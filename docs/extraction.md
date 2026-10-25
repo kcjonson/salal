@@ -598,7 +598,14 @@ roughly this order:
   `Application` installs, so TextInput stops calling
   `engine::ClipboardManager::Get()` (`TextInput.cpp:460,470,478`).
 - Move `FontRenderer` from `libs/ui/font` to `libs/renderer/font`, namespace
-  `renderer`, and drop renderer's PRIVATE `../ui` include dir.
+  `Renderer`, and drop renderer's PRIVATE `../ui` include dir. `Renderer`
+  rather than the standards doc's lowercase because FontFamily, Primitives,
+  BatchRenderer, Shader, CoordinateSystem, metrics/, gl/ and resources/Tile*
+  are all `namespace Renderer` (only vector/ and two resources/ files are
+  lowercase); a lowercase FontRenderer would force `Renderer::FontFamily`
+  qualifiers and a second namespace block in Primitives.h, the shape being
+  removed. Settling renderer's lib-wide namespace case (`Renderer` vs
+  `renderer`; the standards doc says lowercase) is a worldsim follow-up.
 - CMake: `ui` drops `engine` and `httplib`, `engine` drops the `nlohmann_json`
   it never includes. Re-run the include resolver and confirm `ui -> engine` and
   `renderer -> ui` are both zero.

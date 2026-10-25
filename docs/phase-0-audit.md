@@ -242,7 +242,7 @@ leaves it building and running identically.
 | a | Delete the two dead `InputManager.h` includes (`Button.cpp:10`, `TextInput.cpp:10`) | trivial | |
 | b | Move `input/InputTypes.h` below ui; engine's `InputManager.h:3` includes it from the new place | trivial | foundation if decision D in [open-decisions.md](open-decisions.md) goes as proposed, `libs/ui/input/` otherwise. Leave the `engine::` namespace for the first pass; a rename to `UI::` touches ui 26 files / 98 uses, engine 2 / 15, apps/world-sim 13 / 54, apps/ui-sandbox 3 / 20, asset-manager 0 |
 | c | Clipboard seam: a small interface or `std::function` hooks in ui that `Application.cpp:43-44` installs; TextInput stops calling `engine::ClipboardManager::Get()` | moderate | alternative: move ClipboardManager (one .h/.cpp; deps GLFW, string, Log) down as a platform service. ui already has GLFW transitively through renderer's PUBLIC link |
-| d | Move FontRenderer from `libs/ui/font` to `libs/renderer/font`, namespace `renderer`; drop renderer's PRIVATE `../ui` include dir | moderate | 13 includes plus `AppLauncher.cpp:37,195` and Primitives to retarget. Alternative kept for the record: a text-provider interface in renderer that ui implements, the shape `setFontRenderer` injection already has |
+| d | Move FontRenderer from `libs/ui/font` to `libs/renderer/font`, namespace `Renderer`; drop renderer's PRIVATE `../ui` include dir | moderate | 13 includes plus `AppLauncher.cpp:37,195` and Primitives to retarget. `Renderer` rather than the standards doc's lowercase because FontFamily, Primitives, BatchRenderer, Shader, CoordinateSystem, metrics/, gl/ and resources/Tile* are all `namespace Renderer` (only vector/ and two resources/ files are lowercase); a lowercase FontRenderer would force `Renderer::FontFamily` qualifiers and a second namespace block in Primitives.h, the shape being removed. Alternative kept for the record: a text-provider interface in renderer that ui implements, the shape `setFontRenderer` injection already has |
 | e | CMake: ui drops `engine` and `httplib`; engine drops `nlohmann_json`; re-run the resolver and confirm ui -> engine and renderer -> ui are both zero | trivial | planet-view-tests can then drop ui |
 | f | Move DebugServer, LockFreeRingBuffer, PerformanceMetrics and PngEncoder out of foundation into `libs/engine` (the proto-app); invert `Logger::setDebugServer` into a generic sink callback; foundation drops OpenGL::GL and httplib | moderate | could land in phase 1 instead, but must land before foundation is extracted |
 
@@ -268,6 +268,8 @@ problem.
 - The test-only include graph beyond the ui row.
 - Whether the `UI` / `ui` namespace split, or the `Foundation` / `foundation`
   and `Renderer` / `renderer` splits the fact-check found, cost anything at
-  link time. Spelling, not structure; left alone.
+  link time. Spelling, not structure; left alone. One worldsim follow-up from
+  it: settle renderer's lib-wide namespace case (`Renderer` vs `renderer`; the
+  standards doc says lowercase, the code and now FontRenderer say `Renderer`).
 - Whether msdfgen is a build-time or runtime dependency.
 - Runtime behaviour of any kind. Nothing was built or run.
