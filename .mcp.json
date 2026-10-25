@@ -1,0 +1,9 @@
+{
+	"mcpServers": {
+		"specboard": {
+			"type": "http",
+			"url": "https://specboard.io/mcp",
+			"headers": { "X-Specboard-Project": "kcjonson/salal" }
+		}
+	}
+}

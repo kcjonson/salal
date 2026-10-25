@@ -11,38 +11,71 @@ games. See [README.md](README.md).
 It is being **extracted from worldsim**, which has already implemented this
 architecture and is where the code comes from. Nothing has been extracted yet.
 
+## Project management: Specboard
+
+Work here is tracked in Specboard over the Specboard MCP. The repo's
+`.mcp.json` binds it to the right project, so never ask which one, and never
+write the project name or UUID into a committed file, commit message or PR
+body. Run `/whats-next` (the `specboard:whats-next` plugin skill) to see
+current work and pick up an item; close out with `specboard:complete` once the
+change is verified, not before.
+
+Specs live in git, items live on the board. The output of a planning session is
+an epic with a linked spec doc under `docs/`, not code. No status files, TODO
+lists or progress logs in this repo, and no ticket keys inside spec docs.
+Branch names follow `<type>/SAL-123-title` when the item is obvious, a short
+descriptive name otherwise. Personal preferences are in the claude-config
+repo's `specboard.md`.
+
 ## Read this first
 
 - **[docs/architecture.md](docs/architecture.md)** is normative. The four-layer
   stack, what each library owns, the dependency rule, the component model, the
   frame contract, determinism, the inspector contract, and the WebAssembly
-  constraints. Where it and the code disagree, the document is right.
+  constraints. Where it and the code disagree, the document is right. Where it
+  says "proposed", it means it.
 - **[docs/extraction.md](docs/extraction.md)** is the plan: what comes from
   where, in what order, what it costs, and what is still open.
+- **[docs/phase-0-audit.md](docs/phase-0-audit.md)** is the layering audit of
+  worldsim, done 2026-10-25: every violation with file and line, the reverse
+  knot through `FontRenderer`, and the fix list.
+- **[docs/app-carve-out.md](docs/app-carve-out.md)** maps worldsim's
+  `libs/engine` into generic and game, directory by directory, and lists what
+  `libs/app` is made of.
+- **[docs/consumer-requirements.md](docs/consumer-requirements.md)** is what
+  the three games need from the engine, and where their own docs conflict with
+  these.
 
 For how the first consumer intends to use this engine, see `tech-stack.md` in
-`../asteroids-roguelike/docs/`.
+`../asteroids-roguelike/docs/`. Its layer diagram, PRNG choice and primitive
+casing predate this repo; the consumer-requirements doc lists the conflicts.
 
 ## Sibling repos on this machine
 
 | Path | What it is |
 |---|---|
-| `../worldsim` | C++20, OpenGL. The source of the code. Active, large |
-| `../asteroids-roguelike` | First new consumer. Design docs complete, no code |
-| `../dual-deck-builder` | Wasteland Wheels. TypeScript today, migrating to C++ |
+| `../worldsim` | C++20, OpenGL. The source of the code. Active, large. Tracked in Specboard |
+| `../asteroids-roguelike` | First new consumer. Design docs complete, no code. No CLAUDE.md, no `.claude/`, no tracking set up |
+| `../dual-deck-builder` | Wasteland Wheels. TypeScript today, migrating to C++. Its `docs/ui-rendering-spec/` is a backend-agnostic UI spec abstracted from worldsim and the key reference for `ui` |
 
 All three will consume this engine via CMake FetchContent pinned to a tag.
 
 ## Status and what to work on
 
-Nothing is built. **Phase 0 is an audit** and everything else waits on it: does
-worldsim's `libs/ui` actually respect its own documented dependency layering, or
-does it reach into `libs/engine`? Worldsim's own CLAUDE.md warns that its code
-may violate its documented standards, so this gets verified rather than assumed.
+Nothing is built. **Phase 0, the audit, is done** (2026-10-25); findings in
+[docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reaches
+into `libs/engine` through two small headers (`input/InputTypes.h` and
+`clipboard/ClipboardManager.h`), its `renderer` reaches back into `ui` through
+`FontRenderer`, and its `foundation` carries the HTTP dev server with OpenGL
+and httplib behind it.
 
-Then, in order: extract `foundation` and `renderer`, carve `app` out of
-worldsim's `libs/engine`, extract `ui` last. The extraction doc has the detail
-and the reasoning for the order.
+Next is **phase 0.5, untangling worldsim**: small PRs in that repo (two dead
+includes, `InputTypes.h` moved down, a clipboard seam, `FontRenderer` into
+`renderer`, CMake cleanup, the dev server out of `foundation`), each leaving it
+building and running identically. Then phase 1, the skeleton here and the
+extraction of `foundation` and `renderer`; phase 2 carves `app` out of
+`libs/engine`; `ui` is extracted last. The extraction doc has the detail and
+the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
 consume this repo. Not one giant branch: worldsim is active, and a long-lived
@@ -75,7 +108,9 @@ it is the first thing that quietly breaks if nobody is watching.
   owns `main()`. `emscripten_set_main_loop` needs this, and it is better design
   anyway.
 - The HTTP dev server sits behind a compile flag. No listening sockets in a
-  browser.
+  browser. Worldsim has no such flag today (the server is always compiled into
+  `foundation` and switched on at runtime), so this is new discipline, added
+  when the server moves into `app`.
 - Asset loading goes through an indirection that can be MEMFS.
 
 These are cheap now and expensive once three games depend on the API.
@@ -137,7 +172,10 @@ exist here yet.
 Once they do: `/api/ui/screenshot`, `/api/ui/tree` for element bounds,
 `/api/ui/lint` for layout invariant violations (expect `"count":0` before
 screenshotting anything), `/api/input` for synthetic input, `/api/control` for
-scene switching and shutdown. Don't check coordinates by eye.
+scene switching and shutdown. Those five are the contract every app exposes.
+Worldsim's server has twelve routes today (the others are health, metrics, a
+dev-command bag, a state handshake, two SSE streams and an index page), and
+games will be able to register their own. Don't check coordinates by eye.
 
 This is a native app rendering every frame, not a web page. Shut it down as soon
 as you are done with it.
@@ -149,9 +187,10 @@ on macOS and Linux, Ninja Multi-Config with MSVC on Windows, ccache in front of
 both. Copy `CMakePresets.json` from worldsim when phase 1 starts.
 
 Expected dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
-`nanosvg`, `msdfgen`, `cpp-httplib`, `gtest`, `benchmark`, plus an audio library
-(worldsim has none, so this is new; `miniaudio` or `openal-soft`, both of which
-keep the WebAssembly build possible).
+`nanosvg`, `msdfgen`, `cpp-httplib`, `gtest`, `benchmark`. Worldsim's
+`pugixml`, `lua` and `sol2` serve its `assets` target and stay behind. An audio
+library is proposed and not decided (worldsim has none; `miniaudio` with its
+Emscripten backend is the recommendation).
 
 ## Testing
 
@@ -162,11 +201,17 @@ No tests on feel, and no screenshot baselines or pixel comparisons.
 
 ## Open decisions
 
-Don't guess at these; ask.
+Don't guess at these; ask. The live list, each with a recommendation and the
+phase that needs the answer, is
+[docs/open-decisions.md](docs/open-decisions.md), mirrored as items on the
+board: the engine PRNG, audio, adopting dual-deck-builder's UI spec, where
+input types live, the ECS core, the `ui` storage model, render targets and
+particles, vector/SVG conventions, multi-device focus, and the
+dual-deck-builder golden corpus.
 
-- Whether work here is tracked in Specboard, as worldsim and dual-deck-builder
-  are. Nothing is set up.
-- Whether `app` is one library or splits into `app` and `input`.
-- Whether worldsim's vector/SVG asset conventions come across with `renderer` or
-  get parameterised out.
-- When `engine-extraction.md` moves into this repo.
+Resolved since the first version of this file: work is tracked in Specboard
+(see above). The app-versus-input split now has a proposal, plain-data input
+types in `foundation` with the device poller in `app` and no separate library,
+and is decision D there. The "engine-extraction.md" item is dropped; that file
+never existed in worldsim, and the plan is
+[docs/extraction.md](docs/extraction.md).

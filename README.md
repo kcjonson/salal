@@ -19,21 +19,33 @@ from.
   consumer conforms to.
 - [docs/extraction.md](docs/extraction.md) is the plan: what comes from where,
   in what order, and what is still open.
+- [docs/phase-0-audit.md](docs/phase-0-audit.md) is the layering audit of
+  worldsim, done 2026-10-25.
 
-Phase 0 is an audit of whether worldsim's `libs/ui` actually respects its own
-dependency layering. Everything else waits on the answer.
+Phase 0, the audit of whether worldsim's `libs/ui` respects its own dependency
+layering, is done. It reaches into `libs/engine` through two small headers and
+nothing else, and worldsim's renderer reaches back into `ui` for its font
+renderer. Both get untangled in worldsim before anything is extracted; the fix
+list is in the audit doc and the order of work after it is in the extraction
+doc.
 
 ## Planned shape
 
 ```
 libs/
   foundation/   math, platform, logging, arenas, resource handles, seeded PRNG
-  renderer/     gl, shader, primitives, batching, vector/SVG, SDF text, coords
-  ui/           components, layout, focus, theme, shapes, font, animation
+  renderer/     gl, shader, primitives, batching, vector/SVG, fonts, SDF text, coords
+  ui/           components, layout, focus, theme, shapes, animation
   app/          window, fixed-step loop, scenes, config, input, dev server
+  audio/        proposed, not decided: mixer, buses, stems, one-shots
 apps/
   sandbox/      boots straight into a single UI scene
 ```
+
+The font renderer lives in `renderer` rather than `ui`, so text is available
+without the UI library. `audio` is a proposal, recorded with the other open
+questions in [docs/open-decisions.md](docs/open-decisions.md); the other four
+libraries are settled.
 
 One rule: a library may depend only on layers below it, enforced through CMake
 target dependencies. A consuming game's simulation layer may depend on neither
@@ -43,7 +55,7 @@ target dependencies. A consuming game's simulation layer may depend on neither
 
 ```
 Components      scene graph, shapes, widgets, style
-Primitives      immediate-mode: DrawRect, DrawText, DrawCircle
+Primitives      immediate-mode: drawRect, drawText, drawCircle
 BatchRenderer   command buffer, sorts by state, minimal draw calls
 OpenGL 3.3+     via GLEW, or WebGL2 via Emscripten
 ```
