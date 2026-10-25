@@ -16,10 +16,10 @@ row says otherwise; `*.test.cpp` and `*.bench.cpp` were tallied separately.
 Symbol usage (`engine::Key` and so on) was a second pass by grep over
 `libs/ui`.
 
-The resolver (`resolve_includes.py`) lives in a session scratchpad today. It
-should be checked into worldsim under `tools/` with the first untangling PR so
-the ui -> engine and renderer -> ui cells can be re-run to zero after each
-step.
+The resolver is `tools/resolve-includes.mjs` in worldsim, a Node script added
+in [worldsim#291](https://github.com/kcjonson/worldsim/pull/291). Re-run it
+after each untangling step until the ui -> engine and renderer -> ui cells
+read zero.
 
 ## The documented rule
 

@@ -156,6 +156,9 @@ temporaries, resource handles for assets. Structured logging with categories,
 consuming games' design docs say "screen" because that is clearer for a player;
 in code it is a `Scene`.
 
+**Scripts and tooling:** Node (ESM, `.mjs`, no dependencies unless there is a
+`package.json` for them). No Python.
+
 ## Clean code, no legacy
 
 Worldsim's rule, and it applies here. When you replace something, delete what it
