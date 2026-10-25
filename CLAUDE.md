@@ -11,14 +11,17 @@ games. See [README.md](README.md).
 It is being **extracted from worldsim**, which has already implemented this
 architecture and is where the code comes from. Nothing has been extracted yet.
 
-## Read this first: the design lives in another repo
+## Read this first
 
-The plan, the inventory, the phasing, the risks and the open questions are in
-**`../asteroids-roguelike/docs/engine-extraction.md`**. It is not in this repo
-yet, and it is the thing to read before touching anything here.
+- **[docs/architecture.md](docs/architecture.md)** is normative. The four-layer
+  stack, what each library owns, the dependency rule, the component model, the
+  frame contract, determinism, the inspector contract, and the WebAssembly
+  constraints. Where it and the code disagree, the document is right.
+- **[docs/extraction.md](docs/extraction.md)** is the plan: what comes from
+  where, in what order, what it costs, and what is still open.
 
-Also worth reading, in that same folder, `tech-stack.md` for how the first
-consumer intends to use this engine.
+For how the first consumer intends to use this engine, see `tech-stack.md` in
+`../asteroids-roguelike/docs/`.
 
 ## Sibling repos on this machine
 

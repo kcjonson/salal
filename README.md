@@ -13,9 +13,12 @@ everything else grows up out of, which is the job this repo has.
 
 The engine is being extracted from [worldsim](https://github.com/kcjonson/worldsim),
 which has implemented this architecture once already and is where the code comes
-from. The design, the inventory, the phasing and the open questions live in
-[`asteroids-roguelike/docs/engine-extraction.md`](https://github.com/kcjonson/asteroids-roguelike/blob/main/docs/engine-extraction.md)
-until this repo is real enough to hold them.
+from.
+
+- [docs/architecture.md](docs/architecture.md) is the normative spec every
+  consumer conforms to.
+- [docs/extraction.md](docs/extraction.md) is the plan: what comes from where,
+  in what order, and what is still open.
 
 Phase 0 is an audit of whether worldsim's `libs/ui` actually respects its own
 dependency layering. Everything else waits on the answer.
