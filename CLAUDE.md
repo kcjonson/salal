@@ -106,11 +106,12 @@ and it overrides whatever the existing code happens to do.
 Tabs, width 4, column limit 140, braces attached, designated initializers where
 a call takes several parameters.
 
-> **A discrepancy worth knowing.** Worldsim's `CLAUDE.md` says
-> "Classes/Functions: PascalCase" and gives `LoadTexture` as an example. Its
-> coding-standards doc says functions are `camelCase` with `loadTexture()`, and
-> that doc is explicitly declared the source of truth. **Functions are
-> `camelCase`.** Do not copy the CLAUDE.md line.
+> **A discrepancy worth knowing.** Worldsim's `CLAUDE.md` said
+> "Classes/Functions: PascalCase" with `LoadTexture` as the example, while its
+> coding-standards doc says functions are `camelCase` with `loadTexture()` and
+> is declared the source of truth. Fixed in
+> [worldsim#289](https://github.com/kcjonson/worldsim/pull/289), but an older
+> checkout will still have the wrong line. **Functions are `camelCase`.**
 
 Memory: prefer stack allocation, smart pointers over raw, memory arenas for
 temporaries, resource handles for assets. Structured logging with categories,
