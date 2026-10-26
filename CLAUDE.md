@@ -9,8 +9,8 @@ frame, input and the scene graph, so the games on top of it only have to be
 games. See [README.md](README.md).
 
 It is being **extracted from worldsim**, which has already implemented this
-architecture and is where the code comes from. `foundation` is imported;
-`renderer`, `ui` and `app` are placeholders.
+architecture and is where the code comes from. `foundation` and `renderer` are
+imported; `ui` and `app` are placeholders.
 
 ## Project management: Specboard
 
@@ -63,9 +63,9 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 ## Status and what to work on
 
 The build skeleton is in, with CI on Windows, macOS and Linux. **`foundation`
-is imported** (a plain copy of worldsim at `870dd755`, 2026-10-26); `renderer`,
-`ui` and `app` are placeholders, as is the sandbox. **Phase 0, the audit, is
-done** (2026-10-25); findings in
+and `renderer` are imported** (plain copies of worldsim at `870dd755` and
+`2cc7e40a`, 2026-10-26); `ui` and `app` are placeholders, as is the sandbox.
+**Phase 0, the audit, is done** (2026-10-25); findings in
 [docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
 `clipboard/ClipboardManager.h`), its `renderer` reached back into `ui` through
@@ -78,9 +78,9 @@ the CMake cleanup landed, the dev server left `foundation` for
 `libs/engine/debug`, and `InputTypes.h` is in `foundation/input/` with `engine`
 off ui's link list (decision D, settled 2026-10-26).
 
-Phase 1 is under way: `foundation` is imported, `renderer` is next, then
-worldsim converts to consume this repo. Phase 2 carves `app` out of
-`libs/engine`; `ui` is extracted last.
+Phase 1 is under way: `foundation` and `renderer` are imported; next is the
+`v0.1.0` tag, then worldsim converts to consume this repo. Phase 2 carves `app`
+out of `libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -199,14 +199,21 @@ ctest --test-dir build -C Debug
 The `windows` preset names `cl` bare, so run configure from a Visual Studio
 developer shell (or after `vcvars64.bat`), where it resolves.
 
-`foundation` is worldsim's code, imported as a plain copy. `renderer`, `ui` and
-`app` are placeholders until phase 1 moves their code in: one translation unit
-and one gtest each, there to exercise the wiring. The placeholder namespaces
-(`renderer`, `ui`, `app`, lowercase per the coding-standards doc) are not a
-decision about the namespaces of moved worldsim code; that casing is an open
-worldsim follow-up. Blame and history for imported code live in worldsim;
+`foundation` and `renderer` are worldsim's code, imported as plain copies. `ui`
+and `app` are placeholders until later phases move their code in: one
+translation unit and one gtest each, there to exercise the wiring. The
+placeholder namespaces (`ui`, `app`, lowercase per the coding-standards doc) are
+not a decision about the namespaces of moved worldsim code; that casing (the
+imported renderer has both `Renderer` and `renderer`) is an open worldsim
+follow-up. Blame and history for imported code live in worldsim;
 `git remote add worldsim ../worldsim && git fetch worldsim` makes
-`git blame worldsim/main -- libs/foundation/<file>` work from here.
+`git blame worldsim/main -- libs/<lib>/<file>` work from here.
+
+The renderer stages its shaders into `build/shaders/` (the top-level build tree,
+even as a subproject), which consumers mirror next to each executable, and it
+ships no fonts: `FontRenderer::Initialize` looks for
+`fonts/<Family>-SDF.{png,json}` beside the executable, worldsim supplies them,
+and an API that takes atlas sources is a phase 2 item.
 
 Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
 The deterministic math and hash noise are header-inline polynomials; Clang fuses
@@ -223,10 +230,10 @@ off as a subproject) switch off what it doesn't link. CI
 checks clang-format 21.
 
 Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
-`nanosvg`, `msdfgen`, `cpp-httplib`, `gtest`, `benchmark`. Worldsim's
-`pugixml`, `lua` and `sol2` serve its `assets` target and stay behind. An audio
-library is proposed and not decided (worldsim has none; `miniaudio` is the
-recommendation).
+`nanosvg`, `cpp-httplib`, `gtest`, `benchmark`. Worldsim's `pugixml`, `lua` and
+`sol2` serve its `assets` target, `msdfgen` its font-atlas tool, and all four
+stay behind. An audio library is proposed and not decided (worldsim has none;
+`miniaudio` is the recommendation).
 
 ## Testing
 
