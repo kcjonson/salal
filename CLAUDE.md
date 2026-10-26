@@ -170,7 +170,7 @@ removing legacy code. One way to do each thing.
 
 There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox is a stub today (`apps/sandbox`, links
-`app` and exits); the real one and the server come across from worldsim.
+`salal::app` and exits); the real one and the server come across from worldsim.
 
 Once they are in: `/api/ui/screenshot`, `/api/ui/tree` for element bounds,
 `/api/ui/lint` for layout invariant violations (expect `"count":0` before
@@ -202,8 +202,12 @@ The libraries are placeholders until phase 1 moves code in: one translation
 unit and one gtest each, there to exercise the wiring. Their namespaces
 (`foundation`, `renderer`, `ui`, `app`, lowercase per the coding-standards doc)
 are not a decision about the namespaces of moved worldsim code; that casing is
-an open worldsim follow-up. Each lib's `*.test.cpp` files become `<lib>-tests`
-through `salal_add_tests` in `cmake/SalalTesting.cmake`. CI
+an open worldsim follow-up. Each lib's `*.test.cpp` files become
+`salal_<lib>_tests` through `salal_add_tests` in `cmake/SalalTesting.cmake`.
+Targets are `salal_<lib>` behind `salal::<lib>` aliases, so a FetchContent
+consumer's own `ui` or `engine` can't collide, and `SALAL_BUILD_UI`,
+`SALAL_BUILD_APP`, `SALAL_BUILD_SANDBOX` and `SALAL_BUILD_TESTS` (on standalone,
+off as a subproject) switch off what it doesn't link. CI
 (`.github/workflows/ci.yml`) builds and tests on Windows, macOS and Linux and
 checks clang-format 21.
 
