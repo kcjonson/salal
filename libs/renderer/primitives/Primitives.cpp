@@ -6,6 +6,7 @@
 #include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "primitives/BatchRenderer.h"
+#include "vector/Types.h"
 #include <GL/glew.h>
 #include <algorithm>
 #include <cctype>
@@ -27,7 +28,7 @@ namespace Renderer::Primitives {
 	static CoordinateSystem*			  g_coordinateSystem = nullptr;
 	static FontRenderer*				  g_fontRenderer = nullptr;
 	static FrameUpdateCallback			  g_frameUpdateCallback = nullptr;
-	static unsigned int					  g_tileAtlasTexture = 0;
+	static TextureHandle				  g_tileAtlasTexture;
 	static std::vector<glm::vec4>		  g_tileAtlasRects;
 	static std::stack<Foundation::Rect>	  g_scissorStack;
 	static std::stack<Foundation::Mat4>	  g_transformStack;
@@ -76,18 +77,18 @@ namespace Renderer::Primitives {
 		return g_fontRenderer;
 	}
 
-	void setFontAtlas(unsigned int atlasTexture, float pixelRange) {
+	void setFontAtlas(TextureHandle atlas, float pixelRange) {
 		if (g_batchRenderer != nullptr) {
-			g_batchRenderer->setFontAtlas(atlasTexture, pixelRange);
+			g_batchRenderer->setFontAtlas(atlas, pixelRange);
 		}
 	}
 
-	void setTileAtlas(unsigned int atlasTexture, const std::vector<glm::vec4>& rects) {
-		g_tileAtlasTexture = atlasTexture;
+	void setTileAtlas(TextureHandle atlas, const std::vector<glm::vec4>& rects) {
+		g_tileAtlasTexture = atlas;
 		g_tileAtlasRects = rects;
 	}
 
-	unsigned int getTileAtlasTexture() {
+	TextureHandle getTileAtlasTexture() {
 		return g_tileAtlasTexture;
 	}
 
@@ -95,15 +96,16 @@ namespace Renderer::Primitives {
 		return g_tileAtlasRects;
 	}
 
-	BatchRenderer* getBatchRenderer() {
-		return g_batchRenderer.get();
-	}
-
 	void setFrameUpdateCallback(FrameUpdateCallback callback) {
 		g_frameUpdateCallback = callback;
 	}
 
 	// --- Frame Lifecycle ---
+
+	void clear(const Foundation::Color& color) {
+		glClearColor(color.r, color.g, color.b, color.a);
+		glClear(GL_COLOR_BUFFER_BIT);
+	}
 
 	void beginFrame() {
 		if (g_batchRenderer != nullptr) {
@@ -347,10 +349,6 @@ namespace Renderer::Primitives {
 			return;
 		}
 
-		// Each glyph carries its family's atlas texture so the batch groups it
-		// with other glyphs from the same atlas (see BatchRenderer::flush).
-		const GLuint atlasTexture = g_fontRenderer->getAtlasTexture(args.font);
-
 		// CSS text-transform: fold the case once up front so measure and emit agree.
 		std::string effective = args.text;
 		if (args.transform == Foundation::TextTransform::Uppercase) {
@@ -383,24 +381,80 @@ namespace Renderer::Primitives {
 			g_fontRenderer->generateGlyphQuads(
 				effective, glm::vec2(pos.x, pos.y), args.scale, glm::vec4(col.r, col.g, col.b, col.a), quads, args.font, args.letterSpacing
 			);
-			for (const auto& quad : quads) {
-				g_batchRenderer->addTextQuad(
-					Foundation::Vec2(quad.position.x, quad.position.y),
-					Foundation::Vec2(quad.size.x, quad.size.y),
-					Foundation::Vec2(quad.uvMin.x, quad.uvMin.y),
-					Foundation::Vec2(quad.uvMax.x, quad.uvMax.y),
-					Foundation::Color(quad.color.r, quad.color.g, quad.color.b, quad.color.a),
-					Foundation::Vec2(quad.runOrigin.x, quad.runOrigin.y),
-					atlasTexture,
-					static_cast<float>(args.zIndex)
-				);
-			}
+			drawGlyphs(quads.data(), quads.size(), args.font, static_cast<float>(args.zIndex));
 		};
 
 		if (args.shadowColor.a > 0.0F) {
 			emit({origin.x + args.shadowOffset.x, origin.y + args.shadowOffset.y}, args.shadowColor);
 		}
 		emit(origin, args.color);
+	}
+
+	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family, float zIndex) {
+		if (g_batchRenderer == nullptr) {
+			return;
+		}
+
+		// Each glyph carries its family's atlas so the batch groups it with other
+		// glyphs from the same atlas (see BatchRenderer::flush). With no font
+		// renderer the quads sample the default atlas, as family-less callers always did.
+		const TextureHandle atlas = g_fontRenderer != nullptr ? g_fontRenderer->getAtlasTexture(family) : TextureHandle{};
+		for (size_t i = 0; i < count; ++i) {
+			const FontRenderer::GlyphQuad& quad = quads[i];
+			g_batchRenderer->addTextQuad(
+				Foundation::Vec2(quad.position.x, quad.position.y),
+				Foundation::Vec2(quad.size.x, quad.size.y),
+				Foundation::Vec2(quad.uvMin.x, quad.uvMin.y),
+				Foundation::Vec2(quad.uvMax.x, quad.uvMax.y),
+				Foundation::Color(quad.color.r, quad.color.g, quad.color.b, quad.color.a),
+				Foundation::Vec2(quad.runOrigin.x, quad.runOrigin.y),
+				atlas,
+				zIndex
+			);
+		}
+	}
+
+	// --- World-Space Instancing ---
+
+	InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances) {
+		if (g_batchRenderer == nullptr) {
+			return {};
+		}
+		return g_batchRenderer->uploadInstancedMesh(mesh, maxInstances);
+	}
+
+	void releaseInstancedMesh(InstancedMeshHandle& handle) {
+		BatchRenderer::releaseInstancedMesh(handle);
+	}
+
+	void drawInstanced(const InstancedMeshHandle& handle, const InstanceData* instances, uint32_t count, const WorldCamera& camera) {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->drawInstanced(handle, instances, count, camera.position, camera.zoom, camera.pixelsPerMeter);
+		}
+	}
+
+	void setGroundcover(const GroundcoverParams& params) {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->setGroundcover(params);
+		}
+	}
+
+	void setBakedAlpha(float alpha) {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->setBakedAlpha(alpha);
+		}
+	}
+
+	void beginBakedPass(const WorldCamera& camera) {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->beginBakedPass(camera);
+		}
+	}
+
+	void endBakedPass() {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->endBakedPass();
+		}
 	}
 
 	// --- Clip Stack (Shader-based, batching-friendly) ---

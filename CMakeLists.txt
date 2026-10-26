@@ -65,7 +65,10 @@ endif()
 
 # salal_check_layering(): the dependency rule at configure time. Matches the plain
 # target, the salal:: alias, and the $<LINK_ONLY:...> form CMake adds for PRIVATE
-# links between static libraries.
+# links between static libraries. Also the renderer's backend boundary: GL and
+# GLFW are the renderer's private business, so it must not export them as link
+# dependencies, and no public renderer header may reach a GL, GLES, OpenGL, GLFW
+# or glad header (docs/renderer-boundary.md).
 function(salal_check_layering)
     set(above_foundation renderer ui app)
     set(above_renderer ui app)
@@ -86,7 +89,73 @@ function(salal_check_layering)
                 message(FATAL_ERROR "foundation must stay GL-free and socket-free; it links ${dep}.")
             endif()
         endforeach()
+        # A static library's PRIVATE links appear in the interface as $<LINK_ONLY:...>,
+        # which carries no include directories or compile usage; a plain entry would.
+        if(lib STREQUAL "renderer")
+            foreach(dep IN LISTS iface)
+                if(dep MATCHES "^(OpenGL::|GLEW::|glfw$)")
+                    message(FATAL_ERROR "renderer must keep GL private; it exports ${dep} (docs/renderer-boundary.md).")
+                endif()
+            endforeach()
+        endif()
     endforeach()
+    salal_check_renderer_headers_gl_free()
+endfunction()
+
+# Every header under libs/renderer outside gl/, shader/ and backend/ is public. Walk
+# each one's quoted and angle includes transitively through this repo's libraries
+# and fail on the first path that reaches a GL, GLES, OpenGL, GLFW or glad header
+# (GL/glew.h, GL/gl.h, GLFW/glfw3.h, ...). Headers proven clean once are not walked again.
+function(salal_check_renderer_headers_gl_free)
+    set(renderer_dir "${PROJECT_SOURCE_DIR}/libs/renderer")
+    file(GLOB lib_roots LIST_DIRECTORIES true "${PROJECT_SOURCE_DIR}/libs/*")
+    file(GLOB_RECURSE headers RELATIVE "${renderer_dir}" CONFIGURE_DEPENDS "${renderer_dir}/*.h")
+    set(clean "")
+    foreach(header IN LISTS headers)
+        if(header MATCHES "^(gl|shader|backend)/")
+            continue()
+        endif()
+        set(visited "")
+        _salal_walk_includes("${renderer_dir}/${header}" "${header}" visited "${lib_roots}")
+        list(APPEND clean ${visited})
+        list(REMOVE_DUPLICATES clean)
+    endforeach()
+endfunction()
+
+# Depth-first over one file's includes. `chain` is the include path so far, for the
+# error message; `visited_var` names the caller's list of files already walked;
+# `clean`, inherited from the caller, holds files already proven GL-free.
+function(_salal_walk_includes file chain visited_var roots)
+    set(visited ${${visited_var}})
+    if(file IN_LIST visited OR file IN_LIST clean)
+        return()
+    endif()
+    list(APPEND visited "${file}")
+    get_filename_component(dir "${file}" DIRECTORY)
+    file(STRINGS "${file}" lines REGEX "^[ \t]*#[ \t]*include[ \t]*[<\"]")
+    foreach(line IN LISTS lines)
+        string(REGEX MATCH "#[ \t]*include[ \t]*([<\"])([^>\"]+)[>\"]" _ "${line}")
+        set(form "${CMAKE_MATCH_1}")
+        set(target "${CMAKE_MATCH_2}")
+        if(target MATCHES "^(GL|GLES[23]?|OpenGL|GLFW|glad)/")
+            message(FATAL_ERROR "Public renderer header reaches <${target}>: ${chain} (docs/renderer-boundary.md).")
+        endif()
+        set(candidates "")
+        if(form STREQUAL "\"")
+            list(APPEND candidates "${dir}/${target}")
+        endif()
+        foreach(root IN LISTS roots)
+            list(APPEND candidates "${root}/${target}")
+        endforeach()
+        foreach(candidate IN LISTS candidates)
+            if(EXISTS "${candidate}" AND NOT IS_DIRECTORY "${candidate}")
+                get_filename_component(candidate "${candidate}" ABSOLUTE)
+                _salal_walk_includes("${candidate}" "${chain} -> ${target}" visited "${roots}")
+                break()
+            endif()
+        endforeach()
+    endforeach()
+    set(${visited_var} ${visited} PARENT_SCOPE)
 endfunction()
 
 salal_check_layering()

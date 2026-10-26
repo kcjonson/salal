@@ -3,10 +3,16 @@
 
 #include "primitives/BatchRenderer.h"
 #include "CoordinateSystem/CoordinateSystem.h"
+#include "backend/gl/GLNames.h"
+#include "gl/GLBuffer.h"
+#include "gl/GLVertexArray.h"
+#include "shader/Shader.h"
+#include <GL/glew.h>
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
+#include <utility>
 
 namespace Renderer {
 
@@ -23,7 +29,69 @@ namespace Renderer {
 		}
 	} // namespace
 
-	BatchRenderer::BatchRenderer() { // NOLINT(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
+	// OpenGL resources (RAII wrappers for automatic cleanup) and uniform locations
+	struct BatchRenderer::GL {
+		GLVertexArray vao;
+		GLBuffer	  vbo;
+		GLBuffer	  ibo;
+		Shader		  shader;
+
+		// Uniform locations (standard batched rendering)
+		GLint projectionLoc = -1;
+		GLint transformLoc = -1;
+		GLint atlasLoc = -1;
+		GLint viewportHeightLoc = -1;
+		GLint pixelRatioLoc = -1;
+		GLint bakedAlphaLoc = -1;
+
+		// Uniform locations (instanced rendering)
+		GLint cameraPositionLoc = -1;
+		GLint cameraZoomLoc = -1;
+		GLint pixelsPerMeterLoc = -1;
+		GLint viewportSizeLoc = -1;
+		GLint instancedLoc = -1;
+
+		// Uniform locations (groundcover deform and cursor, instancing.glsl)
+		GLint groundcoverModeLoc = -1;
+		GLint groundcoverOpennessLoc = -1;
+		GLint groundcoverReachLoc = -1;
+		GLint cursorWorldLoc = -1;
+		GLint cursorRadiusLoc = -1;
+		GLint cursorStrengthLoc = -1;
+	};
+
+	// --- InstancedMeshHandle ---
+	// Defined here because releasing needs GL, which InstanceData.h does not include.
+
+	InstancedMeshHandle::~InstancedMeshHandle() {
+		BatchRenderer::releaseInstancedMesh(*this);
+	}
+
+	InstancedMeshHandle::InstancedMeshHandle(InstancedMeshHandle&& other) noexcept
+		: vao(std::exchange(other.vao, 0)),
+		  meshVBO(std::exchange(other.meshVBO, 0)),
+		  meshIBO(std::exchange(other.meshIBO, 0)),
+		  instanceVBO(std::exchange(other.instanceVBO, 0)),
+		  indexCount(std::exchange(other.indexCount, 0)),
+		  vertexCount(std::exchange(other.vertexCount, 0)),
+		  maxInstances(std::exchange(other.maxInstances, 0)) {}
+
+	InstancedMeshHandle& InstancedMeshHandle::operator=(InstancedMeshHandle&& other) noexcept {
+		if (this != &other) {
+			BatchRenderer::releaseInstancedMesh(*this);
+			vao = std::exchange(other.vao, 0);
+			meshVBO = std::exchange(other.meshVBO, 0);
+			meshIBO = std::exchange(other.meshIBO, 0);
+			instanceVBO = std::exchange(other.instanceVBO, 0);
+			indexCount = std::exchange(other.indexCount, 0);
+			vertexCount = std::exchange(other.vertexCount, 0);
+			maxInstances = std::exchange(other.maxInstances, 0);
+		}
+		return *this;
+	}
+
+	BatchRenderer::BatchRenderer() // NOLINT(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
+		: gl(std::make_unique<GL>()) {
 		// Reserve space for vertices to minimize allocations
 		vertices.reserve(10000);
 		indices.reserve(15000);
@@ -36,47 +104,60 @@ namespace Renderer {
 
 	void BatchRenderer::init() {
 		// Load uber shader (unified shapes + text)
-		if (!shader.LoadFromFile("uber.vert", "uber.frag")) {
+		if (!gl->shader.LoadFromFile("uber.vert", "uber.frag")) {
 			std::cerr << "Failed to load uber shaders!" << std::endl;
 			return;
 		}
 
+		const GLuint program = gl->shader.getProgram();
+
 		// Get uniform locations (standard batched rendering)
-		projectionLoc = glGetUniformLocation(shader.getProgram(), "u_projection");
-		transformLoc = glGetUniformLocation(shader.getProgram(), "u_transform");
-		atlasLoc = glGetUniformLocation(shader.getProgram(), "u_atlas");
-		viewportHeightLoc = glGetUniformLocation(shader.getProgram(), "u_viewportHeight");
-		pixelRatioLoc = glGetUniformLocation(shader.getProgram(), "u_pixelRatio");
+		gl->projectionLoc = glGetUniformLocation(program, "u_projection");
+		gl->transformLoc = glGetUniformLocation(program, "u_transform");
+		gl->atlasLoc = glGetUniformLocation(program, "u_atlas");
+		gl->viewportHeightLoc = glGetUniformLocation(program, "u_viewportHeight");
+		gl->pixelRatioLoc = glGetUniformLocation(program, "u_pixelRatio");
+		gl->bakedAlphaLoc = glGetUniformLocation(program, "u_bakedAlpha");
 
 		// Get uniform locations (instanced rendering)
-		cameraPositionLoc = glGetUniformLocation(shader.getProgram(), "u_cameraPosition");
-		cameraZoomLoc = glGetUniformLocation(shader.getProgram(), "u_cameraZoom");
-		pixelsPerMeterLoc = glGetUniformLocation(shader.getProgram(), "u_pixelsPerMeter");
-		viewportSizeLoc = glGetUniformLocation(shader.getProgram(), "u_viewportSize");
-		instancedLoc = glGetUniformLocation(shader.getProgram(), "u_instanced");
+		gl->cameraPositionLoc = glGetUniformLocation(program, "u_cameraPosition");
+		gl->cameraZoomLoc = glGetUniformLocation(program, "u_cameraZoom");
+		gl->pixelsPerMeterLoc = glGetUniformLocation(program, "u_pixelsPerMeter");
+		gl->viewportSizeLoc = glGetUniformLocation(program, "u_viewportSize");
+		gl->instancedLoc = glGetUniformLocation(program, "u_instanced");
+
+		// Get uniform locations (groundcover deform and cursor)
+		gl->groundcoverModeLoc = glGetUniformLocation(program, "u_groundcoverMode");
+		gl->groundcoverOpennessLoc = glGetUniformLocation(program, "u_groundcoverOpenness");
+		gl->groundcoverReachLoc = glGetUniformLocation(program, "u_groundcoverReach");
+		gl->cursorWorldLoc = glGetUniformLocation(program, "u_cursorWorld");
+		gl->cursorRadiusLoc = glGetUniformLocation(program, "u_cursorRadius");
+		gl->cursorStrengthLoc = glGetUniformLocation(program, "u_cursorStrength");
 
 		// u_bakedAlpha defaults to 0.0 like all uniforms; initialize to opaque so
 		// instanced draws are visible before the baked path ever sets it
-		shader.use();
-		glUniform1f(glGetUniformLocation(shader.getProgram(), "u_bakedAlpha"), 1.0F);
-		shader.unbind();
+		gl->shader.use();
+		glUniform1f(gl->bakedAlphaLoc, 1.0F);
+		gl->shader.unbind();
+		bakedAlpha = 1.0F;
 
 		// Debug: verify instancing uniforms are found (only in debug builds)
 #ifndef NDEBUG
 		std::cerr << "[BatchRenderer] Instancing uniforms: "
-				  << "u_instanced=" << instancedLoc << " u_cameraPosition=" << cameraPositionLoc << " u_cameraZoom=" << cameraZoomLoc
-				  << " u_pixelsPerMeter=" << pixelsPerMeterLoc << " u_viewportSize=" << viewportSizeLoc << std::endl;
+				  << "u_instanced=" << gl->instancedLoc << " u_cameraPosition=" << gl->cameraPositionLoc
+				  << " u_cameraZoom=" << gl->cameraZoomLoc << " u_pixelsPerMeter=" << gl->pixelsPerMeterLoc
+				  << " u_viewportSize=" << gl->viewportSizeLoc << std::endl;
 #endif
 
 		// Create VAO/VBO/IBO using RAII wrappers
-		vao = GLVertexArray::create();
-		vbo = GLBuffer::create(GL_ARRAY_BUFFER);
-		ibo = GLBuffer::create(GL_ELEMENT_ARRAY_BUFFER);
+		gl->vao = GLVertexArray::create();
+		gl->vbo = GLBuffer::create(GL_ARRAY_BUFFER);
+		gl->ibo = GLBuffer::create(GL_ELEMENT_ARRAY_BUFFER);
 
-		vao.bind();
+		gl->vao.bind();
 
 		// Set up vertex buffer
-		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, gl->vbo);
 
 		// Position attribute (location = 0)
 		glEnableVertexAttribArray(0);
@@ -104,16 +185,16 @@ namespace Renderer {
 		glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(UberVertex), (void*)offsetof(UberVertex, clipBounds));
 
 		// Bind index buffer
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gl->ibo);
 
 		glBindVertexArray(0);
 	}
 
 	void BatchRenderer::shutdown() {
 		// Release RAII wrappers (GPU resources freed automatically)
-		vao.release();
-		vbo.release();
-		ibo.release();
+		gl->vao.release();
+		gl->vbo.release();
+		gl->ibo.release();
 		// Shader cleanup handled by its own RAII destructor
 	}
 
@@ -281,8 +362,8 @@ namespace Renderer {
 		indices.push_back(baseIndex + 2);
 		indices.push_back(baseIndex + 3);
 
-		// Shapes ignore the bound atlas (shader branches on data2.w); tag 0.
-		vertexAtlas.insert(vertexAtlas.end(), 4, 0);
+		// Shapes ignore the bound atlas (shader branches on data2.w); tag invalid.
+		vertexAtlas.insert(vertexAtlas.end(), 4, TextureHandle{});
 
 		recordGroup(zGroupStart, zIndex);
 	}
@@ -351,7 +432,7 @@ namespace Renderer {
 		indices.push_back(baseIndex + 2);
 		indices.push_back(baseIndex + 3);
 
-		vertexAtlas.insert(vertexAtlas.end(), 4, 0);
+		vertexAtlas.insert(vertexAtlas.end(), 4, TextureHandle{});
 
 		recordGroup(zGroupStart, zIndex);
 	}
@@ -396,8 +477,8 @@ namespace Renderer {
 			indices.push_back(baseIndex + inputIndices[i]);
 		}
 
-		// Tessellated shapes ignore the bound atlas; tag every vertex 0.
-		vertexAtlas.insert(vertexAtlas.end(), vertexCount, 0);
+		// Tessellated shapes ignore the bound atlas; tag every vertex invalid.
+		vertexAtlas.insert(vertexAtlas.end(), vertexCount, TextureHandle{});
 
 		recordGroup(zGroupStart, zIndex);
 	}
@@ -409,13 +490,13 @@ namespace Renderer {
 		const Foundation::Vec2&	 uvMax,
 		const Foundation::Color& color,
 		const Foundation::Vec2&	 runOrigin,
-		GLuint					 atlasTexture,
+		TextureHandle			 atlas,
 		float					 zIndex
 	) {
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
-		// Resolve the atlas this glyph samples. 0 means "use the default atlas"
-		// (Roboto, set via setFontAtlas), so existing callers are unchanged.
-		GLuint resolvedAtlas = (atlasTexture != 0) ? atlasTexture : defaultFontAtlas;
+		// Resolve the atlas this glyph samples. An invalid handle means "use the
+		// default atlas" (Roboto, set via setFontAtlas), so existing callers are unchanged.
+		const TextureHandle resolvedAtlas = atlas.isValid() ? atlas : defaultFontAtlas;
 
 		uint32_t baseIndex = static_cast<uint32_t>(vertices.size());
 
@@ -520,8 +601,8 @@ namespace Renderer {
 		recordGroup(zGroupStart, zIndex);
 	}
 
-	void BatchRenderer::setFontAtlas(GLuint atlasTexture, float pixelRange) {
-		defaultFontAtlas = atlasTexture;
+	void BatchRenderer::setFontAtlas(TextureHandle atlas, float pixelRange) {
+		defaultFontAtlas = atlas;
 		fontPixelRange = pixelRange;
 	}
 
@@ -560,16 +641,16 @@ namespace Renderer {
 		glDisable(GL_CULL_FACE);
 
 		// Upload vertex data to GPU
-		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, gl->vbo);
 		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(UberVertex), vertices.data(), GL_DYNAMIC_DRAW);
 
 		// Upload index data to GPU
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gl->ibo);
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size() * sizeof(uint32_t), idx.data(), GL_DYNAMIC_DRAW);
 
 		// Bind shader and VAO
-		shader.use();
-		glBindVertexArray(vao);
+		gl->shader.use();
+		glBindVertexArray(gl->vao);
 
 		// Create projection matrix
 		// If CoordinateSystem is set, use it for DPI-aware projection (logical pixels)
@@ -581,11 +662,11 @@ namespace Renderer {
 			projection = glm::ortho(0.0F, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight), 0.0F, -1.0F, 1.0F);
 		}
 
-		glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
+		glUniformMatrix4fv(gl->projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
 		// Transform is identity since transforms are baked into vertex positions at add time
 		// This allows different parts of the scene to have different transforms within one batch
 		Foundation::Mat4 identityTransform(1.0F);
-		glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(identityTransform));
+		glUniformMatrix4fv(gl->transformLoc, 1, GL_FALSE, glm::value_ptr(identityTransform));
 
 		// Set viewport height and pixel ratio for clipping
 		// gl_FragCoord uses physical pixels, so we need framebuffer height and pixel ratio
@@ -598,20 +679,20 @@ namespace Renderer {
 			glm::vec2 windowSize = coordinateSystem->getWindowSize();
 			framebufferHeight = windowSize.y * pixelRatio;
 		}
-		glUniform1f(viewportHeightLoc, framebufferHeight);
-		glUniform1f(pixelRatioLoc, pixelRatio);
+		glUniform1f(gl->viewportHeightLoc, framebufferHeight);
+		glUniform1f(gl->pixelRatioLoc, pixelRatio);
 
 		// Set instanced = false for standard batched rendering path
-		glUniform1i(instancedLoc, 0);
+		glUniform1i(gl->instancedLoc, 0);
 
 		glActiveTexture(GL_TEXTURE0);
-		glUniform1i(atlasLoc, 0);
+		glUniform1i(gl->atlasLoc, 0);
 
 		// Multi-atlas draw splitting.
 		//
 		// All shapes and text share one VBO/IBO and one draw order (z-order ==
 		// submission order). Text vertices are tagged in `vertexAtlas` with the
-		// MSDF atlas they sample; shapes are tagged 0 (they ignore the bound
+		// MSDF atlas they sample; shapes are tagged invalid (they ignore the bound
 		// texture, the shader branches on data2.w). We walk triangles in order,
 		// keeping a contiguous run of indices, and start a NEW draw call only
 		// when a text triangle needs a different atlas than the one currently
@@ -620,21 +701,25 @@ namespace Renderer {
 		// Common case (all text from one atlas, e.g. the default Roboto): every
 		// text triangle needs the same atlas, so this collapses to a single
 		// glDrawElements identical to the prior single-atlas behavior.
-		const size_t indexCount = idx.size();
-		GLuint		 boundAtlas = defaultFontAtlas; // What's currently bound on the GPU
-		if (boundAtlas != 0) {
-			glBindTexture(GL_TEXTURE_2D, boundAtlas);
+		const size_t  indexCount = idx.size();
+		TextureHandle boundAtlas = defaultFontAtlas; // What's currently bound on the GPU
+		if (boundAtlas.isValid()) {
+			glBindTexture(GL_TEXTURE_2D, backend::gl::name(boundAtlas));
 		}
 
 		size_t runStart = 0; // First index of the current contiguous run
 		for (size_t tri = 0; tri < indexCount; tri += 3) {
-			// A triangle's vertices are all shape (tag 0) or all the same text
-			// atlas; max() yields the text atlas if any, else 0 (no requirement).
-			GLuint required = vertexAtlas[idx[tri]];
-			required = std::max(required, vertexAtlas[idx[tri + 1]]);
-			required = std::max(required, vertexAtlas[idx[tri + 2]]);
+			// A triangle's vertices are all shape (tag invalid) or all the same text
+			// atlas; the first valid tag is the text atlas if any, else invalid.
+			TextureHandle required = vertexAtlas[idx[tri]];
+			if (!required.isValid()) {
+				required = vertexAtlas[idx[tri + 1]];
+			}
+			if (!required.isValid()) {
+				required = vertexAtlas[idx[tri + 2]];
+			}
 
-			if (required != 0 && required != boundAtlas) {
+			if (required.isValid() && required != boundAtlas) {
 				// Flush the run accumulated so far with the previously bound atlas.
 				if (tri > runStart) {
 					glDrawElements(
@@ -644,7 +729,7 @@ namespace Renderer {
 				}
 				// Bind the atlas this run needs and start a new run here.
 				boundAtlas = required;
-				glBindTexture(GL_TEXTURE_2D, boundAtlas);
+				glBindTexture(GL_TEXTURE_2D, backend::gl::name(boundAtlas));
 				runStart = tri;
 			}
 		}
@@ -776,12 +861,12 @@ namespace Renderer {
 			meshVertices.push_back(v);
 		}
 
-		// Create VAO for instanced rendering (RAII wrapper)
-		handle.vao = GLVertexArray::create();
-		handle.vao.bind();
+		// Create VAO for instanced rendering
+		glGenVertexArrays(1, &handle.vao);
+		glBindVertexArray(handle.vao);
 
 		// Create mesh VBO (static geometry - uploaded once, reused for all instances)
-		handle.meshVBO = GLBuffer::create(GL_ARRAY_BUFFER);
+		glGenBuffers(1, &handle.meshVBO);
 		glBindBuffer(GL_ARRAY_BUFFER, handle.meshVBO);
 		glBufferData(
 			GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(meshVertices.size() * sizeof(InstancedMeshVertex)), meshVertices.data(), GL_STATIC_DRAW
@@ -803,8 +888,8 @@ namespace Renderer {
 		// Locations 1, 3, 4, 5 are not enabled - OpenGL provides default vertex attribute values (0,0,0,1)
 		// This is fine because the instanced path only uses position and color
 
-		// Create mesh IBO (index buffer for triangles) - RAII wrapper
-		handle.meshIBO = GLBuffer::create(GL_ELEMENT_ARRAY_BUFFER);
+		// Create mesh IBO (index buffer for triangles)
+		glGenBuffers(1, &handle.meshIBO);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, handle.meshIBO);
 		glBufferData(
 			GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(uint16_t)), mesh.indices.data(), GL_STATIC_DRAW
@@ -812,8 +897,8 @@ namespace Renderer {
 		handle.indexCount = static_cast<uint32_t>(mesh.indices.size());
 		handle.vertexCount = static_cast<uint32_t>(mesh.vertices.size());
 
-		// Create instance VBO (dynamic - updated each frame with per-instance data) - RAII wrapper
-		handle.instanceVBO = GLBuffer::create(GL_ARRAY_BUFFER);
+		// Create instance VBO (dynamic - updated each frame with per-instance data)
+		glGenBuffers(1, &handle.instanceVBO);
 		glBindBuffer(GL_ARRAY_BUFFER, handle.instanceVBO);
 		glBufferData(
 			GL_ARRAY_BUFFER,
@@ -840,13 +925,22 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::releaseInstancedMesh(InstancedMeshHandle& handle) {
-		// RAII wrappers automatically release GPU resources when destroyed or reset
-		handle.vao.release();
-		handle.meshVBO.release();
-		handle.meshIBO.release();
-		handle.instanceVBO.release();
-
-		// Reset other fields
+		if (handle.vao != 0) {
+			glDeleteVertexArrays(1, &handle.vao);
+		}
+		if (handle.meshVBO != 0) {
+			glDeleteBuffers(1, &handle.meshVBO);
+		}
+		if (handle.meshIBO != 0) {
+			glDeleteBuffers(1, &handle.meshIBO);
+		}
+		if (handle.instanceVBO != 0) {
+			glDeleteBuffers(1, &handle.instanceVBO);
+		}
+		handle.vao = 0;
+		handle.meshVBO = 0;
+		handle.meshIBO = 0;
+		handle.instanceVBO = 0;
 		handle.indexCount = 0;
 		handle.vertexCount = 0;
 		handle.maxInstances = 0;
@@ -871,7 +965,7 @@ namespace Renderer {
 		glDisable(GL_CULL_FACE);
 
 		// Use the uber shader
-		shader.use();
+		gl->shader.use();
 
 		// Set up projection matrix (same as flush())
 		Foundation::Mat4 projection;
@@ -880,17 +974,17 @@ namespace Renderer {
 		} else {
 			projection = glm::ortho(0.0F, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight), 0.0F, -1.0F, 1.0F);
 		}
-		glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
+		glUniformMatrix4fv(gl->projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
 
 		// Identity transform (world→screen is done in shader via instancing uniforms)
 		Foundation::Mat4 identity(1.0F);
-		glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(identity));
+		glUniformMatrix4fv(gl->transformLoc, 1, GL_FALSE, glm::value_ptr(identity));
 
 		// Set instancing uniforms
-		glUniform1i(instancedLoc, 1); // Enable instanced rendering path
-		glUniform2f(cameraPositionLoc, cameraPosition.x, cameraPosition.y);
-		glUniform1f(cameraZoomLoc, cameraZoom);
-		glUniform1f(pixelsPerMeterLoc, pixelsPerMeter);
+		glUniform1i(gl->instancedLoc, 1); // Enable instanced rendering path
+		glUniform2f(gl->cameraPositionLoc, cameraPosition.x, cameraPosition.y);
+		glUniform1f(gl->cameraZoomLoc, cameraZoom);
+		glUniform1f(gl->pixelsPerMeterLoc, pixelsPerMeter);
 		// Use logical pixels for viewport size to match the projection matrix
 		// (CreateScreenSpaceProjection uses logical pixels, not physical pixels)
 		float logicalWidth = static_cast<float>(viewportWidth);
@@ -900,11 +994,11 @@ namespace Renderer {
 			logicalWidth = windowSize.x;
 			logicalHeight = windowSize.y;
 		}
-		glUniform2f(viewportSizeLoc, logicalWidth, logicalHeight);
+		glUniform2f(gl->viewportSizeLoc, logicalWidth, logicalHeight);
 
 		// Bind the instanced mesh VAO and instance buffer
-		handle.vao.bind();
-		handle.instanceVBO.bind();
+		glBindVertexArray(handle.vao);
+		glBindBuffer(GL_ARRAY_BUFFER, handle.instanceVBO);
 
 		// Handle overflow by batching multiple draw calls if needed
 		// This ensures all instances render even if count > maxInstances
@@ -935,6 +1029,61 @@ namespace Renderer {
 			offset += batchSize;
 		}
 
+		glBindVertexArray(0);
+		glDisable(GL_BLEND);
+	}
+
+	void BatchRenderer::setGroundcover(const Primitives::GroundcoverParams& params) {
+		gl->shader.use();
+		glUniform1i(gl->groundcoverModeLoc, params.enabled ? 1 : 0);
+		glUniform1f(gl->groundcoverOpennessLoc, params.openness);
+		glUniform1f(gl->groundcoverReachLoc, params.reach);
+		glUniform2f(gl->cursorWorldLoc, params.cursorWorld.x, params.cursorWorld.y);
+		glUniform1f(gl->cursorRadiusLoc, params.cursorRadius);
+		glUniform1f(gl->cursorStrengthLoc, params.cursorStrength);
+	}
+
+	void BatchRenderer::setBakedAlpha(float alpha) {
+		gl->shader.use();
+		glUniform1f(gl->bakedAlphaLoc, alpha);
+		bakedAlpha = alpha;
+	}
+
+	void BatchRenderer::beginBakedPass(const Primitives::WorldCamera& camera) {
+		// The same fixed state as flush() and drawInstanced()
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glDisable(GL_DEPTH_TEST);
+		glDisable(GL_CULL_FACE);
+
+		gl->shader.use();
+
+		// Projection and viewport size from the setViewport() dimensions, which the
+		// caller sets from the same logical size it baked and culled with.
+		const float		 width = static_cast<float>(viewportWidth);
+		const float		 height = static_cast<float>(viewportHeight);
+		Foundation::Mat4 projection = glm::ortho(0.0F, width, height, 0.0F, -1.0F, 1.0F);
+		glUniformMatrix4fv(gl->projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
+		Foundation::Mat4 identity(1.0F);
+		glUniformMatrix4fv(gl->transformLoc, 1, GL_FALSE, glm::value_ptr(identity));
+
+		// Baked world-space mode (u_instanced = 2)
+		glUniform1i(gl->instancedLoc, 2);
+		glUniform2f(gl->cameraPositionLoc, camera.position.x, camera.position.y);
+		glUniform1f(gl->cameraZoomLoc, camera.zoom);
+		glUniform1f(gl->pixelsPerMeterLoc, camera.pixelsPerMeter);
+		glUniform2f(gl->viewportSizeLoc, width, height);
+
+		glUniform1f(gl->bakedAlphaLoc, 1.0F);
+		bakedAlpha = 1.0F;
+	}
+
+	void BatchRenderer::endBakedPass() {
+		// Reset alpha so the instanced path (same shader branch) is unaffected
+		if (bakedAlpha != 1.0F) {
+			glUniform1f(gl->bakedAlphaLoc, 1.0F);
+			bakedAlpha = 1.0F;
+		}
 		glBindVertexArray(0);
 		glDisable(GL_BLEND);
 	}

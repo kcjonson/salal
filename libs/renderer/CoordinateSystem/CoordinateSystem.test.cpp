@@ -1,72 +1,77 @@
+// CoordinateSystem is fed window sizes by the app, so these run with no window.
+
 #include "CoordinateSystem/CoordinateSystem.h"
-#include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
 
 using namespace Renderer;
 
-// ============================================================================
-// CoordinateSystem Tests
-// ============================================================================
-
-// Test fixture that creates a minimal GLFW window for testing
-class CoordinateSystemTest : public ::testing::Test {
-  protected:
-	void SetUp() override {
-		// Initialize GLFW for testing
-		if (glfwInit() == 0) {
-			GTEST_SKIP() << "GLFW initialization failed - skipping CoordinateSystem tests"; // NOLINT(readability-implicit-bool-conversion)
-		}
-
-		// Create a hidden window for testing (no OpenGL context needed for coordinate math)
-		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // No OpenGL context needed
-
-		testWindow = glfwCreateWindow(800, 600, "Test", nullptr, nullptr);
-		if (testWindow == nullptr) {
-			glfwTerminate();
-			GTEST_SKIP() << "GLFW window creation failed - skipping CoordinateSystem tests"; // NOLINT(readability-implicit-bool-conversion)
-		}
-	}
-
-	void TearDown() override {
-		if (testWindow != nullptr) {
-			glfwDestroyWindow(testWindow);
-		}
-		glfwTerminate();
-	}
-
-  protected:						  // NOLINT(readability-redundant-access-specifiers)
-	GLFWwindow* testWindow = nullptr; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-};
+namespace {
+	constexpr Viewport kWindow{800, 600, 800, 600};
+	constexpr Viewport kRetinaWindow{800, 600, 1600, 1200};
+} // namespace
 
 // ----------------------------------------------------------------------------
-// Initialization Tests
+// Viewport Tests
 // ----------------------------------------------------------------------------
 
-TEST_F(CoordinateSystemTest, Initialization) {
-	CoordinateSystem coordSys;
-	EXPECT_TRUE(coordSys.Initialize(testWindow));
+TEST(ViewportTest, PixelRatioIsFramebufferOverLogical) {
+	EXPECT_FLOAT_EQ(kWindow.pixelRatio(), 1.0F);
+	EXPECT_FLOAT_EQ(kRetinaWindow.pixelRatio(), 2.0F);
+	EXPECT_FLOAT_EQ((Viewport{1000, 500, 1500, 750}).pixelRatio(), 1.5F);
 }
 
-TEST_F(CoordinateSystemTest, InitializationWithNullWindow) {
+TEST(ViewportTest, UnsizedViewportHasRatioOne) {
+	EXPECT_FLOAT_EQ(Viewport{}.pixelRatio(), 1.0F);
+}
+
+// ----------------------------------------------------------------------------
+// Viewport Round Trip
+// ----------------------------------------------------------------------------
+
+TEST(CoordinateSystemTest, SetViewportIsReadBack) {
 	CoordinateSystem coordSys;
-	EXPECT_FALSE(coordSys.Initialize(nullptr));
+	coordSys.setViewport(kRetinaWindow);
+
+	const Viewport& v = coordSys.viewport();
+	EXPECT_EQ(v.logicalWidth, 800);
+	EXPECT_EQ(v.logicalHeight, 600);
+	EXPECT_EQ(v.framebufferWidth, 1600);
+	EXPECT_EQ(v.framebufferHeight, 1200);
+}
+
+TEST(CoordinateSystemTest, LastViewportWins) {
+	CoordinateSystem coordSys;
+	coordSys.setViewport(kWindow);
+	coordSys.setViewport({1024, 768, 1024, 768});
+
+	glm::vec2 size = coordSys.getWindowSize();
+	EXPECT_EQ(size.x, 1024.0F);
+	EXPECT_EQ(size.y, 768.0F);
 }
 
 // ----------------------------------------------------------------------------
 // Window Size Tests
 // ----------------------------------------------------------------------------
 
-TEST_F(CoordinateSystemTest, GetWindowSize) {
+TEST(CoordinateSystemTest, GetWindowSize) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
+	coordSys.setViewport(kWindow);
 
 	glm::vec2 size = coordSys.getWindowSize();
 	EXPECT_EQ(size.x, 800.0F);
 	EXPECT_EQ(size.y, 600.0F);
 }
 
-TEST_F(CoordinateSystemTest, GetWindowSizeWithoutInitialization) {
+TEST(CoordinateSystemTest, GetWindowSizeIsLogicalNotFramebuffer) {
+	CoordinateSystem coordSys;
+	coordSys.setViewport(kRetinaWindow);
+
+	glm::vec2 size = coordSys.getWindowSize();
+	EXPECT_EQ(size.x, 800.0F);
+	EXPECT_EQ(size.y, 600.0F);
+}
+
+TEST(CoordinateSystemTest, GetWindowSizeWithoutViewport) {
 	CoordinateSystem coordSys;
 	// Should return default fallback values
 	glm::vec2 size = coordSys.getWindowSize();
@@ -78,9 +83,9 @@ TEST_F(CoordinateSystemTest, GetWindowSizeWithoutInitialization) {
 // Percentage Helper Tests
 // ----------------------------------------------------------------------------
 
-TEST_F(CoordinateSystemTest, PercentWidth) {
+TEST(CoordinateSystemTest, PercentWidth) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow); // 800x600 window
+	coordSys.setViewport(kWindow); // 800x600 window
 
 	EXPECT_FLOAT_EQ(coordSys.PercentWidth(50.0F), 400.0F);	// 50% of 800
 	EXPECT_FLOAT_EQ(coordSys.PercentWidth(100.0F), 800.0F); // 100% of 800
@@ -88,9 +93,9 @@ TEST_F(CoordinateSystemTest, PercentWidth) {
 	EXPECT_FLOAT_EQ(coordSys.PercentWidth(0.0F), 0.0F);		// 0% of 800
 }
 
-TEST_F(CoordinateSystemTest, PercentHeight) {
+TEST(CoordinateSystemTest, PercentHeight) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow); // 800x600 window
+	coordSys.setViewport(kWindow); // 800x600 window
 
 	EXPECT_FLOAT_EQ(coordSys.PercentHeight(50.0F), 300.0F);	 // 50% of 600
 	EXPECT_FLOAT_EQ(coordSys.PercentHeight(100.0F), 600.0F); // 100% of 600
@@ -98,18 +103,18 @@ TEST_F(CoordinateSystemTest, PercentHeight) {
 	EXPECT_FLOAT_EQ(coordSys.PercentHeight(0.0F), 0.0F);	 // 0% of 600
 }
 
-TEST_F(CoordinateSystemTest, PercentSize) {
+TEST(CoordinateSystemTest, PercentSize) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow); // 800x600 window
+	coordSys.setViewport(kWindow); // 800x600 window
 
 	glm::vec2 size = coordSys.PercentSize(50.0F, 75.0F);
 	EXPECT_FLOAT_EQ(size.x, 400.0F); // 50% of 800
 	EXPECT_FLOAT_EQ(size.y, 450.0F); // 75% of 600
 }
 
-TEST_F(CoordinateSystemTest, PercentPosition) {
+TEST(CoordinateSystemTest, PercentPosition) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow); // 800x600 window
+	coordSys.setViewport(kWindow); // 800x600 window
 
 	glm::vec2 pos = coordSys.PercentPosition(25.0F, 50.0F);
 	EXPECT_FLOAT_EQ(pos.x, 200.0F); // 25% of 800
@@ -120,75 +125,59 @@ TEST_F(CoordinateSystemTest, PercentPosition) {
 // Pixel Ratio Tests
 // ----------------------------------------------------------------------------
 
-TEST_F(CoordinateSystemTest, GetPixelRatio) {
+TEST(CoordinateSystemTest, GetPixelRatio) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
+	coordSys.setViewport(kWindow);
+	EXPECT_FLOAT_EQ(coordSys.getPixelRatio(), 1.0F);
 
-	float ratio = coordSys.getPixelRatio();
-	// Ratio should be positive and reasonable (1.0 for non-retina, 2.0 for retina)
-	EXPECT_GT(ratio, 0.0F);
-	EXPECT_LE(ratio, 4.0F); // Most displays have ratio <= 4.0
+	coordSys.setViewport(kRetinaWindow);
+	EXPECT_FLOAT_EQ(coordSys.getPixelRatio(), 2.0F);
 }
 
-TEST_F(CoordinateSystemTest, PixelRatioCaching) {
+TEST(CoordinateSystemTest, PixelRatioWithoutViewport) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
-
-	float ratio1 = coordSys.getPixelRatio();
-	float ratio2 = coordSys.getPixelRatio();
-
-	// Should return same value (cached)
-	EXPECT_FLOAT_EQ(ratio1, ratio2);
+	EXPECT_FLOAT_EQ(coordSys.getPixelRatio(), 1.0F);
 }
 
-TEST_F(CoordinateSystemTest, PixelRatioInvalidatesOnWindowResize) {
+TEST(CoordinateSystemTest, PixelRatioFollowsResize) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
+	coordSys.setViewport(kWindow);
+	EXPECT_FLOAT_EQ(coordSys.getPixelRatio(), 1.0F);
 
-	float ratio1 = coordSys.getPixelRatio();
-
-	// Simulate window resize
-	coordSys.updateWindowSize(1024, 768);
-
-	// This should have invalidated the cache (though ratio might be the same)
-	float ratio2 = coordSys.getPixelRatio();
-
-	// Both ratios should be valid
-	EXPECT_GT(ratio1, 0.0F);
-	EXPECT_GT(ratio2, 0.0F);
+	// Dragged onto a 2x display: same logical size, doubled framebuffer
+	coordSys.setViewport(kRetinaWindow);
+	EXPECT_FLOAT_EQ(coordSys.getPixelRatio(), 2.0F);
 }
 
 // ----------------------------------------------------------------------------
 // Coordinate Conversion Tests
 // ----------------------------------------------------------------------------
 
-TEST_F(CoordinateSystemTest, WindowToFramebufferConversion) {
+TEST(CoordinateSystemTest, WindowToFramebufferConversion) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
+	coordSys.setViewport(kRetinaWindow);
 
-	float	  ratio = coordSys.getPixelRatio();
 	glm::vec2 windowCoords(100.0F, 200.0F);
 	glm::vec2 framebufferCoords = coordSys.WindowToFramebuffer(windowCoords);
 
-	EXPECT_FLOAT_EQ(framebufferCoords.x, 100.0F * ratio);
-	EXPECT_FLOAT_EQ(framebufferCoords.y, 200.0F * ratio);
+	EXPECT_FLOAT_EQ(framebufferCoords.x, 200.0F);
+	EXPECT_FLOAT_EQ(framebufferCoords.y, 400.0F);
 }
 
-TEST_F(CoordinateSystemTest, FramebufferToWindowConversion) {
+TEST(CoordinateSystemTest, FramebufferToWindowConversion) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
+	coordSys.setViewport(kRetinaWindow);
 
-	float	  ratio = coordSys.getPixelRatio();
 	glm::vec2 framebufferCoords(200.0F, 400.0F);
 	glm::vec2 windowCoords = coordSys.FramebufferToWindow(framebufferCoords);
 
-	EXPECT_FLOAT_EQ(windowCoords.x, 200.0F / ratio);
-	EXPECT_FLOAT_EQ(windowCoords.y, 400.0F / ratio);
+	EXPECT_FLOAT_EQ(windowCoords.x, 100.0F);
+	EXPECT_FLOAT_EQ(windowCoords.y, 200.0F);
 }
 
-TEST_F(CoordinateSystemTest, RoundTripConversion) {
+TEST(CoordinateSystemTest, RoundTripConversion) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
+	coordSys.setViewport({1000, 500, 1500, 750});
 
 	glm::vec2 original(123.0F, 456.0F);
 	glm::vec2 framebuffer = coordSys.WindowToFramebuffer(original);
@@ -202,9 +191,9 @@ TEST_F(CoordinateSystemTest, RoundTripConversion) {
 // Projection Matrix Tests
 // ----------------------------------------------------------------------------
 
-TEST_F(CoordinateSystemTest, CreateScreenSpaceProjection) {
+TEST(CoordinateSystemTest, CreateScreenSpaceProjection) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
+	coordSys.setViewport(kWindow);
 
 	glm::mat4 projection = coordSys.CreateScreenSpaceProjection();
 
@@ -223,9 +212,20 @@ TEST_F(CoordinateSystemTest, CreateScreenSpaceProjection) {
 	EXPECT_NEAR(bottomRight.y / bottomRight.w, -1.0F, 0.01F);
 }
 
-TEST_F(CoordinateSystemTest, CreateWorldSpaceProjection) {
+TEST(CoordinateSystemTest, ScreenSpaceProjectionUsesLogicalPixels) {
 	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
+	coordSys.setViewport(kRetinaWindow);
+
+	// (800,600) logical is still the bottom-right corner on a 2x display
+	glm::mat4 projection = coordSys.CreateScreenSpaceProjection();
+	glm::vec4 bottomRight = projection * glm::vec4(800.0F, 600.0F, 0.0F, 1.0F);
+	EXPECT_NEAR(bottomRight.x / bottomRight.w, 1.0F, 0.01F);
+	EXPECT_NEAR(bottomRight.y / bottomRight.w, -1.0F, 0.01F);
+}
+
+TEST(CoordinateSystemTest, CreateWorldSpaceProjection) {
+	CoordinateSystem coordSys;
+	coordSys.setViewport(kWindow);
 
 	glm::mat4 projection = coordSys.CreateWorldSpaceProjection();
 
@@ -248,27 +248,11 @@ TEST_F(CoordinateSystemTest, CreateWorldSpaceProjection) {
 // Edge Cases
 // ----------------------------------------------------------------------------
 
-TEST_F(CoordinateSystemTest, PercentHelpersWithoutWindow) {
+TEST(CoordinateSystemTest, PercentHelpersWithoutViewport) {
 	CoordinateSystem coordSys;
-	// Don't initialize - should use fallback values
+	// Not sized - should use fallback values
 
 	// Should use default 1920x1080
 	EXPECT_FLOAT_EQ(coordSys.PercentWidth(50.0F), 960.0F);	// 50% of 1920
 	EXPECT_FLOAT_EQ(coordSys.PercentHeight(50.0F), 540.0F); // 50% of 1080
-}
-
-TEST_F(CoordinateSystemTest, UpdateWindowSizeInvalidatesCache) {
-	CoordinateSystem coordSys;
-	coordSys.Initialize(testWindow);
-
-	// Get initial ratio (forces calculation)
-	coordSys.getPixelRatio();
-
-	// Update window size should mark cache as dirty
-	coordSys.updateWindowSize(1024, 768);
-
-	// Next call should recalculate (we can't directly test the dirty flag,
-	// but we can verify the function completes without error)
-	float ratio = coordSys.getPixelRatio();
-	EXPECT_GT(ratio, 0.0F);
 }

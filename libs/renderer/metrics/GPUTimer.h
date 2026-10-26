@@ -6,20 +6,19 @@
 // the frame's own span. Each span's result is read kFrames spans later, long
 // after the GPU finished it, so reading never stalls the CPU.
 
-#include "gl/GLQuery.h"
-#include <array>
+#include <memory>
 
 namespace Renderer {
 
 	class GPUTimer {
 	  public:
-		GPUTimer() = default;
-		~GPUTimer() = default;
+		GPUTimer();
+		~GPUTimer();
 
 		GPUTimer(const GPUTimer&) = delete;
 		GPUTimer& operator=(const GPUTimer&) = delete;
-		GPUTimer(GPUTimer&&) noexcept = default;
-		GPUTimer& operator=(GPUTimer&&) noexcept = default;
+		GPUTimer(GPUTimer&&) noexcept;
+		GPUTimer& operator=(GPUTimer&&) noexcept;
 
 		/// Start a span. Needs a current GL context; the queries are created on first use.
 		void begin();
@@ -33,17 +32,13 @@ namespace Renderer {
 	  private:
 		static constexpr int kFrames = 4;
 
-		struct Span {
-			GLQuery start;
-			GLQuery stop;
-			bool	pending = false;
-		};
+		// The query pairs (GL objects, defined in GPUTimer.cpp); null until begin().
+		struct Spans;
+		std::unique_ptr<Spans> spans;
 
-		std::array<Span, kFrames> spans;
-		int						  current = 0;
-		bool					  created = false;
-		bool					  open = false;
-		float					  lastTimeMs = 0.0F;
+		int	  current = 0;
+		bool  open = false;
+		float lastTimeMs = 0.0F;
 	};
 
 } // namespace Renderer

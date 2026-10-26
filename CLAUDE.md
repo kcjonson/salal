@@ -46,7 +46,7 @@ repo's `specboard.md`.
   the three games need from the engine, and where their own docs conflict with
   these.
 - **[docs/renderer-boundary.md](docs/renderer-boundary.md)** is the renderer
-  backend-boundary design: the GL leaks on the public surface today, the target
+  backend-boundary design: the GL leaks the public surface had, the target
   handles and declarations, the backend seam, and the PR sequence that lands it.
 
 For how the first consumer intends to use this engine, see `tech-stack.md` in
@@ -82,9 +82,10 @@ the CMake cleanup landed, the dev server left `foundation` for
 off ui's link list (decision D, settled 2026-10-26).
 
 Phase 1 landed (2026-10-26): `foundation` and `renderer` are imported, `v0.1.0`
-is tagged, and worldsim consumes this repo. The renderer boundary PRs are next,
-sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md); PR 1 is in
-progress. Phase 2 carves `app` out of `libs/engine`; `ui` is extracted last.
+is tagged, and worldsim consumes this repo. The renderer boundary PRs are under
+way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PR 1
+(GL off the public surface) is in, PR 2 is next. Phase 2 carves `app` out of
+`libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to

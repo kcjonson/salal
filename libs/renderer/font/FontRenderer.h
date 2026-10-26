@@ -3,11 +3,13 @@
 
 #pragma once
 
+#include "Handle.h"
 #include "graphics/PrimitiveStyles.h"
 #include "primitives/FontFamily.h"
-#include "shader/Shader.h"
-#include <GL/glew.h>
 #include <array>
+#include <cmath>
+#include <cstdint>
+#include <functional>
 #include <glm/glm.hpp>
 #include <map>
 #include <string>
@@ -165,11 +167,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		) const;
 
 		/**
-		 * Get the texture ID of a font atlas (for batching)
+		 * Get the atlas texture of a font family (for batching)
 		 * @param family Font family whose atlas texture to return (default Roboto)
-		 * @return OpenGL texture ID
+		 * @return The atlas texture; invalid if the renderer never loaded
 		 */
-		GLuint getAtlasTexture(FontFamily family = FontFamily::Roboto) const;
+		TextureHandle getAtlasTexture(FontFamily family = FontFamily::Roboto) const;
 
 		/**
 		 * Update the internal frame counter for cache LRU tracking
@@ -216,13 +218,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		};
 
 		/**
-		 * A single loaded font: its glyphs, atlas metadata, GL texture, and the
+		 * A single loaded font: its glyphs, atlas metadata, atlas texture, and the
 		 * font metrics derived from them. One Atlas per FontFamily.
 		 */
 		struct Atlas {
 			std::map<char, SDFGlyph> glyphs;						// Map of SDF glyphs
 			SDFAtlasMetadata		 metadata{};					// SDF atlas metadata
-			GLuint					 texture = 0;					// SDF atlas GL texture
+			uint32_t				 textureName = 0;				// SDF atlas GL texture name (owned here)
+			TextureHandle			 texture;						// The same texture as a handle
 			float					 scaledAscender = 0.0F;			// Ascender for the base font size
 			float					 maxGlyphHeightUnscaled = 0.0F; // Unscaled max glyph height
 			bool					 loaded = false;				// True once successfully loaded
