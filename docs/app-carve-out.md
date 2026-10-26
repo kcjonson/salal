@@ -6,17 +6,18 @@ generic, where they knot into the game, ui and renderer, and what the proposed
 on 2026-10-25. This document is the map. The design of the new app API (tick,
 scene stack, config, the device layer that feeds the input accumulator) is
 phase-2 work and is not written here; the input types themselves are settled
-(decision D) and go to `foundation/input/`. What follows is meant to let that
+(decision D) and live in `foundation/input/`. What follows is meant to let that
 design be written without re-reading worldsim.
 
-Seven phase 0.5 PRs ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)) merged 2026-10-25/26, taking
-worldsim main to 42885471. Counts, sizes and line numbers below are the survey
+Eight phase 0.5 PRs ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through [worldsim#298](https://github.com/kcjonson/worldsim/pull/298)) merged 2026-10-25/26, taking
+worldsim main to 870dd755. Counts, sizes and line numbers below are the survey
 at db335a2b and stay as the record; rows that changed carry a trailing note.
 Paths that moved: `libs/ui/font/FontRenderer.*` and the stb_image TU to
 `libs/renderer/font` and `libs/renderer` ([worldsim#293](https://github.com/kcjonson/worldsim/pull/293)); `libs/foundation/debug/*`
 to `libs/engine/debug`, `foundation/graphics/PngEncoder.*` to
 `libs/engine/graphics`, and `foundation/metrics/PerformanceMetrics.h` to
-`libs/renderer/metrics` ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297)). `AppLauncher.cpp` line numbers predate
+`libs/renderer/metrics` ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297)); `input/InputTypes.h` to `libs/foundation/input`
+([worldsim#298](https://github.com/kcjonson/worldsim/pull/298)). `AppLauncher.cpp` line numbers predate
 [worldsim#296](https://github.com/kcjonson/worldsim/pull/296) and [worldsim#297](https://github.com/kcjonson/worldsim/pull/297), which trimmed it.
 
 `libs/engine` is 294 .h/.cpp files and 75,113 lines with tests and benches,
@@ -68,7 +69,8 @@ graph.
 Since the survey: engine no longer links `nlohmann_json` and ui no longer links
 `httplib` ([worldsim#295](https://github.com/kcjonson/worldsim/pull/295)), foundation links only glm ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297)), and FontRenderer is
 `Renderer::FontRenderer` in `libs/renderer/font`, so renderer no longer reaches
-into ui ([worldsim#293](https://github.com/kcjonson/worldsim/pull/293)). ui still links PUBLIC engine, for `input/InputTypes.h`.
+into ui ([worldsim#293](https://github.com/kcjonson/worldsim/pull/293)). ui no longer links engine: `input/InputTypes.h` moved to
+`libs/foundation/input` ([worldsim#298](https://github.com/kcjonson/worldsim/pull/298)).
 
 ## Knots
 
@@ -149,9 +151,10 @@ clipboard interface that app implements.
 Since the survey: the two dead `InputManager.h` includes are gone ([worldsim#292](https://github.com/kcjonson/worldsim/pull/292)),
 and TextInput reaches the clipboard through `UI::IClipboard` in
 `libs/ui/clipboard`, which `engine::ClipboardManager` implements ([worldsim#294](https://github.com/kcjonson/worldsim/pull/294)).
-The seven `InputTypes.h` includes are what is left of ui -> engine; decision D
-(settled 2026-10-26) puts the file in `foundation/input/`, and that move is
-next.
+The seven `InputTypes.h` includes were what was left of ui -> engine; decision D
+(settled 2026-10-26) put the file in `foundation/input/`, done in
+[worldsim#298](https://github.com/kcjonson/worldsim/pull/298) (namespace now `foundation::`), which also dropped `engine` from
+ui's link list.
 
 ## Subsystem notes
 
@@ -430,7 +433,7 @@ Core, moves once the knots are cut (15 files, 2,900 lines):
 | `scene/Overlay.h` | 40 |
 | `scene/SceneManager.h` | 159 |
 | `scene/SceneManager.cpp` | 237 |
-| `input/InputTypes.h` | 133 (moves to `foundation/input/`; decision D) |
+| `input/InputTypes.h` | 133 (moved to `foundation/input/`, worldsim#298; decision D) |
 | `input/InputManager.h` | 182 |
 | `input/InputManager.cpp` | 628 |
 | `input/InputManager.test.cpp` | 89 |

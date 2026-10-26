@@ -30,8 +30,8 @@ document is the one that is right.
 
 | Library | Owns | Does not own |
 |---|---|---|
-| `foundation` | math, platform abstraction, logging, memory arenas, resource handles, seeded PRNG, and the plain-data input types in `input/` (`Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`, the event structs, the accumulator behind the per-tick `InputSnapshot`, the `ActionMap`), none of which include GLFW | anything that knows about pixels; the HTTP dev server, which sits here in worldsim today and moves to `app` |
-| `renderer` | GL abstraction, shaders, Primitives, BatchRenderer, vector/SVG, fonts and glyph generation, SDF text rendering, coordinate system, draw metrics | layout, interaction, widgets |
+| `foundation` | math, platform abstraction, logging, memory arenas, resource handles, seeded PRNG, and the plain-data input types in `input/` (`Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`, the event structs, the accumulator behind the per-tick `InputSnapshot`, the `ActionMap`), none of which include GLFW | anything that knows about pixels; the HTTP dev server, which is `app`'s (worldsim has moved it out of foundation into `libs/engine/debug`, and it moves on in phase 2) |
+| `renderer` | GL abstraction (to sit behind a backend boundary, with OpenGL 3.3 core as the first backend; the direction is settled, the design is planned; see [open-decisions.md](open-decisions.md) decision G), shaders, Primitives, BatchRenderer, vector/SVG, the font renderer and SDF text rendering (the game owns the fonts and atlases; the renderer will take atlas sources from the game, a phase 2 item), coordinate system, draw metrics | layout, interaction, widgets |
 | `ui` | Layer hierarchy, components, layout, focus, theme, text components and font theme tokens, text layout for widgets, animation, inspector | the window, the loop, game logic, the font renderer |
 | `app` | window, fixed-step loop, scenes, config, device input (GLFW callbacks, gamepads, hot-plug, device-to-player-slot claiming, key names for rebinding) feeding the per-tick snapshot, clipboard, dev server | anything drawable |
 | `audio` (proposed) | a mixer with priority buses and ducking, looping voices with per-frame pitch, filter and gain, synchronized stems, one-shots with pitch, gain and pan; depends on `foundation` only | game-side sound design |
@@ -52,13 +52,33 @@ otherwise normative. It is decision B: the recommendation is an engine library
 beside `renderer` over miniaudio, scheduled after `app`, but neither the
 library nor its placement is settled.
 
+The backend boundary in the `renderer` row has a settled direction and a planned
+design; nothing is built, and decision G in
+[open-decisions.md](open-decisions.md) holds the plan. The layer is OpenGL
+throughout today: worldsim's renderer, which salal will import unchanged, has
+about 180 direct GL calls in about ten files (measured on worldsim main @
+`870dd755`, before the renderer import), and `BatchRenderer.h` and
+`FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. The plan
+takes GL off the public surface first, then routes textures through one wrapper
+and designs the render-target API as a backend object. OpenGL 3.3 core is the
+only backend until then, and Vulkan is possible later, not scheduled. Blend
+state in the batch sort key, that render-target API, and the polygon, arc and
+wide-line primitives land before a second consumer depends on the renderer API,
+which is after worldsim pins `v0.1.0` (worldsim consumes the renderer as it is,
+behaviour-identical, and takes API changes through a tag bump). The diagram
+above is accurate for the code that exists.
+
 Fonts moving into `renderer` is settled, and forced. Worldsim's
 `renderer/primitives/Primitives.cpp:12` includes `ui/font/FontRenderer.h` and
-`Primitives.h:35` forward-declares `ui::FontRenderer` in its public API, the
-one place the renderer reaches up into ui, and `FontRenderer` itself depends
-on nothing else in ui. Moving it removes that knot and gives a game text
-without the `ui` library, which asteroids-roguelike's debug overlay needs from
-day one.
+`Primitives.h:35` forward-declares `ui::FontRenderer` in its public API, the one
+place the renderer reaches up into ui, and `FontRenderer` itself depends on
+nothing else in ui. Moving it removes that knot and gives a game text without
+the `ui` library, which asteroids-roguelike's debug overlay needs from day one.
+The font files, the atlas generator and the font-atlas build target stay in the
+game; salal ships no fonts. The renderer will take atlas sources from the game
+(a phase 2 item); today `FontRenderer::Initialize` looks for
+`fonts/<Family>-SDF.{png,json}` beside the executable and exits the process when
+Roboto is missing.
 
 ### The dependency rule
 
@@ -166,6 +186,10 @@ Required of `sim` layers in consumers, and of anything in the engine they call.
 - Nothing unseeded. No wall-clock reads in simulation.
 - No reliance on hash-container iteration order.
 - No platform-varying floating-point behaviour where it can be avoided.
+- Builds with floating-point contraction off on GCC and Clang
+  (`-ffp-contract=off`, inherited from `foundation`). Clang fuses `a*b+c` into
+  one rounded FMA wherever the target has one, which is always on arm64, so
+  golden values computed on one architecture can fail by an ULP on the other.
 
 This buys replays, bug reports reproducible from a seed and an input log,
 differential testing between implementations, and a path to netplay that does
@@ -208,7 +232,7 @@ Every app built on the engine exposes, behind a compile flag, at least:
 | `/api/control` | scene switch, pause, resume, reload, exit |
 
 Those five are the contract. Worldsim's server
-(`libs/foundation/debug/DebugServer.cpp`) has twelve routes today: the five,
+(`libs/engine/debug/DebugServer.cpp`) has twelve routes today: the five,
 plus `/api/health`, `/api/metrics`, `/api/dev/<verb>` (a generic command bag),
 `/api/state?what=` (the synchronous handshake that `tree` and `lint` ride on),
 `/stream/metrics` and `/stream/logs` (server-sent events), and `/` (an HTML
@@ -225,7 +249,7 @@ by eye.
 
 The flag matters: no listening sockets in a shipped build.
 Worldsim has no such flag today; the server is always compiled into
-`foundation` and enabled at runtime by `AppConfig::enableDebugServer` or
+`engine` and enabled at runtime by `AppConfig::enableDebugServer` or
 `--http-port`.
 
 ## Portability, including Rust

@@ -17,7 +17,7 @@ Written into the docs as decided, with the reason.
 |---|---|
 | Work is tracked in Specboard | Kevin asked for it; worldsim and dual-deck-builder already are |
 | FontRenderer moves into `renderer` (namespace `ui::` -> `Renderer::`) | removes the renderer -> ui knot (`worldsim/libs/renderer/primitives/Primitives.cpp:12`, `Primitives.h:35`) and gives text below ui, which the prototype's debug overlay needs; FontRenderer depends on nothing else in ui. `Renderer::` rather than the standards doc's lowercase because FontFamily, Primitives, BatchRenderer, Shader, CoordinateSystem, metrics/, gl/ and resources/Tile* are all `namespace Renderer` (only vector/ and two resources/ files are lowercase); a lowercase FontRenderer would force `Renderer::FontFamily` qualifiers and a second namespace block in Primitives.h, the shape being removed |
-| The dev server moves out of `foundation` into `app`, behind a compile flag; tree snapshot, lint and the injection grammar stay as transport-free functions; `Logger::setDebugServer` becomes a sink callback; foundation becomes GL-free | it lives in `worldsim/libs/foundation/debug/DebugServer.cpp` today and drags OpenGL and httplib into foundation; architecture.md already assigns it to app |
+| The dev server moves out of `foundation` into `app`, behind a compile flag; tree snapshot, lint and the injection grammar stay as transport-free functions; `Logger::setDebugServer` becomes a sink callback; foundation becomes GL-free | it lived in `worldsim/libs/foundation/debug/DebugServer.cpp` and dragged OpenGL and httplib into foundation; architecture.md already assigns it to app. [worldsim#297](https://github.com/kcjonson/worldsim/pull/297) moved it to `libs/engine/debug` and added the sink; the move into `app` is phase 2 |
 | `Application::run()` splits into `tick()` plus a native `while (tick())`; the fixed-step accumulator with interpolation is net-new in `app` | the loop body (`worldsim/libs/engine/application/Application.cpp:112-306`) is already one frame's work; the frame contract is normative |
 | `IScene::exportState()` is deleted during extraction | a pure-virtual contract for `/api/scene/state`, a route that no longer exists (`worldsim/libs/engine/scene/Scene.h:64-68`) |
 | Worldsim's `assets`, ECS systems and components, construction, nav, vision and world/* stay in worldsim | game schema and game logic throughout (the classification in app-carve-out.md) |
@@ -26,6 +26,10 @@ Written into the docs as decided, with the reason.
 | The TileAtlasBuilder bootstrap and asset-system init move out of AppLauncher into the game | `AppLauncher.cpp:209-226` and `:231-264` hardcode terrain surfaces and asset paths |
 | Input types live in `foundation/input/`, the device poller in `app`, and there is no separate `input` library (decision D, 2026-10-26) | every surveyed engine keeps input types in a leaf module below UI and gameplay with the platform layer depending on it (design and evidence under D below) |
 | WebAssembly is not an engine target (2026-10-26) | a temporary playtest idea for dual-deck-builder's migration that had started shaping the engine (the GL ES 3.0 subset rule pushed decision G to LDR-only render targets, the Emscripten CI job cost two vcpkg commits); dual-deck-builder's TypeScript build stays the playtest URL |
+| Imports are plain copies at a named worldsim commit, one commit per library, with the formatting pass in its own commit (2026-10-26) | history stays in worldsim, where blame for an imported file is `git log 870dd755 -- libs/foundation`; a byte-identical copy can be checked against its source, and formatting stays out of that diff (24 of foundation's 38 files were out of line with the shared `.clang-format`). No filter-repo. Foundation arrived this way in [salal#8](https://github.com/kcjonson/salal/pull/8) |
+| Fonts, the font files and the atlas tool stay game-side (2026-10-26); this narrows decision H | worldsim keeps `fonts/`, `tools/generate_sdf_atlas` and the font-atlas target, salal ships no fonts, and `msdfgen` leaves salal's `vcpkg.json`. `FontRenderer` itself is in `renderer` (above) and moves as it is. What remains of H is an API that takes atlas sources and stops calling `std::exit`, not whether salal ships fonts |
+| `-ffp-contract=off` is an engine-wide rule (2026-10-26) | set PUBLIC on `salal_foundation` for GCC, Clang and AppleClang (not clang-cl), so every consumer inherits it. The first macOS arm64 run failed three golden-bit tests by one ULP (`DeterministicMath` cos, `HashNoise` value and gradient noise) because Clang fuses `a*b+c` into an FMA there; worldsim's headers claim bit-identical results across x64, ARM and WASM; that had never been tested on ARM |
+| The renderer sits behind a backend boundary; OpenGL 3.3 core is the first backend, Vulkan possible later (direction settled 2026-10-26; the design is decision G's first steps) | worldsim's renderer is OpenGL throughout: about 180 direct GL calls in about ten files (measured on worldsim main @ `870dd755`, before the renderer import), and `BatchRenderer.h` and `FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. Nothing is built yet; the first steps (GL off the public surface, textures through `gl/GLTexture`, the render-target API as a backend object) are under decision G, and the full backend interface is a later refactor |
 
 ## A. Engine PRNG
 
@@ -201,11 +205,12 @@ the polling side, GLFW's
 `glfwGetKey` can miss state changes and points at callbacks.
 
 Unblocks. Untangling step b (`InputTypes.h` moves into `foundation/input/`) and
-phase 2 (the snapshot, accumulator and `ActionMap`). That move and dropping
-`engine` from ui's link list are the last two steps of phase 0.5; the rest of
-the untangle landed in worldsim on 2026-10-25/26
-([worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through
-[worldsim#297](https://github.com/kcjonson/worldsim/pull/297)).
+phase 2 (the snapshot, accumulator and `ActionMap`). Step b is done: that move
+and dropping `engine` from ui's link list were the last of phase 0.5
+([worldsim#298](https://github.com/kcjonson/worldsim/pull/298), 2026-10-26;
+the namespace is now `foundation::`), and the rest of the untangle landed on
+2026-10-25/26 ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291)
+through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)).
 
 ## E. ECS core
 
@@ -251,8 +256,10 @@ architecture.md keeps hedging about worldsim's own code.
 
 ## G. Render targets, additive blending, particles
 
-Question. Who owns offscreen render targets, blend state and particles, and
-when, given that the batch sort key is fixed in phase 1 and asteroids wants
+Question. Who owns offscreen render targets, blend state, the polygon, arc and
+wide-line primitives, and particles, and when, given that the batch sort key,
+the render-target API and the primitives have to settle before a second consumer
+depends on the renderer API (after worldsim pins `v0.1.0`), and asteroids wants
 bloom, additive glow and particles by Quick Run?
 
 Evidence. `asteroids-roguelike/docs/art-audio.md:17-19, :100-102` ask for
@@ -263,15 +270,44 @@ attachment in
 `worldsim/libs/engine/world/rendering/SurfaceFieldGolden.test.cpp:257`
 (`glFramebufferTexture2D` at `:262`), a test of code that stays in worldsim;
 nothing that moves to salal uses float render targets. Dual-deck-builder's
-batcher sorts by layer ordinal only.
+batcher sorts by layer ordinal only. The polygon, arc and wide-line primitives
+are the required shape additions listed in [architecture.md](architecture.md).
 
-Recommendation. Renderer gets blend state in the batch sort key and an
-offscreen render-target API in the phase 1 design, so neither is retrofitted
-onto an API three games call. Float colour attachments are allowed; GL 3.3
-core has them without an extension. Particles start game-side over
-Primitives; an engine pool is promoted when a second game wants one.
+GL isolation, measured on 2026-10-26 in worldsim's renderer (worldsim main @
+`870dd755`, before the renderer import). There are about 180 direct GL calls in
+about ten files, 112 of them in `BatchRenderer.cpp` and `shader/`.
+The `gl/` wrappers are RAII handles and nothing more. `BatchRenderer.h` and
+`FontRenderer.h` leak `<GL/glew.h>` and `GLuint` into every includer.
+`getShaderProgram()` and `getBatchRenderer()` are used by ten files in ui,
+engine and the apps to poke GL directly, and the game's own code makes about 400
+more GL calls outside the renderer.
 
-Needed by. Phase 1, for the sort key and the render-target API. Bloom and
+Recommendation. Renderer gets blend state in the batch sort key, an offscreen
+render-target API, and polygon, arc and wide-line primitives, all landed before
+a second consumer depends on the renderer API, so none is retrofitted onto an
+API three games call. That point is after worldsim pins `v0.1.0`: worldsim
+consumes the renderer as it is, behaviour-identical, and takes API changes
+through a tag bump. Float colour attachments are allowed; GL 3.3 core has them
+without an extension. Particles start game-side over Primitives; an engine pool
+is promoted when a second game wants one.
+
+The first steps toward a backend boundary (OpenGL 3.3 core as the first
+backend, Vulkan possible later, the full backend interface a later refactor),
+as their own PRs after worldsim pins `v0.1.0`:
+
+1. Take GL off the public surface, about 15 files. Drop `<GL/glew.h>` from
+   `BatchRenderer.h`, `FontRenderer.h` and `Primitives.cpp`; return opaque
+   texture handles from `getAtlasTexture`, `TileAtlasBuilder::texture` and
+   `RenderToTexture::texture`; make `CoordinateSystem::Initialize` take sizes or
+   a callback instead of a `GLFWwindow*`; replace `getShaderProgram()` and
+   `getBatchRenderer()` with the operations their callers need.
+2. Route all texture creation through `gl/GLTexture`.
+3. Design the offscreen render-target API as a backend object, which is the
+   render-target half of this decision.
+
+Needed by. Before a second consumer depends on the renderer API, which is
+after worldsim pins `v0.1.0`: blend state in the sort key, the render-target
+API (step 3 above) and the polygon, arc and wide-line primitives. Bloom and
 particles themselves are Quick Run or later.
 
 If deferred. Blend state gets added to the sort key after three games depend
@@ -298,6 +334,11 @@ Recommendation. Still open. The vector tessellation moves as code; the path
 conventions and TileAtlasBuilder's bootstrap stay game-side (the bootstrap is
 already settled). Decide the rest when dual-deck-builder's presentation port
 shows what its art atlas needs.
+
+Narrowed 2026-10-26: fonts, the font files and the atlas tool are game-side
+(Settled), so the font half of this question is no longer whether salal ships
+assets. It is the API `FontRenderer` takes for atlas sources, and getting
+`std::exit` out of its initialisation, a phase 2 follow-up.
 
 Needed by. Phase 1 at the latest for what moves; the convention question can
 wait until Job B's presentation phase.
