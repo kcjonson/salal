@@ -1,10 +1,26 @@
 # Extracting a shared engine
 
 Surveyed 2026-10-25, revised the same day after Kevin's decision to migrate
-dual-deck-builder to C++. No code moved.
+dual-deck-builder to C++, and revised again the same day after the Phase 0
+surveys. No code moved.
 
 This is the engine repo. It holds a README, formatter configs, and these docs;
 no code has been extracted yet.
+
+## Corrections in this revision (2026-10-25)
+
+Checked by five read-only surveys against worldsim main `db335a2b`,
+dual-deck-builder `afcd7b16` and asteroids-roguelike `176064c`, and fixed in
+place: dual-deck-builder's engine imports zero game code (not one) and was
+rebuilt to a spec abstracted from worldsim; its 740-line sim core drags a
+~32,900-line import closure; worldsim's dev server lives in `foundation`, has
+twelve routes and no compile flag; twelve shader files, not ten; two production
+GL-context sites, not one; worldsim already has a deterministic PRNG and lacks
+only the fork API; Phase 0 is done and adds an untangling step before phase 1.
+Detail: [phase-0-audit.md](phase-0-audit.md),
+[app-carve-out.md](app-carve-out.md),
+[consumer-requirements.md](consumer-requirements.md),
+[open-decisions.md](open-decisions.md).
 
 ## The name
 
@@ -52,7 +68,9 @@ real figure is **138,266 lines across 523 files**, and its `src/` total is
 the last partial subtotal was read.
 
 The correction makes the migration **larger** than this document previously
-claimed, not smaller. Worldsim's figures were measured correctly and all hold.
+claimed, not smaller. The worldsim figures in that version were also off, by
+small amounts on four of seven libraries (none by more than 1,232 lines), and
+are replaced below with the numbers from main.
 
 ## The decision
 
@@ -72,79 +90,131 @@ itself. At three it is the obvious shape.
 You have written this engine three times.
 
 Worldsim's UI layer is already a port: `docs/technical/ui-framework/colonysim-integration-architecture.md`
-documents bringing colonysim's Layer and Shape components into worldsim in
-October 2025. Dual-deck-builder then grew its own engine independently, in
-another language, and arrived at the same design: `Layer` for positioning and
-hierarchy, `Component` extending it for interaction, concrete shape classes
-(Rectangle, Text, Circle, Triangle), batching underneath.
+(dated 2025-10-29, with its storage decision reversed in place on 2025-11-03;
+see decision F) documents bringing colonysim's Layer and Shape components into
+worldsim in October 2025. Dual-deck-builder's engine is the third pass, and not
+an independent one: between August and October 2026 it was rebuilt to
+`docs/ui-rendering-spec/`, eighteen chapters of backend-agnostic spec
+abstracted from worldsim's C++ so that a second implementation could be built
+to it, with a C++ column in the module map and a conformance scorecard for both
+(dual-deck-builder `docs/ui-rendering-spec/01-architecture.md`,
+`14-testing-and-conformance.md`). Its code has a single `Component` base class
+with Rectangle, Circle, Line, Polygon, Triangle and Text as leaf subclasses and
+"layer" meaning a named z-layer rather than a positioning class
+(`src/renderer/engine/components/Component.ts`), but the retained tree, the
+immediate-mode draw API and the batcher underneath are the same shape as
+worldsim's.
 
-Same architecture, three implementations, two languages. A fourth game would make
-it four.
+Same architecture, three implementations, two languages, and now a written spec
+for the UI half of it. A fourth game would make it four.
 
 ## What exists
 
 ### Worldsim, C++20 and OpenGL
 
+Counted on main at `db335a2b`, `.h` and `.cpp` only, tests and benchmarks
+included.
+
 | Library | Files | Lines | Generic? |
 |---|---|---|---|
-| `foundation` | 45 | 6,687 | Yes |
-| `renderer` | 69 | 10,010 | Yes |
-| `ui` | 100 | 19,469 | Mostly, unaudited |
-| `engine` | 293 | 73,881 | **Mixed.** Scenes, lifecycle, config, input and the dev server are generic; the ECS, colonists, chunks, pathfinding, tasks and crafting are not |
+| `foundation` | 45 | 6,739 | Yes, once the HTTP dev server leaves it (it is in `foundation/debug/` today, and foundation links OpenGL and httplib for it) |
+| `renderer` | 69 | 10,021 | Yes, once `FontRenderer` moves in from `ui`; `Primitives.cpp` already includes it |
+| `ui` | 100 | 19,469 | Mostly. Audited: it reaches into `engine` through two small headers and nothing else |
+| `engine` | 294 | 75,113 | **Mixed.** Scenes, lifecycle and input are generic (16 files, 2,902 lines); the ECS, colonists, chunks, pathfinding, tasks and crafting are not. The figure bundles two CMake targets: `engine` alone is 236 files and 60,938 lines, and `assets` (58 files, 14,175 lines) is its own target and stays behind |
 | `world` | 79 | 21,460 | No |
-| `geometry` | 67 | 18,064 | No |
+| `geometry` | 67 | 18,141 | No |
 | `planet-view` | 16 | 1,942 | No |
+| `game-systems` | 1 | 2 | A placeholder `world-sim` still links |
+
+Tests are a large share of those numbers: 2,545 of foundation's lines, 2,422 of
+renderer's, 5,731 of ui's, and 29,873 of engine's (40%).
 
 `ui` breaks down as `components` 12,765, `layout` 1,712, `focus` 1,422, `font`
 1,151, `debug` 592, `theme` 547, `component` 496, `shapes` 483, `layer` 176,
-`input` 86. `renderer` as `vector` 3,930, `primitives` 2,784, `resources` 1,320,
+`input` 86. `renderer` as `vector` 3,941, `primitives` 2,784, `resources` 1,320,
 `CoordinateSystem` 564, `shader` 533, `gl` 468, `metrics` 411.
 
 ### Dual-deck-builder, TypeScript and WebGL
 
-| Area | Files | Lines |
-|---|---|---|
-| `src/renderer/engine` | 238 | 68,185 |
-| `src/renderer/game` | 523 | 138,266 |
-| `src/` total | 790 | 210,855 |
+Counted at `afcd7b16`, `.ts` and `.tsx`, tests included, with the non-test
+figures alongside.
+
+| Area | Files | Lines | Non-test lines |
+|---|---|---|---|
+| `src/renderer/engine` | 238 | 68,185 | 37,163 |
+| `src/renderer/game` | 523 | 138,266 | 77,744 |
+| `src/` total | 790 | 210,855 | 118,699 |
 
 Engine: `ui` 16,573, `components` 10,442, `rendering` 8,893, `draw` 7,686,
 `debug` 6,841, `input` 6,381, `text` 3,655, `services` 2,756, `style` 1,249,
-`theme` 950, `animation` 926, `gpu` 854, `errors` 644, `coords` 335.
+`theme` 950, `animation` 926, `gpu` 854, `errors` 644, `coords` 335. Without
+tests the three subsystems this document leans on are smaller than they look:
+`input` 3,217, `debug` 2,896, `animation` 479.
 
 Game: `screens` 35,075, `map` 25,416, `mechanics` 22,179, `ui` 21,933,
 `campaign` 21,734, `ai` 5,661, `core` 3,740, `sim` 859, `art` 364, `data` 343.
 
-**Its engine is already isolated.** One import from game code across 238 files.
+**Its engine is already isolated.** Zero imports from game code across 238
+files; the only specifiers that leave `engine/` are shader and font asset
+files. The coupling runs the other way, game into engine, in 143 non-test
+files, and `mechanics`, `ai` and `sim` import nothing from the engine at all.
 
-**44% of its game layer is tests**: 204 files, 60,522 lines. That is the most
+**43.8% of its game layer is tests**: 204 files, 60,522 lines. That is the most
 valuable asset in this whole plan, for reasons under the migration section.
 
 ### The asymmetry
 
-Dual-deck-builder's engine is 68,185 lines against worldsim's 36,166 for
-foundation, renderer and ui together. It is the larger implementation and in
-places the better one.
+Dual-deck-builder's engine is 68,185 lines against worldsim's 36,229 for
+foundation, renderer and ui together (37,163 against 25,531 without tests on
+either side). It is the larger implementation, and the first version of this
+document called it the better one in places. The surveys sharpen that claim
+subsystem by subsystem:
 
-Stated carefully, since the comparison is not apples to apples: worldsim's input
-and debug tooling are not all in `libs/ui` (86 and 592 lines there). Its
-InputManager and HTTP dev server live in `libs/engine`.
+- Input. Dual-deck-builder's dispatcher, hit testing, focus manager and drag
+  service are built to the spec and documented in decision records
+  (`docs/AI_TECHNICAL_DECISIONS/input-dispatcher.md`, `focus-manager.md`,
+  `drag-service.md`). Worldsim's is a polled singleton
+  (`libs/engine/input/InputManager.h`) with keyboard routed to `ui` through a
+  `FocusManager` side channel rather than through the scene. A real design
+  gap, in dual-deck-builder's favour.
+- Debug tooling. The same tree-snapshot schema, lint rules and injection
+  grammar; the difference is transport. Worldsim serves them over HTTP from
+  `libs/foundation/debug/DebugServer.cpp`, dual-deck-builder exposes them as
+  browser window globals (`src/renderer/engine/debug/hooks.ts`) driven by
+  Playwright, and has no screenshot capture at all. The portable part under
+  both is the pure functions.
+- Animation. Dual-deck-builder has a 356-line tween engine
+  (`src/renderer/engine/animation/Animator.ts`), no timelines, sequences,
+  springs or loops. Worldsim has nothing. Small, and net-new on the C++ side.
+- Gamepad. Neither has it. Dual-deck-builder has scaffolding (a `controller`
+  input mode, a `virtual` pointer type) and a deferred adapter spec; worldsim
+  has zero hits for the word.
+- Frame loop. Dual-deck-builder's is variable-step over
+  `requestAnimationFrame` with no fixed timestep or accumulator
+  (`src/renderer/engine/rendering/FrameLoop.ts`, delta clamped by
+  `MAX_DELTA_SECONDS = 0.25` in `FrameTimer.ts:48`); the game is turn-based,
+  so it gives no precedent for salal's frame contract.
 
-But dual-deck-builder has `input` (6,381), `debug` (6,841) and `animation` (926)
-as **first-class engine subsystems, peers of rendering and UI**, where worldsim
-has them split across a library boundary with 73,000 lines of colonist logic.
-That is not a maturity gap, it is a difference in where each project drew the
-line, and the cleaner line is dual-deck-builder's.
+Where worldsim keeps input and the dev server outside `libs/ui` (86 and 592
+lines there; the InputManager is in `libs/engine`, the server in
+`libs/foundation`), dual-deck-builder has `input`, `debug` and `animation` as
+peers of rendering and UI inside one engine directory. That is the cleaner
+line, and the spec the TS engine was built to is the single best input for
+salal's `ui` design (decision C in [open-decisions.md](open-decisions.md)).
 
 ## The extraction problem
 
-Not "is `libs/ui` clean enough to move." It is that **worldsim's generic code
-does not all live in `libs/`.**
+**Worldsim's generic code does not all live in `libs/`.** Whether `libs/ui` is
+clean enough to move was the smaller question.
 
-Scene management, lifecycle, config loading, input, and the HTTP dev server sit
-inside `libs/engine` mixed with the game. Extract foundation, renderer and ui and
-you get a drawing layer with no way to open a window, run a loop, switch scenes,
-or read a gamepad.
+Scene management, lifecycle and input sit inside `libs/engine` mixed with the
+game, and the HTTP dev server sits one layer lower still, in
+`libs/foundation/debug/DebugServer.cpp`, which is why foundation links OpenGL
+and httplib today (`libs/foundation/CMakeLists.txt:28-37`). There is no config
+system to extract: `AppConfig` is a C++ struct filled with designated
+initializers in each `main()`. Extract foundation, renderer and ui and you get
+a drawing layer with no way to open a window, run a loop, switch scenes, or
+read a gamepad.
 
 So: **dual-deck-builder is the reference for where the boundary goes, worldsim is
 the source of the code.** That framing survives the decision change and is the
@@ -152,8 +222,8 @@ most useful line in this document.
 
 ## Is this an engine, or a drawing library?
 
-An engine, but a small and specific one. The test is not what is inside it, it is
-**who owns the frame**. A drawing library is something your code calls. An engine
+An engine, but a small and specific one. The test is **who owns the frame**,
+not what is inside it. A drawing library is something your code calls. An engine
 is something that calls your code, and worldsim's `AppLauncher` already does
 that: it creates the window, sets up GL, runs the loop, and calls into whatever
 scene is current.
@@ -188,9 +258,9 @@ What it is: **a 2D presentation engine.** It owns the frame, the window, input,
 time, a retained scene graph, layout, text, batching, theming and focus. That is
 a real engine by the ownership test and a modest one by any other.
 
-Physics stays per-game on purpose. In this game the physics *is* the game and
-lives in `sim`; dual-deck-builder has none. If a third game ever wants the same
-rigid-body model, that is the moment to promote it, not before.
+Physics stays per-game on purpose. In asteroids-roguelike the physics *is* the
+game and lives in `sim`; dual-deck-builder has none. If a third game ever wants
+the same rigid-body model, that is the moment to promote it, not before.
 
 ### Why extracting one is not the usual mistake
 
@@ -208,17 +278,19 @@ salal/
   CMakePresets.json          from worldsim, unchanged
   vcpkg.json                 opengl glfw3 glew glm nlohmann-json
                              stb nanosvg msdfgen cpp-httplib gtest benchmark
+                             (worldsim's pugixml, lua and sol2 serve its
+                             assets target and stay behind)
   libs/
     foundation/              math, platform, logging, arenas, resource handles,
                              seeded PRNG with forking
     renderer/                gl, shader, primitives, batch, vector, text,
-                             coords, metrics
+                             fonts, coords, metrics
     ui/                      component, components, layout, focus, theme,
-                             shapes, font, animation, inspector
+                             shapes, animation, inspector
     app/                     window, fixed-step loop, scenes, config,
                              input (keyboard, mouse, gamepad), dev server
   apps/
-    sandbox/                 the ui-sandbox pattern, belongs with the engine
+    sandbox/                 the ui-sandbox harness and its pure-UI scenes
   tests/
   docs/
     architecture.md          the four-layer stack, normative
@@ -226,12 +298,31 @@ salal/
 ```
 
 `libs/app/` is new and is the hard part: the generic slice carved out of
-worldsim's `libs/engine`, plus the fixed-step loop, gamepad input and seeded
-PRNG that [asteroids-roguelike/docs/tech-stack.md](https://github.com/kcjonson/asteroids-roguelike/blob/main/docs/tech-stack.md) found missing. Those belong to the
-engine, because all three games want them.
+worldsim's `libs/engine` (16 files, 2,902 lines: `application/`, `scene/`,
+`input/`, `clipboard/`), plus the dev server and its metrics plumbing relocated
+up from `foundation` and `renderer` (another ~2,100 lines), plus the fixed-step
+loop, gamepad input and PRNG fork API that [asteroids-roguelike/docs/tech-stack.md](https://github.com/kcjonson/asteroids-roguelike/blob/main/docs/tech-stack.md) found missing. Those belong to the
+engine, because all three games want them. The file list with sizes is in
+[app-carve-out.md](app-carve-out.md).
+
+Determinism is a partial gap rather than an absent one. `libs/foundation/random/`
+already has `Pcg32.h` and `SplitMix64.h` with `deriveSeed(seed, streamId)`,
+deterministic and identical across x64, ARM and WASM by its own header comment.
+What is missing is a named-stream `fork` API and the discipline: `std::mt19937`
+is still used in `engine` and the apps outside worldgen. Which generator the
+engine standardises on is decision A.
 
 `animation` moves into `ui` from dual-deck-builder's design; worldsim has no
-equivalent.
+equivalent. `font` moves the other way, out of `ui` and into `renderer`:
+worldsim's `renderer/primitives/Primitives.cpp:12` already includes
+`ui/font/FontRenderer.h`, the one place renderer reaches up into ui, and
+`FontRenderer` itself uses nothing else in ui. Moving it removes that knot and
+gives the asteroids prototype's debug overlay text without the ui library.
+
+The sandbox is the harness from worldsim's `apps/ui-sandbox` plus the scenes
+that are pure UI. Roughly a third of its 27 scenes (Planet, Grass, Tree and the
+Salvage scenes among them) link `world`, `planet-view` or `assets`
+(`apps/ui-sandbox/CMakeLists.txt:42-51`) and stay in worldsim.
 
 The dependency rule carries over, with one addition: a consuming game's
 simulation layer may not depend on `renderer` or `ui`.
@@ -265,9 +356,11 @@ and couples CI and release cycles for projects with nothing to say to each other
 
 ### Job A: its engine's better subsystems, into the shared C++ engine
 
-Input, debug tooling and animation are where the TypeScript implementation came
-out ahead. Those designs get reimplemented in C++ inside `libs/app` and
-`libs/ui`, and all three games get them.
+Input dispatch, the debug tooling's transport-free core and the tween animator
+are where the TypeScript implementation came out ahead ("The asymmetry" says
+by how much). Those designs get reimplemented in C++ inside `libs/app` and
+`libs/ui`, and all three games get them. Gamepad support is not among them;
+neither codebase has it.
 
 This is engine work with payoff beyond dual-deck-builder, it happens during the
 `app` phase, and it is the part of the migration that is unambiguously worth
@@ -278,30 +371,43 @@ doing on its own merits.
 The large and risky one. The port order matters more than anything else here, and
 there is a very good first target.
 
-**Start with the simulation core.** `src/renderer/game/sim/` is 859 lines and its
-spec (`docs/specs/Balance Simulation.md`) says it is deliberately free of DOM,
-`fetch`, localStorage and dev-tools hooks so the same code runs in Node and in a
-Web Worker. It takes plain data in and emits plain JSON out, it is seeded with
-forking (`fork('run', n)`, `fork('fight', f)`), and **the same config and seed
-give the same JSON in Node and in the browser.**
+**Start with the simulation core, knowing what that means.**
+`src/renderer/game/sim/` is 740 non-test lines (859 with tests) and its spec
+(`docs/specs/Balance Simulation.md`) says it is deliberately free of DOM,
+`fetch`, localStorage and dev-tools hooks. It takes plain data in and emits
+plain JSON out, and it is seeded with forking (`fork('run', n)`,
+`fork('fight', f)`). But its static import closure is about 110 files and
+32,900 lines: `map` 15,233, `mechanics` 8,097, `campaign` 5,020, `ai` 2,993,
+`core` 814. Porting "the sim" is porting most of the game's logic; what it
+leaves out is `screens`, game `ui`, `art` and `Game.ts`.
 
-So a C++ third implementation can be held to exactly that bar. Port it, run both
-on identical configs and seeds, diff the JSON. That is differential testing for
-free, and it means the riskiest question in the whole migration (does the game
-logic port faithfully?) gets answered mechanically rather than by playtesting.
+The spec requires that the same config and seed give the same JSON in Node and
+in the browser. Today that is a requirement, not a demonstrated property: the
+only runner is `node scripts/balance-sim.mjs` with modes `fights` and `gen`,
+the browser Balance Lab the spec describes has not been built, no workflow
+invokes the sim, and no golden JSON corpus is committed. The anchors that do
+exist are pinned test outcomes (`Fights.test.ts` on seed 7, `Gen.test.ts` on
+seed 1), the Rng golden vectors, and the baseline tables in the spec.
+
+So a C++ third implementation can be held to exactly that bar, once the bar is
+fixed in a file. Generate a corpus from `--json` and commit it in
+dual-deck-builder (decision J), port the closure, run both on identical configs
+and seeds, diff the JSON. That is differential testing for the price of one
+script, and it means the riskiest question in the whole migration (does the
+game logic port faithfully?) gets answered mechanically rather than by
+playtesting. It also pins the engine's PRNG: bit-identical output needs
+dual-deck-builder's sfc32 and MurmurHash3-based `fork(name, attempt)`
+(`src/renderer/game/core/Rng.ts`), which is decision A.
 
 The sim core plays through the game's real code rather than a copy of it, which
-is what makes this work: verifying the sim verifies `mechanics` (22,179),
-`campaign` (21,734) and the encounter builder underneath it.
-
-**Then the logic layers**, in dependency order: `core` (3,740), `mechanics`,
-`campaign`, `map` (25,416, area-map generation, pure enough to verify the same
-way), `ai` (5,661). Each one is verifiable against the TS implementation on
-identical seeds before anything is drawn.
+is what makes this work: verifying the sim verifies `mechanics`, `campaign`,
+`map` and `ai` underneath it, in dependency order `core`, `mechanics`,
+`campaign`, `map`, `ai`, each checkable on identical seeds before anything is
+drawn.
 
 **Presentation last.** `screens` (35,075) and game `ui` (21,933), 57,008 lines
-between them, are the only part that needs the shared engine to exist. They come
-after Job A and after the logic layers are known good.
+with tests and 37,044 without, are the only part that needs the shared engine
+to exist. They come after Job A and after the logic layers are known good.
 
 **The 60,522 lines of tests are the spec.** They port alongside their subjects and
 they are what makes a cross-language rewrite of this size tractable at all. A
@@ -311,9 +417,9 @@ differential harness is a translation.
 ### What the migration costs
 
 The web playtest deploy. Dual-deck-builder currently pushes to
-`bearcavinteractive.com/playtest/dual-deck-builder/` on every merge to main, and
-that is its primary playtest channel with Electron builds secondary. You cannot
-send someone a link to a C++ binary.
+`bearcavinteractive.com/playtest/dual-deckbuilder/` on every merge to main
+(`.github/workflows/deploy-sftp.yml`), and that is its primary playtest channel
+with Electron builds secondary. You cannot send someone a link to a C++ binary.
 
 **WebAssembly puts it back**, which is the single best argument for the section
 below and changes this from an accepted regression to a temporary one. The
@@ -321,8 +427,11 @@ engine is a clean Emscripten target and both new games are good fits.
 
 Until the web build exists, the gap is partly covered by worldsim's HTTP dev
 server: screenshot capture, element-tree inspection, layout linting and
-synthetic input injection. That serves agent-driven verification well and human
-playtesting not at all. For humans it is a distributed build instead of a URL.
+synthetic input injection, five of its twelve routes (the rest are health,
+metrics, a dev-command bag, a state handshake, two SSE streams and an index
+page; architecture.md lists them). That serves agent-driven verification well
+and human playtesting not at all. For humans it is a distributed build instead
+of a URL.
 
 ### One rule that does not apply here
 
@@ -340,14 +449,30 @@ for playtesting puts the playtest URL back, for both new games.
 This codebase is an unusually clean Emscripten target, and that is a measured
 claim rather than an optimistic one:
 
-- **Ten shaders, all `#version 330 core`.** The port is a version header and
-  precision qualifiers, in ten files.
-- **No geometry or compute shaders anywhere.** WebGL2 has no geometry stage, and
-  that is the usual blocker. It is absent.
-- **The GL 3.3 core context is created in exactly one place**,
-  `libs/engine/application/AppLauncher.cpp:128`, which is a file headed for
-  `libs/app`. So the platform branch lands in one file in the engine.
-- **GLM, nanosvg, stb and nlohmann-json** are header-only or pure C/C++.
+- Twelve shader files, 1,473 lines of GLSL. Eight carry `#version 330 core`
+  (`uber.*` and `tile.*` in `libs/renderer/shaders/`, `planet.*` and `blit.*`
+  in `libs/planet-view/shaders/`, which stays in worldsim) and four are
+  headerless includes (`hash_noise`, `instancing`, `land`, `water` under
+  `libs/renderer/shaders/includes/`, 938 of the lines) spliced in by a custom
+  preprocessor (`libs/renderer/shader/ShaderPreprocessor.cpp`). For the
+  renderer that moves, the port is a version header and precision qualifiers
+  in four files; the include mechanism carries over unchanged.
+- No geometry or compute shaders anywhere, no `glMapBuffer`, and all
+  fifteen `glVertexAttribPointer` sites pass VBO offsets. WebGL2 has no
+  geometry stage, and that is the usual blocker. It is absent. The one
+  `GL_RGBA32F` use is a framebuffer colour attachment in
+  `libs/engine/world/rendering/SurfaceFieldGolden.test.cpp:257` (attached at
+  `:262`), a test of code that stays in worldsim; nothing that moves uses
+  float render targets, so `EXT_color_buffer_float` is not needed.
+- The GL 3.3 core context is created in two production sites:
+  `libs/engine/application/AppLauncher.cpp:137-154` (hints, window,
+  `glewInit`), a file headed for `libs/app`, and `apps/asset-cli/Main.cpp:134-149`,
+  which makes its own hidden context and stays in worldsim. Five tests open
+  windows too, four with GL contexts, two of those in libraries that move
+  (`libs/renderer/resources/RenderToTexture.test.cpp:13-25`,
+  `libs/ui/font/FontRenderer.test.cpp:29-39`). So the platform branch lands in
+  one file in the engine, plus two test fixtures.
+- GLM, nanosvg, stb and nlohmann-json are header-only or pure C/C++.
 
 ### Toolchain
 
@@ -359,25 +484,33 @@ available since Emscripten 3.1.55), linking with `-sUSE_WEBGL2=1 -sFULL_ES3=1
 
 Each is small and each lives in one place, which is the point.
 
-- **GLEW compiles out.** WebGL needs no extension loader.
-- **Shaders become `#version 300 es`** with explicit precision qualifiers.
-- **The main loop inverts.** `emscripten_set_main_loop` drives the frame instead
+- GLEW compiles out. WebGL needs no extension loader.
+- Shaders become `#version 300 es` with explicit precision qualifiers.
+- The main loop inverts. `emscripten_set_main_loop` drives the frame instead
   of a `while` loop owning the program.
-- **The dev server compiles out.** cpp-httplib cannot listen in a browser.
-- **Threads.** Worldsim uses them in `Application.cpp` and `AssetRegistry.cpp`.
-  On the web they need SharedArrayBuffer plus COOP/COEP headers; neither new game
-  needs them, so the simplest answer is a single-threaded web path.
-- **File I/O** goes through preloading or MEMFS rather than the filesystem.
+- The dev server compiles out. cpp-httplib cannot listen in a browser.
+  Worldsim has no compile flag for it today, only the runtime
+  `AppConfig::enableDebugServer` and `--http-port` (`DebugServer.cpp` has no
+  `#if` at all), so the flag is something the extraction adds.
+- Threads. In worldsim they live in `foundation` (the dev server's
+  `std::thread` at `debug/DebugServer.cpp:260`, and a `threading/TaskPool`), in
+  `engine`'s assets, ECS and chunk code (`std::thread`, `std::async`), in
+  `planet-view`, and in `world` (`std::jthread`). `Application.cpp` only sleeps
+  for frame pacing, and `renderer` and `ui` have nothing beyond `thread_local`
+  scratch buffers. On the web they need SharedArrayBuffer plus COOP/COEP
+  headers; neither new game needs them, so the simplest answer is a
+  single-threaded web path.
+- File I/O goes through preloading or MEMFS rather than the filesystem.
 - `FULL_ES3` emulation costs performance wherever client-side arrays or
   `glMapBuffer` are used. Use VBOs and the flag stops mattering.
 
 ### Per game
 
-- **asteroids-roguelike:** ideal. 2D, single screen, a few hundred flat shapes,
+- asteroids-roguelike: ideal. 2D, single screen, a few hundred flat shapes,
   no worldgen, no large assets.
-- **dual-deck-builder:** good. UI-heavy and simulation-light, and a web build
+- dual-deck-builder: good. UI-heavy and simulation-light, and a web build
   restores exactly the playtest channel the C++ migration takes away.
-- **worldsim:** no, and it does not need one. A 1.3 GiB planet file and threaded
+- worldsim: no, and it does not need one. A 1.3 GiB planet file and threaded
   worldgen are not browser work.
 
 ### Design for it now, not later
@@ -391,8 +524,12 @@ than a separate project:
 - Make the fixed-step loop a tick function the platform calls, not a loop that
   owns `main()`. This matters for its own sake and it is what
   `emscripten_set_main_loop` needs.
-- Put the dev server behind a compile flag from the first commit.
-- Load assets through an indirection that can be MEMFS.
+- Put the dev server behind a compile flag from the first commit. Worldsim has
+  none (the server is gated at runtime only), so this is new discipline rather
+  than carried-over discipline.
+- Load assets through an indirection that can be MEMFS. Worldsim's only seam
+  is `foundation/utils/ResourcePath`; every reader after it hits the
+  filesystem directly.
 
 All cheap upfront. All expensive to retrofit once three games depend on the API.
 
@@ -402,44 +539,151 @@ All cheap upfront. All expensive to retrofit once three games depend on the API.
   compile to WASM, which is probably fine and is unchecked.
 - Download size. A WASM binary plus SDF atlases plus SVG assets is likely a few
   megabytes, acceptable for playtesting and unmeasured.
+- Whether the web build gets gamepad support. The browser Gamepad API exists
+  and Emscripten's GLFW port maps to it, but couch co-op in a browser tab is an
+  odd proposition and may not be worth the verification effort.
 - Audio, below.
 
 ### Audio is net-new
 
 Worldsim has **no audio library at all**: nothing in `vcpkg.json`, nothing in
-`libs/`. So the mix-priority system, stem layering and procedural SFX in
-[asteroids-roguelike/docs/art-audio.md](https://github.com/kcjonson/asteroids-roguelike/blob/main/docs/art-audio.md) are engine work nobody has started, and they are a
-fourth gap alongside the fixed-step loop, gamepad input and determinism.
+`libs/`. So the priority mix with ducking, the stem layering driven by
+`pressure`, and the thrust loop whose pitch and filter track mass and velocity
+in [asteroids-roguelike/docs/art-audio.md](https://github.com/kcjonson/asteroids-roguelike/blob/main/docs/art-audio.md) (`:72-93`) are engine work nobody has
+started, and they are a fourth gap alongside the fixed-step loop, gamepad input
+and determinism. That doc asks for parameter-driven playback, not synthesis;
+"procedural SFX" appears only in `tech-stack.md:138-139`.
 
 The WebAssembly target constrains the choice. miniaudio and OpenAL-soft both have
 Emscripten backends over Web Audio; picking one of those keeps the web build
-possible, and picking something platform-native closes it off.
+possible, and picking something platform-native closes it off. Whether audio
+lives in the engine and which library it uses is decision B; the recommendation
+is a new `audio` library over miniaudio, scheduled after `app` because the
+asteroids feel prototype wants audible thrust.
 
 ## Sequencing
 
-Designed so nothing blocks on anything it does not have to.
+Designed so nothing blocks on anything it does not have to. Phase 0 is done,
+and its answer put a step in front of phase 1.
 
-0. **Audit.** Does `ui` respect worldsim's documented layering, or reach into
-   `engine`? Worldsim's own CLAUDE.md warns the code may violate its standards,
-   so this is verified, not assumed. Read-only, and it gates the phases below.
-1. **Extract `foundation` and `renderer`.** The generic ones. Worldsim converts
-   to consuming them and must still build and run identically.
-2. **Carve out `app`.** The generic slice of `libs/engine`, plus the fixed-step
-   loop, gamepad input and seeded PRNG. Job A of the migration lands here.
-   `asteroids-roguelike` starts here.
-3. **Extract `ui`.** Largest and least certain, and nothing upstream waits on it.
-4. **Dual-deck-builder Job B**, sim core first with differential verification,
-   presentation last.
+### Phase 0, the audit (done 2026-10-25)
 
-In parallel and blocked by none of it: the feel prototype for this game, which
-needs `foundation`, enough of `renderer` to draw flat shapes, and the loop. No UI
-layer at all.
+The question was whether `ui` respects worldsim's documented layering or
+reaches into `engine`. It reaches in, narrowly: ten includes in eight files,
+all resolving to two small engine headers, `input/InputTypes.h` (a 133-line
+include-free enum header for `engine::Key` and `engine::MouseButton`) and
+`clipboard/ClipboardManager.h` (a GLFW singleton that TextInput calls for cut,
+copy and paste), and two of the ten are dead includes of `InputManager.h`. `ui` never touches Scene,
+Application, the ECS, chunks, world, geometry or assets. The audit also found
+a knot the first version of this document missed, running the other way:
+`renderer/primitives/Primitives.cpp:12` includes `ui/font/FontRenderer.h` and
+`Primitives.h:35` forward-declares `ui::FontRenderer` in its public API, so
+renderer cannot be extracted on its own until FontRenderer moves. And the CMake graph is
+worse than the include graph: `libs/ui/CMakeLists.txt` links all of `engine`
+PUBLIC plus an httplib it never includes. Every file and line is in
+[phase-0-audit.md](phase-0-audit.md). The extraction is not gated by ui's
+design; it is gated by two header moves, one clipboard seam and CMake cleanup.
 
-The **WebAssembly target is not a phase**, it is a set of constraints observed
-from phase 1 onward (see "Design for it now"). The first actual web build is
-worth attempting as soon as the prototype draws something, because a browser
-build that works on a white triangle and a dozen circles proves the toolchain
-before there is anything complicated to debug.
+### Phase 0.5, untangle worldsim
+
+Small PRs in worldsim, each leaving it building and running identically, in
+roughly this order:
+
+- Delete the two dead `InputManager.h` includes in `ui`
+  (`components/button/Button.cpp:10`, `components/TextInput/TextInput.cpp:10`).
+- Move `input/InputTypes.h` below `ui`: into `foundation` if decision D goes as
+  proposed, into `ui` otherwise. Engine's `InputManager.h` includes it from
+  there. The `engine::` namespace can stay for the first pass.
+- Give `ui` a clipboard seam, a small interface or `std::function` hooks that
+  `Application` installs, so TextInput stops calling
+  `engine::ClipboardManager::Get()` (`TextInput.cpp:460,470,478`).
+- Move `FontRenderer` from `libs/ui/font` to `libs/renderer/font`, namespace
+  `Renderer`, and drop renderer's PRIVATE `../ui` include dir. `Renderer`
+  rather than the standards doc's lowercase because FontFamily, Primitives,
+  BatchRenderer, Shader, CoordinateSystem, metrics/, gl/ and resources/Tile*
+  are all `namespace Renderer` (only vector/ and two resources/ files are
+  lowercase); a lowercase FontRenderer would force `Renderer::FontFamily`
+  qualifiers and a second namespace block in Primitives.h, the shape being
+  removed. Settling renderer's lib-wide namespace case (`Renderer` vs
+  `renderer`; the standards doc says lowercase) is a worldsim follow-up.
+- CMake: `ui` drops `engine` and `httplib`, `engine` drops the `nlohmann_json`
+  it never includes. Re-run the include resolver and confirm `ui -> engine` and
+  `renderer -> ui` are both zero.
+- Move `DebugServer`, `PngEncoder`, `LockFreeRingBuffer` and
+  `PerformanceMetrics` out of `foundation` into `libs/engine` (the proto-app),
+  and invert `Logger::setDebugServer` into a generic sink callback. Foundation
+  drops OpenGL and httplib. This one can slip into phase 1, but it has to land
+  before foundation is extracted.
+
+### Phase 1, the skeleton, then `foundation` and `renderer`
+
+CMakeLists, `CMakePresets.json` copied, `vcpkg.json` without pugixml, lua and
+sol2, CI on Windows, macOS and Linux plus an Emscripten link-only job. Then the
+two generic libraries move and worldsim consumes them via FetchContent pinned
+to a tag, still building and running identically. Four renderer design items
+have to be right before anyone depends on them, because they shape the batch
+sort key and the shader layout: blend state in the sort key, an offscreen
+render target API, the shader version-swap discipline, and polygon, arc and
+wide-line primitives (decision G).
+
+### Phase 2, carve out `app`
+
+The 16-file slice (`application/`, `scene/`, `input/`, `clipboard/`) plus what
+the consumers need from a frame owner and worldsim never built:
+
+- The `tick()` split and a fixed-step accumulator. Worldsim's loop is
+  variable-step with a 120 FPS sleep-and-spin cap, but the body of
+  `Application::run()` is already one frame's work
+  (`libs/engine/application/Application.cpp:112-306`), so the split is
+  mechanical; the accumulator is net-new.
+- `InputSnapshot` and gamepad input with hot-plug and device-to-player-slot
+  claiming. Worldsim has keyboard and mouse only.
+- The clipboard, behind the seam from phase 0.5.
+- A scene manager with a stack, overlays and typed payloads.
+  `IScene::exportState()` is deleted on the way; it serves a route that no
+  longer exists.
+- A config file loader. Net-new: worldsim's `AppConfig` is a struct, and its
+  only "config" is game XML under `assets/config/` parsed by game registries.
+- An asset byte-provider that can be MEMFS. Net-new: `ResourcePath` is the
+  only seam today and every reader after it hits the filesystem directly.
+- The dev server, relocated from `foundation`, behind a compile flag, with
+  game-registrable endpoints, tick stepping and pad injection.
+- The PRNG fork API (decision A) in `foundation/random`.
+- The sandbox harness.
+
+Job A of the migration lands here. Worldsim consumes. The asteroids feel
+prototype can start here.
+
+### Phase 2b, audio
+
+Decision B. After `app`, before `ui`, because the feel prototype wants audible
+thrust and nothing in `ui` depends on it.
+
+### Phase 3, extract `ui`
+
+Largest and least certain, and nothing upstream waits on it. Against the
+adopted spec (decision C), with multi-device focus (I) and the storage model
+(F) settled on the way, and the spec's conformance scorecard as the acceptance
+test.
+
+### Phase 4, dual-deck-builder Job B
+
+Tracked in dual-deck-builder's own project. Prerequisite there: the golden JSON
+corpus (J). "Sim first" means the ~33k-line logic closure, verified by
+differential JSON; presentation (`screens` 22,295 and game `ui` 14,749
+non-test lines) last.
+
+In parallel and blocked by none of it: the feel prototype for
+asteroids-roguelike, which needs `foundation`, enough of `renderer` to draw a
+few hundred flat shapes and the debug overlay's text, and the loop. No UI layer
+at all.
+
+The **WebAssembly target is a set of constraints, not a phase**, observed from
+phase 1 onward (see "Design for it now"), with a link-only CI job from
+phase 1. The first actual web build is worth attempting as soon as the
+prototype draws something, because a browser build that works on a white
+triangle and a dozen circles proves the toolchain before there is anything
+complicated to debug.
 
 Each extraction phase is its own branch and PR in worldsim. Not one giant one:
 worldsim is active, and a long-lived extraction branch against an active repo is
@@ -457,15 +701,16 @@ with the logic verified before it starts.
 2D-tiles-plus-3D-worldgen game may not fit an arcade shooter or a deckbuilder,
 and you find out afterwards.
 
-The mitigation is also the opportunity: **this game is the genericity test.** No
-tiles, no chunks, no 3D, no pathfinding. If the engine serves it without
-contortion the engine is generic; if it fights, that is the API talking while
-there is still only one real consumer. Dual-deck-builder is the second test and a
-harder one, since it is UI-heavy where this game is simulation-heavy.
+The mitigation is also the opportunity: **asteroids-roguelike is the genericity
+test.** No tiles, no chunks, no 3D, no pathfinding. If the engine serves it
+without contortion the engine is generic; if it fights, that is the API talking
+while there is still only one real consumer. Dual-deck-builder is the second
+test and a harder one, since it is UI-heavy where asteroids is
+simulation-heavy.
 
 **Extraction stalls every game and ships nothing.** The sequencing exists for
-this. Phase 1 is small, phase 3 is optional for a long time, phase 4 is its own
-project, and the prototype runs throughout.
+this. Phases 0.5 and 1 are small PRs, phase 3 is optional for a long time,
+phase 4 is its own project, and the prototype runs throughout.
 
 **Versioning.** Three consumers, one developer, pinned tags. Manageable now,
 becomes real with a second developer.
@@ -477,21 +722,28 @@ first commit that supports it, even when all it does is link.
 
 ## Open
 
-- The audit in phase 0. Everything is downstream of it.
-- Whether `libs/app` is one library or splits into `app` and `input`.
-- Whether this document moves into the salal repo, and when.
-- Whether worldsim's vector/SVG asset conventions come along with `renderer` or
-  get parameterised out. Dual-deck-builder has its own `draw` and `rendering`
-  layers that may disagree.
-- Whether dual-deck-builder keeps a browser build of its sim core for the Balance
-  Lab after the game itself is native. The spec says that core runs in a Web
-  Worker today, and keeping that would preserve the differential harness
-  permanently rather than only during the port.
-- Which audio library, and whether audio lives in the engine or per game. The
-  engine, probably, since all three will want a mix.
-- Whether msdfgen is a build-time or runtime dependency, which decides whether it
-  has to compile to WASM.
-- WASM download size, unmeasured.
-- Whether the web build gets gamepad support. The browser Gamepad API exists and
-  Emscripten's GLFW port maps to it, but couch co-op in a browser tab is an odd
-  proposition and may not be worth the verification effort.
+The questions that need Kevin are in [open-decisions.md](open-decisions.md),
+each with a recommendation, the evidence, and the phase that needs the answer,
+and each tracked on the board. By letter:
+
+- A. The engine PRNG: dual-deck-builder's sfc32 with MurmurHash3 `fork`, or
+  worldsim's Pcg32 with `deriveSeed`.
+- B. Audio: in the engine or per game, and which library.
+- C. Adopt dual-deck-builder's `docs/ui-rendering-spec/` as the normative spec
+  for `ui`.
+- D. Where input types live, which also settles the old app-versus-input split.
+- E. The ECS core: ship it as an optional header module or leave it in worldsim.
+- F. The `ui` storage model during extraction, shared_ptr graph or value
+  semantics.
+- G. Render targets, additive blending and particles: who owns them and when.
+- H. Whether worldsim's vector/SVG asset conventions come with `renderer` or
+  get parameterised out.
+- I. Multi-device focus for the asteroids co-op shop.
+- J. The differential harness for dual-deck-builder: a committed golden JSON
+  corpus, which is work in that repo.
+
+Resolved since the first version: the phase 0 audit (done, above), whether this
+document moves into the salal repo (it did), and whether work is tracked in
+Specboard (it is; `.mcp.json` holds the binding). The smaller unknowns, msdfgen
+at build time or run time, WASM download size, and web gamepad support, stay
+under "Not verified" above.

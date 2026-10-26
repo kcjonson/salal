@@ -25,3 +25,4 @@ vcpkg_installed/
 Thumbs.db
 
 .claude/worktrees/
+.claude/settings.local.json
