@@ -1,5 +1,6 @@
-// The lookups need no GL context; everything that creates a texture runs on a
-// hidden GL 3.3 core context and skips where none can be made (headless CI).
+// The lookups need no GL context and the headless cases below make no GL call
+// (a GL call with no context is undefined on macOS); everything that creates a
+// texture runs on a hidden GL 3.3 core context and skips where none can be made.
 
 #include "backend/gl/GLTextures.h"
 
@@ -27,12 +28,6 @@ namespace Renderer::backend::gl {
 		updateTexture(TextureHandle{}, 0, 0, 1, 1, pixel.data());
 		destroyTexture(TextureHandle{});
 		destroyTexture(TextureHandle::make(999, 0));
-	}
-
-	TEST(GLTexturesTest, NoContextGivesNoHandle) {
-		// With no GL context current, glGenTextures issues nothing; the table must not
-		// hand out a handle that resolves to texture 0.
-		EXPECT_FALSE(createTexture({.width = 2, .height = 2}).isValid());
 	}
 
 	class GLTexturesContextTest : public ::testing::Test {
