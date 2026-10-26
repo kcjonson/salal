@@ -53,8 +53,9 @@ beside `renderer` over miniaudio, scheduled after `app`, but neither the
 library nor its placement is settled.
 
 The backend boundary in the `renderer` row has a settled direction and a
-design; decision G in [open-decisions.md](open-decisions.md) holds the plan and
-[renderer-boundary.md](renderer-boundary.md) the design and the PR sequence.
+design; decision G in [open-decisions.md](open-decisions.md) is settled
+(2026-10-26) and [renderer-boundary.md](renderer-boundary.md) holds the design
+and the PR sequence.
 The first step is in: no public renderer header (every header under
 `libs/renderer` outside `gl/`, `shader/` and `backend/`) reaches a GL, GLES,
 OpenGL, GLFW or glad header, which `salal_check_layering()` walks at configure time,

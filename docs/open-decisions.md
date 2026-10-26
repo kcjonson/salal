@@ -30,6 +30,7 @@ Written into the docs as decided, with the reason.
 | Fonts, the font files and the atlas tool stay game-side (2026-10-26); this narrows decision H | worldsim keeps `fonts/`, `tools/generate_sdf_atlas` and the font-atlas target, salal ships no fonts, and `msdfgen` leaves salal's `vcpkg.json`. `FontRenderer` itself is in `renderer` (above) and moves as it is. What remains of H is an API that takes atlas sources and stops calling `std::exit`, not whether salal ships fonts |
 | `-ffp-contract=off` is an engine-wide rule (2026-10-26) | set PUBLIC on `salal_foundation` for GCC, Clang and AppleClang (not clang-cl), so every consumer inherits it. The first macOS arm64 run failed three golden-bit tests by one ULP (`DeterministicMath` cos, `HashNoise` value and gradient noise) because Clang fuses `a*b+c` into an FMA there; worldsim's headers claim bit-identical results across x64, ARM and WASM; that had never been tested on ARM |
 | The renderer sits behind a backend boundary; OpenGL 3.3 core is the first backend, Vulkan possible later (direction settled 2026-10-26; the design is merged as [renderer-boundary.md](renderer-boundary.md)) | worldsim's renderer is OpenGL throughout: 19 GL or GLFW leaks in 16 public headers and 182 direct GL calls in twelve renderer files (measured at worldsim `2cc7e40a`), and `BatchRenderer.h` and `FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. Nothing has landed yet; four PRs tagged `v0.2.0` through `v0.5.0`, with a worldsim pin after each, are sequenced in [renderer-boundary.md](renderer-boundary.md), and PR 1 (GL off the public surface) is in progress |
+| The renderer owns offscreen render targets, and additive blend is a per-group key in the batch sort key that splits a run rather than sorting; particles stay game-side; float colour attachments are allowed (decision G, 2026-10-26; the questions the design left open are decided in [renderer-boundary.md](renderer-boundary.md)) | blend state and the render-target API have to settle before a second consumer depends on the renderer API, so none is retrofitted onto an API three games call; GL 3.3 core has float colour attachments without an extension; particles start as a pool over `Primitives` and are promoted to an engine pool when a second game wants one |
 
 ## A. Engine PRNG
 
@@ -256,6 +257,12 @@ architecture.md keeps hedging about worldsim's own code.
 
 ## G. Render targets, additive blending, particles
 
+Settled 2026-10-26: the renderer owns offscreen render targets, and additive
+blend is a per-group key in the batch sort key that splits a run rather than
+sorting; particles stay game-side; float colour attachments are allowed. The
+recommendation below was ratified as written, and the four questions it left
+open are decided in [renderer-boundary.md](renderer-boundary.md).
+
 Question. Who owns offscreen render targets, blend state, the polygon, arc and
 wide-line primitives, and particles, and when, given that the batch sort key,
 the render-target API and the primitives have to settle before a second consumer
@@ -278,7 +285,7 @@ GL isolation, measured at worldsim `2cc7e40a` for
 renderer headers, 182 GL calls in 12 renderer files behind them, 346 calls in
 the game's own renderers and about 480 outside the renderer in all.
 
-Recommendation. Renderer gets blend state in the batch sort key, an offscreen
+Decision. Renderer gets blend state in the batch sort key, an offscreen
 render-target API, and polygon, arc and wide-line primitives, all landed before
 a second consumer depends on the renderer API, so none is retrofitted onto an
 API three games call. That point is after worldsim pins `v0.1.0`: worldsim
@@ -292,17 +299,18 @@ audit, the target declarations, the backend seam and the PR sequence, is
 The boundary lands as four salal PRs tagged `v0.2.0` through `v0.5.0`, each
 followed by a worldsim pin: GL off the public surface, textures and the render
 target as backend objects, blend state in the sort key with the new primitives,
-then the backend interface. File lists, target declarations and open questions
-are in [renderer-boundary.md](renderer-boundary.md).
+then the backend interface. File lists, target declarations and the settled
+questions are in [renderer-boundary.md](renderer-boundary.md).
 
-Needed by. Before a second consumer depends on the renderer API, which is
-after worldsim pins `v0.1.0`: blend state in the sort key, the render-target
-API (the second of the four PRs) and the polygon, arc and wide-line primitives. Bloom and
-particles themselves are Quick Run or later.
+Needed by. Settled, so no longer a gate. It was needed before a second
+consumer depends on the renderer API, which is after worldsim pins `v0.1.0`:
+blend state in the sort key, the render-target API (the second of the four
+PRs) and the polygon, arc and wide-line primitives. Bloom and particles
+themselves are Quick Run or later.
 
-If deferred. Blend state gets added to the sort key after three games depend
-on its ordering, and additive draws start as per-call GL state changes that
-defeat the batcher.
+If deferred. Moot, as it is settled. The cost would have been blend state
+added to the sort key after three games depend on its ordering, and additive
+draws as per-call GL state changes that defeat the batcher.
 
 ## H. Vector and SVG asset conventions
 
