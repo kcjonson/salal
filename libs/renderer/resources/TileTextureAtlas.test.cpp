@@ -192,7 +192,7 @@ TEST_F(TileTextureAtlasTest, UploadInvalidRegion) {
 
 TEST_F(TileTextureAtlasTest, UploadNullData) {
 	TileTextureAtlas atlas(256);
-	AtlasRegion region = atlas.allocate(64, 64);
+	AtlasRegion		 region = atlas.allocate(64, 64);
 	EXPECT_TRUE(region.valid);
 
 	// Upload should return false for null data

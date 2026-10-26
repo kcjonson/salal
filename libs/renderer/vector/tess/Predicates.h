@@ -13,19 +13,31 @@
 namespace renderer::tess {
 
 	// Lexicographic vertex order: by s, then t.
-	inline bool vertEq(const Vertex& u, const Vertex& v) { return u.s == v.s && u.t == v.t; }
-	inline bool vertLeq(const Vertex& u, const Vertex& v) { return (u.s < v.s) || (u.s == v.s && u.t <= v.t); }
+	inline bool vertEq(const Vertex& u, const Vertex& v) {
+		return u.s == v.s && u.t == v.t;
+	}
+	inline bool vertLeq(const Vertex& u, const Vertex& v) {
+		return (u.s < v.s) || (u.s == v.s && u.t <= v.t);
+	}
 	// Same, with s and t transposed (used for the t-coordinate intersection pass).
-	inline bool transLeq(const Vertex& u, const Vertex& v) { return (u.t < v.t) || (u.t == v.t && u.s <= v.s); }
+	inline bool transLeq(const Vertex& u, const Vertex& v) {
+		return (u.t < v.t) || (u.t == v.t && u.s <= v.s);
+	}
 
-	inline bool edgeGoesLeft(const HalfEdge& e) { return vertLeq(*e.dst(), *e.org); }
-	inline bool edgeGoesRight(const HalfEdge& e) { return vertLeq(*e.org, *e.dst()); }
+	inline bool edgeGoesLeft(const HalfEdge& e) {
+		return vertLeq(*e.dst(), *e.org);
+	}
+	inline bool edgeGoesRight(const HalfEdge& e) {
+		return vertLeq(*e.org, *e.dst());
+	}
 
 	// Signed distance from edge uw to v at v's s-coordinate (> 0 above, < 0 below).
 	// Requires vertLeq(u,v) && vertLeq(v,w). Accurate and stable near u or w.
 	float edgeEval(const Vertex& u, const Vertex& v, const Vertex& w);
 	// Sign matches edgeEval; delegates to it (see header note).
-	inline float edgeSign(const Vertex& u, const Vertex& v, const Vertex& w) { return edgeEval(u, v, w); }
+	inline float edgeSign(const Vertex& u, const Vertex& v, const Vertex& w) {
+		return edgeEval(u, v, w);
+	}
 
 	// edgeEval / cheap-sign with s and t transposed. Requires transLeq(u,v) && transLeq(v,w).
 	float transEval(const Vertex& u, const Vertex& v, const Vertex& w);

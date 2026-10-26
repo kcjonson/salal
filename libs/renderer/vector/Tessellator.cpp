@@ -101,8 +101,7 @@ namespace renderer {
 
 		// Sweep-line tessellation of one or more contours. Handles concavity, holes, and
 		// self-intersection; resolves the interior by winding rule and triangulates it.
-		bool sweepTessellate(std::span<const VectorPath> contours, TessellatedMesh& outMesh,
-							 const TessellatorOptions& options) {
+		bool sweepTessellate(std::span<const VectorPath> contours, TessellatedMesh& outMesh, const TessellatorOptions& options) {
 			using namespace renderer::tess;
 
 			// libtess assumes inside faces wind CCW in sweep space; flip t when the input's net
@@ -154,9 +153,8 @@ namespace renderer {
 				}
 			}
 
-			const WindingRule rule =
-				options.useNonZeroFillRule ? WindingRule::NonZero : WindingRule::Odd;
-			Sweep sweep(mesh, rule, bmin, bmax);
+			const WindingRule rule = options.useNonZeroFillRule ? WindingRule::NonZero : WindingRule::Odd;
+			Sweep			  sweep(mesh, rule, bmin, bmax);
 			sweep.computeInterior();
 			tessellateInterior(mesh);
 
@@ -181,8 +179,7 @@ namespace renderer {
 			}
 
 			if (outMesh.vertices.size() > kMaxOutputVertices) {
-				LOG_ERROR(Renderer, "Tessellator: output exceeds %zu vertices (%zu)", kMaxOutputVertices,
-						  outMesh.vertices.size());
+				LOG_ERROR(Renderer, "Tessellator: output exceeds %zu vertices (%zu)", kMaxOutputVertices, outMesh.vertices.size());
 				outMesh.clear();
 				return false;
 			}
@@ -206,8 +203,7 @@ namespace renderer {
 
 	} // namespace
 
-	bool Tessellator::Tessellate(const VectorPath& path, TessellatedMesh& outMesh,
-								 const TessellatorOptions& options) {
+	bool Tessellator::Tessellate(const VectorPath& path, TessellatedMesh& outMesh, const TessellatorOptions& options) {
 		outMesh.clear();
 
 		if (path.vertices.size() < 3) {
@@ -218,8 +214,7 @@ namespace renderer {
 		// sweep) are covered. The sweep can still add intersection vertices, so it keeps its own
 		// post-tessellation backstop.
 		if (path.vertices.size() > kMaxOutputVertices) {
-			LOG_ERROR(Renderer, "Tessellator: input exceeds %zu vertices (%zu)", kMaxOutputVertices,
-					  path.vertices.size());
+			LOG_ERROR(Renderer, "Tessellator: input exceeds %zu vertices (%zu)", kMaxOutputVertices, path.vertices.size());
 			return false;
 		}
 		if (!path.isClosed) {
@@ -240,8 +235,7 @@ namespace renderer {
 		return sweepTessellate(std::span<const VectorPath>(&path, 1), outMesh, options);
 	}
 
-	bool Tessellator::Tessellate(std::span<const VectorPath> contours, TessellatedMesh& outMesh,
-								 const TessellatorOptions& options) {
+	bool Tessellator::Tessellate(std::span<const VectorPath> contours, TessellatedMesh& outMesh, const TessellatorOptions& options) {
 		outMesh.clear();
 		if (contours.size() == 1) {
 			// Single contour can use the convex fast path.

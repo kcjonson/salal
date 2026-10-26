@@ -14,27 +14,21 @@ namespace renderer::tess {
 			HalfEdge* up = face->anEdge;
 			assert(up->lnext != up && up->lnext->lnext != up);
 
-			for (; vertLeq(*up->dst(), *up->org); up = up->lprev()) {
-			}
-			for (; vertLeq(*up->org, *up->dst()); up = up->lnext) {
-			}
+			for (; vertLeq(*up->dst(), *up->org); up = up->lprev()) {}
+			for (; vertLeq(*up->org, *up->dst()); up = up->lnext) {}
 			HalfEdge* lo = up->lprev();
 
 			while (up->lnext != lo) {
 				if (vertLeq(*up->dst(), *lo->org)) {
 					// up->dst is leftmost: fan triangles off lo->org.
-					while (lo->lnext != up
-						   && (edgeGoesLeft(*lo->lnext)
-							   || edgeSign(*lo->org, *lo->dst(), *lo->lnext->dst()) <= 0.0F)) {
+					while (lo->lnext != up && (edgeGoesLeft(*lo->lnext) || edgeSign(*lo->org, *lo->dst(), *lo->lnext->dst()) <= 0.0F)) {
 						HalfEdge* temp = mesh.connect(lo->lnext, lo);
 						lo = temp->sym;
 					}
 					lo = lo->lprev();
 				} else {
 					// lo->org is leftmost: fan CCW triangles off up->dst.
-					while (lo->lnext != up
-						   && (edgeGoesRight(*up->lprev())
-							   || edgeSign(*up->dst(), *up->org, *up->lprev()->org) >= 0.0F)) {
+					while (lo->lnext != up && (edgeGoesRight(*up->lprev()) || edgeSign(*up->dst(), *up->org, *up->lprev()->org) >= 0.0F)) {
 						HalfEdge* temp = mesh.connect(up, up->lprev());
 						up = temp->sym;
 					}

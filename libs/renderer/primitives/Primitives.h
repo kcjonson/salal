@@ -18,9 +18,9 @@
 #include "math/Types.h"
 #include "primitives/FontFamily.h"
 #include <cstdint>
+#include <glm/vec4.hpp>
 #include <string>
 #include <vector>
-#include <glm/vec4.hpp>
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
@@ -89,7 +89,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void setTileAtlas(unsigned int atlasTexture, const std::vector<glm::vec4>& rects);
 
 		// Tile atlas accessors for the tile render pass
-		unsigned int getTileAtlasTexture();
+		unsigned int				  getTileAtlasTexture();
 		const std::vector<glm::vec4>& getTileAtlasRects();
 
 		// Get the internal batch renderer for direct text rendering.
@@ -161,14 +161,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Arguments for DrawTriangles
 		struct TrianglesArgs {
-			const Foundation::Vec2*	 vertices = nullptr;	 // Vertex positions (array)
-			const uint16_t*			 indices = nullptr;		 // Triangle indices (array)
-			size_t					 vertexCount = 0;		 // Number of vertices
-			size_t					 indexCount = 0;		 // Number of indices (triangles * 3)
-			Foundation::Color		 color;					 // Fill color (used if colors == nullptr)
-			const Foundation::Color* colors = nullptr;		 // Optional: per-vertex colors (array, same size as vertices)
-			const char*				 id = nullptr;			 // Optional: for inspection/debugging
-			int						 zIndex = 0;			 // Optional: explicit draw order
+			const Foundation::Vec2*	 vertices = nullptr; // Vertex positions (array)
+			const uint16_t*			 indices = nullptr;	 // Triangle indices (array)
+			size_t					 vertexCount = 0;	 // Number of vertices
+			size_t					 indexCount = 0;	 // Number of indices (triangles * 3)
+			Foundation::Color		 color;				 // Fill color (used if colors == nullptr)
+			const Foundation::Color* colors = nullptr;	 // Optional: per-vertex colors (array, same size as vertices)
+			const char*				 id = nullptr;		 // Optional: for inspection/debugging
+			int						 zIndex = 0;		 // Optional: explicit draw order
 		};
 
 		// Draw a rectangle with optional fill and border
@@ -206,28 +206,28 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Arguments for DrawText
 		struct TextArgs {
-			std::string			 text;
-			Foundation::Vec2	 position; // Top-left position
-			float				 scale = 1.0F; // Text scale (1.0F = 16px base size)
-			Foundation::Color	 color = Foundation::Color(1.0F, 1.0F, 1.0F, 1.0F); // RGBA
-			FontFamily			 font = FontFamily::Roboto; // Atlas to render with (default Roboto)
+			std::string		  text;
+			Foundation::Vec2  position;											 // Top-left position
+			float			  scale = 1.0F;										 // Text scale (1.0F = 16px base size)
+			Foundation::Color color = Foundation::Color(1.0F, 1.0F, 1.0F, 1.0F); // RGBA
+			FontFamily		  font = FontFamily::Roboto;						 // Atlas to render with (default Roboto)
 			// CSS text-shadow: when shadowColor.a > 0, the string is drawn once at
 			// position+shadowOffset in shadowColor (behind), then normally.
-			Foundation::Color	 shadowColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F);
-			Foundation::Vec2	 shadowOffset{0.0F, 0.0F};
+			Foundation::Color shadowColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F);
+			Foundation::Vec2  shadowOffset{0.0F, 0.0F};
 			// CSS text-align / vertical alignment. When boxWidth/boxHeight > 0, the
 			// text is aligned within [position, position+box]; otherwise drawn at
 			// position (the box-less default matches plain top-left placement).
 			Foundation::HorizontalAlign hAlign = Foundation::HorizontalAlign::Left;
 			Foundation::VerticalAlign	vAlign = Foundation::VerticalAlign::Top;
-			float				 boxWidth = 0.0F;  // align box width (px); 0 = no horizontal box
-			float				 boxHeight = 0.0F; // align box height (px); 0 = no vertical box
+			float						boxWidth = 0.0F;  // align box width (px); 0 = no horizontal box
+			float						boxHeight = 0.0F; // align box height (px); 0 = no vertical box
 			// CSS letter-spacing: extra px inserted between glyphs (not after last).
-			float				 letterSpacing = 0.0F;
+			float letterSpacing = 0.0F;
 			// CSS text-transform applied to the string at draw time.
 			Foundation::TextTransform transform = Foundation::TextTransform::None;
-			const char*			 id = nullptr;
-			float				 zIndex = 0.0F;
+			const char*				  id = nullptr;
+			float					  zIndex = 0.0F;
 		};
 
 		// Draw text using the font renderer.

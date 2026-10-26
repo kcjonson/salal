@@ -41,8 +41,7 @@ namespace renderer {
 
 		// Tessellate multiple contours resolved together by the winding rule (outer boundary
 		// plus holes). Returns false on error.
-		bool Tessellate(std::span<const VectorPath> contours, TessellatedMesh& outMesh,
-						const TessellatorOptions& options = {});
+		bool Tessellate(std::span<const VectorPath> contours, TessellatedMesh& outMesh, const TessellatorOptions& options = {});
 	};
 
 } // namespace renderer

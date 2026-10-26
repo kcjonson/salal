@@ -85,8 +85,8 @@ namespace renderer::tess {
 		// A lone edge: distinct endpoints, both half-edges share the single loop.
 		EXPECT_NE(e->org, e->dst());
 		EXPECT_EQ(e->lface, e->sym->lface);
-		EXPECT_EQ(e->onext, e);		   // origin has only this edge
-		EXPECT_EQ(e->lnext, e->sym);   // left-face loop is the two half-edges
+		EXPECT_EQ(e->onext, e);		 // origin has only this edge
+		EXPECT_EQ(e->lnext, e->sym); // left-face loop is the two half-edges
 		EXPECT_EQ(e->sym->lnext, e);
 		EXPECT_EQ(e->sym->sym, e);
 	}
@@ -115,8 +115,7 @@ namespace renderer::tess {
 
 	TEST(TessMesh, PentagonContourLoopsHaveAllVerts) {
 		Mesh	  mesh;
-		HalfEdge* e = buildContour(
-			mesh, {{0.0F, 0.0F}, {100.0F, 0.0F}, {120.0F, 80.0F}, {50.0F, 130.0F}, {-20.0F, 80.0F}});
+		HalfEdge* e = buildContour(mesh, {{0.0F, 0.0F}, {100.0F, 0.0F}, {120.0F, 80.0F}, {50.0F, 130.0F}, {-20.0F, 80.0F}});
 
 		EXPECT_TRUE(mesh.checkConsistency());
 		EXPECT_EQ(countVertices(mesh), 5);
@@ -130,8 +129,7 @@ namespace renderer::tess {
 	TEST(TessMesh, ConnectSplitsFaceIntoTwoLoops) {
 		Mesh mesh;
 		// Quad contour; connect a chord and confirm it splits the loop in two.
-		HalfEdge* e =
-			buildContour(mesh, {{0.0F, 0.0F}, {100.0F, 0.0F}, {100.0F, 100.0F}, {0.0F, 100.0F}});
+		HalfEdge* e = buildContour(mesh, {{0.0F, 0.0F}, {100.0F, 0.0F}, {100.0F, 100.0F}, {0.0F, 100.0F}});
 		ASSERT_TRUE(mesh.checkConsistency());
 
 		HalfEdge* across = mesh.connect(e, e->lnext->lnext);
@@ -146,8 +144,7 @@ namespace renderer::tess {
 
 	TEST(TessMesh, DeleteEdgeUndoesConnect) {
 		Mesh	  mesh;
-		HalfEdge* e =
-			buildContour(mesh, {{0.0F, 0.0F}, {100.0F, 0.0F}, {100.0F, 100.0F}, {0.0F, 100.0F}});
+		HalfEdge* e = buildContour(mesh, {{0.0F, 0.0F}, {100.0F, 0.0F}, {100.0F, 100.0F}, {0.0F, 100.0F}});
 		HalfEdge* across = mesh.connect(e, e->lnext->lnext);
 		ASSERT_EQ(countEdges(mesh), 5);
 

@@ -11,39 +11,39 @@
 
 namespace Renderer {
 
-class GPUTimer {
-  public:
-	GPUTimer() = default;
-	~GPUTimer() = default;
+	class GPUTimer {
+	  public:
+		GPUTimer() = default;
+		~GPUTimer() = default;
 
-	GPUTimer(const GPUTimer&) = delete;
-	GPUTimer& operator=(const GPUTimer&) = delete;
-	GPUTimer(GPUTimer&&) noexcept = default;
-	GPUTimer& operator=(GPUTimer&&) noexcept = default;
+		GPUTimer(const GPUTimer&) = delete;
+		GPUTimer& operator=(const GPUTimer&) = delete;
+		GPUTimer(GPUTimer&&) noexcept = default;
+		GPUTimer& operator=(GPUTimer&&) noexcept = default;
 
-	/// Start a span. Needs a current GL context; the queries are created on first use.
-	void begin();
+		/// Start a span. Needs a current GL context; the queries are created on first use.
+		void begin();
 
-	/// End the span begun last.
-	void end();
+		/// End the span begun last.
+		void end();
 
-	/// GPU milliseconds of the latest span whose result has arrived, 0 until one has.
-	[[nodiscard]] float getTimeMs() const { return lastTimeMs; }
+		/// GPU milliseconds of the latest span whose result has arrived, 0 until one has.
+		[[nodiscard]] float getTimeMs() const { return lastTimeMs; }
 
-  private:
-	static constexpr int kFrames = 4;
+	  private:
+		static constexpr int kFrames = 4;
 
-	struct Span {
-		GLQuery start;
-		GLQuery stop;
-		bool	pending = false;
+		struct Span {
+			GLQuery start;
+			GLQuery stop;
+			bool	pending = false;
+		};
+
+		std::array<Span, kFrames> spans;
+		int						  current = 0;
+		bool					  created = false;
+		bool					  open = false;
+		float					  lastTimeMs = 0.0F;
 	};
-
-	std::array<Span, kFrames> spans;
-	int						  current = 0;
-	bool					  created = false;
-	bool					  open	  = false;
-	float					  lastTimeMs = 0.0F;
-};
 
 } // namespace Renderer

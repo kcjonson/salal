@@ -12,7 +12,7 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 	/// Per-system timing for ECS profiling
 	struct EcsSystemTiming {
 		const char* name{nullptr};
-		float durationMs{};
+		float		durationMs{};
 	};
 
 	struct PerformanceMetrics {
@@ -26,11 +26,11 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		uint32_t triangleCount{};  // Number of triangles rendered this frame
 
 		// Timing breakdown (for profiling bottlenecks)
-		float	 tileRenderMs{};	 // Time spent rendering tiles
-		float	 entityRenderMs{};	 // Time spent rendering entities
-		float	 updateMs{};		 // Time spent in update loop
-		uint32_t tileCount{};		 // Number of tiles rendered
-		uint32_t entityCount{};		 // Number of entities rendered
+		float	 tileRenderMs{};	  // Time spent rendering tiles
+		float	 entityRenderMs{};	  // Time spent rendering entities
+		float	 updateMs{};		  // Time spent in update loop
+		uint32_t tileCount{};		  // Number of tiles rendered
+		uint32_t entityCount{};		  // Number of entities rendered
 		uint32_t visibleChunkCount{}; // Number of chunks being rendered
 
 		// Frame time histogram (for spike detection)
@@ -41,9 +41,9 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		uint32_t histogramTotal{};	  // Total frames in histogram window
 
 		// Spike detection
-		float frameTime1PercentLow{}; // 99th percentile frame time (worst 1%)
-		uint32_t spikeCount16ms{};	  // Frames > 16.6ms in recent window
-		uint32_t spikeCount33ms{};	  // Frames > 33ms in recent window
+		float	 frameTime1PercentLow{}; // 99th percentile frame time (worst 1%)
+		uint32_t spikeCount16ms{};		 // Frames > 16.6ms in recent window
+		uint32_t spikeCount33ms{};		 // Frames > 33ms in recent window
 
 		// ECS system timings (for per-system profiling)
 		std::vector<EcsSystemTiming> ecsSystems;
@@ -53,18 +53,18 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		float tileGpuMs{};	 // Of that, the ground and water pass (ChunkRenderer)
 
 		// System resources
-		uint64_t memoryUsedBytes{};	   // Process resident memory (RSS)
-		uint64_t memoryPeakBytes{};	   // Peak memory usage
-		float	 cpuUsagePercent{};	   // CPU usage (0-100%, may exceed 100% on multi-core)
-		uint32_t cpuCoreCount{};	   // Number of CPU cores (max CPU% = 100 * cores)
-		float	 inputLatencyMs{};	   // Time from input event to frame start
+		uint64_t memoryUsedBytes{}; // Process resident memory (RSS)
+		uint64_t memoryPeakBytes{}; // Peak memory usage
+		float	 cpuUsagePercent{}; // CPU usage (0-100%, may exceed 100% on multi-core)
+		uint32_t cpuCoreCount{};	// Number of CPU cores (max CPU% = 100 * cores)
+		float	 inputLatencyMs{};	// Time from input event to frame start
 
 		// Main loop timing breakdown (for diagnosing system-wide lag)
-		float pollEventsMs{};	// Time for glfwPollEvents
-		float inputHandleMs{};	// Time for input handling
-		float sceneUpdateMs{};	// Time for scene update
-		float sceneRenderMs{};	// Time for scene render
-		float swapBuffersMs{};	// Time for buffer swap (includes VSync wait)
+		float pollEventsMs{};  // Time for glfwPollEvents
+		float inputHandleMs{}; // Time for input handling
+		float sceneUpdateMs{}; // Time for scene update
+		float sceneRenderMs{}; // Time for scene render
+		float swapBuffersMs{}; // Time for buffer swap (includes VSync wait)
 
 		// Serialize to JSON for HTTP API
 		std::string toJSON() const;

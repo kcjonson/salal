@@ -1,10 +1,10 @@
 #pragma once
 
 #include "math/Types.h"
-#include <graphics/Color.h>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <graphics/Color.h>
 #include <string>
 #include <vector>
 

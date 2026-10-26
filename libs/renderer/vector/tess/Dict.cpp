@@ -2,7 +2,9 @@
 
 namespace renderer::tess {
 
-	Dict::Dict(void* dictFrame, LeqFn dictLeq) : frame(dictFrame), leq(dictLeq) {
+	Dict::Dict(void* dictFrame, LeqFn dictLeq)
+		: frame(dictFrame),
+		  leq(dictLeq) {
 		head.key = nullptr;
 		head.next = &head;
 		head.prev = &head;

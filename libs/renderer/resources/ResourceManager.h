@@ -120,7 +120,7 @@ namespace renderer {
 		}
 
 	  private:
-		std::vector<T>		  resources;	 // Resource storage
+		std::vector<T>		  resources;   // Resource storage
 		std::vector<uint16_t> generations; // Generation counter per slot
 		std::vector<uint16_t> freeIndices; // Free list for recycling
 	};

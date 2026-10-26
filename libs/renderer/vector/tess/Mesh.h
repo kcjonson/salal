@@ -26,7 +26,7 @@ namespace renderer::tess {
 
 	struct HalfEdge {
 		HalfEdge* next{nullptr};  // global edge list (visits one half-edge per edge)
-		HalfEdge* sym{nullptr};   // same edge, opposite direction
+		HalfEdge* sym{nullptr};	  // same edge, opposite direction
 		HalfEdge* onext{nullptr}; // next edge CCW around origin
 		HalfEdge* lnext{nullptr}; // next edge CCW around left face
 		Vertex*	  org{nullptr};	  // origin vertex
@@ -51,8 +51,8 @@ namespace renderer::tess {
 		HalfEdge* anEdge{nullptr}; // a half-edge with this origin
 		float	  s{0.0F};		   // sweep-plane coordinates == the 2D position
 		float	  t{0.0F};
-		int		  pqHandle{0};	   // priority-queue handle (sweep), for deletion
-		int		  idx{-1};		   // output index, assigned at triangulation
+		int		  pqHandle{0}; // priority-queue handle (sweep), for deletion
+		int		  idx{-1};	   // output index, assigned at triangulation
 	};
 
 	struct Face {
@@ -95,9 +95,9 @@ namespace renderer::tess {
 		// makeEdge: one edge, two vertices, and a single loop (face).
 		HalfEdge* makeEdge();
 		// splice: the fundamental connectivity operation (merges/splits vertices and faces).
-		bool	  splice(HalfEdge* eOrg, HalfEdge* eDst);
+		bool splice(HalfEdge* eOrg, HalfEdge* eDst);
 		// deleteEdge: remove eDel, joining or splitting the incident loops.
-		bool	  deleteEdge(HalfEdge* eDel);
+		bool deleteEdge(HalfEdge* eDel);
 
 		// Convenience operations.
 		// addEdgeVertex: new edge eNew == eOrg->lnext with a fresh destination vertex.
@@ -120,13 +120,13 @@ namespace renderer::tess {
 		HalfEdge* makeEdgePair(HalfEdge* eNext);
 		// Attach a new origin vertex to every half-edge in eOrig's origin orbit,
 		// inserting it before vNext in the vertex list.
-		void	  makeVertex(HalfEdge* eOrig, Vertex* vNext);
+		void makeVertex(HalfEdge* eOrig, Vertex* vNext);
 		// Attach a new left face to every half-edge in eOrig's left-face orbit,
 		// inserting it before fNext in the face list.
-		void	  makeFace(HalfEdge* eOrig, Face* fNext);
-		void	  killEdge(HalfEdge* eDel);
-		void	  killVertex(Vertex* vDel, Vertex* newOrg);
-		void	  killFace(Face* fDel, Face* newLface);
+		void makeFace(HalfEdge* eOrig, Face* fNext);
+		void killEdge(HalfEdge* eDel);
+		void killVertex(Vertex* vDel, Vertex* newOrg);
+		void killFace(Face* fDel, Face* newLface);
 
 		std::deque<Vertex>	 vertexPool;
 		std::deque<Face>	 facePool;

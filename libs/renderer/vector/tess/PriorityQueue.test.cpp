@@ -15,8 +15,7 @@ namespace renderer::tess {
 	} // namespace
 
 	TEST(TessPriorityQueue, ExtractsInLexOrder) {
-		std::vector<Vertex> verts = {makeV(3, 1), makeV(1, 5), makeV(1, 2),
-									 makeV(2, 0), makeV(3, 0), makeV(0, 9)};
+		std::vector<Vertex> verts = {makeV(3, 1), makeV(1, 5), makeV(1, 2), makeV(2, 0), makeV(3, 0), makeV(0, 9)};
 		PriorityQueue		pq;
 		for (auto& v : verts) {
 			pq.insert(&v);

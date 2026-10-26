@@ -10,24 +10,24 @@
 
 namespace {
 
-// Write `content` to a unique temp .svg, return its path. Caller removes it.
-std::filesystem::path writeTempSvg(const std::string& name, const std::string& content) {
-	const std::filesystem::path p = std::filesystem::temp_directory_path() / name;
-	std::ofstream				out(p);
-	out << content;
-	out.close();
-	return p;
-}
+	// Write `content` to a unique temp .svg, return its path. Caller removes it.
+	std::filesystem::path writeTempSvg(const std::string& name, const std::string& content) {
+		const std::filesystem::path p = std::filesystem::temp_directory_path() / name;
+		std::ofstream				out(p);
+		out << content;
+		out.close();
+		return p;
+	}
 
-renderer::LoadedSVGShape strokeShape(const std::vector<Foundation::Vec2>& verts, bool closed, float width) {
-	renderer::LoadedSVGShape s;
-	s.hasFill = false;
-	s.hasStroke = true;
-	s.strokeWidth = width;
-	s.strokeColor = Foundation::Color::white();
-	s.paths.emplace_back(verts, closed);
-	return s;
-}
+	renderer::LoadedSVGShape strokeShape(const std::vector<Foundation::Vec2>& verts, bool closed, float width) {
+		renderer::LoadedSVGShape s;
+		s.hasFill = false;
+		s.hasStroke = true;
+		s.strokeWidth = width;
+		s.strokeColor = Foundation::Color::white();
+		s.paths.emplace_back(verts, closed);
+		return s;
+	}
 
 } // namespace
 
@@ -38,7 +38,8 @@ TEST(SVGLoaderTest, LoadStrokeOnlyLineKeepsTwoVertexPath) {
 		"worldsim_stroke_line.svg",
 		R"(<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
   <path d="M0,10 L20,10" stroke="#ff0000" stroke-width="2" fill="none"/>
-</svg>)");
+</svg>)"
+	);
 
 	std::vector<renderer::LoadedSVGShape> shapes;
 	const bool							  ok = renderer::loadSVG(svg.string(), 0.5F, shapes);
@@ -54,7 +55,7 @@ TEST(SVGLoaderTest, LoadStrokeOnlyLineKeepsTwoVertexPath) {
 
 // An open 2-point stroke is exactly one bevel-band quad: 4 verts, 2 triangles, no join wedges.
 TEST(SVGLoaderTest, StrokeOnlyOpenSegmentEmitsOneQuad) {
-	const auto				 shape = strokeShape({{0.0F, 0.0F}, {10.0F, 0.0F}}, /*closed=*/false, 2.0F);
+	const auto				  shape = strokeShape({{0.0F, 0.0F}, {10.0F, 0.0F}}, /*closed=*/false, 2.0F);
 	renderer::TessellatedMesh mesh;
 	renderer::appendShapeMesh(shape, mesh);
 
@@ -74,7 +75,7 @@ TEST(SVGLoaderTest, ClosedStrokeAddsJoinsVsOpen) {
 	renderer::TessellatedMesh closedMesh;
 	renderer::appendShapeMesh(strokeShape(corner, /*closed=*/true, 2.0F), closedMesh);
 
-	EXPECT_GT(openMesh.vertices.size(), 8U);						// 2 quads + at least one join wedge
+	EXPECT_GT(openMesh.vertices.size(), 8U);						 // 2 quads + at least one join wedge
 	EXPECT_GT(closedMesh.vertices.size(), openMesh.vertices.size()); // extra segment + joins all the way round
 }
 

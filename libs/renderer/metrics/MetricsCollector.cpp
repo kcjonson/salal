@@ -1,8 +1,8 @@
 // Metrics collector implementation.
 
 #include "metrics/MetricsCollector.h"
-#include <metrics/SystemResources.h>
 #include <algorithm>
+#include <metrics/SystemResources.h>
 #include <numeric>
 
 namespace Renderer {
@@ -57,8 +57,7 @@ namespace Renderer {
 		metrics.visibleChunkCount = visibleChunkCount;
 
 		// Histogram
-		computeHistogram(metrics.histogram0to8ms, metrics.histogram8to16ms, metrics.histogram16to33ms,
-						 metrics.histogram33plusMs);
+		computeHistogram(metrics.histogram0to8ms, metrics.histogram8to16ms, metrics.histogram16to33ms, metrics.histogram33plusMs);
 		metrics.histogramTotal = static_cast<uint32_t>(frameTimeSamples.size());
 
 		// Spike detection
@@ -74,7 +73,7 @@ namespace Renderer {
 		metrics.tileGpuMs = tileGpuMs;
 
 		// System resources (sample every 10th call to reduce overhead)
-		static int sampleCounter = 0;
+		static int							sampleCounter = 0;
 		static Foundation::ResourceSnapshot cachedResources{};
 		if (++sampleCounter >= 10) {
 			sampleCounter = 0;
@@ -101,8 +100,14 @@ namespace Renderer {
 		triangleCount = inTriangleCount;
 	}
 
-	void MetricsCollector::setTimingBreakdown(float inTileRenderMs, float inEntityRenderMs, float inUpdateMs,
-											  uint32_t inTileCount, uint32_t inEntityCount, uint32_t inVisibleChunkCount) {
+	void MetricsCollector::setTimingBreakdown(
+		float	 inTileRenderMs,
+		float	 inEntityRenderMs,
+		float	 inUpdateMs,
+		uint32_t inTileCount,
+		uint32_t inEntityCount,
+		uint32_t inVisibleChunkCount
+	) {
 		tileRenderMs = inTileRenderMs;
 		entityRenderMs = inEntityRenderMs;
 		updateMs = inUpdateMs;
@@ -125,8 +130,13 @@ namespace Renderer {
 		tileGpuMs = tilePassMs;
 	}
 
-	void MetricsCollector::setMainLoopTimings(float pollEventsMs, float inputHandleMs, float sceneUpdateMs,
-											  float sceneRenderMs, float swapBuffersMs) {
+	void MetricsCollector::setMainLoopTimings(
+		float pollEventsMs,
+		float inputHandleMs,
+		float sceneUpdateMs,
+		float sceneRenderMs,
+		float swapBuffersMs
+	) {
 		m_pollEventsMs = pollEventsMs;
 		m_inputHandleMs = inputHandleMs;
 		m_sceneUpdateMs = sceneUpdateMs;
@@ -161,8 +171,7 @@ namespace Renderer {
 		outMax = *minmax.second;
 	}
 
-	void MetricsCollector::computeHistogram(uint32_t& out0to8, uint32_t& out8to16, uint32_t& out16to33,
-											uint32_t& out33plus) const {
+	void MetricsCollector::computeHistogram(uint32_t& out0to8, uint32_t& out8to16, uint32_t& out16to33, uint32_t& out33plus) const {
 		out0to8 = 0;
 		out8to16 = 0;
 		out16to33 = 0;
@@ -197,8 +206,7 @@ namespace Renderer {
 		}
 
 		// Use nth_element for O(n) instead of O(n log n) sort
-		std::nth_element(percentileScratch.begin(), percentileScratch.begin() + static_cast<ptrdiff_t>(index),
-						 percentileScratch.end());
+		std::nth_element(percentileScratch.begin(), percentileScratch.begin() + static_cast<ptrdiff_t>(index), percentileScratch.end());
 		return percentileScratch[index];
 	}
 

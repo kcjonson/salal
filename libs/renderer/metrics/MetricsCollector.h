@@ -24,8 +24,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void setRenderStats(uint32_t drawCalls, uint32_t vertexCount, uint32_t triangleCount);
 
 		// Set timing breakdown (called by game scene for profiling)
-		void setTimingBreakdown(float tileRenderMs, float entityRenderMs, float updateMs,
-								uint32_t tileCount, uint32_t entityCount, uint32_t visibleChunkCount);
+		void setTimingBreakdown(
+			float	 tileRenderMs,
+			float	 entityRenderMs,
+			float	 updateMs,
+			uint32_t tileCount,
+			uint32_t entityCount,
+			uint32_t visibleChunkCount
+		);
 
 		// Set entity renderer stats (raw GL draws that bypass BatchRenderer counters)
 		void setEntityRenderStats(uint32_t drawCalls, uint32_t triangleCount);
@@ -37,8 +43,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void setGpuTimes(float renderMs, float tilePassMs);
 
 		// Set main loop timing breakdown (called by Application after each frame)
-		void setMainLoopTimings(float pollEventsMs, float inputHandleMs, float sceneUpdateMs,
-								float sceneRenderMs, float swapBuffersMs);
+		void setMainLoopTimings(float pollEventsMs, float inputHandleMs, float sceneUpdateMs, float sceneRenderMs, float swapBuffersMs);
 
 	  private:
 		using Clock = std::chrono::high_resolution_clock;

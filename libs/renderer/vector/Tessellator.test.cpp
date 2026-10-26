@@ -4,8 +4,8 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <numbers>
 #include <gtest/gtest.h>
+#include <numbers>
 
 using namespace renderer;
 
@@ -169,9 +169,9 @@ class SVGTessellationTest : public ::testing::Test {
 	std::string tempDir;
 
 	void SetUp() override {
-		tempDir = (std::filesystem::temp_directory_path() /
-				   ("svg_test_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed())))
-					  .string();
+		tempDir =
+			(std::filesystem::temp_directory_path() / ("svg_test_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed())))
+				.string();
 	}
 
 	void TearDown() override {

@@ -45,8 +45,14 @@ namespace renderer::tess {
 		std::deque<DictNode> pool;
 	};
 
-	inline ActiveRegion* dictKey(DictNode* n) { return n->key; }
-	inline DictNode*	 dictSucc(DictNode* n) { return n->next; }
-	inline DictNode*	 dictPred(DictNode* n) { return n->prev; }
+	inline ActiveRegion* dictKey(DictNode* n) {
+		return n->key;
+	}
+	inline DictNode* dictSucc(DictNode* n) {
+		return n->next;
+	}
+	inline DictNode* dictPred(DictNode* n) {
+		return n->prev;
+	}
 
 } // namespace renderer::tess

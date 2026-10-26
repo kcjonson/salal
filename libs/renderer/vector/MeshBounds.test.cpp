@@ -15,7 +15,7 @@ namespace {
 
 TEST(MeshBoundsTest, ComputeBoundsOfEmptyMeshIsZero) {
 	renderer::TessellatedMesh empty;
-	Foundation::Rect b = renderer::computeBounds(empty);
+	Foundation::Rect		  b = renderer::computeBounds(empty);
 	EXPECT_FLOAT_EQ(b.x, 0.0F);
 	EXPECT_FLOAT_EQ(b.y, 0.0F);
 	EXPECT_FLOAT_EQ(b.width, 0.0F);

@@ -15,11 +15,10 @@ namespace {
 	double meshArea(const TessellatedMesh& m) {
 		double total = 0.0;
 		for (size_t t = 0; t + 2 < m.indices.size(); t += 3) {
-			const auto& a = m.vertices[m.indices[t]];
-			const auto& b = m.vertices[m.indices[t + 1]];
-			const auto& c = m.vertices[m.indices[t + 2]];
-			const double cross =
-				(static_cast<double>(b.x - a.x) * (c.y - a.y)) - (static_cast<double>(c.x - a.x) * (b.y - a.y));
+			const auto&	 a = m.vertices[m.indices[t]];
+			const auto&	 b = m.vertices[m.indices[t + 1]];
+			const auto&	 c = m.vertices[m.indices[t + 2]];
+			const double cross = (static_cast<double>(b.x - a.x) * (c.y - a.y)) - (static_cast<double>(c.x - a.x) * (b.y - a.y));
 			total += std::abs(cross) * 0.5;
 		}
 		return total;
@@ -57,9 +56,9 @@ TEST(TessellatorSweep, FoundationTabInWorldMeters) {
 
 // Concave 5-point star (non-self-intersecting). Area equals the polygon's shoelace area.
 TEST(TessellatorSweep, ConcaveStar) {
-	Tessellator			   t;
+	Tessellator					  t;
 	std::vector<Foundation::Vec2> verts;
-	const float			   pi = 3.14159265358979F;
+	const float					  pi = 3.14159265358979F;
 	for (int i = 0; i < 10; ++i) {
 		const float a = ((static_cast<float>(i) / 10.0F) * 2.0F * pi) - (pi / 2.0F);
 		const float r = (i % 2 == 0) ? 100.0F : 40.0F;
@@ -81,9 +80,9 @@ TEST(TessellatorSweep, ConcaveStar) {
 
 // Square with a square hole (opposite winding), nonzero rule. Area = outer - hole.
 TEST(TessellatorSweep, SquareWithHoleNonZero) {
-	Tessellator			   t;
-	VectorPath			   outer = makePath({{0, 0}, {100, 0}, {100, 100}, {0, 100}});	  // CCW
-	VectorPath			   hole = makePath({{25, 25}, {25, 75}, {75, 75}, {75, 25}});	  // CW
+	Tessellator				t;
+	VectorPath				outer = makePath({{0, 0}, {100, 0}, {100, 100}, {0, 100}}); // CCW
+	VectorPath				hole = makePath({{25, 25}, {25, 75}, {75, 75}, {75, 25}});	// CW
 	std::vector<VectorPath> contours = {outer, hole};
 
 	TessellatedMesh mesh;
@@ -99,7 +98,7 @@ TEST(TessellatorSweep, SelfIntersectingBowtie) {
 	TessellatedMesh mesh;
 	ASSERT_TRUE(t.Tessellate(path, mesh));
 	EXPECT_GT(mesh.getTriangleCount(), 0U);
-	EXPECT_GE(mesh.vertices.size(), 5U); // 4 input + the intersection (Steiner) point
+	EXPECT_GE(mesh.vertices.size(), 5U);	  // 4 input + the intersection (Steiner) point
 	EXPECT_NEAR(meshArea(mesh), 5000.0, 2.0); // two 2500-area lobes
 }
 
@@ -107,18 +106,18 @@ TEST(TessellatorSweep, SelfIntersectingBowtie) {
 //  - nonzero: inner region winds twice -> still inside -> whole outer fills (10000)
 //  - even-odd: inner region is even -> a ring (10000 - 2500 = 7500)
 TEST(TessellatorSweep, WindingRuleDifferentiation) {
-	Tessellator			   t;
-	VectorPath			   outer = makePath({{0, 0}, {100, 0}, {100, 100}, {0, 100}}); // CCW
-	VectorPath			   inner = makePath({{25, 25}, {75, 25}, {75, 75}, {25, 75}}); // CCW (same)
+	Tessellator				t;
+	VectorPath				outer = makePath({{0, 0}, {100, 0}, {100, 100}, {0, 100}}); // CCW
+	VectorPath				inner = makePath({{25, 25}, {75, 25}, {75, 75}, {25, 75}}); // CCW (same)
 	std::vector<VectorPath> contours = {outer, inner};
 
-	TessellatedMesh nonzero;
+	TessellatedMesh	   nonzero;
 	TessellatorOptions nz;
 	nz.useNonZeroFillRule = true;
 	ASSERT_TRUE(t.Tessellate(contours, nonzero, nz));
 	EXPECT_NEAR(meshArea(nonzero), 10000.0, 1.0);
 
-	TessellatedMesh odd;
+	TessellatedMesh	   odd;
 	TessellatorOptions eo;
 	eo.useNonZeroFillRule = false;
 	ASSERT_TRUE(t.Tessellate(contours, odd, eo));
@@ -137,8 +136,7 @@ TEST(TessellatorSweep, DegenerateCollinearDoesNotCrash) {
 // A duplicated vertex inside a concave contour (a zero-length edge) must be handled cleanly.
 TEST(TessellatorSweep, DuplicateVertexInConcave) {
 	Tessellator		t;
-	VectorPath		path =
-		makePath({{0, 0}, {100, 0}, {100, 0}, {100, 40}, {40, 40}, {40, 100}, {0, 100}});
+	VectorPath		path = makePath({{0, 0}, {100, 0}, {100, 0}, {100, 40}, {40, 40}, {40, 100}, {0, 100}});
 	TessellatedMesh mesh;
 	ASSERT_TRUE(t.Tessellate(path, mesh));
 	EXPECT_NEAR(meshArea(mesh), 6400.0, 1.0);

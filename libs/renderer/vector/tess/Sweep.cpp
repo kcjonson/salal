@@ -22,7 +22,8 @@ namespace renderer::tess {
 	} // namespace
 
 	Sweep::Sweep(Mesh& tessMesh, WindingRule rule, const float boundsMin[2], const float boundsMax[2])
-		: mesh(tessMesh), windingRule(rule) {
+		: mesh(tessMesh),
+		  windingRule(rule) {
 		bmin[0] = boundsMin[0];
 		bmin[1] = boundsMin[1];
 		bmax[0] = boundsMax[0];
@@ -57,7 +58,9 @@ namespace renderer::tess {
 		return t1 >= t2;
 	}
 
-	ActiveRegion* Sweep::allocRegion() { return &regionPool.emplace_back(); }
+	ActiveRegion* Sweep::allocRegion() {
+		return &regionPool.emplace_back();
+	}
 
 	void Sweep::deleteRegion(ActiveRegion* reg) {
 		if (reg->fixUpperEdge) {
@@ -164,8 +167,7 @@ namespace renderer::tess {
 		return ePrev;
 	}
 
-	void Sweep::addRightEdges(ActiveRegion* regUp, HalfEdge* eFirst, HalfEdge* eLast,
-							  HalfEdge* eTopLeft, bool cleanUp) {
+	void Sweep::addRightEdges(ActiveRegion* regUp, HalfEdge* eFirst, HalfEdge* eLast, HalfEdge* eTopLeft, bool cleanUp) {
 		bool firstTime = true;
 
 		// Insert the new right-going edges into the dictionary.
@@ -214,7 +216,9 @@ namespace renderer::tess {
 		}
 	}
 
-	void Sweep::spliceMergeVertices(HalfEdge* e1, HalfEdge* e2) { mesh.splice(e1, e2); }
+	void Sweep::spliceMergeVertices(HalfEdge* e1, HalfEdge* e2) {
+		mesh.splice(e1, e2);
+	}
 
 	bool Sweep::checkForRightSplice(ActiveRegion* regUp) {
 		ActiveRegion* regLo = regionBelow(regUp);
@@ -343,8 +347,8 @@ namespace renderer::tess {
 			return false;
 		}
 
-		if ((!vertEq(*dstUp, *event) && edgeSign(*dstUp, *event, isect) >= 0.0F)
-			|| (!vertEq(*dstLo, *event) && edgeSign(*dstLo, *event, isect) <= 0.0F)) {
+		if ((!vertEq(*dstUp, *event) && edgeSign(*dstUp, *event, isect) >= 0.0F) ||
+			(!vertEq(*dstLo, *event) && edgeSign(*dstLo, *event, isect) <= 0.0F)) {
 			// The new edge would pass on the wrong side of the event (tiny numeric error).
 			if (dstLo == event) {
 				mesh.splitEdge(eUp->sym);
@@ -432,8 +436,8 @@ namespace renderer::tess {
 				}
 			}
 			if (eUp->org != eLo->org) {
-				if (eUp->dst() != eLo->dst() && !regUp->fixUpperEdge && !regLo->fixUpperEdge
-					&& (eUp->dst() == event || eLo->dst() == event)) {
+				if (eUp->dst() != eLo->dst() && !regUp->fixUpperEdge && !regLo->fixUpperEdge &&
+					(eUp->dst() == event || eLo->dst() == event)) {
 					if (checkForIntersect(regUp)) {
 						// walkDirtyRegions recursed; we're done.
 						return;

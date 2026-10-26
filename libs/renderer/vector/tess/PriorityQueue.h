@@ -43,9 +43,9 @@ namespace renderer::tess {
 		void siftDown(int i);
 		void swapSlots(int i, int j);
 
-		std::vector<Slot> heap;			// 0-indexed binary heap
-		std::vector<int>  handleToPos;	// handle -> heap index, or kInvalidHandle
-		std::vector<int>  freeHandles;	// recycled handle ids
+		std::vector<Slot> heap;		   // 0-indexed binary heap
+		std::vector<int>  handleToPos; // handle -> heap index, or kInvalidHandle
+		std::vector<int>  freeHandles; // recycled handle ids
 	};
 
 } // namespace renderer::tess

@@ -11,7 +11,7 @@ namespace Renderer {
 		if (!created) {
 			for (Span& span : spans) {
 				span.start = GLQuery::create();
-				span.stop  = GLQuery::create();
+				span.stop = GLQuery::create();
 			}
 			created = true;
 		}
@@ -21,8 +21,8 @@ namespace Renderer {
 		Span& span = spans[current];
 		if (span.pending && span.stop.isResultAvailable()) {
 			const GLuint64 startNs = span.start.getResult();
-			const GLuint64 stopNs  = span.stop.getResult();
-			lastTimeMs			   = static_cast<float>(static_cast<double>(stopNs - startNs) / 1.0e6);
+			const GLuint64 stopNs = span.stop.getResult();
+			lastTimeMs = static_cast<float>(static_cast<double>(stopNs - startNs) / 1.0e6);
 		}
 		span.pending = false;
 		span.start.recordTimestamp();
@@ -36,8 +36,8 @@ namespace Renderer {
 		Span& span = spans[current];
 		span.stop.recordTimestamp();
 		span.pending = true;
-		open		 = false;
-		current		 = (current + 1) % kFrames;
+		open = false;
+		current = (current + 1) % kFrames;
 	}
 
 } // namespace Renderer
