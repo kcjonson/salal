@@ -1,8 +1,11 @@
 #include "Renderer.h"
-#include "Foundation.h"
+
+#include <utils/Log.h>
 
 namespace renderer {
 	int layerDepth() {
-		return foundation::layerDepth() + 1;
+		// The call is the point: it keeps salal_renderer linked against salal_foundation until real code does.
+		foundation::Logger::initialize();
+		return 1;
 	}
 } // namespace renderer

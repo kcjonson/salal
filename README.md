@@ -9,8 +9,9 @@ everything else grows up out of, which is the job this repo has.
 
 ## Status
 
-**The build skeleton is in:** four placeholder libraries, a sandbox stub, and
-CI on Windows, macOS and Linux. No engine code yet.
+**`foundation` is imported** from worldsim as a plain copy; `renderer`, `ui`
+and `app` are placeholders, with a sandbox stub and CI on Windows, macOS and
+Linux.
 
 The engine is being extracted from [worldsim](https://github.com/kcjonson/worldsim),
 which has implemented this architecture once already and is where the code comes

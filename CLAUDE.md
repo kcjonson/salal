@@ -9,7 +9,8 @@ frame, input and the scene graph, so the games on top of it only have to be
 games. See [README.md](README.md).
 
 It is being **extracted from worldsim**, which has already implemented this
-architecture and is where the code comes from. Nothing has been extracted yet.
+architecture and is where the code comes from. `foundation` is imported;
+`renderer`, `ui` and `app` are placeholders.
 
 ## Project management: Specboard
 
@@ -61,25 +62,25 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 
 ## Status and what to work on
 
-The build skeleton is in: four placeholder libraries, a sandbox stub, and CI on
-Windows, macOS and Linux. No engine code yet. **Phase 0, the audit, is done**
-(2026-10-25); findings in
+The build skeleton is in, with CI on Windows, macOS and Linux. **`foundation`
+is imported** (a plain copy of worldsim at `870dd755`, 2026-10-26); `renderer`,
+`ui` and `app` are placeholders, as is the sandbox. **Phase 0, the audit, is
+done** (2026-10-25); findings in
 [docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
 `clipboard/ClipboardManager.h`), its `renderer` reached back into `ui` through
 `FontRenderer`, and its `foundation` carried the HTTP dev server with OpenGL
 and httplib behind it.
 
-**Phase 0.5, untangling worldsim, is done apart from the `InputTypes.h`
-move** (seven PRs, [worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297), merged 2026-10-25/26): the dead
+**Phase 0.5, untangling worldsim, is done** (eight PRs, [worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through [worldsim#298](https://github.com/kcjonson/worldsim/pull/298), merged 2026-10-25/26): the dead
 includes are gone, the clipboard is a seam, `FontRenderer` is in `renderer`,
-the CMake cleanup landed, and the dev server left `foundation` for
-`libs/engine/debug`. What remains is moving `InputTypes.h` into
-`foundation/input/` and dropping `engine` from ui's link list, both unblocked by
-decision D (settled 2026-10-26).
+the CMake cleanup landed, the dev server left `foundation` for
+`libs/engine/debug`, and `InputTypes.h` is in `foundation/input/` with `engine`
+off ui's link list (decision D, settled 2026-10-26).
 
-Next is that move. Then phase 1, extracting `foundation` and `renderer` into
-the skeleton here; phase 2 carves `app` out of `libs/engine`; `ui` is extracted last.
+Phase 1 is under way: `foundation` is imported, `renderer` is next, then
+worldsim converts to consume this repo. Phase 2 carves `app` out of
+`libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -198,12 +199,22 @@ ctest --test-dir build -C Debug
 The `windows` preset names `cl` bare, so run configure from a Visual Studio
 developer shell (or after `vcvars64.bat`), where it resolves.
 
-The libraries are placeholders until phase 1 moves code in: one translation
-unit and one gtest each, there to exercise the wiring. Their namespaces
-(`foundation`, `renderer`, `ui`, `app`, lowercase per the coding-standards doc)
-are not a decision about the namespaces of moved worldsim code; that casing is
-an open worldsim follow-up. Each lib's `*.test.cpp` files become
-`salal_<lib>_tests` through `salal_add_tests` in `cmake/SalalTesting.cmake`.
+`foundation` is worldsim's code, imported as a plain copy. `renderer`, `ui` and
+`app` are placeholders until phase 1 moves their code in: one translation unit
+and one gtest each, there to exercise the wiring. The placeholder namespaces
+(`renderer`, `ui`, `app`, lowercase per the coding-standards doc) are not a
+decision about the namespaces of moved worldsim code; that casing is an open
+worldsim follow-up. Blame and history for imported code live in worldsim;
+`git remote add worldsim ../worldsim && git fetch worldsim` makes
+`git blame worldsim/main -- libs/foundation/<file>` work from here.
+
+Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
+The deterministic math and hash noise are header-inline polynomials; Clang fuses
+`a*b+c` into an FMA on arm64 and the golden bit patterns, computed on x64,
+moved by one ULP the first time the tests ran on macOS. Do not drop the flag.
+
+Each lib's `*.test.cpp` files become `salal_<lib>_tests` through
+`salal_add_tests` in `cmake/SalalTesting.cmake`.
 Targets are `salal_<lib>` behind `salal::<lib>` aliases, so a FetchContent
 consumer's own `ui` or `engine` can't collide, and `SALAL_BUILD_UI`,
 `SALAL_BUILD_APP`, `SALAL_BUILD_SANDBOX` and `SALAL_BUILD_TESTS` (on standalone,
