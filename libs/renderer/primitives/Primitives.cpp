@@ -137,7 +137,8 @@ namespace Renderer::Primitives {
 	// --- Frame Lifecycle ---
 
 	void clear(const Foundation::Color& color) {
-		glClearColor(color.r, color.g, color.b, color.a);
+		// Targets hold premultiplied colour, as everything drawn into them is.
+		glClearColor(color.r * color.a, color.g * color.a, color.b * color.a, color.a);
 		glClear(GL_COLOR_BUFFER_BIT);
 	}
 
@@ -481,13 +482,13 @@ namespace Renderer::Primitives {
 
 		if (args.style.border.has_value() && args.style.border->width > 0.0F) {
 			const Foundation::LineStyle& border = args.style.border.value();
-			// The stroke's centre line runs half its width outside the outline, so its
-			// inner edge lies on the polygon's edges.
-			static thread_local std::vector<Foundation::Vec2> centreLine;
+			// The fill is not anti-aliased: a pixel is fill or not by its centre. The
+			// border's inner edge runs a pixel inside the outline, so its edge ramp (a pixel
+			// either side) lies over fill and every pixel outside the fill is fully border.
 			static thread_local std::vector<StrokePiece>	  pieces;
-			offsetOutline(args.vertices, border.width * 0.5F, centreLine);
-			strokePolyline({.points = centreLine, .width = border.width, .join = LineJoin::Miter, .closed = true}, pieces);
-			g_batchRenderer->addStrokePieces(pieces, border.color, zIndex, args.blend);
+			static thread_local std::vector<Foundation::Vec2> wedges;
+			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces, wedges);
+			g_batchRenderer->addStroke(pieces, wedges, border.color, zIndex, args.blend);
 		}
 	}
 
@@ -498,7 +499,7 @@ namespace Renderer::Primitives {
 		static thread_local std::vector<StrokePiece> pieces;
 		strokePolyline(args, pieces);
 		if (!pieces.empty()) {
-			g_batchRenderer->addStrokePieces(pieces, args.color, static_cast<float>(args.zIndex), args.blend);
+			g_batchRenderer->addStroke(pieces, {}, args.color, static_cast<float>(args.zIndex), args.blend);
 		}
 	}
 

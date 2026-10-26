@@ -44,7 +44,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		Foundation::Vec2 texCoord;	 // UV for text and images, rectLocalPos for shapes
 		Foundation::Vec4 color;		 // Fill color RGBA, straight alpha
 		Foundation::Vec4 data1;		 // Border: (color.rgb, width) for shapes, (blur, 0, 0, 0) for shadows
-		Foundation::Vec4 data2;		 // Shape: (halfW, halfH, cornerRadius, borderPos), Text: (pixelRange, 0, 0, -1)
+		Foundation::Vec4 data2;		 // xyz per mode, w the mode (table below). Shape: (halfW, halfH, cornerRadius, borderPos);
+									 // text: (pixelRange, 0, 0, w); shadow: (halfW, halfH, cornerRadius, w);
+									 // arc: (innerR, outerR, sweep / 2, w); image: (0, 0, 0, w)
 		Foundation::Vec4 clipBounds; // Clip rect (minX, minY, maxX, maxY), or (0,0,0,0) for no clipping
 	};
 
@@ -59,7 +61,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	//   arc               -4           -14
 	//   image             -5           -15
 	constexpr float kRenderModeText = -1.0F;	  // MSDF text
-	constexpr float kRenderModeInstanced = -2.0F; // Instanced and baked world meshes (uber.vert)
 	constexpr float kRenderModeShadow = -3.0F;	  // Box-shadow / glow (SDF soft falloff)
 	constexpr float kRenderModeArc = -4.0F;		  // Ring, arc or pie (SDF)
 	constexpr float kRenderModeImage = -5.0F;	  // Plain texture sample
@@ -150,13 +151,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha
 		);
 
-		// Add the pieces of a stroke (strokePolyline) as one draw group, each an SDF
-		// box quad padded by a pixel so its edge ramp is not cut off.
-		void addStrokePieces(
-			std::span<const StrokePiece> pieces,
-			const Foundation::Color&	 color,
-			float						 zIndex = 0.0F,
-			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
+		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
+		// an SDF box quad padded by a pixel so its edge ramp is not cut off, and its flat
+		// `triangles`, three points each (strokeOutline's wedges).
+		void addStroke(
+			std::span<const StrokePiece>	  pieces,
+			std::span<const Foundation::Vec2> triangles,
+			const Foundation::Color&		  color,
+			float							  zIndex = 0.0F,
+			Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha
 		);
 
 		// Add a ring, arc or pie as one SDF quad (see Primitives::ArcArgs).
@@ -247,6 +250,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Get current transform matrix
 		const Foundation::Mat4& getTransform() const { return currentTransform; }
+
+		// Local units per logical pixel under the current transform.
+		float getLocalPixel() const { return pixelPadding; }
 
 		// Rendering statistics structure
 		struct RenderStats {

@@ -73,7 +73,7 @@ TEST(RenderModeTest, EveryAddWritesItsModeAndBlend) {
 	batch.addArc({.center = {0.0F, 0.0F}, .innerRadius = 4.0F, .outerRadius = 8.0F, .blend = BlendMode::Additive});
 	batch.addImageQuad({.texture = kImage, .bounds = {0.0F, 0.0F, 4.0F, 4.0F}, .blend = BlendMode::Additive});
 	const StrokePiece piece{.center = {0.0F, 0.0F}, .halfLength = 2.0F, .halfWidth = 1.0F};
-	batch.addStrokePieces({&piece, 1}, Foundation::Color::white(), 0.0F, BlendMode::Additive);
+	batch.addStroke({&piece, 1}, {}, Foundation::Color::white(), 0.0F, BlendMode::Additive);
 
 	const std::span<const UberVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 4U + 4U + 4U + 3U + 4U + 4U + 4U);
@@ -244,16 +244,18 @@ TEST(BatchArcTest, SweepClampsToTheFullRingAndEmptyArcsAddNothing) {
 // Stroke pieces
 // ============================================================================
 
-TEST(BatchStrokeTest, PiecesAreOrientedBoxesInOneGroup) {
+TEST(BatchStrokeTest, PiecesAreOrientedBoxesAndTrianglesFlatInOneGroup) {
 	BatchRenderer	  batch;
 	const StrokePiece pieces[2] = {
 		{.center = {10.0F, 0.0F}, .axis = {0.0F, 1.0F}, .halfLength = 5.0F, .halfWidth = 2.0F},
 		{.center = {0.0F, 0.0F}, .axis = {1.0F, 0.0F}, .halfLength = 2.0F, .halfWidth = 2.0F, .cornerRadius = 2.0F},
 	};
-	batch.addStrokePieces(pieces, Foundation::Color::white(), 3.0F);
+	const Foundation::Vec2 wedge[3] = {{0.0F, 0.0F}, {4.0F, 0.0F}, {0.0F, 4.0F}};
+	batch.addStroke(pieces, wedge, Foundation::Color::white(), 3.0F);
+	addRect(batch); // z 0 sorts ahead of the whole stroke
 
 	const std::span<const UberVertex> vertices = batch.getPendingVertices();
-	ASSERT_EQ(vertices.size(), 8U);
+	ASSERT_EQ(vertices.size(), 8U + 3U + 4U);
 	// Along the axis (down the screen) by halfLength + 1, across it by halfWidth + 1.
 	EXPECT_NEAR(vertices[0].position.x, 13.0F, kTolerance);
 	EXPECT_NEAR(vertices[0].position.y, -6.0F, kTolerance);
@@ -261,8 +263,15 @@ TEST(BatchStrokeTest, PiecesAreOrientedBoxesInOneGroup) {
 	EXPECT_NEAR(vertices[0].texCoord.y, -3.0F, kTolerance);
 	EXPECT_EQ(vertices[0].data2, Foundation::Vec4(5.0F, 2.0F, 0.0F, 1.0F));
 	EXPECT_EQ(vertices[4].data2, Foundation::Vec4(2.0F, 2.0F, 2.0F, 1.0F));
+	// The wedge is a flat triangle: a zero-size shape, positions as given.
+	EXPECT_EQ(vertices[8].data2, Foundation::Vec4(0.0F, 0.0F, 0.0F, 1.0F));
+	EXPECT_EQ(vertices[9].position, Foundation::Vec2(4.0F, 0.0F));
 
+	// One group: the rect sorts in front of it, and the stroke stays together after.
 	const DrawPlan plan = batch.plan();
+	ASSERT_EQ(plan.indices.size(), 6U + 12U + 3U);
+	EXPECT_EQ(plan.indices[0], 11U);
+	EXPECT_EQ(plan.indices[6], 0U);
+	EXPECT_EQ(plan.indices[18], 8U);
 	ASSERT_EQ(plan.runs.size(), 1U);
-	EXPECT_EQ(plan.runs[0].indexCount, 12U);
 }

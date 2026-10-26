@@ -108,41 +108,116 @@ namespace Renderer {
 		}
 	}
 
-	void offsetOutline(std::span<const Foundation::Vec2> outline, float distance, std::vector<Foundation::Vec2>& out) {
-		out.clear();
-		static thread_local std::vector<Foundation::Vec2> points;
-		distinctPoints(outline, true, points);
-		const size_t count = points.size();
-		if (count < 3) {
-			return;
-		}
+	namespace {
 
-		float twiceArea = 0.0F;
-		for (size_t i = 0; i < count; ++i) {
-			twiceArea += cross(points[i], points[(i + 1) % count]);
-		}
-		if (twiceArea == 0.0F) {
-			return;
-		}
-		// With positive signed area the outside is on the right of each edge, (d.y, -d.x).
-		const float side = twiceArea > 0.0F ? 1.0F : -1.0F;
-		const auto	outward = [side](const Foundation::Vec2& direction) {
-			 return Foundation::Vec2(direction.y, -direction.x) * side;
+		// One vertex of a closed outline: its point, the unit directions of the edges
+		// in and out, their outward normals, and `miter`, the vector that takes the
+		// point to where the two edges meet once both move one unit outward.
+		struct OutlineCorner {
+			Foundation::Vec2 point;
+			Foundation::Vec2 incoming;
+			Foundation::Vec2 outgoing;
+			Foundation::Vec2 normalIn;
+			Foundation::Vec2 normalOut;
+			Foundation::Vec2 miter;
+			bool			 notch = false; // A reflex vertex: the outline turns away from its inside
 		};
 
-		out.reserve(count);
-		for (size_t i = 0; i < count; ++i) {
-			const Foundation::Vec2& point = points[i];
-			const Foundation::Vec2	incoming = glm::normalize(point - points[(i + count - 1) % count]);
-			const Foundation::Vec2	outgoing = glm::normalize(points[(i + 1) % count] - point);
-			const Foundation::Vec2	sum = outward(incoming) + outward(outgoing);
-			const float				length = glm::length(sum);
-			// The moved edges meet along the normals' bisector at 1 / cos(turn / 2), which
-			// is 2 / |sum|; a hairpin has no bisector and points straight on.
-			const Foundation::Vec2 bisector = length > kMinSegment ? sum / length : incoming;
-			const float			   reach = length > kMinSegment ? std::min(2.0F / length, kMiterLimit) : kMiterLimit;
-			out.push_back(point + (bisector * (distance * reach)));
+		// The corners of `outline`; false for fewer than three distinct points or zero area.
+		bool outlineCorners(std::span<const Foundation::Vec2> outline, std::vector<OutlineCorner>& out) {
+			out.clear();
+			static thread_local std::vector<Foundation::Vec2> points;
+			distinctPoints(outline, true, points);
+			const size_t count = points.size();
+			if (count < 3) {
+				return false;
+			}
+			float twiceArea = 0.0F;
+			for (size_t i = 0; i < count; ++i) {
+				twiceArea += cross(points[i], points[(i + 1) % count]);
+			}
+			if (twiceArea == 0.0F) {
+				return false;
+			}
+			// With positive signed area the outside is on the right of each edge, (d.y, -d.x),
+			// and a convex vertex turns left.
+			const float side = twiceArea > 0.0F ? 1.0F : -1.0F;
+			const auto	outward = [side](const Foundation::Vec2& direction) {
+				 return Foundation::Vec2(direction.y, -direction.x) * side;
+			};
+
+			out.reserve(count);
+			for (size_t i = 0; i < count; ++i) {
+				OutlineCorner corner{.point = points[i]};
+				corner.incoming = glm::normalize(corner.point - points[(i + count - 1) % count]);
+				corner.outgoing = glm::normalize(points[(i + 1) % count] - corner.point);
+				corner.normalIn = outward(corner.incoming);
+				corner.normalOut = outward(corner.outgoing);
+				corner.notch = cross(corner.incoming, corner.outgoing) * side < 0.0F;
+				// The moved edges meet along the normals' bisector at 1 / cos(turn / 2), which
+				// is 2 / |sum|; a hairpin has no bisector and points straight on. Only a convex
+				// spike is limited: a notch's meeting point is where its border has to reach.
+				const Foundation::Vec2 sum = corner.normalIn + corner.normalOut;
+				const float			   length = glm::length(sum);
+				if (length > kMinSegment) {
+					const float reach = 2.0F / length;
+					corner.miter = (sum / length) * (corner.notch ? reach : std::min(reach, kMiterLimit));
+				} else {
+					corner.miter = corner.incoming * kMiterLimit;
+				}
+				out.push_back(corner);
+			}
+			return true;
 		}
+
+	} // namespace
+
+	void offsetOutline(std::span<const Foundation::Vec2> outline, float distance, std::vector<Foundation::Vec2>& out) {
+		out.clear();
+		static thread_local std::vector<OutlineCorner> corners;
+		if (!outlineCorners(outline, corners)) {
+			return;
+		}
+		out.reserve(corners.size());
+		for (const OutlineCorner& corner : corners) {
+			out.push_back(corner.point + (corner.miter * distance));
+		}
+	}
+
+	void strokeOutline(
+		std::span<const Foundation::Vec2> outline,
+		float							  width,
+		float							  inset,
+		std::vector<StrokePiece>&		  pieces,
+		std::vector<Foundation::Vec2>&	  wedges
+	) {
+		pieces.clear();
+		wedges.clear();
+		static thread_local std::vector<OutlineCorner> corners;
+		if (!(width + inset > 0.0F) || !outlineCorners(outline, corners)) {
+			return;
+		}
+
+		// The stroke's centre line runs halfway between its outer edge, `width` out, and
+		// its inner edge, `inset` in.
+		const float										  centre = (width - inset) * 0.5F;
+		const float										  halfWidth = (width + inset) * 0.5F;
+		static thread_local std::vector<Foundation::Vec2> centreLine;
+		centreLine.clear();
+		for (const OutlineCorner& corner : corners) {
+			const Foundation::Vec2 joint = corner.point + (corner.miter * centre);
+			centreLine.push_back(joint);
+			// Past a right-angle turn the joint is a disk, which leaves the notch's
+			// corner, where the inner edges meet, uncovered. The two boxes end square at
+			// the joint, so their inner corners and that point bound exactly what is left
+			// (the disk covers the rest of the miter's kite).
+			if (corner.notch && glm::dot(corner.incoming, corner.outgoing) < 0.0F) {
+				wedges.push_back(corner.point - (corner.miter * inset));
+				wedges.push_back(joint - (corner.normalIn * halfWidth));
+				wedges.push_back(joint - (corner.normalOut * halfWidth));
+			}
+		}
+		strokePolyline({.points = centreLine, .width = width + inset, .join = Primitives::LineJoin::Miter, .closed = true}, pieces);
 	}
 
 } // namespace Renderer

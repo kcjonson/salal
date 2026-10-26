@@ -12,6 +12,7 @@
 #include <cmath>
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
+#include <numbers>
 #include <utility>
 
 namespace Renderer {
@@ -28,7 +29,7 @@ namespace Renderer {
 			return Foundation::Vec2(result.x, result.y);
 		}
 
-		constexpr float kTwoPi = 6.28318530718F;
+		constexpr float kTwoPi = 2.0F * std::numbers::pi_v<float>;
 
 		// The GL blend function for a run's state (glBlendState). Output is
 		// premultiplied, so both modes blend "over" with ONE, ONE_MINUS_SRC_ALPHA;
@@ -525,11 +526,12 @@ namespace Renderer {
 		recordGroup(zGroupStart, zIndex, blend);
 	}
 
-	void BatchRenderer::addStrokePieces(
-		std::span<const StrokePiece> pieces,
-		const Foundation::Color&	 color,
-		float						 zIndex,
-		Primitives::BlendMode		 blend
+	void BatchRenderer::addStroke(
+		std::span<const StrokePiece>	  pieces,
+		std::span<const Foundation::Vec2> triangles,
+		const Foundation::Color&		  color,
+		float							  zIndex,
+		Primitives::BlendMode			  blend
 	) {
 		const uint32_t		   groupStart = static_cast<uint32_t>(indices.size());
 		const Foundation::Vec4 colorVec = color.toVec4();
@@ -552,6 +554,24 @@ namespace Renderer {
 			};
 			const Foundation::Vec2 local[4] = {{-reachX, -reachY}, {reachX, -reachY}, {reachX, reachY}, {-reachX, reachY}};
 			pushQuad(corners, local, colorVec, noBorder, {piece.halfLength, piece.halfWidth, piece.cornerRadius, mode});
+		}
+		// Flat triangles as addTriangles draws them: a zero-size box, so the shape is the
+		// triangle itself.
+		const bool isIdentity = transformClass == TransformClass::kIdentity;
+		for (size_t i = 0; i + 2 < triangles.size(); i += 3) {
+			const uint32_t baseIndex = static_cast<uint32_t>(vertices.size());
+			for (size_t corner = 0; corner < 3; ++corner) {
+				vertices.push_back(
+					{TransformPosition(triangles[i + corner], currentTransform, isIdentity),
+					 Foundation::Vec2(0.0F, 0.0F),
+					 colorVec,
+					 noBorder,
+					 Foundation::Vec4(0.0F, 0.0F, 0.0F, mode),
+					 currentClipBounds}
+				);
+				indices.push_back(baseIndex + static_cast<uint32_t>(corner));
+			}
+			vertexAtlas.insert(vertexAtlas.end(), 3, TextureHandle{});
 		}
 		recordGroup(groupStart, zIndex, blend);
 	}

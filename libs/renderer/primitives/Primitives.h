@@ -23,6 +23,7 @@
 #include "primitives/InstanceData.h"
 #include <cstdint>
 #include <glm/vec4.hpp>
+#include <numbers>
 #include <span>
 #include <string>
 #include <vector>
@@ -126,14 +127,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Frame Lifecycle ---
 
-		// Clear the bound colour target to one colour.
+		// Clear the bound colour target to one colour, straight alpha like every colour
+		// at this API; the target stores it premultiplied.
 		void clear(const Foundation::Color& color);
 
 		// The backbuffer as RGBA8, bottom row first as GL reads it, at the size the
-		// last setViewport() with no RenderTarget open recorded. `width` and `height`
-		// are set first; the pixels are read only when `rgba` holds width * height * 4
-		// bytes, so a call with an empty span sizes the buffer for the next one.
-		// Synchronous by design: it waits for the GPU.
+		// last setViewport() with no RenderTarget open recorded. Its colour is
+		// premultiplied by its alpha, as everything the renderer draws and clears is.
+		// `width` and `height` are set first; the pixels are read only when `rgba`
+		// holds width * height * 4 bytes, so a call with an empty span sizes the buffer
+		// for the next one. Synchronous by design: it waits for the GPU.
 		void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height);
 
 		void beginFrame();
@@ -267,8 +270,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Draw a filled polygon, convex or not, self-crossing filled by the nonzero
 		// rule. The outline is tessellated once per distinct vertex list and cached,
 		// so a silhouette drawn every frame under PushTransform costs one
-		// tessellation. The fill is not anti-aliased (as drawTriangles); a border is a
-		// closed polyline with miter joins whose inner edge lies on the outline.
+		// tessellation. The fill is not anti-aliased (as drawTriangles). A border is a
+		// closed stroke with miter joins (strokeOutline) whose outer edge runs its width
+		// outside the outline and whose inner edge runs a pixel inside, so its
+		// anti-aliased edge covers the fill's aliased one and no background shows
+		// between them; a notch sharper than a right angle gets a flat wedge into its
+		// corner.
 		void drawPolygon(const PolygonArgs& args);
 
 		// Arguments for DrawPolyline
@@ -278,10 +285,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::Color				  color = Foundation::Color::white();
 			LineCap							  cap = LineCap::Butt;
 			LineJoin						  join = LineJoin::Round;
-			bool							  closed = false; // Join the last point back to the first; caps are unused
-			const char*						  id = nullptr;
-			int								  zIndex = 0;
-			BlendMode						  blend = BlendMode::Alpha;
+			bool		closed = false; // Join the last point back to the first, uncapped; two points stay an open segment
+			const char* id = nullptr;
+			int			zIndex = 0;
+			BlendMode	blend = BlendMode::Alpha;
 		};
 
 		// Draw a stroked polyline, anti-aliased: one SDF quad per segment, one per
@@ -298,7 +305,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float			  innerRadius = 0.0F;
 			float			  outerRadius = 0.0F;
 			float			  startAngle = 0.0F;
-			float			  sweep = 6.2831853F;
+			float			  sweep = 2.0F * std::numbers::pi_v<float>;
 			Foundation::Color color = Foundation::Color::white();
 			const char*		  id = nullptr;
 			int				  zIndex = 0;

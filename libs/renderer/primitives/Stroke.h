@@ -27,14 +27,29 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// butt-ended boxes, extended by half the width for a square cap or to the miter
 	// point at a mitered joint; every joint and round cap adds a disk, which also
 	// covers the seam where two butt ends meet. Points closer than a ten-thousandth
-	// of a unit to the one before are dropped; fewer than two points draw nothing.
+	// of a unit to the one before are dropped; fewer than two points draw nothing,
+	// and a closed line with only two left is the open segment between them, capped.
 	void strokePolyline(const Primitives::PolylineArgs& args, std::vector<StrokePiece>& out);
 
 	// `outline`, a closed polygon of either winding, with every edge moved
-	// `distance` outward and each vertex at its moved edges' meeting point. A
+	// `distance` outward and each vertex at its moved edges' meeting point. A convex
 	// vertex sharper than the miter limit of 4 (an interior angle under about 29
-	// degrees) moves only 4 times `distance`. Empty for fewer than three distinct
-	// points or zero area.
+	// degrees) moves only 4 times `distance`; a notch's vertex always meets exactly.
+	// Empty for fewer than three distinct points or zero area.
 	void offsetOutline(std::span<const Foundation::Vec2> outline, float distance, std::vector<Foundation::Vec2>& out);
+
+	// A polygon's border: a closed stroke along `outline` whose outer edge runs
+	// `width` outside it and whose inner edge runs `inset` inside it, under the
+	// fill's edge, so no background shows between fill and border. Its joints are
+	// mitered up to a right-angle turn and round past it on the outside. At a notch
+	// sharper than a right angle the stroke turns further than that, so `wedges`
+	// gets the flat triangle (three points) that carries it into the notch's corner.
+	void strokeOutline(
+		std::span<const Foundation::Vec2> outline,
+		float							  width,
+		float							  inset,
+		std::vector<StrokePiece>&		  pieces,
+		std::vector<Foundation::Vec2>&	  wedges
+	);
 
 } // namespace Renderer

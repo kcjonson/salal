@@ -1,4 +1,6 @@
 #include "primitives/Stroke.h"
+#include <algorithm>
+#include <cmath>
 #include <glm/geometric.hpp>
 #include <gtest/gtest.h>
 #include <vector>
@@ -131,4 +133,89 @@ TEST(StrokeTest, OffsetOutlineLimitsASpikeAndRejectsZeroArea) {
 	const std::vector<Foundation::Vec2> line = {{0.0F, 0.0F}, {5.0F, 0.0F}, {10.0F, 0.0F}};
 	offsetOutline(line, 1.0F, out);
 	EXPECT_TRUE(out.empty());
+}
+
+namespace {
+
+	// Signed distance to a piece, as the shader measures it (negative inside).
+	float pieceDistance(const StrokePiece& piece, Foundation::Vec2 point) {
+		const Foundation::Vec2 local = point - piece.center;
+		const float			   along = glm::dot(local, piece.axis);
+		const float			   across = (piece.axis.x * local.y) - (piece.axis.y * local.x);
+		const float			   radius = std::min(piece.cornerRadius, std::min(piece.halfLength, piece.halfWidth));
+		const float			   qx = std::abs(along) - piece.halfLength + radius;
+		const float			   qy = std::abs(across) - piece.halfWidth + radius;
+		return glm::length(Foundation::Vec2(std::max(qx, 0.0F), std::max(qy, 0.0F))) + std::min(std::max(qx, qy), 0.0F) - radius;
+	}
+
+	bool inTriangle(Foundation::Vec2 p, Foundation::Vec2 a, Foundation::Vec2 b, Foundation::Vec2 c) {
+		const auto side = [](Foundation::Vec2 o, Foundation::Vec2 u, Foundation::Vec2 v) {
+			return ((u.x - o.x) * (v.y - o.y)) - ((u.y - o.y) * (v.x - o.x));
+		};
+		const float d1 = side(a, b, p);
+		const float d2 = side(b, c, p);
+		const float d3 = side(c, a, p);
+		return !((d1 < 0.0F || d2 < 0.0F || d3 < 0.0F) && (d1 > 0.0F || d2 > 0.0F || d3 > 0.0F));
+	}
+
+	bool covered(const std::vector<StrokePiece>& pieces, const std::vector<Foundation::Vec2>& wedges, Foundation::Vec2 point) {
+		for (const StrokePiece& piece : pieces) {
+			if (pieceDistance(piece, point) <= 0.0F) {
+				return true;
+			}
+		}
+		for (size_t i = 0; i + 2 < wedges.size(); i += 3) {
+			if (inTriangle(point, wedges[i], wedges[i + 1], wedges[i + 2])) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// A 40 x 40 block with a notch cut up from its bottom edge to (20, 15): 37 degrees.
+	const std::vector<Foundation::Vec2> kNotched =
+		{{0.0F, 0.0F}, {15.0F, 0.0F}, {20.0F, 15.0F}, {25.0F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}, {0.0F, 40.0F}};
+
+} // namespace
+
+TEST(StrokeTest, OffsetOutlineMeetsExactlyAtASharpNotch) {
+	// A 15-degree notch is past the miter limit, which applies to spikes only.
+	const std::vector<Foundation::Vec2> notched = {
+		{0.0F, 0.0F}, {18.0F, 0.0F}, {20.0F, 15.0F}, {22.0F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}, {0.0F, 40.0F}
+	};
+	std::vector<Foundation::Vec2> out;
+	offsetOutline(notched, 1.0F, out);
+	ASSERT_EQ(out.size(), notched.size());
+	// One unit from both walls of the notch.
+	const Foundation::Vec2 wall = glm::normalize(notched[2] - notched[1]);
+	const Foundation::Vec2 fromWall = out[2] - notched[1];
+	EXPECT_NEAR(std::abs((wall.x * fromWall.y) - (wall.y * fromWall.x)), 1.0F, kTolerance);
+	EXPECT_NEAR(out[2].x, 20.0F, kTolerance);
+	EXPECT_LT(out[2].y, 15.0F - 4.0F);
+}
+
+TEST(StrokeTest, OutlineBorderRunsFromInsetToWidth) {
+	const std::vector<Foundation::Vec2> square = {{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}};
+	std::vector<StrokePiece>			pieces;
+	std::vector<Foundation::Vec2>		wedges;
+	strokeOutline(square, 4.0F, 1.0F, pieces, wedges);
+	EXPECT_TRUE(wedges.empty());
+	EXPECT_TRUE(covered(pieces, wedges, {4.05F, 16.0F}));
+	EXPECT_TRUE(covered(pieces, wedges, {8.95F, 16.0F}));
+	EXPECT_FALSE(covered(pieces, wedges, {3.95F, 16.0F}));
+	EXPECT_FALSE(covered(pieces, wedges, {9.05F, 16.0F}));
+	EXPECT_TRUE(covered(pieces, wedges, {4.05F, 4.05F})); // the mitered corner
+}
+
+TEST(StrokeTest, OutlineBorderFillsASharpNotchToItsCorner) {
+	std::vector<StrokePiece>	  pieces;
+	std::vector<Foundation::Vec2> wedges;
+	strokeOutline(kNotched, 4.0F, 1.0F, pieces, wedges);
+	EXPECT_EQ(wedges.size(), 3U);
+	// Down the notch's middle the walls are (15 - y) * sin(18.4 degrees) away: within
+	// the border's 4 from y = 2.35 up to the corner, and the inset reaches past it.
+	for (float y = 15.9F; y > 2.5F; y -= 0.25F) {
+		EXPECT_TRUE(covered(pieces, wedges, {20.0F, y})) << "y " << y;
+	}
+	EXPECT_FALSE(covered(pieces, wedges, {20.0F, 1.5F}));
 }

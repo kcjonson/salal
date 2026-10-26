@@ -63,18 +63,24 @@ namespace Renderer {
 			}
 		}
 
-		// Clear the target to `background`, run `draw` as one frame, read it back.
+		// Clear `into` to `background` and run `draw` into it as one frame.
 		template <typename Draw>
-		void render(const Foundation::Color& background, Draw draw) {
-			target.begin();
-			Primitives::setViewport(kSize, kSize);
+		static void drawInto(RenderTarget& into, const Foundation::Color& background, Draw draw) {
+			into.begin();
+			Primitives::setViewport(into.width(), into.height());
 			Primitives::clear(background);
 			Primitives::beginFrame();
 			draw();
 			Primitives::endFrame();
+			into.end();
+		}
+
+		// The same into the fixture's target, then read it back.
+		template <typename Draw>
+		void render(const Foundation::Color& background, Draw draw) {
+			drawInto(target, background, draw);
 			pixels.assign(static_cast<size_t>(kSize) * kSize * 4, 0);
 			target.readPixels(pixels);
-			target.end();
 		}
 
 		// The pixel at screen position (x, y), y down; readPixels rows run bottom up.
@@ -83,10 +89,10 @@ namespace Renderer {
 			return {pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]};
 		}
 
-		// Within one count per channel: the GPU may round 127.5 either way.
-		static void expectNear(const std::array<int, 4>& actual, const std::array<int, 4>& expected) {
+		// Within `tolerance` per channel: the GPU may round 127.5 either way.
+		static void expectNear(const std::array<int, 4>& actual, const std::array<int, 4>& expected, int tolerance = 1) {
 			for (size_t c = 0; c < 4; ++c) {
-				EXPECT_LE(std::abs(actual[c] - expected[c]), 1)
+				EXPECT_LE(std::abs(actual[c] - expected[c]), tolerance)
 					<< "channel " << c << ": " << actual[0] << "," << actual[1] << "," << actual[2] << "," << actual[3];
 			}
 		}
@@ -177,10 +183,53 @@ namespace Renderer {
 			);
 		});
 		expectNear(pixel(16, 16), {255, 0, 0, 255}); // fill
-		expectNear(pixel(9, 16), {255, 0, 0, 255});	 // just inside the edge: the border does not cover the fill
-		expectNear(pixel(6, 16), {0, 0, 255, 255});	 // the border, outside
-		expectNear(pixel(5, 5), {0, 0, 255, 255});	 // the mitered corner
-		expectNear(pixel(2, 16), {0, 0, 0, 0});		 // past the border
+		expectNear(pixel(10, 16), {255, 0, 0, 255}); // a pixel in from the edge: fill only
+		// The seam. The fill ends at x = 8; the border's inner edge runs a pixel in, at 9,
+		// so its ramp (0.84 at half a pixel inside, 0.16 at half outside) lies over fill and
+		// no background shows through on either side.
+		expectNear(pixel(9, 16), {215, 0, 40, 255}, 2);
+		expectNear(pixel(8, 16), {40, 0, 215, 255}, 2);
+		expectNear(pixel(7, 16), {0, 0, 255, 255});
+		expectNear(pixel(6, 16), {0, 0, 255, 255});
+		expectNear(pixel(5, 5), {0, 0, 255, 255}); // the mitered corner
+		expectNear(pixel(2, 16), {0, 0, 0, 0});	   // past the border
+	}
+
+	TEST_F(PrimitivesDrawTest, ClearStoresPremultipliedColour) {
+		RenderTarget half = RenderTarget::create(kSize, kSize);
+		ASSERT_TRUE(half.isValid());
+		drawInto(half, Foundation::Color(1.0F, 1.0F, 1.0F, 0.5F), [] {});
+		std::vector<uint8_t> cleared(static_cast<size_t>(kSize) * kSize * 4, 0);
+		half.readPixels(cleared);
+		EXPECT_LE(std::abs(cleared[0] - 128), 1);
+		EXPECT_LE(std::abs(cleared[3] - 128), 1);
+
+		// Composited over black it is half white, as a premultiplied target must be.
+		const Foundation::Rect bounds{0.0F, 0.0F, static_cast<float>(kSize), static_cast<float>(kSize)};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { Primitives::drawImage({.texture = half.texture(), .bounds = bounds}); });
+		expectNear(pixel(16, 16), {128, 128, 128, 255});
+	}
+
+	TEST_F(PrimitivesDrawTest, ARenderTargetDrawsUprightWithFlippedUvs) {
+		RenderTarget source = RenderTarget::create(kSize, kSize);
+		ASSERT_TRUE(source.isValid());
+		const float size = static_cast<float>(kSize);
+		drawInto(source, Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+			Primitives::drawRect({.bounds = {0.0F, 0.0F, size, size * 0.5F}, .style = {.fill = Foundation::Color::red()}});
+			Primitives::drawRect({.bounds = {0.0F, size * 0.5F, size, size * 0.5F}, .style = {.fill = Foundation::Color::blue()}});
+		});
+		const Foundation::Rect bounds{0.0F, 0.0F, size, size};
+
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+			Primitives::drawImage({.texture = source.texture(), .bounds = bounds, .uvMin = {0.0F, 1.0F}, .uvMax = {1.0F, 0.0F}});
+		});
+		expectNear(pixel(16, 4), {255, 0, 0, 255});
+		expectNear(pixel(16, 28), {0, 0, 255, 255});
+
+		// With the default UVs it draws upside down: its bottom row is texture row 0.
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { Primitives::drawImage({.texture = source.texture(), .bounds = bounds}); });
+		expectNear(pixel(16, 4), {0, 0, 255, 255});
+		expectNear(pixel(16, 28), {255, 0, 0, 255});
 	}
 
 } // namespace Renderer

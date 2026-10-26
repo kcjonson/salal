@@ -64,8 +64,8 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		std::optional<BorderStyle> border = std::nullopt;
 	};
 
-	// Polygon visual style. The border is a stroke just outside the outline (its
-	// inner edge on the polygon's edges), so the fill keeps its area under it.
+	// Polygon visual style. The border is a stroke outside the outline, `width`
+	// wide, that reaches a pixel under the fill's edge so nothing shows between them.
 	struct PolygonStyle {
 		Color					 fill = Color::white();
 		std::optional<LineStyle> border = std::nullopt;
