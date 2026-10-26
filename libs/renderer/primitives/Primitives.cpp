@@ -3,6 +3,8 @@
 
 #include "primitives/Primitives.h"
 #include "CoordinateSystem/CoordinateSystem.h"
+#include "backend/gl/GLTargets.h"
+#include "backend/gl/GLTextures.h"
 #include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "primitives/BatchRenderer.h"
@@ -96,6 +98,20 @@ namespace Renderer::Primitives {
 		return g_tileAtlasRects;
 	}
 
+	// --- Textures ---
+
+	TextureHandle createTexture(const TextureDesc& desc) {
+		return backend::gl::createTexture(desc);
+	}
+
+	void updateTexture(TextureHandle handle, int x, int y, int width, int height, const void* pixels) {
+		backend::gl::updateTexture(handle, x, y, width, height, pixels);
+	}
+
+	void destroyTexture(TextureHandle handle) {
+		backend::gl::destroyTexture(handle);
+	}
+
 	void setFrameUpdateCallback(FrameUpdateCallback callback) {
 		g_frameUpdateCallback = callback;
 	}
@@ -105,6 +121,28 @@ namespace Renderer::Primitives {
 	void clear(const Foundation::Color& color) {
 		glClearColor(color.r, color.g, color.b, color.a);
 		glClear(GL_COLOR_BUFFER_BIT);
+	}
+
+	void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height) {
+		const backend::gl::BoundTarget& backbuffer = backend::gl::backbuffer();
+		width = backbuffer.width;
+		height = backbuffer.height;
+		if (rgba.empty() || width <= 0 || height <= 0) {
+			return;
+		}
+		const size_t needed = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+		if (rgba.size() < needed) {
+			LOG_ERROR(Renderer, "readBackbuffer: %zu bytes given, %zu needed for %dx%d", rgba.size(), needed, width, height);
+			return;
+		}
+		const GLuint bound = backend::gl::currentTarget().framebuffer;
+		if (bound != 0) {
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+		}
+		glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+		if (bound != 0) {
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, bound);
+		}
 	}
 
 	void beginFrame() {
@@ -135,6 +173,17 @@ namespace Renderer::Primitives {
 	void setViewport(int width, int height) {
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->setViewport(width, height);
+		}
+		// A RenderTarget's size is its own; only the backbuffer's is learned here. With
+		// a coordinate system the window's framebuffer size is the backbuffer, whatever
+		// size a world pass sets the projection to (worldsim's baked pass uses the logical size).
+		if (backend::gl::currentTarget().framebuffer == 0) {
+			if (g_coordinateSystem != nullptr) {
+				const Viewport& window = g_coordinateSystem->viewport();
+				backend::gl::setBackbufferSize(window.framebufferWidth, window.framebufferHeight);
+			} else {
+				backend::gl::setBackbufferSize(width, height);
+			}
 		}
 	}
 

@@ -102,7 +102,8 @@ function(salal_check_layering)
     salal_check_renderer_headers_gl_free()
 endfunction()
 
-# Every header under libs/renderer outside gl/, shader/ and backend/ is public. Walk
+# Every header under libs/renderer outside backend/ is public (backend/gl/ is the
+# explicit GL opt-in for a game's own passes, docs/renderer-boundary.md). Walk
 # each one's quoted and angle includes transitively through this repo's libraries
 # and fail on the first path that reaches a GL, GLES, OpenGL, GLFW or glad header
 # (GL/glew.h, GL/gl.h, GLFW/glfw3.h, ...). Headers proven clean once are not walked again.
@@ -112,7 +113,7 @@ function(salal_check_renderer_headers_gl_free)
     file(GLOB_RECURSE headers RELATIVE "${renderer_dir}" CONFIGURE_DEPENDS "${renderer_dir}/*.h")
     set(clean "")
     foreach(header IN LISTS headers)
-        if(header MATCHES "^(gl|shader|backend)/")
+        if(header MATCHES "^backend/")
             continue()
         endif()
         set(visited "")

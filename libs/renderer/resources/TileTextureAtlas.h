@@ -2,12 +2,8 @@
 
 #include "Handle.h"
 #include <cstdint>
-#include <memory>
-#include <vector>
 
 namespace Renderer {
-
-	class GLTexture;
 
 	struct AtlasRegion {
 		int	 x = 0;
@@ -17,8 +13,8 @@ namespace Renderer {
 		bool valid = false;
 	};
 
-	// Simple shelf-packed 2D texture atlas for tile patterns.
-	// Uses RAII for automatic GPU resource cleanup.
+	// Simple shelf-packed 2D RGBA8 texture atlas for tile patterns. The texture
+	// lives in the renderer's table and goes with the atlas.
 	class TileTextureAtlas {
 	  public:
 		explicit TileTextureAtlas(int atlasSize = 4096);
@@ -38,16 +34,16 @@ namespace Renderer {
 		bool upload(const AtlasRegion& region, const uint8_t* rgbaData);
 
 		[[nodiscard]] TextureHandle texture() const { return handle_; }
-		[[nodiscard]] int			size() const;
+		[[nodiscard]] int			size() const { return size_; }
 
 	  private:
 		void release();
 
-		std::unique_ptr<GLTexture> texture_; // RAII texture wrapper
-		TextureHandle			   handle_;
-		int						   cursorX_ = 0;
-		int						   cursorY_ = 0;
-		int						   currentRowHeight_ = 0;
+		TextureHandle handle_;
+		int			  size_ = 0;
+		int			  cursorX_ = 0;
+		int			  cursorY_ = 0;
+		int			  currentRowHeight_ = 0;
 	};
 
 } // namespace Renderer

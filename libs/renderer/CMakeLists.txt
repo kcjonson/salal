@@ -24,11 +24,12 @@ add_library(salal_renderer STATIC
     vector/tess/Dict.cpp
     vector/tess/Sweep.cpp
     vector/tess/Triangulate.cpp
-    shader/Shader.cpp
-    shader/ShaderLoader.cpp
-    shader/ShaderPreprocessor.cpp
-    backend/gl/GLNames.cpp
-    resources/RenderToTexture.cpp
+    backend/gl/GLTargets.cpp
+    backend/gl/GLTextures.cpp
+    backend/gl/Shader.cpp
+    backend/gl/ShaderLoader.cpp
+    backend/gl/ShaderPreprocessor.cpp
+    resources/RenderTarget.cpp
     resources/TileTextureAtlas.cpp
     resources/TilePatternBaker.cpp
     resources/TileAtlasBuilder.cpp

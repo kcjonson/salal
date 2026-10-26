@@ -1,7 +1,7 @@
 // Shader Loader implementation
 // Loads shader source from disk and compiles into OpenGL programs
 
-#include "shader/ShaderLoader.h"
+#include "backend/gl/ShaderLoader.h"
 #include <fstream>
 #include <iostream>
 #include <sstream>

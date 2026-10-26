@@ -631,7 +631,7 @@ in [open-decisions.md](open-decisions.md) and the PR sequence is in
 [renderer-boundary.md](renderer-boundary.md). The target is a backend boundary
 with OpenGL 3.3 core as the first backend and Vulkan possible later. The order
 is GL off the public surface (about 25 files), then every texture through
-`gl/GLTexture`, then the offscreen render-target API designed as a backend
+`backend/gl/GLTexture`, then the offscreen render-target API designed as a backend
 object. The full backend interface is a later refactor. Blend state in the batch
 sort key, the offscreen render-target API, and the polygon, arc and wide-line
 primitives must land before a second consumer depends on the renderer API.

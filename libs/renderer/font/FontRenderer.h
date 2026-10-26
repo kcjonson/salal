@@ -224,8 +224,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		struct Atlas {
 			std::map<char, SDFGlyph> glyphs;						// Map of SDF glyphs
 			SDFAtlasMetadata		 metadata{};					// SDF atlas metadata
-			uint32_t				 textureName = 0;				// SDF atlas GL texture name (owned here)
-			TextureHandle			 texture;						// The same texture as a handle
+			TextureHandle			 texture;						// SDF atlas texture in the renderer's table, owned here
 			float					 scaledAscender = 0.0F;			// Ascender for the base font size
 			float					 maxGlyphHeightUnscaled = 0.0F; // Unscaled max glyph height
 			bool					 loaded = false;				// True once successfully loaded

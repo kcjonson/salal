@@ -1,6 +1,6 @@
 // ShaderPreprocessor implementation
 
-#include "shader/ShaderPreprocessor.h"
+#include "backend/gl/ShaderPreprocessor.h"
 
 #include <fstream>
 #include <iostream>
