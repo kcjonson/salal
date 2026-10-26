@@ -5,7 +5,7 @@
 #include "resources/RenderTarget.h"
 
 #include "CoordinateSystem/CoordinateSystem.h"
-#include "backend/gl/GLTextures.h"
+#include "backend/gl/GLBackend.h"
 #include "primitives/Primitives.h"
 
 #include <GL/glew.h>

@@ -4,7 +4,7 @@
 #include "primitives/Primitives.h"
 #include "CoordinateSystem/CoordinateSystem.h"
 #include "backend/gl/GLTargets.h"
-#include "backend/gl/GLTextures.h"
+#include "backend/gl/GLBackend.h"
 #include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "primitives/BatchRenderer.h"

@@ -1,6 +1,6 @@
 #include "resources/TileTextureAtlas.h"
 
-#include "backend/gl/GLTextures.h"
+#include "backend/gl/GLBackend.h"
 
 #include <algorithm>
 #include <utility>

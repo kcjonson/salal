@@ -2,7 +2,7 @@
 
 // What a texture in the renderer's table is made of: the formats it stores and
 // the description Primitives::createTexture takes. No GL here; the GL side maps
-// a TextureFormat to its internal format in backend/gl/GLTextures.cpp.
+// a TextureFormat to its internal format in backend/gl/GLBackend.cpp.
 
 #include <cstdint>
 

@@ -26,7 +26,7 @@ add_library(salal_renderer STATIC
     vector/tess/Sweep.cpp
     vector/tess/Triangulate.cpp
     backend/gl/GLTargets.cpp
-    backend/gl/GLTextures.cpp
+    backend/gl/GLBackend.cpp
     backend/gl/Shader.cpp
     backend/gl/ShaderLoader.cpp
     backend/gl/ShaderPreprocessor.cpp

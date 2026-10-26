@@ -2,7 +2,7 @@
 // (a GL call with no context is undefined on macOS); everything that creates a
 // texture runs on a hidden GL 3.3 core context and skips where none can be made.
 
-#include "backend/gl/GLTextures.h"
+#include "backend/gl/GLBackend.h"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>

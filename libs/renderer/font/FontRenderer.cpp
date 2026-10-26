@@ -1,7 +1,7 @@
 // Font rendering implementation using MSDF (Multi-channel Signed Distance Field) atlas
 
 #include "font/FontRenderer.h"
-#include "backend/gl/GLTextures.h"
+#include "backend/gl/GLBackend.h"
 #include "utils/Log.h"
 #include "utils/ResourcePath.h"
 #include <cstdlib>

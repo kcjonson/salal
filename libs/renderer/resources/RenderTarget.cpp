@@ -2,7 +2,7 @@
 
 #include "backend/gl/GLFramebuffer.h"
 #include "backend/gl/GLTargets.h"
-#include "backend/gl/GLTextures.h"
+#include "backend/gl/GLBackend.h"
 #include "utils/Log.h"
 
 #include <GL/glew.h>
