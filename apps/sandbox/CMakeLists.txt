@@ -1,8 +1,10 @@
-add_executable(sandbox
+add_executable(salal_sandbox
     main.cpp
 )
 
-target_link_libraries(sandbox
+target_link_libraries(salal_sandbox
     PRIVATE
-        app
+        salal::app
 )
+
+set_target_properties(salal_sandbox PROPERTIES OUTPUT_NAME sandbox FOLDER salal)
