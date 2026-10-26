@@ -332,15 +332,16 @@ What is missing is a named-stream `fork` API and the discipline: `std::mt19937`
 is still used in `engine` and the apps outside worldgen. Which generator the
 engine standardises on is decision A.
 
-Found along the way: worldsim's claim of identical output on x64, ARM and WASM
-had never been run on ARM. The first macOS (arm64) run of foundation's tests
-failed three golden-bit tests by one ULP, `DeterministicMath` cos and `HashNoise`
-value and gradient noise. Clang fuses `a*b+c` into an FMA wherever the target
-has one (always on arm64, on x64 only with `-mfma`), and the goldens were
-computed without fusion. `salal_foundation` now sets `-ffp-contract=off` PUBLIC
-for GCC, Clang and AppleClang (not clang-cl); the math is header-inline, so
-every consumer's translation units need the flag and inherit it. It is an
-engine-wide rule now (Settled, in [open-decisions.md](open-decisions.md)).
+Found along the way: worldsim's headers claim bit-identical results across x64,
+ARM and WASM; that had never been tested on ARM. The first macOS (arm64) run of
+foundation's tests failed three golden-bit tests by one ULP, `DeterministicMath`
+cos and `HashNoise` value and gradient noise. Clang fuses `a*b+c` into an FMA
+wherever the target has one (always on arm64, on x64 only with `-mfma`), and the
+goldens were computed without fusion. `salal_foundation` now sets
+`-ffp-contract=off` PUBLIC for GCC, Clang and AppleClang (not clang-cl); the
+math is header-inline, so every consumer's translation units need the flag and
+inherit it. It is an engine-wide rule now (Settled, in
+[open-decisions.md](open-decisions.md)).
 
 `animation` moves into `ui` from dual-deck-builder's design; worldsim has no
 equivalent. `font` moves the other way, out of `ui` and into `renderer`:
@@ -580,7 +581,7 @@ pre-moves first so each import is a pure move. State as of 2026-10-26:
 1. Skeleton hardening, salal [#7](https://github.com/kcjonson/salal/pull/7). `salal_<lib>` targets with
    `salal::<lib>` aliases, `SALAL_BUILD_UI/APP/SANDBOX/TESTS` options that
    default on only for a top-level build, and a configure-time layering check
-   that also keeps `foundation` GL-free. Done.
+   that also keeps `foundation` GL-free. Done, merged as `a2144ac0`.
 2. Foundation import, salal [#8](https://github.com/kcjonson/salal/pull/8). A byte-identical plain copy of worldsim
    @ `870dd755` (38 files; the placeholder `Foundation.*` deleted), with the
    clang-format pass as a separate commit because 24 of the 38 files were out of
@@ -588,20 +589,20 @@ pre-moves first so each import is a pure move. State as of 2026-10-26:
 3. Worldsim pre-move, worldsim [#299](https://github.com/kcjonson/worldsim/pull/299). The tile-pass shaders move into
    `libs/engine/world/rendering/shaders` so the renderer ships only its own;
    the renderer's GL test fixtures now request a 3.3 core context; each app
-   mirrors shaders beside its exe on every build. In CI.
-4. Renderer import, salal. From the worldsim commit after #299: 84 files less
-   the tile shaders, the placeholder `Renderer.*` deleted, stb through
-   `find_package`, msdfgen out of the manifest. The GL fixtures skip without a
-   context, so headless CI passes and a Windows machine with a display runs
-   them. Next, once #299 merges.
+   mirrors shaders beside its exe on every build. Done, merged as `2cc7e40a`.
+4. Renderer import, salal. From worldsim @ `2cc7e40a`: 79 files, the
+   placeholder `Renderer.*` deleted, stb through `find_package`, msdfgen out of
+   the manifest. The GL fixtures skip without a context, so headless CI passes
+   and a Windows machine with a display runs them. In progress.
 5. Tag `v0.1.0`. Next.
 6. Worldsim consumes, worldsim. Delete `libs/foundation` and `libs/renderer`,
-   add the FetchContent block, move 13 `target_link_libraries` lines to the
-   `salal::` targets, point the two `add_dependencies` on `renderer-shaders` at
-   `salal_renderer_shaders`, fix the tests-heavy path filter and the include
-   resolver's roots. Verified by a full Windows build, ctest, ui-sandbox
-   screenshots (text_shapes, sdf_minimal, svg, button) and the world-sim game
-   scene, all identical to before the branch, and green CI. Next.
+   add the FetchContent block, move about a dozen `target_link_libraries` lines
+   to the `salal::` targets, point the four `<app>-shaders` targets'
+   `add_dependencies` at `salal_renderer_shaders` (asset-cli, asset-manager,
+   ui-sandbox and world-sim), fix the tests-heavy path filter and the include
+   resolver's roots. Verify with a full Windows build, ctest, ui-sandbox
+   screenshots on text_shapes, sdf_minimal, svg and button plus the game scene,
+   identical to the pre-branch shots, and green CI. Next.
 7. The GL-boundary PRs, salal, after step 6 so worldsim pins a tag before the
    API moves underneath it; tag `v0.2.0` when they are done. Next.
 
@@ -615,21 +616,24 @@ looks like":
 - `DEVELOPMENT_BUILD` stays a PUBLIC per-config definition on
   `salal_foundation`, because `Log.h` compiles the debug levels out without it.
   The rename to `SALAL_DEVELOPMENT_BUILD` comes before a third consumer.
-- Benchmarks build through `salal_add_benchmarks` and are not registered with
+- `salal_add_tests` also builds `salal_<lib>_benchmarks`, unregistered with
   ctest.
 
 The GL boundary is a phase 1 design item, implemented after the import as its
-own PRs. Worldsim's renderer has 182 direct GL calls in 10 files, and
+own PRs. Worldsim's renderer has about 180 direct GL calls in about ten files
+(measured on worldsim main @ `870dd755`, before the renderer import), and
 `BatchRenderer.h` and `FontRenderer.h` put `<GL/glew.h>` in front of every
 includer; the measurements are under decision G in
 [open-decisions.md](open-decisions.md). The target is a backend boundary with
-OpenGL 3.3 core as the first backend and Vulkan possible later. The order is
-GL off the public surface (about 15 files), then every texture through
+OpenGL 3.3 core as the first backend and Vulkan possible later. The order is GL
+off the public surface (about 15 files), then every texture through
 `gl/GLTexture`, then the offscreen render-target API designed as a backend
-object. The full backend interface is a later refactor. The other design items
-from decision G still have to be right before a second consumer depends on the
-renderer, because they shape the batch sort key and the shader layout: blend
-state in the sort key, and polygon, arc and wide-line primitives.
+object. The full backend interface is a later refactor. Blend state in the batch
+sort key, the offscreen render-target API, and the polygon, arc and wide-line
+primitives must land before a second consumer depends on the renderer API, which
+is after worldsim pins `v0.1.0` (worldsim consumes the renderer as it is,
+behaviour-identical, and takes API changes through a tag bump). Blend state and
+the primitives shape the batch sort key and the shader layout.
 
 Follow-ups recorded and kept out of the moves, so the imports stay pure:
 
@@ -759,5 +763,6 @@ document moves into the salal repo (it did), whether work is tracked in
 Specboard (it is; `.mcp.json` holds the binding), the browser build (dropped,
 above), where input types live (decision D, 2026-10-26: `foundation/input/`,
 with the poller in `app`), and, 2026-10-26, that imports are plain copies, that
-fonts and the atlas tool stay game-side, and that floating-point contraction is
-off engine-wide (all Settled).
+fonts and the atlas tool stay game-side, that floating-point contraction is off
+engine-wide, and that the renderer sits behind a backend boundary (all
+Settled).

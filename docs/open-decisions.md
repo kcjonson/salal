@@ -28,7 +28,8 @@ Written into the docs as decided, with the reason.
 | WebAssembly is not an engine target (2026-10-26) | a temporary playtest idea for dual-deck-builder's migration that had started shaping the engine (the GL ES 3.0 subset rule pushed decision G to LDR-only render targets, the Emscripten CI job cost two vcpkg commits); dual-deck-builder's TypeScript build stays the playtest URL |
 | Imports are plain copies at a named worldsim commit, one commit per library, with the formatting pass in its own commit (2026-10-26) | history stays in worldsim, where blame for an imported file is `git log 870dd755 -- libs/foundation`; a byte-identical copy can be checked against its source, and formatting stays out of that diff (24 of foundation's 38 files were out of line with the shared `.clang-format`). No filter-repo. Foundation arrived this way in [salal#8](https://github.com/kcjonson/salal/pull/8) |
 | Fonts, the font files and the atlas tool stay game-side (2026-10-26); this narrows decision H | worldsim keeps `fonts/`, `tools/generate_sdf_atlas` and the font-atlas target, salal ships no fonts, and `msdfgen` leaves salal's `vcpkg.json`. `FontRenderer` itself is in `renderer` (above) and moves as it is. What remains of H is an API that takes atlas sources and stops calling `std::exit`, not whether salal ships fonts |
-| `-ffp-contract=off` is an engine-wide rule (2026-10-26) | set PUBLIC on `salal_foundation` for GCC, Clang and AppleClang (not clang-cl), so every consumer inherits it. The first macOS arm64 run failed three golden-bit tests by one ULP (`DeterministicMath` cos, `HashNoise` value and gradient noise) because Clang fuses `a*b+c` into an FMA there; worldsim's "identical output on x64, ARM, WASM" had never been run on ARM |
+| `-ffp-contract=off` is an engine-wide rule (2026-10-26) | set PUBLIC on `salal_foundation` for GCC, Clang and AppleClang (not clang-cl), so every consumer inherits it. The first macOS arm64 run failed three golden-bit tests by one ULP (`DeterministicMath` cos, `HashNoise` value and gradient noise) because Clang fuses `a*b+c` into an FMA there; worldsim's headers claim bit-identical results across x64, ARM and WASM; that had never been tested on ARM |
+| The renderer sits behind a backend boundary; OpenGL 3.3 core is the first backend, Vulkan possible later (direction settled 2026-10-26; the design is decision G's first steps) | worldsim's renderer is OpenGL throughout: about 180 direct GL calls in about ten files (measured on worldsim main @ `870dd755`, before the renderer import), and `BatchRenderer.h` and `FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. Nothing is built yet; the first steps (GL off the public surface, textures through `gl/GLTexture`, the render-target API as a backend object) are under decision G, and the full backend interface is a later refactor |
 
 ## A. Engine PRNG
 
@@ -255,8 +256,10 @@ architecture.md keeps hedging about worldsim's own code.
 
 ## G. Render targets, additive blending, particles
 
-Question. Who owns offscreen render targets, blend state and particles, and
-when, given that the batch sort key is fixed in phase 1 and asteroids wants
+Question. Who owns offscreen render targets, blend state, the polygon, arc and
+wide-line primitives, and particles, and when, given that the batch sort key,
+the render-target API and the primitives have to settle before a second consumer
+depends on the renderer API (after worldsim pins `v0.1.0`), and asteroids wants
 bloom, additive glow and particles by Quick Run?
 
 Evidence. `asteroids-roguelike/docs/art-audio.md:17-19, :100-102` ask for
@@ -267,21 +270,26 @@ attachment in
 `worldsim/libs/engine/world/rendering/SurfaceFieldGolden.test.cpp:257`
 (`glFramebufferTexture2D` at `:262`), a test of code that stays in worldsim;
 nothing that moves to salal uses float render targets. Dual-deck-builder's
-batcher sorts by layer ordinal only.
+batcher sorts by layer ordinal only. The polygon, arc and wide-line primitives
+are the required shape additions listed in [architecture.md](architecture.md).
 
-GL isolation, measured in worldsim's renderer on 2026-10-26. There are 182
-direct GL calls in 10 files, 112 of them in `BatchRenderer.cpp` and `shader/`.
+GL isolation, measured on 2026-10-26 in worldsim's renderer (worldsim main @
+`870dd755`, before the renderer import). There are about 180 direct GL calls in
+about ten files, 112 of them in `BatchRenderer.cpp` and `shader/`.
 The `gl/` wrappers are RAII handles and nothing more. `BatchRenderer.h` and
 `FontRenderer.h` leak `<GL/glew.h>` and `GLuint` into every includer.
 `getShaderProgram()` and `getBatchRenderer()` are used by ten files in ui,
 engine and the apps to poke GL directly, and the game's own code makes about 400
 more GL calls outside the renderer.
 
-Recommendation. Renderer gets blend state in the batch sort key and an
-offscreen render-target API in the phase 1 design, so neither is retrofitted
-onto an API three games call. Float colour attachments are allowed; GL 3.3
-core has them without an extension. Particles start game-side over
-Primitives; an engine pool is promoted when a second game wants one.
+Recommendation. Renderer gets blend state in the batch sort key, an offscreen
+render-target API, and polygon, arc and wide-line primitives, all landed before
+a second consumer depends on the renderer API, so none is retrofitted onto an
+API three games call. That point is after worldsim pins `v0.1.0`: worldsim
+consumes the renderer as it is, behaviour-identical, and takes API changes
+through a tag bump. Float colour attachments are allowed; GL 3.3 core has them
+without an extension. Particles start game-side over Primitives; an engine pool
+is promoted when a second game wants one.
 
 The first steps toward a backend boundary (OpenGL 3.3 core as the first
 backend, Vulkan possible later, the full backend interface a later refactor),
@@ -297,8 +305,10 @@ as their own PRs after worldsim pins `v0.1.0`:
 3. Design the offscreen render-target API as a backend object, which is the
    render-target half of this decision.
 
-Needed by. Phase 1, for the sort key and the render-target API (the latter is
-step 3 above). Bloom and particles themselves are Quick Run or later.
+Needed by. Before a second consumer depends on the renderer API, which is
+after worldsim pins `v0.1.0`: blend state in the sort key, the render-target
+API (step 3 above) and the polygon, arc and wide-line primitives. Bloom and
+particles themselves are Quick Run or later.
 
 If deferred. Blend state gets added to the sort key after three games depend
 on its ordering, and additive draws start as per-call GL state changes that
