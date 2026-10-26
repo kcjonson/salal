@@ -9,7 +9,8 @@ everything else grows up out of, which is the job this repo has.
 
 ## Status
 
-**Nothing here yet.** The repo exists to hold the namespace and the plan.
+**The build skeleton is in:** four placeholder libraries, a sandbox stub, and
+CI on Windows, macOS and Linux. No engine code yet.
 
 The engine is being extracted from [worldsim](https://github.com/kcjonson/worldsim),
 which has implemented this architecture once already and is where the code comes

@@ -10,6 +10,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -55,9 +58,6 @@ jobs:
         echo "CC=clang" >> "$GITHUB_ENV"
         echo "CXX=clang++" >> "$GITHUB_ENV"
 
-    - name: Install CMake and Ninja
-      uses: lukka/get-cmake@latest
-
     # The presets name ccache as the compiler launcher, so it has to be on PATH.
     - name: Set up ccache
       uses: hendrikmuhs/ccache-action@v1.2
@@ -79,12 +79,13 @@ jobs:
         echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/vcpkg-binary-cache,readwrite" >> "$GITHUB_ENV"
 
     - name: Restore vcpkg binary cache
-      id: vcpkg-cache
       uses: actions/cache/restore@v4
       with:
         path: ${{ runner.temp }}/vcpkg-binary-cache
-        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**') }}
-        restore-keys: vcpkg-${{ runner.os }}-
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**') }}-${{ github.run_id }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**') }}-
+          vcpkg-${{ runner.os }}-
 
     - name: Set up vcpkg
       uses: lukka/run-vcpkg@v11
@@ -95,13 +96,16 @@ jobs:
       run: cmake --preset ${{ matrix.preset }} ${{ matrix.configure-args }}
 
     # Saved straight after configure, where vcpkg install runs, so a later
-    # compile or test failure doesn't throw away an hour of port builds.
+    # compile or test failure doesn't throw away an hour of port builds. The run
+    # id makes every key unique: a saved key is immutable, so without it a
+    # partial install from a failed configure would own the slot for this
+    # manifest hash forever. Restore takes the newest key with the prefix.
     - name: Save vcpkg binary cache
-      if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+      if: always()
       uses: actions/cache/save@v4
       with:
         path: ${{ runner.temp }}/vcpkg-binary-cache
-        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**') }}
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**') }}-${{ github.run_id }}
 
     - name: Build
       run: cmake --build --preset ${{ matrix.preset }}
