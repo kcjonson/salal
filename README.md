@@ -58,7 +58,7 @@ target dependencies. A consuming game's simulation layer may depend on neither
 Components      scene graph, shapes, widgets, style
 Primitives      immediate-mode: drawRect, drawText, drawCircle
 BatchRenderer   command buffer, sorts by state, minimal draw calls
-OpenGL 3.3+     via GLEW, or WebGL2 via Emscripten
+OpenGL 3.3+     via GLEW
 ```
 
 ## What it is not
@@ -82,7 +82,4 @@ Consumed via CMake FetchContent, pinned to a tag per game.
 
 ## Targets
 
-Windows, macOS and Linux natively. WebAssembly through Emscripten as a playtest
-channel, which constrains the renderer to the GL ES 3.0 subset and means the
-frame loop has to be a tick function the platform calls rather than a loop that
-owns `main()`.
+Windows, macOS and Linux natively.

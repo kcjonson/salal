@@ -49,8 +49,7 @@ of worldsim's code" (`tech-stack.md:110`).
   `multiplayer.md:113`).
 - Layouts (`multiplayer.md:111-117`): two pads; one pad plus keyboard; split
   keyboard (arrows and right-hand keys for P1, WASD and left-hand keys for
-  P2). The split layout is also how two-player web play works without
-  gamepads.
+  P2).
 - Slot claiming: solo, whoever presses a button becomes P1
   (`multiplayer.md:119-120`). Co-op, two cards, each claimed by pressing a
   button on the device that will fly it (`multiplayer.md:124-126`;
@@ -110,9 +109,6 @@ SDL_mixer, SDL2, fmod, portaudio or soloud, only an unused
   (`:91-93`) suggests stereo panning by screen position (inferred).
 - Settings has an audio section (`screens.md:17, 91`): master, music and sfx
   volumes (inferred).
-- Web: the library needs an Emscripten backend, and browser audio-unlock after
-  a user gesture is in no doc; Boot is "skippable on any input"
-  (`screens.md:76-77`), which would serve.
 
 ### Rendering
 
@@ -150,12 +146,10 @@ per-frame transform, ring or arc (partial fill), line with width (beams,
 predicted path), stroke or rim-light on a silhouette, clip or mask by
 silhouette (hold-fill), and a transform or camera stack for wrap ghosts. Bloom
 needs an FBO or render-to-texture, a blur chain, and additive blend state in
-the batch sort key; HDR bloom wants float colour attachments, RGBA16F is not
-colour-renderable in core ES 3.0 without an extension, and salal says no
-extension loader on the web, so LDR bloom sidesteps the question. Particles
-exist nowhere in salal or worldsim; game-side over Primitives is the cheap
-start, an engine pool with batch-friendly additive draw the likely end state.
-Open decision G.
+the batch sort key; HDR bloom wants float colour attachments, which GL 3.3
+core has. Particles exist nowhere in salal or worldsim; game-side over
+Primitives is the cheap start, an engine pool with batch-friendly additive
+draw the likely end state. Open decision G.
 
 ### Inspector
 
@@ -163,8 +157,7 @@ Open decision G.
   `/api/control`, lint 0 before a screenshot, bounds from the tree
   (`tech-stack.md:88-97, :218-220`). The ui-sandbox second executable comes
   with it (`:97-98`).
-- On web, glew and cpp-httplib compile out (`:206`); the dev server sits
-  behind a compile flag (`:259`).
+- The dev server sits behind a compile flag (`:259`).
 - Inferred: an arena drawn with Primitives is invisible to `/api/ui/tree`.
   Verifying it needs game-registered endpoints (sim state, step N ticks, set
   or read the seed, pause), synthetic pad and axis injection in `/api/input`,
@@ -196,9 +189,8 @@ Profiles and per-player fits (`assists.md:44`; `multiplayer.md:128`;
 `screens.md:113-114`), campaign saves with Continue
 (`screens.md:82-83, 164-165`; `modes.md:132-133` mentions save migrations),
 local leaderboards bracketed by fit (`modes.md:109-115`; `screens.md:99-102`),
-settings. Salal has config only. Needs a versioned save abstraction; on web,
-IDBFS or equivalent, which no doc addresses. Leaderboards are local only
-(inferred; no backend, `tech-stack.md:283-287`).
+settings. Salal has config only. Needs a versioned save abstraction.
+Leaderboards are local only (inferred; no backend, `tech-stack.md:283-287`).
 
 ### UI inventory and controller-first rules
 
@@ -500,12 +492,12 @@ Prerequisites and facts the engine side must honour:
   (2026-10-17). First step before Job B: generate a corpus from `--json` and
   commit it in DDB (open decision J).
 - The TypeScript implementation stays until parity; it is the oracle.
-- The playtest deploy it loses: on every push to main, `deploy-sftp.yml`
-  builds `npm run build:web` (Node 24) and mirrors `dist/web/` over SFTP to
+- The playtest deploy: on every push to main, `deploy-sftp.yml` builds
+  `npm run build:web` (Node 24) and mirrors `dist/web/` over SFTP to
   `bearcavinteractive.com/playtest/dual-deckbuilder/` (no hyphen between deck
   and builder); PRs labelled `playtest` deploy to
-  `.../playtest/dual-deckbuilder/<branch>/`. The WebAssembly target is what
-  puts it back.
+  `.../playtest/dual-deckbuilder/<branch>/`. That TypeScript build stays the
+  playtest URL until parity; the C++ build is playtested natively.
 
 Its inputs are plain JSON (`SimConfigInput`: seed default 1, runs 150, crews,
 archetypes, routes, playerAI and enemyAI default 'aggressive', turns 25,
@@ -540,9 +532,8 @@ from the outside:
   which move into the game.
 - Its threads: the `AssetRegistry` load thread, `std::async` in ChunkManager,
   NavigationSystem, AsyncChunkProcessor and PlanetColorizer, the foundation
-  TaskPool. The engine's single-threaded web path is a web constraint;
-  natively, worldsim keeps its threads, and nothing in the extracted libraries
-  may assume one thread.
+  TaskPool. Worldsim keeps them, and nothing in the extracted libraries may
+  assume one thread.
 - Its three GUI apps and their dev-server ports (world-sim 8081, ui-sandbox
   8090, asset-manager 8070), and `apps/asset-cli`, which creates its own GL
   context (`worldsim/apps/asset-cli/Main.cpp:134-149`).
@@ -557,8 +548,7 @@ worldsim's to clean up or leave.
 Its loop is variable-step with a 120 FPS cap, and its scenes implement
 `update(float dt)`. The tick split in phase 2 is mechanical, but the
 fixed-step accumulator is opt-in for worldsim: it keeps variable-step
-behaviour until it chooses otherwise. extraction.md's reason for giving it no
-web build (a 1.3 GiB planet file and threaded worldgen) stands.
+behaviour until it chooses otherwise.
 
 Naming: worldsim's code spells namespaces `Foundation` 19 times and
 `foundation` 13, `Renderer` 31 and `renderer` 11 (plus 14 `renderer::tess`),

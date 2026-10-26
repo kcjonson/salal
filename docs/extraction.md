@@ -15,9 +15,9 @@ dual-deck-builder `afcd7b16` and asteroids-roguelike `176064c`, and fixed in
 place: dual-deck-builder's engine imports zero game code (not one) and was
 rebuilt to a spec abstracted from worldsim; its 740-line sim core drags a
 ~32,900-line import closure; worldsim's dev server lives in `foundation`, has
-twelve routes and no compile flag; twelve shader files, not ten; two production
-GL-context sites, not one; worldsim already has a deterministic PRNG and lacks
-only the fork API; Phase 0 is done and adds an untangling step before phase 1.
+twelve routes and no compile flag; worldsim already has a deterministic PRNG
+and lacks only the fork API; Phase 0 is done and adds an untangling step
+before phase 1.
 Detail: [phase-0-audit.md](phase-0-audit.md),
 [app-carve-out.md](app-carve-out.md),
 [consumer-requirements.md](consumer-requirements.md),
@@ -310,7 +310,7 @@ engine, because all three games want them. The file list with sizes is in
 
 Determinism is a partial gap rather than an absent one. `libs/foundation/random/`
 already has `Pcg32.h` and `SplitMix64.h` with `deriveSeed(seed, streamId)`,
-deterministic and identical across x64, ARM and WASM by its own header comment.
+deterministic and identical across architectures by its own header comment.
 What is missing is a named-stream `fork` API and the discipline: `std::mt19937`
 is still used in `engine` and the apps outside worldgen. Which generator the
 engine standardises on is decision A.
@@ -425,17 +425,13 @@ The web playtest deploy. Dual-deck-builder currently pushes to
 (`.github/workflows/deploy-sftp.yml`), and that is its primary playtest channel
 with Electron builds secondary. You cannot send someone a link to a C++ binary.
 
-**WebAssembly puts it back**, which is the single best argument for the section
-below and changes this from an accepted regression to a temporary one. The
-engine is a clean Emscripten target and both new games are good fits.
-
-Until the web build exists, the gap is partly covered by worldsim's HTTP dev
-server: screenshot capture, element-tree inspection, layout linting and
-synthetic input injection, five of its twelve routes (the rest are health,
-metrics, a dev-command bag, a state handshake, two SSE streams and an index
-page; architecture.md lists them). That serves agent-driven verification well
-and human playtesting not at all. For humans it is a distributed build instead
-of a URL.
+The playtest URL stays the TypeScript build until parity. That build is also
+the differential oracle (next section), so it stays anyway, and the C++ build
+is playtested natively: a distributed binary for humans, plus worldsim's HTTP
+dev server for agent-driven verification (screenshot capture, element-tree
+inspection, layout linting and synthetic input injection, five of its twelve
+routes; the rest are health, metrics, a dev-command bag, a state handshake,
+two SSE streams and an index page, and architecture.md lists them).
 
 ### One rule that does not apply here
 
@@ -445,111 +441,18 @@ TypeScript implementation is the oracle for the differential tests and has to
 stay until parity. Deleting it early throws away the only thing that proves the
 port correct.
 
-## WebAssembly
+## WebAssembly, dropped
 
-**Worth doing, and it recovers the thing the migration costs.** A browser build
-for playtesting puts the playtest URL back, for both new games.
+A browser build was on the table as a playtest channel for the C++ migration,
+to put dual-deck-builder's playtest URL back. Kevin dropped it on 2026-10-26:
+it was only ever a temporary playtest idea, and it had started shaping the
+engine. The GL ES 3.0 subset rule had pushed decision G to LDR-only render
+targets, and the Emscripten CI job had cost two vcpkg commits.
+Dual-deck-builder's TypeScript build remains the playtest URL during the
+migration; any future web build is a best-effort experiment in that repo, with
+no engine guarantees.
 
-This codebase is an unusually clean Emscripten target, and that is a measured
-claim rather than an optimistic one:
-
-- Twelve shader files, 1,473 lines of GLSL. Eight carry `#version 330 core`
-  (`uber.*` and `tile.*` in `libs/renderer/shaders/`, `planet.*` and `blit.*`
-  in `libs/planet-view/shaders/`, which stays in worldsim) and four are
-  headerless includes (`hash_noise`, `instancing`, `land`, `water` under
-  `libs/renderer/shaders/includes/`, 938 of the lines) spliced in by a custom
-  preprocessor (`libs/renderer/shader/ShaderPreprocessor.cpp`). For the
-  renderer that moves, the port is a version header and precision qualifiers
-  in four files; the include mechanism carries over unchanged.
-- No geometry or compute shaders anywhere, no `glMapBuffer`, and all
-  fifteen `glVertexAttribPointer` sites pass VBO offsets. WebGL2 has no
-  geometry stage, and that is the usual blocker. It is absent. The one
-  `GL_RGBA32F` use is a framebuffer colour attachment in
-  `libs/engine/world/rendering/SurfaceFieldGolden.test.cpp:257` (attached at
-  `:262`), a test of code that stays in worldsim; nothing that moves uses
-  float render targets, so `EXT_color_buffer_float` is not needed.
-- The GL 3.3 core context is created in two production sites:
-  `libs/engine/application/AppLauncher.cpp:137-154` (hints, window,
-  `glewInit`), a file headed for `libs/app`, and `apps/asset-cli/Main.cpp:134-149`,
-  which makes its own hidden context and stays in worldsim. Five tests open
-  windows too, four with GL contexts, two of those in libraries that move
-  (`libs/renderer/resources/RenderToTexture.test.cpp:13-25`,
-  `libs/ui/font/FontRenderer.test.cpp:29-39`). So the platform branch lands in
-  one file in the engine, plus two test fixtures.
-- GLM, nanosvg, stb and nlohmann-json are header-only or pure C/C++.
-
-### Toolchain
-
-Emscripten with `--use-port=contrib.glfw3` (its own GLFW3 implementation,
-available since Emscripten 3.1.55), linking with `-sUSE_WEBGL2=1 -sFULL_ES3=1
--sALLOW_MEMORY_GROWTH=1`.
-
-### Porting items
-
-Each is small and each lives in one place, which is the point.
-
-- GLEW compiles out. WebGL needs no extension loader.
-- Shaders become `#version 300 es` with explicit precision qualifiers.
-- The main loop inverts. `emscripten_set_main_loop` drives the frame instead
-  of a `while` loop owning the program.
-- The dev server compiles out. cpp-httplib cannot listen in a browser.
-  Worldsim has no compile flag for it today, only the runtime
-  `AppConfig::enableDebugServer` and `--http-port` (`DebugServer.cpp` has no
-  `#if` at all), so the flag is something the extraction adds.
-- Threads. In worldsim they live in `foundation` (a `threading/TaskPool`; the
-  dev server's `std::thread` at `debug/DebugServer.cpp:260` lived here until
-  it moved to `engine/debug` in phase 0.5), in
-  `engine`'s assets, ECS and chunk code (`std::thread`, `std::async`), in
-  `planet-view`, and in `world` (`std::jthread`). `Application.cpp` only sleeps
-  for frame pacing, and `renderer` and `ui` have nothing beyond `thread_local`
-  scratch buffers. On the web they need SharedArrayBuffer plus COOP/COEP
-  headers; neither new game needs them, so the simplest answer is a
-  single-threaded web path.
-- File I/O goes through preloading or MEMFS rather than the filesystem.
-- `FULL_ES3` emulation costs performance wherever client-side arrays or
-  `glMapBuffer` are used. Use VBOs and the flag stops mattering.
-
-### Per game
-
-- asteroids-roguelike: ideal. 2D, single screen, a few hundred flat shapes,
-  no worldgen, no large assets.
-- dual-deck-builder: good. UI-heavy and simulation-light, and a web build
-  restores exactly the playtest channel the C++ migration takes away.
-- worldsim: no, and it does not need one. A 1.3 GiB planet file and threaded
-  worldgen are not browser work.
-
-### Design for it now, not later
-
-This is the actionable part, and it is a constraint on the extraction rather
-than a separate project:
-
-- Keep the renderer inside the GL ES 3.0 subset. No geometry shaders, no compute,
-  no `glMapBuffer`.
-- Author shaders so a version header swap is the entire change.
-- Make the fixed-step loop a tick function the platform calls, not a loop that
-  owns `main()`. This matters for its own sake and it is what
-  `emscripten_set_main_loop` needs.
-- Put the dev server behind a compile flag from the first commit. Worldsim has
-  none (the server is gated at runtime only), so this is new discipline rather
-  than carried-over discipline.
-- Load assets through an indirection that can be MEMFS. Worldsim's only seam
-  is `foundation/utils/ResourcePath`; every reader after it hits the
-  filesystem directly.
-
-All cheap upfront. All expensive to retrofit once three games depend on the API.
-
-### Not verified
-
-- Whether msdfgen runs at asset-build time or at runtime. At runtime it has to
-  compile to WASM, which is probably fine and is unchecked.
-- Download size. A WASM binary plus SDF atlases plus SVG assets is likely a few
-  megabytes, acceptable for playtesting and unmeasured.
-- Whether the web build gets gamepad support. The browser Gamepad API exists
-  and Emscripten's GLFW port maps to it, but couch co-op in a browser tab is an
-  odd proposition and may not be worth the verification effort.
-- Audio, below.
-
-### Audio is net-new
+## Audio is net-new
 
 Worldsim has **no audio library at all**: nothing in `vcpkg.json`, nothing in
 `libs/`. So the priority mix with ducking, the stem layering driven by
@@ -559,11 +462,9 @@ started, and they are a fourth gap alongside the fixed-step loop, gamepad input
 and determinism. That doc asks for parameter-driven playback, not synthesis;
 "procedural SFX" appears only in `tech-stack.md:138-139`.
 
-The WebAssembly target constrains the choice. miniaudio and OpenAL-soft both have
-Emscripten backends over Web Audio; picking one of those keeps the web build
-possible, and picking something platform-native closes it off. Whether audio
-lives in the engine and which library it uses is decision B; the recommendation
-is a new `audio` library over miniaudio, scheduled after `app` because the
+Whether audio lives in the engine and which library it uses is decision B; the
+recommendation is a new `audio` library over miniaudio (single header,
+permissive licence, cross-platform), scheduled after `app` because the
 asteroids feel prototype wants audible thrust.
 
 ## Sequencing
@@ -631,13 +532,12 @@ roughly this order:
 ### Phase 1, the skeleton, then `foundation` and `renderer`
 
 CMakeLists, `CMakePresets.json` copied, `vcpkg.json` without pugixml, lua and
-sol2, CI on Windows, macOS and Linux plus an Emscripten link-only job. Then the
-two generic libraries move and worldsim consumes them via FetchContent pinned
-to a tag, still building and running identically. Four renderer design items
-have to be right before anyone depends on them, because they shape the batch
-sort key and the shader layout: blend state in the sort key, an offscreen
-render target API, the shader version-swap discipline, and polygon, arc and
-wide-line primitives (decision G).
+sol2, CI on Windows, macOS and Linux. Then the two generic libraries move and
+worldsim consumes them via FetchContent pinned to a tag, still building and
+running identically. Three renderer design items have to be right before
+anyone depends on them, because they shape the batch sort key and the shader
+layout: blend state in the sort key, an offscreen render target API, and
+polygon, arc and wide-line primitives (decision G).
 
 ### Phase 2, carve out `app`
 
@@ -657,8 +557,8 @@ the consumers need from a frame owner and worldsim never built:
   longer exists.
 - A config file loader. Net-new: worldsim's `AppConfig` is a struct, and its
   only "config" is game XML under `assets/config/` parsed by game registries.
-- An asset byte-provider that can be MEMFS. Net-new: `ResourcePath` is the
-  only seam today and every reader after it hits the filesystem directly.
+- A byte-provider seam between asset lookup and file reads, only if a consumer
+  needs one; today worldsim's `findResourceString` path search is enough.
 - The dev server, relocated from `libs/engine/debug`, behind a compile flag, with
   game-registrable endpoints, tick stepping and pad injection.
 - The PRNG fork API (decision A) in `foundation/random`.
@@ -691,13 +591,6 @@ asteroids-roguelike, which needs `foundation`, enough of `renderer` to draw a
 few hundred flat shapes and the debug overlay's text, and the loop. No UI layer
 at all.
 
-The **WebAssembly target is a set of constraints, not a phase**, observed from
-phase 1 onward (see "Design for it now"), with a link-only CI job from
-phase 1. The first actual web build is worth attempting as soon as the
-prototype draws something, because a browser build that works on a white
-triangle and a dozen circles proves the toolchain before there is anything
-complicated to debug.
-
 Each extraction phase is its own branch and PR in worldsim. Not one giant one:
 worldsim is active, and a long-lived extraction branch against an active repo is
 the standard way this fails.
@@ -728,11 +621,6 @@ phase 4 is its own project, and the prototype runs throughout.
 **Versioning.** Three consumers, one developer, pinned tags. Manageable now,
 becomes real with a second developer.
 
-**The web build rots if it is not in CI.** A third build configuration that
-nobody compiles breaks silently and then costs a day to revive. If the
-WebAssembly target is worth having, it belongs in the engine repo's CI from the
-first commit that supports it, even when all it does is link.
-
 ## Open
 
 The questions that need Kevin are in [open-decisions.md](open-decisions.md),
@@ -756,7 +644,6 @@ and each tracked on the board. By letter:
   corpus, which is work in that repo.
 
 Resolved since the first version: the phase 0 audit (done, above), whether this
-document moves into the salal repo (it did), and whether work is tracked in
-Specboard (it is; `.mcp.json` holds the binding). The smaller unknowns, msdfgen
-at build time or run time, WASM download size, and web gamepad support, stay
-under "Not verified" above.
+document moves into the salal repo (it did), whether work is tracked in
+Specboard (it is; `.mcp.json` holds the binding), and the browser build
+(dropped, above).

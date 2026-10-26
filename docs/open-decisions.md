@@ -24,6 +24,7 @@ Written into the docs as decided, with the reason.
 | Phase 0 is complete; an "untangle worldsim" step precedes phase 1 | both ui -> engine and renderer -> ui must be cut before phase 1 can leave worldsim building |
 | The ui-sandbox harness moves with the pure-UI scenes; game-flavoured scenes stay | the harness is generic; Planet, Grass, Tree and Salvage* link planet-view, world and assets |
 | The TileAtlasBuilder bootstrap and asset-system init move out of AppLauncher into the game | `AppLauncher.cpp:209-226` and `:231-264` hardcode terrain surfaces and asset paths |
+| WebAssembly is not an engine target (2026-10-26) | a temporary playtest idea for dual-deck-builder's migration that had started shaping the engine (the GL ES 3.0 subset rule pushed decision G to LDR-only render targets, the Emscripten CI job cost two vcpkg commits); dual-deck-builder's TypeScript build stays the playtest URL |
 
 ## A. Engine PRNG
 
@@ -65,15 +66,15 @@ only an unused `LogCategory::Audio`. Asteroids' feel prototype wants audible
 thrust and impacts (`asteroids-roguelike/docs/physics.md:254-255`), and Quick
 Run wants priority buses with ducking, a looping thrust voice with per-frame
 pitch and filter, pitched one-shots and sample-synchronized stems driven by a
-pressure scalar (`asteroids-roguelike/docs/art-audio.md:72-95`). Both
-candidates asteroids names (`tech-stack.md:197-206`), miniaudio and
-openal-soft, have Emscripten backends over Web Audio.
+pressure scalar (`asteroids-roguelike/docs/art-audio.md:72-95`). Asteroids
+names two candidates (`tech-stack.md:197-206`), miniaudio and openal-soft.
 
 Recommendation. Engine. A new `audio` library beside `renderer`, depending on
 foundation only: a mixer with priority buses and ducking, looping voices with
 per-frame pitch, filter and gain, synchronized stems, one-shots with pitch,
-gain and pan; miniaudio as the backend. Schedule it as phase 2b, after app and
-before ui, because the prototype wants it.
+gain and pan; miniaudio as the backend (single header, permissive licence,
+cross-platform). Schedule it as phase 2b, after app and before ui, because the
+prototype wants it.
 
 Needed by. The asteroids feel prototype, so right after phase 2.
 
@@ -193,17 +194,14 @@ or particles. Worldsim's one `GL_RGBA32F` use is a framebuffer colour
 attachment in
 `worldsim/libs/engine/world/rendering/SurfaceFieldGolden.test.cpp:257`
 (`glFramebufferTexture2D` at `:262`), a test of code that stays in worldsim;
-nothing that moves to salal uses float render targets. Float attachments
-(RGBA16F, RGBA32F) are not colour-renderable in core ES 3.0 without
-EXT_color_buffer_float, and salal forbids an extension loader on the web.
-Dual-deck-builder's batcher sorts by layer ordinal only.
+nothing that moves to salal uses float render targets. Dual-deck-builder's
+batcher sorts by layer ordinal only.
 
 Recommendation. Renderer gets blend state in the batch sort key and an
 offscreen render-target API in the phase 1 design, so neither is retrofitted
-onto an API three games call. Bloom is LDR, which keeps the renderer inside
-core ES 3.0 without EXT_color_buffer_float, an extension no extracted code
-needs today. Particles start game-side over Primitives; an engine pool is
-promoted when a second game wants one.
+onto an API three games call. Float colour attachments are allowed; GL 3.3
+core has them without an extension. Particles start game-side over
+Primitives; an engine pool is promoted when a second game wants one.
 
 Needed by. Phase 1, for the sort key and the render-target API. Bloom and
 particles themselves are Quick Run or later.

@@ -359,10 +359,9 @@ Renderer and ui read directly too: `renderer/shader/Shader.cpp:41-42`,
 `ui/font/FontRenderer.cpp:72-73, :141, :276` (stbi_load),
 `renderer/resources/TileAtlasBuilder.cpp:64`.
 
-No byte-provider or VFS interface exists; ResourcePath is the only seam.
-Emscripten MEMFS would satisfy ifstream, load_file and std::filesystem if
-files are preloaded, but the exe-dir search is native-only. Async load is a
-`std::thread` (`AssetRegistry.cpp:1179`) polled by `SplashScene.cpp:141-143`;
+No byte-provider or VFS interface exists; ResourcePath is the only seam. Async
+load is a `std::thread` (`AssetRegistry.cpp:1179`) polled by
+`SplashScene.cpp:141-143`;
 `--scene` already forces the synchronous path (`AppLauncher.cpp:357`).
 
 ### ECS core
@@ -379,9 +378,9 @@ a product call (open decision E, recommendation: leave it).
 `worldsim/libs/foundation/random/Pcg32.h` (PCG32 `pcg_oneseq_64_xsh_rr_32`,
 8-byte state, constexpr, seeded via SplitMix64, nextUInt32, nextFloat,
 nextDouble, nextRange with Lemire's bounded method; the header says "THE rng
-for world-generation code", "std::mt19937 is banned in worldgen", "identical
-output on x64, ARM, WASM"), `SplitMix64.h` (`splitMix64` and
-`deriveSeed(worldSeed, streamId)` for independent sub-streams),
+for world-generation code" and "std::mt19937 is banned in worldgen", and
+promises identical output across architectures), `SplitMix64.h` (`splitMix64`
+and `deriveSeed(worldSeed, streamId)` for independent sub-streams),
 `HashNoise.h`, plus `foundation/math/DeterministicMath.h`. Seeded,
 deterministic, cross-platform, with seed derivation. No `fork()` on the
 generator and no named-stream forking like DDB's `fork('run', n)`; forking is
@@ -475,7 +474,8 @@ None of this exists in worldsim in any form:
   frame contract)
 - gamepad input, hot-plug and device-to-player-slot claiming
 - a config file loader
-- an asset byte-provider interface that can be MEMFS
+- a byte-provider seam between asset lookup and file reads, only if a consumer
+  needs one; today worldsim's `findResourceString` path search is enough
 - a compile flag for the dev server, with game-registrable endpoints and pad
   and axis injection
 - a named-stream PRNG fork API (decision A)
@@ -485,7 +485,7 @@ None of this exists in worldsim in any form:
 
 ## Frame-contract flags
 
-Twelve things in the current code that the phase-2 design has to answer, in
+Eleven things in the current code that the phase-2 design has to answer, in
 the order they were found.
 
 1. `Application::run()` owns the loop and blocks (`Application.cpp:111-307`);
@@ -505,24 +505,21 @@ the order they were found.
    (`ChunkManager.cpp:108`, `NavigationSystem.cpp:501`,
    `AsyncChunkProcessor.h:115`).
 5. GLFW types in public headers: `Application.h:3-4`, `InputManager.h:4`
-   (members `:121-129`), `ClipboardManager.h:3`. GLFW exists under
-   Emscripten, so not a blocker, but the platform leaks into the API.
+   (members `:121-129`), `ClipboardManager.h:3`. The platform leaks into the
+   API.
 6. Static-lifetime singletons everywhere: `SceneManager::Get()`
    function-static; InputManager, ClipboardManager and FocusManager through
    setInstance; `AssetRegistry::Get()`; a function-static CoordinateSystem
    (`AppLauncher.cpp:171`); the g_* globals. Re-init and headless tests are
    awkward.
 7. `glfwGetTime` is the clock (`Application.cpp:109, :113, :279, :285, :290`).
-   Fine under Emscripten, but a platform-called tick wants a Clock seam.
-8. `glewInit` (`AppLauncher.cpp:153-160`) and 3.3 core window hints
-   (`:137-140`): GLEW is not used under Emscripten and the hints must become
-   ES 3.0.
-9. Three exit flags OR'd at `Application.cpp:111`. In wasm, exit means
-   `emscripten_cancel_main_loop`.
-10. argv parsing and printf help (`AppLauncher.cpp:300-320`): the browser has
-    no argv, so defaults must stand alone.
-11. The hardcoded clear colour and glClear live in the loop
+   A platform-called tick wants a Clock seam.
+8. Three exit flags OR'd at `Application.cpp:111`; a `tick()` that returns
+   `false` collapses them into one.
+9. argv parsing and printf help (`AppLauncher.cpp:300-320`): a headless test
+   constructs the app without argv, so defaults must stand alone.
+10. The hardcoded clear colour and glClear live in the loop
     (`Application.cpp:240-241`); they belong to the scene or the renderer.
-12. `IScene::exportState()` (`Scene.h:64-68`) is a pure-virtual contract for
+11. `IScene::exportState()` (`Scene.h:64-68`) is a pure-virtual contract for
     a route that no longer exists. Deleted during extraction rather than
     carried.

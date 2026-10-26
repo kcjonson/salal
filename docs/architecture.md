@@ -14,7 +14,7 @@ Primitives      immediate-mode: drawRect, drawText, drawCircle
     |
 BatchRenderer   command buffer: accumulate, sort by state, flush
     |
-OpenGL 3.3+     via GLEW natively, WebGL2 via Emscripten
+OpenGL 3.3 core via GLEW
 ```
 
 Components call Primitives every frame. Primitives feed the BatchRenderer. The
@@ -45,8 +45,8 @@ and below a game's `sim` (which consumes the snapshot and may not depend on
 `ui`), so the proposal puts them in `foundation` as plain data and keeps
 everything that touches GLFW in `app`, with no separate `input` library. The
 `audio` row is decision B: the recommendation is an engine library beside
-`renderer` over miniaudio with its Emscripten backend, scheduled after `app`,
-but neither the library nor its placement is settled.
+`renderer` over miniaudio, scheduled after `app`, but neither the library nor
+its placement is settled.
 
 Fonts moving into `renderer` is settled, and forced. Worldsim's
 `renderer/primitives/Primitives.cpp:12` includes `ui/font/FontRenderer.h` and
@@ -133,10 +133,9 @@ states, accumulator clamped so one long frame cannot cascade into a death
 spiral. The default rate is a consumer's choice; `asteroids-roguelike` wants
 120 Hz.
 
-This shape is not negotiable, for two reasons. `emscripten_set_main_loop`
-requires the platform to drive the frame, so a `while` loop in the engine closes
-off the web build entirely. And a tick function is testable headlessly, where a
-loop is not.
+This shape is not negotiable, for two reasons. A tick function is testable
+headlessly, where a loop is not, and the platform, not the engine, owns the
+frame.
 
 Worldsim does not have it today. `Application::run()` owns a variable-step
 loop with a 120 FPS sleep-and-spin cap and no accumulator anywhere in `libs/`
@@ -218,34 +217,10 @@ This is how UI is verified without a human watching. Check `lint` is clean
 before trusting a screenshot, and read bounds from `tree` rather than measuring
 by eye.
 
-The flag matters: no listening sockets in a browser, and none in a shipped build.
+The flag matters: no listening sockets in a shipped build.
 Worldsim has no such flag today; the server is always compiled into
 `foundation` and enabled at runtime by `AppConfig::enableDebugServer` or
 `--http-port`.
-
-## WebAssembly constraints
-
-Emscripten is a supported target, which constrains the renderer permanently:
-
-- Stay inside the GL ES 3.0 subset. No geometry shaders, no compute shaders, no
-  `glMapBuffer`.
-- Shaders are authored so that swapping `#version 330 core` for
-  `#version 300 es` plus precision qualifiers is the entire change. Worldsim's
-  include preprocessor (`libs/renderer/shader/ShaderPreprocessor.cpp`) splices
-  headerless `.glsl` includes, so only top-level files carry a version line.
-- No GL extension loader on the web path; GLEW compiles out.
-- Float colour attachments are not core ES 3.0 and need
-  `EXT_color_buffer_float` under WebGL2. Worldsim's only `GL_RGBA32F` use is a
-  framebuffer colour attachment in a test of code that stays behind
-  (`libs/engine/world/rendering/SurfaceFieldGolden.test.cpp:257`,
-  `glFramebufferTexture2D` at `:262`); nothing that moves to salal uses float
-  render targets. Bloom and any other offscreen pass stay LDR, which keeps the
-  renderer inside core ES 3.0.
-- Asset loading goes through an indirection that can be MEMFS.
-- Prefer VBOs over client-side arrays, so `FULL_ES3` emulation never costs
-  anything.
-- Single-threaded web path. Threads need SharedArrayBuffer plus COOP/COEP
-  headers and no consumer needs them.
 
 ## Portability, including Rust
 
