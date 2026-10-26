@@ -4,6 +4,7 @@
 
 #include "resources/RenderTarget.h"
 
+#include "CoordinateSystem/CoordinateSystem.h"
 #include "backend/gl/GLTextures.h"
 #include "primitives/Primitives.h"
 
@@ -220,6 +221,26 @@ namespace Renderer {
 		EXPECT_EQ(width, 32);
 		expectSolid(pixels, 0, 0, 255, 255);
 		target.end();
+	}
+
+	TEST_F(RenderTargetTest, BackbufferSizeIsTheWindowFramebufferWhenACoordinateSystemIsSet) {
+		// What the app does on a HiDPI window: the framebuffer is larger than the logical
+		// size a world pass may hand setViewport; the backbuffer keeps the framebuffer size.
+		CoordinateSystem coordinateSystem;
+		coordinateSystem.setViewport({.logicalWidth = 16, .logicalHeight = 16, .framebufferWidth = 32, .framebufferHeight = 32});
+		Primitives::setCoordinateSystem(&coordinateSystem);
+		Primitives::setViewport(16, 16);
+		int width = 0;
+		int height = 0;
+		Primitives::readBackbuffer({}, width, height);
+		EXPECT_EQ(width, 32);
+		EXPECT_EQ(height, 32);
+
+		Primitives::setCoordinateSystem(nullptr);
+		Primitives::setViewport(16, 16);
+		Primitives::readBackbuffer({}, width, height);
+		EXPECT_EQ(width, 16);
+		Primitives::setViewport(32, 32);
 	}
 
 } // namespace Renderer

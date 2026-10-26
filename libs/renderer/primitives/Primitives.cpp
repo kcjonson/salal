@@ -174,9 +174,16 @@ namespace Renderer::Primitives {
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->setViewport(width, height);
 		}
-		// A RenderTarget's size is its own; only the backbuffer's is learned from here.
+		// A RenderTarget's size is its own; only the backbuffer's is learned here. With
+		// a coordinate system the window's framebuffer size is the backbuffer, whatever
+		// size a world pass sets the projection to (worldsim's baked pass uses the logical size).
 		if (backend::gl::currentTarget().framebuffer == 0) {
-			backend::gl::setBackbufferSize(width, height);
+			if (g_coordinateSystem != nullptr) {
+				const Viewport& window = g_coordinateSystem->viewport();
+				backend::gl::setBackbufferSize(window.framebufferWidth, window.framebufferHeight);
+			} else {
+				backend::gl::setBackbufferSize(width, height);
+			}
 		}
 	}
 

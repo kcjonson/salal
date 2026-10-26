@@ -145,10 +145,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// and guarantees the later pass paints on top.
 		void flush();
 
-		// Size of the bound target in pixels: the projection for batched drawing,
-		// and, with no RenderTarget open, the backbuffer size the renderer remembers
-		// (what RenderTarget::end() restores and readBackbuffer() reports). The
-		// platform layer calls it with the framebuffer size whenever that changes.
+		// Size of the bound target in pixels: the projection for batched drawing.
+		// With no RenderTarget open it also refreshes the backbuffer size the renderer
+		// remembers (what RenderTarget::end() restores and readBackbuffer() reports):
+		// the coordinate system's framebuffer size when one is set, else width x height.
+		// The platform layer calls it with the framebuffer size whenever that changes.
 		void setViewport(int width, int height);
 
 		// Get current viewport dimensions
