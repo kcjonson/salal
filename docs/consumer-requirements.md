@@ -529,8 +529,8 @@ from the outside:
   `#version 330 core` shaders); the placeholder `game-systems`.
 - The game-flavoured sandbox scenes (Planet, Grass, Tree, Salvage,
   SalvageDialog), which link planet-view, world and assets.
-- The TileAtlasBuilder bootstrap and asset-system init now in AppLauncher,
-  which move into the game.
+- The TileAtlasBuilder bootstrap and asset-system init, which left
+  AppLauncher for the game ([worldsim#296](https://github.com/kcjonson/worldsim/pull/296)).
 - Its threads: the `AssetRegistry` load thread, `std::async` in ChunkManager,
   NavigationSystem, AsyncChunkProcessor and PlanetColorizer, the foundation
   TaskPool. Worldsim keeps them, and nothing in the extracted libraries may
@@ -554,7 +554,8 @@ behaviour until it chooses otherwise.
 Naming: worldsim's code spells namespaces `Foundation` 19 times and
 `foundation` 13, `Renderer` 31 and `renderer` 11 (plus 14 `renderer::tess`),
 `UI` 89 and `ui` 3; `m_` prefixes sit on 33 of 154 engine headers, 2 of 47 in
-ui, 1 of 32 in renderer, 0 in foundation. Code moves without reformatting
-under clang-format, and not under the naming rules. Whether the extracted code
-is renamed on the way across is a phase-1 call that worldsim will feel in
-every include.
+ui, 1 of 32 in renderer, 0 in foundation. Code moves without renaming, and is
+formatted with the shared clang-format in its own commit (24 of foundation's 38
+files needed it). The phase-1 call was not to rename on the way across, so
+worldsim keeps its include lines and namespaces unchanged and the case split is
+filed as a follow-up (extraction.md).
