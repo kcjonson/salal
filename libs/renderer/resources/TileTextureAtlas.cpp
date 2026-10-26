@@ -1,7 +1,7 @@
 #include "resources/TileTextureAtlas.h"
 
 #include "backend/gl/GLNames.h"
-#include "gl/GLTexture.h"
+#include "backend/gl/GLTexture.h"
 
 #include <GL/glew.h>
 #include <algorithm>

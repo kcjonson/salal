@@ -1,6 +1,6 @@
 #include "metrics/GPUTimer.h"
 
-#include "gl/GLQuery.h"
+#include "backend/gl/GLQuery.h"
 
 #include <GL/glew.h>
 #include <array>

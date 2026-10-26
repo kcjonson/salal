@@ -1,8 +1,8 @@
 #include "resources/RenderToTexture.h"
 
+#include "backend/gl/GLFramebuffer.h"
 #include "backend/gl/GLNames.h"
-#include "gl/GLFramebuffer.h"
-#include "gl/GLTexture.h"
+#include "backend/gl/GLTexture.h"
 
 #include <GL/glew.h>
 #include <stdexcept>

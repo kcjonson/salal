@@ -1,7 +1,7 @@
 // Shader utility implementation
 
-#include "shader/Shader.h"
-#include "shader/ShaderPreprocessor.h"
+#include "backend/gl/Shader.h"
+#include "backend/gl/ShaderPreprocessor.h"
 #include "utils/ResourcePath.h"
 #include <filesystem>
 #include <fstream>
