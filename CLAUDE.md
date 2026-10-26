@@ -45,6 +45,9 @@ repo's `specboard.md`.
 - **[docs/consumer-requirements.md](docs/consumer-requirements.md)** is what
   the three games need from the engine, and where their own docs conflict with
   these.
+- **[docs/renderer-boundary.md](docs/renderer-boundary.md)** is the renderer
+  backend-boundary design: the GL leaks on the public surface today, the target
+  handles and declarations, the backend seam, and the PR sequence that lands it.
 
 For how the first consumer intends to use this engine, see `tech-stack.md` in
 `../asteroids-roguelike/docs/`. Its layer diagram, PRNG choice and primitive
