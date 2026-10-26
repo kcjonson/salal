@@ -6,6 +6,11 @@ whether `libs/ui` respects worldsim's documented dependency layering or
 reaches into `libs/engine`. It reaches in, narrowly, and there is a second
 breach in the other direction that the docs never mention.
 
+Phase 0.5 has since landed in worldsim: seven PRs, [worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through
+[worldsim#297](https://github.com/kcjonson/worldsim/pull/297), merged 2026-10-25/26, taking main to 42885471. Everything below is
+the measured state at db335a2b and stays as the record. The fix list at the
+end has a status column, and a few sections carry a "Now" note.
+
 ## How it was measured
 
 A script resolved every `#include` in `libs/` against each library's declared
@@ -19,7 +24,10 @@ Symbol usage (`engine::Key` and so on) was a second pass by grep over
 The resolver is `tools/resolve-includes.mjs` in worldsim, a Node script added
 in [worldsim#291](https://github.com/kcjonson/worldsim/pull/291). Re-run it
 after each untangling step until the ui -> engine and renderer -> ui cells
-read zero.
+read zero. On worldsim main @ 42885471 renderer -> ui reads 0 and ui -> engine
+reads 7, all `input/InputTypes.h` (`Button.cpp:10`, `ContextMenu.h:23`,
+`ListRow.h:18`, `TabBar.cpp:11`, `FocusManager.h:4`, `Focusable.h:4`,
+`InputEvent.h:11`).
 
 ## The documented rule
 
@@ -34,7 +42,7 @@ says to follow the hierarchy strictly and warns that existing code may violate
 the documented standards. The docs never mention `assets` (a separate
 `add_library(assets)` under `libs/engine/assets`) or `planet-view`.
 
-## Declared graph (CMake)
+## Declared graph (CMake), worldsim main @ db335a2b
 
 | target | target_link_libraries | include dirs | notes |
 |---|---|---|---|
@@ -53,7 +61,7 @@ for static libraries. The root CMakeLists adds libs/ui before libs/engine with
 a "dependency order" comment. The apps (ui-sandbox, world-sim, asset-manager)
 link `engine ui renderer foundation assets ...`.
 
-## Actual include graph
+## Actual include graph, worldsim main @ db335a2b
 
 Resolved `#include` counts, production files only. Rows are the including
 library, columns the library the header resolved into.
@@ -164,6 +172,10 @@ uses nothing else from ui and is already lowercase `namespace ui`. Callers:
 `AppLauncher.cpp:37,195`, renderer's Primitives, and ui components including
 `font/FontRenderer.h` (13 includes).
 
+Now: `FontRenderer` and the stb_image TU are in `libs/renderer/font` and
+`libs/renderer` as `Renderer::FontRenderer` ([worldsim#293](https://github.com/kcjonson/worldsim/pull/293)), and the resolver reads
+renderer -> ui 0.
+
 ## foundation's reach
 
 Zero internal violations. Third-party reach that matters for a reusable
@@ -186,6 +198,12 @@ The only gate is runtime, `AppConfig::enableDebugServer` (default false) and
 `--http-port`. architecture.md assigns the dev server to `app`; that is the
 target, and this is the current state.
 
+Now: foundation links only `glm::glm` and has no GL, GLFW, httplib or
+CoreFoundation references. The dev server (`DebugServer`, `LockFreeRingBuffer`)
+lives in `libs/engine/debug`, `PngEncoder` in `libs/engine/graphics` and
+`PerformanceMetrics` in `libs/renderer/metrics`, and `Logger::setDebugServer`
+became a sink ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297)). There is still no compile flag.
+
 ## engine -> ui: the allowed direction, and the seam
 
 Five include lines in three files, all in `application/` and `scene/`. Nothing
@@ -196,7 +214,7 @@ touches ui.
 |---|---|---|
 | `worldsim/libs/engine/application/Application.cpp` | 3, 8 | `focus/FocusManager.h`, `input/InputEvent.h`; constructs `UI::FocusManager` (`:48-49`), builds `UI::InputEvent` from GLFW callbacks (`:163-194`), `getFocusManager()` (`:355`) |
 | `worldsim/libs/engine/application/Application.h` | 16 | forward-declares `namespace UI { class FocusManager; }`; members at `:121`, `:146` |
-| `worldsim/libs/engine/application/AppLauncher.cpp` | 11, 12 | `font/FontRenderer.h`, `input/InputEvent.h`; owns `std::unique_ptr<ui::FontRenderer>` (`:37`, `:195`); injects synthetic `UI::InputEvent`s from the dev server (`:52-80`) |
+| `worldsim/libs/engine/application/AppLauncher.cpp` | 11, 12 | `font/FontRenderer.h`, `input/InputEvent.h`; owns `std::unique_ptr<ui::FontRenderer>` (`:37`, `:195`; now `Renderer::FontRenderer`, [worldsim#293](https://github.com/kcjonson/worldsim/pull/293)); injects synthetic `UI::InputEvent`s from the dev server (`:52-80`) |
 | `worldsim/libs/engine/scene/SceneManager.cpp` | 3 | `input/InputEvent.h`; `SceneManager::handleInput(UI::InputEvent&)` (`SceneManager.h:129`, `.cpp:215`) |
 | `worldsim/libs/engine/scene/Scene.h` | 7 | forward declaration only; `Scene::handleInput(UI::InputEvent&)` `:80`, `Scene::getUiRoots() -> std::vector<const UI::IComponent*>` `:85` |
 | `worldsim/libs/engine/scene/Overlay.h` | 3 | forward declaration only; `Overlay::handleEvent(UI::InputEvent&)` `:26` |
@@ -205,9 +223,11 @@ Legal under worldsim's rule and under salal's (app sits above ui). It matters
 because it is the exact surface `app` will cut along: `Application.cpp`,
 `SceneManager.*`, `InputManager.*` and `ClipboardManager.*` include only
 engine-self, foundation, ui and GLFW. `AppLauncher.cpp` is the odd one in
-application/: it also pulls `assets/AssetRegistry.h`,
+application/: it also pulled `assets/AssetRegistry.h`,
 `assets/RecipeRegistry.h`, engine's `world/chunk/Chunk.h`, renderer's
 `resources/TileAtlasBuilder.h` and foundation's `debug/DebugServer.h`.
+[worldsim#296](https://github.com/kcjonson/worldsim/pull/296) moved the asset and tile atlas bootstrap out of it and
+[worldsim#297](https://github.com/kcjonson/worldsim/pull/297) moved `DebugServer.h` to `libs/engine/debug`.
 [app-carve-out.md](app-carve-out.md) has that file line by line.
 
 ## Verdict
@@ -237,14 +257,21 @@ Nothing here is hard. The order is the "untangle worldsim" step (0.5) in
 [extraction.md](extraction.md); each item is its own small PR in worldsim that
 leaves it building and running identically.
 
-| step | change | cost | notes |
-|---|---|---|---|
-| a | Delete the two dead `InputManager.h` includes (`Button.cpp:10`, `TextInput.cpp:10`) | trivial | |
-| b | Move `input/InputTypes.h` below ui; engine's `InputManager.h:3` includes it from the new place | trivial | foundation if decision D in [open-decisions.md](open-decisions.md) goes as proposed, `libs/ui/input/` otherwise. Leave the `engine::` namespace for the first pass; a rename to `UI::` touches ui 26 files / 98 uses, engine 2 / 15, apps/world-sim 13 / 54, apps/ui-sandbox 3 / 20, asset-manager 0 |
-| c | Clipboard seam: a small interface or `std::function` hooks in ui that `Application.cpp:43-44` installs; TextInput stops calling `engine::ClipboardManager::Get()` | moderate | alternative: move ClipboardManager (one .h/.cpp; deps GLFW, string, Log) down as a platform service. ui already has GLFW transitively through renderer's PUBLIC link |
-| d | Move FontRenderer from `libs/ui/font` to `libs/renderer/font`, namespace `Renderer`; drop renderer's PRIVATE `../ui` include dir | moderate | 13 includes plus `AppLauncher.cpp:37,195` and Primitives to retarget. `Renderer` rather than the standards doc's lowercase because FontFamily, Primitives, BatchRenderer, Shader, CoordinateSystem, metrics/, gl/ and resources/Tile* are all `namespace Renderer` (only vector/ and two resources/ files are lowercase); a lowercase FontRenderer would force `Renderer::FontFamily` qualifiers and a second namespace block in Primitives.h, the shape being removed. Alternative kept for the record: a text-provider interface in renderer that ui implements, the shape `setFontRenderer` injection already has |
-| e | CMake: ui drops `engine` and `httplib`; engine drops `nlohmann_json`; re-run the resolver and confirm ui -> engine and renderer -> ui are both zero | trivial | planet-view-tests can then drop ui |
-| f | Move DebugServer, LockFreeRingBuffer, PerformanceMetrics and PngEncoder out of foundation into `libs/engine` (the proto-app); invert `Logger::setDebugServer` into a generic sink callback; foundation drops OpenGL::GL and httplib | moderate | could land in phase 1 instead, but must land before foundation is extracted |
+| step | change | cost | notes | status |
+|---|---|---|---|---|
+| a | Delete the two dead `InputManager.h` includes (`Button.cpp:10`, `TextInput.cpp:10`) | trivial | | Done, [worldsim#292](https://github.com/kcjonson/worldsim/pull/292) |
+| b | Move `input/InputTypes.h` below ui; engine's `InputManager.h:3` includes it from the new place | trivial | foundation if decision D in [open-decisions.md](open-decisions.md) goes as proposed, `libs/ui/input/` otherwise. Leave the `engine::` namespace for the first pass; a rename to `UI::` touches ui 26 files / 98 uses, engine 2 / 15, apps/world-sim 13 / 54, apps/ui-sandbox 3 / 20, asset-manager 0 | Open, waiting on decision D. 7 includes remain, all `input/InputTypes.h` |
+| c | Clipboard seam: a small interface or `std::function` hooks in ui that `Application.cpp:43-44` installs; TextInput stops calling `engine::ClipboardManager::Get()` | moderate | alternative: move ClipboardManager (one .h/.cpp; deps GLFW, string, Log) down as a platform service. ui already has GLFW transitively through renderer's PUBLIC link | Done, [worldsim#294](https://github.com/kcjonson/worldsim/pull/294): `UI::IClipboard` in `libs/ui/clipboard`, implemented by `engine::ClipboardManager` |
+| d | Move FontRenderer from `libs/ui/font` to `libs/renderer/font`, namespace `Renderer`; drop renderer's PRIVATE `../ui` include dir | moderate | 13 includes plus `AppLauncher.cpp:37,195` and Primitives to retarget. `Renderer` rather than the standards doc's lowercase because FontFamily, Primitives, BatchRenderer, Shader, CoordinateSystem, metrics/, gl/ and resources/Tile* are all `namespace Renderer` (only vector/ and two resources/ files are lowercase); a lowercase FontRenderer would force `Renderer::FontFamily` qualifiers and a second namespace block in Primitives.h, the shape being removed. Alternative kept for the record: a text-provider interface in renderer that ui implements, the shape `setFontRenderer` injection already has | Done, [worldsim#293](https://github.com/kcjonson/worldsim/pull/293): `FontRenderer` and the stb_image TU are in `libs/renderer/font` and `libs/renderer`, namespace `Renderer` |
+| e | CMake: ui drops `engine` and `httplib`; engine drops `nlohmann_json`; re-run the resolver and confirm ui -> engine and renderer -> ui are both zero | trivial | planet-view-tests can then drop ui | Done except `engine` in ui's link list, which waits on b ([worldsim#295](https://github.com/kcjonson/worldsim/pull/295)): ui no longer links httplib, engine no longer links nlohmann_json |
+| f | Move DebugServer, LockFreeRingBuffer, PerformanceMetrics and PngEncoder out of foundation into `libs/engine` (the proto-app); invert `Logger::setDebugServer` into a generic sink callback; foundation drops OpenGL::GL and httplib | moderate | could land in phase 1 instead, but must land before foundation is extracted | Done, [worldsim#297](https://github.com/kcjonson/worldsim/pull/297): `DebugServer.{h,cpp,test.cpp}` and `LockFreeRingBuffer.h` are in `libs/engine/debug`, `PngEncoder.{h,cpp}` in `libs/engine/graphics`, `PerformanceMetrics.{h,cpp}` in `libs/renderer/metrics` (renderer's `MetricsCollector` returns it from its public API); `Logger::setSink(LogSinkFn, void* context)` replaced `setDebugServer`, with an atomic function pointer and atomic context; foundation links only glm. Namespaces stay `Foundation::` for now |
+
+Status as of worldsim main @ 42885471 (2026-10-26): every step landed on
+2026-10-25/26 except b, which waits on decision D in
+[open-decisions.md](open-decisions.md), and the `engine` half of e, which waits
+on b. Two PRs sit outside the list: [worldsim#291](https://github.com/kcjonson/worldsim/pull/291) added the resolver, and
+[worldsim#296](https://github.com/kcjonson/worldsim/pull/296) moved the asset bootstrap out of AppLauncher
+([app-carve-out.md](app-carve-out.md) has it).
 
 Not on the list: the engine <-> assets declared cycle (assets -> engine, 12
 production includes, all in

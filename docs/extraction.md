@@ -2,7 +2,8 @@
 
 Surveyed 2026-10-25, revised the same day after Kevin's decision to migrate
 dual-deck-builder to C++, and revised again the same day after the Phase 0
-surveys. No code moved.
+surveys. No code moved. Updated 2026-10-26 with what phase 0.5 landed in
+worldsim; still no code here.
 
 This is the engine repo. It holds a README, formatter configs, and these docs;
 no code has been extracted yet.
@@ -117,8 +118,8 @@ included.
 
 | Library | Files | Lines | Generic? |
 |---|---|---|---|
-| `foundation` | 45 | 6,739 | Yes, once the HTTP dev server leaves it (it is in `foundation/debug/` today, and foundation links OpenGL and httplib for it) |
-| `renderer` | 69 | 10,021 | Yes, once `FontRenderer` moves in from `ui`; `Primitives.cpp` already includes it |
+| `foundation` | 45 | 6,739 | Yes. The HTTP dev server was in `foundation/debug/` when counted, with OpenGL and httplib linked for it; it moved to `libs/engine/debug` on 2026-10-25/26 ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297)) and foundation now links only glm |
+| `renderer` | 69 | 10,021 | Yes. `FontRenderer` moved in from `ui` on 2026-10-25/26 ([worldsim#293](https://github.com/kcjonson/worldsim/pull/293)); `Primitives.cpp` already included it |
 | `ui` | 100 | 19,469 | Mostly. Audited: it reaches into `engine` through two small headers and nothing else |
 | `engine` | 294 | 75,113 | **Mixed.** Scenes, lifecycle and input are generic (16 files, 2,902 lines); the ECS, colonists, chunks, pathfinding, tasks and crafting are not. The figure bundles two CMake targets: `engine` alone is 236 files and 60,938 lines, and `assets` (58 files, 14,175 lines) is its own target and stays behind |
 | `world` | 79 | 21,460 | No |
@@ -208,9 +209,10 @@ salal's `ui` design (decision C in [open-decisions.md](open-decisions.md)).
 clean enough to move was the smaller question.
 
 Scene management, lifecycle and input sit inside `libs/engine` mixed with the
-game, and the HTTP dev server sits one layer lower still, in
-`libs/foundation/debug/DebugServer.cpp`, which is why foundation links OpenGL
-and httplib today (`libs/foundation/CMakeLists.txt:28-37`). There is no config
+game, and the HTTP dev server sat one layer lower still, in
+`libs/foundation/debug/DebugServer.cpp`, which is why foundation linked OpenGL
+and httplib (`libs/foundation/CMakeLists.txt:28-37`); it has since moved to
+`libs/engine/debug` ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297)), and foundation links only glm. There is no config
 system to extract: `AppConfig` is a C++ struct filled with designated
 initializers in each `main()`. Extract foundation, renderer and ui and you get
 a drawing layer with no way to open a window, run a loop, switch scenes, or
@@ -300,7 +302,8 @@ salal/
 `libs/app/` is new and is the hard part: the generic slice carved out of
 worldsim's `libs/engine` (16 files, 2,902 lines: `application/`, `scene/`,
 `input/`, `clipboard/`), plus the dev server and its metrics plumbing relocated
-up from `foundation` and `renderer` (another ~2,100 lines), plus the fixed-step
+up from `libs/engine/debug` (it left `foundation` in phase 0.5) and `renderer`
+(another ~2,100 lines), plus the fixed-step
 loop, gamepad input and PRNG fork API that [asteroids-roguelike/docs/tech-stack.md](https://github.com/kcjonson/asteroids-roguelike/blob/main/docs/tech-stack.md) found missing. Those belong to the
 engine, because all three games want them. The file list with sizes is in
 [app-carve-out.md](app-carve-out.md).
@@ -317,7 +320,8 @@ equivalent. `font` moves the other way, out of `ui` and into `renderer`:
 worldsim's `renderer/primitives/Primitives.cpp:12` already includes
 `ui/font/FontRenderer.h`, the one place renderer reaches up into ui, and
 `FontRenderer` itself uses nothing else in ui. Moving it removes that knot and
-gives the asteroids prototype's debug overlay text without the ui library.
+gives the asteroids prototype's debug overlay text without the ui library. The
+move landed in worldsim as [worldsim#293](https://github.com/kcjonson/worldsim/pull/293).
 
 The sandbox is the harness from worldsim's `apps/ui-sandbox` plus the scenes
 that are pure UI. Roughly a third of its 27 scenes (Planet, Grass, Tree and the
@@ -492,8 +496,9 @@ Each is small and each lives in one place, which is the point.
   Worldsim has no compile flag for it today, only the runtime
   `AppConfig::enableDebugServer` and `--http-port` (`DebugServer.cpp` has no
   `#if` at all), so the flag is something the extraction adds.
-- Threads. In worldsim they live in `foundation` (the dev server's
-  `std::thread` at `debug/DebugServer.cpp:260`, and a `threading/TaskPool`), in
+- Threads. In worldsim they live in `foundation` (a `threading/TaskPool`; the
+  dev server's `std::thread` at `debug/DebugServer.cpp:260` lived here until
+  it moved to `engine/debug` in phase 0.5), in
   `engine`'s assets, ECS and chunk code (`std::thread`, `std::async`), in
   `planet-view`, and in `world` (`std::jthread`). `Application.cpp` only sleeps
   for frame pacing, and `renderer` and `ui` have nothing beyond `thread_local`
@@ -586,6 +591,14 @@ design; it is gated by two header moves, one clipboard seam and CMake cleanup.
 
 ### Phase 0.5, untangle worldsim
 
+Done 2026-10-25/26 except the `InputTypes.h` move, which waits on decision D
+along with dropping `engine` from `ui`'s link list: [worldsim#292](https://github.com/kcjonson/worldsim/pull/292) (dead includes),
+[worldsim#294](https://github.com/kcjonson/worldsim/pull/294) (clipboard seam), [worldsim#293](https://github.com/kcjonson/worldsim/pull/293) (`FontRenderer`), [worldsim#295](https://github.com/kcjonson/worldsim/pull/295) (CMake, bar the
+`engine` link) and [worldsim#297](https://github.com/kcjonson/worldsim/pull/297) (dev server), plus [worldsim#291](https://github.com/kcjonson/worldsim/pull/291) (the include resolver)
+and [worldsim#296](https://github.com/kcjonson/worldsim/pull/296) (asset bootstrap out of `AppLauncher`). The dev server now lives
+in `libs/engine/debug`, so phase 2's "dev server moves into app" is a move from
+engine, not from foundation. The list below is the plan as written.
+
 Small PRs in worldsim, each leaving it building and running identically, in
 roughly this order:
 
@@ -646,7 +659,7 @@ the consumers need from a frame owner and worldsim never built:
   only "config" is game XML under `assets/config/` parsed by game registries.
 - An asset byte-provider that can be MEMFS. Net-new: `ResourcePath` is the
   only seam today and every reader after it hits the filesystem directly.
-- The dev server, relocated from `foundation`, behind a compile flag, with
+- The dev server, relocated from `libs/engine/debug`, behind a compile flag, with
   game-registrable endpoints, tick stepping and pad injection.
 - The PRNG fork API (decision A) in `foundation/random`.
 - The sandbox harness.

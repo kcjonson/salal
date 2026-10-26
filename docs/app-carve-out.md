@@ -8,6 +8,16 @@ InputSnapshot, scene stack, config) is phase-2 work and is not written here;
 what follows is meant to let that design be written without re-reading
 worldsim.
 
+Seven phase 0.5 PRs ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)) merged 2026-10-25/26, taking
+worldsim main to 42885471. Counts, sizes and line numbers below are the survey
+at db335a2b and stay as the record; rows that changed carry a trailing note.
+Paths that moved: `libs/ui/font/FontRenderer.*` and the stb_image TU to
+`libs/renderer/font` and `libs/renderer` ([worldsim#293](https://github.com/kcjonson/worldsim/pull/293)); `libs/foundation/debug/*`
+to `libs/engine/debug`, `foundation/graphics/PngEncoder.*` to
+`libs/engine/graphics`, and `foundation/metrics/PerformanceMetrics.h` to
+`libs/renderer/metrics` ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297)). `AppLauncher.cpp` line numbers predate
+[worldsim#296](https://github.com/kcjonson/worldsim/pull/296) and [worldsim#297](https://github.com/kcjonson/worldsim/pull/297), which trimmed it.
+
 `libs/engine` is 294 .h/.cpp files and 75,113 lines with tests and benches,
 across two CMake targets: `engine` (236 files, 60,938 lines) and `assets` (58
 files, 14,175 lines, `libs/engine/assets/CMakeLists.txt`). Tests and benches
@@ -54,6 +64,11 @@ because DebugServer calls glReadPixels.
 `ui::FontRenderer`. [phase-0-audit.md](phase-0-audit.md) has the include
 graph.
 
+Since the survey: engine no longer links `nlohmann_json` and ui no longer links
+`httplib` ([worldsim#295](https://github.com/kcjonson/worldsim/pull/295)), foundation links only glm ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297)), and FontRenderer is
+`Renderer::FontRenderer` in `libs/renderer/font`, so renderer no longer reaches
+into ui ([worldsim#293](https://github.com/kcjonson/worldsim/pull/293)). ui still links PUBLIC engine, for `input/InputTypes.h`.
+
 ## Knots
 
 ### AppLauncher.cpp
@@ -62,23 +77,26 @@ The only generic file with game dependencies.
 
 | line | include / use | layer | note |
 |---|---|---|---|
-| :8, :244, :251, :254 | `<assets/AssetRegistry.h>`; setSharedScriptsPath, beginLoadAsync, loadDefinitionsFromFolder | engine/assets (game schema) | bootstraps the game's asset pipeline inside the launcher |
-| :9, :261 | `<assets/RecipeRegistry.h>`; `loadRecipesFromFolder("assets/recipes")` | game (crafting) | |
-| :24, :211-217 | `"world/chunk/Chunk.h"`; Surface::Count, surfaceToString, Chunk::getSurfaceColor | game, transitively libs/world | builds a default tile atlas for terrain surfaces at startup |
-| :16, :38, :213-221 | `<resources/TileAtlasBuilder.h>` | renderer | `TileAtlasBuilder.cpp:64` hardcodes `assets/tiles/surfaces/<name>/pattern.svg` |
-| :231-264 | initializeAssetSystem | game paths | hardcodes `assets/shared/scripts` and `assets/recipes`; `AppConfig.h:46` defaults assetsRootPath to `assets/world` |
-| :11, :37, :195-205 | `<font/FontRenderer.h>`; `ui::FontRenderer` owned as g_fontRenderer | ui | the app layer constructing a ui object and wiring it into Primitives |
+| :8, :244, :251, :254 | `<assets/AssetRegistry.h>`; setSharedScriptsPath, beginLoadAsync, loadDefinitionsFromFolder | engine/assets (game schema) | bootstraps the game's asset pipeline inside the launcher (moved out, 2026-10-25/26) |
+| :9, :261 | `<assets/RecipeRegistry.h>`; `loadRecipesFromFolder("assets/recipes")` | game (crafting) | (moved out, 2026-10-25/26) |
+| :24, :211-217 | `"world/chunk/Chunk.h"`; Surface::Count, surfaceToString, Chunk::getSurfaceColor | game, transitively libs/world | builds a default tile atlas for terrain surfaces at startup (moved out, 2026-10-25/26) |
+| :16, :38, :213-221 | `<resources/TileAtlasBuilder.h>` | renderer | `TileAtlasBuilder.cpp:64` hardcodes `assets/tiles/surfaces/<name>/pattern.svg` (moved out, 2026-10-25/26) |
+| :231-264 | initializeAssetSystem | game paths | hardcodes `assets/shared/scripts` and `assets/recipes`; `AppConfig.h:46` defaults assetsRootPath to `assets/world` (moved out, 2026-10-25/26) |
+| :11, :37, :195-205 | `<font/FontRenderer.h>`; `ui::FontRenderer` owned as g_fontRenderer | ui | the app layer constructing a ui object and wiring it into Primitives (moved out of ui, 2026-10-25/26: now `Renderer::FontRenderer`) |
 | :12, :52, :66-80 | `<input/InputEvent.h>`; UI::InputEvent::mouseMove/Down/Up/scroll | ui | injected-input dispatch from the dev server |
 | :7, :171-176 | CoordinateSystem (function-static instance) | renderer | |
 | :15, :113, :189-205, :221, :279, :284, :401, :470, :475 | Renderer::Primitives::* | renderer | |
 | :14, :96, :334, :397, :474-486 | Renderer::MetricsCollector | renderer/metrics | |
-| :10, :42, :327-331, :405-465, :489-495, :525-528 | Foundation::DebugServer | foundation/debug | control, input, screenshot and metrics plumbing |
-| :18, :287, :323, :328, :342, :350, :526 | foundation::Logger::initialize/shutdown/setDebugServer | foundation | the logger knows the debug server (`Log.h:45`) |
+| :10, :42, :327-331, :405-465, :489-495, :525-528 | Foundation::DebugServer | foundation/debug | control, input, screenshot and metrics plumbing (now in `engine/debug`, 2026-10-25/26) |
+| :18, :287, :323, :328, :342, :350, :526 | foundation::Logger::initialize/shutdown/setDebugServer | foundation | the logger knows the debug server (`Log.h:45`) (now a sink, `Logger::setSink`, 2026-10-25/26) |
 | :19, :235, :242, :259 | Foundation::findResourceString | foundation | |
 | :21-22, :99-166, :285-286, :456 | GLEW and GLFW direct | platform | window hints 3.3 core (:137-140), glewInit (:153) |
 
 The TileAtlasBuilder bootstrap (`:209-226`) and the asset-system init
-(`:231-264`) move out of AppLauncher into the game. Settled.
+(`:231-264`) moved out of AppLauncher ([worldsim#296](https://github.com/kcjonson/worldsim/pull/296)). The init is
+`engine::assets::initializeAssetSystem` in
+`libs/engine/assets/AssetBootstrap.{h,cpp}`, the tile atlas is built in
+`apps/world-sim/GameBootstrap.{h,cpp}`, and both stay in worldsim.
 
 ### Application.{h,cpp}
 
@@ -127,6 +145,12 @@ include `InputManager.h` and never use it. Plan implication: Key and
 MouseButton (133 lines, no deps) must move below ui, and TextInput needs a
 clipboard interface that app implements.
 
+Since the survey: the two dead `InputManager.h` includes are gone ([worldsim#292](https://github.com/kcjonson/worldsim/pull/292)),
+and TextInput reaches the clipboard through `UI::IClipboard` in
+`libs/ui/clipboard`, which `engine::ClipboardManager` implements ([worldsim#294](https://github.com/kcjonson/worldsim/pull/294)).
+The seven `InputTypes.h` includes are what is left of ui -> engine, waiting on
+decision D.
+
 ## Subsystem notes
 
 ### Launcher and Application API
@@ -152,7 +176,11 @@ setWindowResizeCallback, getMetrics(), getDebugServer().
 
 AppConfig (`AppConfig.h`): windowTitle, windowSizePercent, enableDebugServer,
 debugServerPort, enableMetrics, initializeScenes, getDefaultSceneKey,
-remapSceneName, assetsRootPath, loadAssetsAsync.
+remapSceneName, assetsRootPath, loadAssetsAsync. [worldsim#296](https://github.com/kcjonson/worldsim/pull/296) removed
+`assetsRootPath` and `loadAssetsAsync` and added two hooks,
+`initializeResources(bool hasSceneArg)` and `shutdownResources()`; the app now
+brings the asset system up and down through them instead of the launcher
+doing it.
 
 Application (`application/Application.{h,cpp}`): the constructor takes
 `GLFWwindow*`, constructs InputManager, ClipboardManager and
@@ -253,8 +281,9 @@ InputTypes.h.
 ### Config system
 
 There is none. AppConfig is a C++ struct filled with designated initializers in
-each main(). No settings file, no JSON reader; nlohmann is linked by engine's
-CMake but no engine source includes it. What worldsim calls config is XML
+each main(). No settings file, no JSON reader; engine's CMake linked
+nlohmann though no engine source included it (dropped in [worldsim#295](https://github.com/kcjonson/worldsim/pull/295)). What
+worldsim calls config is XML
 under `assets/config/{actions,construction,work}/*.xml`, parsed with pugixml
 by game registries in engine/assets. JSON in worldsim appears only in
 `libs/ui/debug/{UiTreeSerializer,LayoutLint}`,
@@ -263,10 +292,14 @@ config loader for libs/app is net-new.
 
 ### Dev server
 
-Not in libs/engine. `worldsim/libs/foundation/debug/DebugServer.{h,cpp,test.cpp}`
-(297 + 1,064 + 67 lines) plus `debug/LockFreeRingBuffer.h` (71),
-`foundation/metrics/PerformanceMetrics.h` (73) and
-`foundation/graphics/PngEncoder.{h,cpp}` (65). Started by
+Now in `worldsim/libs/engine/debug` ([worldsim#297](https://github.com/kcjonson/worldsim/pull/297), 2026-10-25/26):
+`DebugServer.{h,cpp,test.cpp}` (297 + 1,064 + 67 lines) and
+`LockFreeRingBuffer.h` (71), with `PngEncoder.{h,cpp}` (65) in
+`libs/engine/graphics` and `PerformanceMetrics.h` (73) in
+`libs/renderer/metrics`, because renderer's `MetricsCollector` returns it from
+its public API. All of it was in `libs/foundation` when surveyed, and the line
+numbers below are from there. Namespaces stayed `Foundation::` for now. Still
+enabled through `AppConfig::enableDebugServer` or `--http-port`. Started by
 `AppLauncher.cpp:323-331`. Binds 127.0.0.1 only (`DebugServer.cpp:1052`).
 
 | route | DebugServer.cpp line | what |
@@ -293,12 +326,14 @@ in each app (`apps/ui-sandbox/Main.cpp:27-52`,
 `UI::serializeUiTreeJson` and `lintUiTreeJson` from `libs/ui/debug`.
 AppLauncher does the generic halves: `/api/input` dispatch (`:46-95`),
 `/api/control` (`:414-465`), screenshot, metrics and scene name (`:489-495`).
-Game residue in the foundation server: CameraCommand (`DebugServer.h:44-53`),
+Game residue in the server: CameraCommand (`DebugServer.h:44-53`),
 consumed only by GameScene. `foundation::Logger::setDebugServer` (`Log.h:45`)
-couples the logger to it.
+coupled the logger to it; [worldsim#297](https://github.com/kcjonson/worldsim/pull/297) replaced it with
+`setSink(LogSinkFn, void* context)`, an atomic function pointer plus an atomic
+context.
 
 Compile flag: none. Zero `#if` in DebugServer.cpp/h; it is always compiled
-into foundation and enabled at runtime by `AppConfig.enableDebugServer`
+into foundation (into engine since [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)) and enabled at runtime by `AppConfig.enableDebugServer`
 (default false) or `--http-port`. All three GUI apps enable it (world-sim
 8081, ui-sandbox 8090, asset-manager 8070). DEVELOPMENT_BUILD gates log levels
 only. The hard rule in CLAUDE.md ("behind a compile flag") describes salal and
@@ -401,7 +436,9 @@ Core, moves once the knots are cut (15 files, 2,900 lines):
 | `clipboard/ClipboardManager.h` | 46 |
 | `clipboard/ClipboardManager.cpp` | 63 |
 
-`application/Placeholder.cpp` is dropped.
+`application/Placeholder.cpp` is dropped. `AssetBootstrap`
+(`libs/engine/assets/AssetBootstrap.{h,cpp}`, [worldsim#296](https://github.com/kcjonson/worldsim/pull/296)) is worldsim's asset
+system, so it stays in worldsim and is not part of this slice.
 
 App-layer code parked in foundation and renderer today that AppLauncher owns.
 The first six rows (2,069 lines) move with app, or at least behind app's
@@ -409,14 +446,20 @@ compile flag; the last two stay put and change shape:
 
 | file | lines | note |
 |---|---|---|
-| `foundation/debug/DebugServer.{h,cpp,test.cpp}` | 1,428 | |
-| `foundation/debug/LockFreeRingBuffer.h` | 71 | |
-| `foundation/metrics/PerformanceMetrics.h` | 73 | |
-| `foundation/graphics/PngEncoder.{h,cpp}` | 65 | |
+| `foundation/debug/DebugServer.{h,cpp,test.cpp}` | 1,428 | now `engine/debug` |
+| `foundation/debug/LockFreeRingBuffer.h` | 71 | now `engine/debug` |
+| `foundation/metrics/PerformanceMetrics.h` | 73 | now `renderer/metrics`, next to the `MetricsCollector` that returns it |
+| `foundation/graphics/PngEncoder.{h,cpp}` | 65 | now `engine/graphics` |
 | `renderer/metrics/MetricsCollector.{h,cpp}` | 319 | |
 | `foundation/utils/ResourcePath.{h,cpp}` | 113 | the seed of the asset indirection |
-| `foundation/utils/Log.{h,cpp}` | 301 | stays in foundation; `setDebugServer` inverts into a sink callback |
-| `renderer/resources/TileAtlasBuilder` | 181 | stays in renderer; its bootstrap in `AppLauncher.cpp:209-226` moves to the game |
+| `foundation/utils/Log.{h,cpp}` | 301 | stays in foundation; `setDebugServer` was inverted into a sink callback, `setSink(LogSinkFn, void* context)`, with an atomic function pointer and atomic context |
+| `renderer/resources/TileAtlasBuilder` | 181 | stays in renderer; its bootstrap in `AppLauncher.cpp:209-226` moved to `apps/world-sim/GameBootstrap.{h,cpp}` |
+
+[worldsim#297](https://github.com/kcjonson/worldsim/pull/297) moved the debug, metrics and PNG files and turned the logger's
+coupling into a sink; [worldsim#296](https://github.com/kcjonson/worldsim/pull/296) moved the atlas bootstrap (both 2026-10-25/26).
+DebugServer, LockFreeRingBuffer and PngEncoder are now in engine, so phase 2
+moves them from engine into app. PerformanceMetrics is in renderer because
+`MetricsCollector` returns it from its public API.
 
 Optional: the ECS core, 7 headers, 689 lines.
 
@@ -455,8 +498,8 @@ the order they were found.
    on by default (`AppLauncher.cpp:151`) but `/api/control?action=vsync` can
    disable it (`:456`).
 3. DebugServer runs its own `std::thread` (`DebugServer.cpp:260`) and parks
-   HTTP threads on the game thread. No compile flag; foundation always links
-   httplib and OpenGL for it.
+   HTTP threads on the game thread. No compile flag; foundation linked
+   httplib and OpenGL for it until [worldsim#297](https://github.com/kcjonson/worldsim/pull/297) moved the server into engine.
 4. `AssetRegistry::beginLoadAsync` is a `std::thread`
    (`AssetRegistry.cpp:1179`); the game side also uses `std::async`
    (`ChunkManager.cpp:108`, `NavigationSystem.cpp:501`,
