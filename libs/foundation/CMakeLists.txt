@@ -1,6 +1,6 @@
 find_package(glm CONFIG REQUIRED)
 
-add_library(salal_foundation
+add_library(salal_foundation STATIC
     Foundation.cpp
 )
 add_library(salal::foundation ALIAS salal_foundation)

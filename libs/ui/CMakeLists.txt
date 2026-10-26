@@ -1,4 +1,4 @@
-add_library(salal_ui
+add_library(salal_ui STATIC
     Ui.cpp
 )
 add_library(salal::ui ALIAS salal_ui)

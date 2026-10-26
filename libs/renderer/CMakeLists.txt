@@ -1,4 +1,4 @@
-add_library(salal_renderer
+add_library(salal_renderer STATIC
     Renderer.cpp
 )
 add_library(salal::renderer ALIAS salal_renderer)

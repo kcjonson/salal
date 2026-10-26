@@ -1,4 +1,4 @@
-add_library(salal_app
+add_library(salal_app STATIC
     App.cpp
 )
 add_library(salal::app ALIAS salal_app)
