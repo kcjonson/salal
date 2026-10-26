@@ -289,7 +289,9 @@ API three games call. That point is after worldsim pins `v0.1.0`: worldsim
 consumes the renderer as it is, behaviour-identical, and takes API changes
 through a tag bump. Float colour attachments are allowed; GL 3.3 core has them
 without an extension. Particles start game-side over Primitives; an engine pool
-is promoted when a second game wants one.
+is promoted when a second game wants one. The design, with the public-surface
+audit, the target declarations, the backend seam and the PR sequence, is
+[renderer-boundary.md](renderer-boundary.md).
 
 The first steps toward a backend boundary (OpenGL 3.3 core as the first
 backend, Vulkan possible later, the full backend interface a later refactor),
