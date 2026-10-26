@@ -77,8 +77,9 @@ namespace Renderer {
 		if (!impl || !impl->inUse) {
 			return;
 		}
-		backend::gl::popTarget(impl->fbo);
-		impl->inUse = false;
+		if (backend::gl::popTarget(impl->fbo)) {
+			impl->inUse = false;
+		}
 	}
 
 	TextureHandle RenderTarget::texture() const {

@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -26,6 +27,12 @@ namespace Renderer::backend::gl {
 		updateTexture(TextureHandle{}, 0, 0, 1, 1, pixel.data());
 		destroyTexture(TextureHandle{});
 		destroyTexture(TextureHandle::make(999, 0));
+	}
+
+	TEST(GLTexturesTest, NoContextGivesNoHandle) {
+		// With no GL context current, glGenTextures issues nothing; the table must not
+		// hand out a handle that resolves to texture 0.
+		EXPECT_FALSE(createTexture({.width = 2, .height = 2}).isValid());
 	}
 
 	class GLTexturesContextTest : public ::testing::Test {
@@ -183,6 +190,20 @@ namespace Renderer::backend::gl {
 	TEST_F(GLTexturesContextTest, EmptySizeIsRefused) {
 		EXPECT_FALSE(createTexture({.width = 0, .height = 4}).isValid());
 		EXPECT_FALSE(createTexture({.width = 4, .height = -1}).isValid());
+	}
+
+	TEST_F(GLTexturesContextTest, UpdateOutsideTheTextureIsRefused) {
+		const std::array<uint8_t, 16> initial{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+		const TextureHandle			  handle = createTexture({.width = 2, .height = 2, .pixels = initial.data()});
+		ASSERT_TRUE(handle.isValid());
+
+		const std::array<uint8_t, 16> zeros{};
+		updateTexture(handle, 1, 1, 2, 2, zeros.data()); // overhangs right and bottom
+		updateTexture(handle, -1, 0, 1, 1, zeros.data());
+		updateTexture(handle, 0, 0, 0, 1, zeros.data());
+		updateTexture(handle, 0, 0, 3, 1, zeros.data());
+		EXPECT_EQ(readBack(handle, 2, 2, 4), std::vector<uint8_t>(initial.begin(), initial.end()));
+		destroyTexture(handle);
 	}
 
 } // namespace Renderer::backend::gl

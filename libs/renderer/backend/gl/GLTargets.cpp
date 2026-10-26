@@ -30,13 +30,19 @@ namespace Renderer::backend::gl {
 		bind(stack().back());
 	}
 
-	void popTarget(GLuint framebuffer) {
+	bool popTarget(GLuint framebuffer) {
 		if (stack().size() < 2 || stack().back().framebuffer != framebuffer) {
-			LOG_ERROR(Renderer, "popTarget: framebuffer %u is not the bound render target", framebuffer);
-			return;
+			// A caller bug (end() out of nesting order); once, or it would repeat every frame.
+			static bool warned = false;
+			if (!warned) {
+				warned = true;
+				LOG_ERROR(Renderer, "popTarget: framebuffer %u is not the bound render target; the pop is refused", framebuffer);
+			}
+			return false;
 		}
 		stack().pop_back();
 		bind(stack().back());
+		return true;
 	}
 
 	const BoundTarget& currentTarget() {

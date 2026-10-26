@@ -25,8 +25,9 @@ namespace Renderer::backend::gl {
 	void pushTarget(GLuint framebuffer, int width, int height);
 
 	// Pop `framebuffer`, which must be the current target, and rebind the one
-	// below it with its viewport. A mismatch is logged and leaves the stack alone.
-	void popTarget(GLuint framebuffer);
+	// below it with its viewport. A mismatch (an inner target still open) leaves
+	// the stack alone, logs once, and returns false.
+	bool popTarget(GLuint framebuffer);
 
 	const BoundTarget& currentTarget();
 	const BoundTarget& backbuffer();

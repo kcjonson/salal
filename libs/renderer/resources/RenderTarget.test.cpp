@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace Renderer {
@@ -238,6 +239,38 @@ namespace Renderer {
 
 		Primitives::setCoordinateSystem(nullptr);
 		Primitives::setViewport(16, 16);
+		Primitives::readBackbuffer({}, width, height);
+		EXPECT_EQ(width, 16);
+		Primitives::setViewport(32, 32);
+	}
+
+	TEST_F(RenderTargetTest, MisnestedEndIsRefusedAndTheStackRecovers) {
+		RenderTarget outer = RenderTarget::create(8, 8);
+		RenderTarget inner = RenderTarget::create(2, 2);
+		ASSERT_TRUE(outer.isValid());
+		ASSERT_TRUE(inner.isValid());
+
+		outer.begin();
+		const GLint outerFbo = boundFramebuffer();
+		inner.begin();
+		const GLint innerFbo = boundFramebuffer();
+
+		outer.end(); // refused: inner is still open
+		EXPECT_EQ(boundFramebuffer(), innerFbo);
+		EXPECT_EQ(viewport(), (std::array<GLint, 4>{0, 0, 2, 2}));
+
+		inner.end();
+		EXPECT_EQ(boundFramebuffer(), outerFbo);
+		EXPECT_EQ(viewport(), (std::array<GLint, 4>{0, 0, 8, 8}));
+
+		outer.end(); // still begun, so this one pops
+		EXPECT_EQ(boundFramebuffer(), 0);
+		EXPECT_EQ(viewport(), (std::array<GLint, 4>{0, 0, 32, 32}));
+
+		// Back at the backbuffer: setViewport refreshes its size again.
+		Primitives::setViewport(16, 16);
+		int width = 0;
+		int height = 0;
 		Primitives::readBackbuffer({}, width, height);
 		EXPECT_EQ(width, 16);
 		Primitives::setViewport(32, 32);

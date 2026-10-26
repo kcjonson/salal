@@ -4,7 +4,6 @@
 // the description Primitives::createTexture takes. No GL here; the GL side maps
 // a TextureFormat to its internal format in backend/gl/GLTextures.cpp.
 
-#include "Handle.h"
 #include <cstdint>
 
 namespace Renderer { // NOLINT(readability-identifier-naming)

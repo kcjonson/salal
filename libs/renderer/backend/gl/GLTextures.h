@@ -19,7 +19,8 @@ namespace Renderer::backend::gl {
 	// invalid, with an error logged, for an empty size or a full table.
 	TextureHandle createTexture(const TextureDesc& desc);
 
-	// Replace the rectangle with `pixels` in the texture's format; nothing for a stale handle.
+	// Replace the rectangle with `pixels` in the texture's format; nothing for a stale
+	// handle, and a rectangle outside the texture is refused with an error logged.
 	void updateTexture(TextureHandle handle, int x, int y, int width, int height, const void* pixels);
 
 	// Delete the GL texture and free the slot; nothing for a stale or invalid handle.

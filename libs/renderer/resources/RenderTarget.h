@@ -35,7 +35,9 @@ namespace Renderer {
 		// Bind as the current target, viewport over the whole texture.
 		void begin();
 
-		// Rebind the target below (the backbuffer at the bottom) and its viewport.
+		// Rebind the target below (the backbuffer at the bottom) and its viewport. An
+		// end() while an inner target is still open is refused (logged once) and the
+		// target stays begun, so ending the inner one and then this one recovers.
 		void end();
 
 		[[nodiscard]] TextureHandle texture() const;

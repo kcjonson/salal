@@ -87,6 +87,11 @@ namespace Renderer::backend::gl {
 		setUnpackAlignment(desc.format);
 		slot.texture = GLTexture(desc.width, desc.height, gl.internal, gl.format, gl.type, desc.pixels);
 		setUnpackAlignment(TextureFormat::Rgba8);
+		if (!slot.texture.isValid()) { // glGenTextures issued nothing: no GL context is current
+			LOG_ERROR(Renderer, "createTexture: GL issued no texture for %dx%d; is a GL context current?", desc.width, desc.height);
+			freeSlots().push_back(index);
+			return {};
+		}
 		if (!desc.linear) { // GLTexture's constructor set linear and left the texture bound
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -100,6 +105,20 @@ namespace Renderer::backend::gl {
 	void updateTexture(TextureHandle handle, int x, int y, int width, int height, const void* pixels) {
 		Slot* slot = slotFor(handle);
 		if (slot == nullptr || pixels == nullptr) {
+			return;
+		}
+		const GLTexture& texture = slot->texture;
+		if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > texture.width() || y + height > texture.height()) {
+			LOG_ERROR(
+				Renderer,
+				"updateTexture: rectangle %d,%d %dx%d is outside the %dx%d texture",
+				x,
+				y,
+				width,
+				height,
+				texture.width(),
+				texture.height()
+			);
 			return;
 		}
 		const GLFormat gl = glFormat(slot->format);
