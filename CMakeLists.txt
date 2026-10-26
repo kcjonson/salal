@@ -44,7 +44,4 @@ add_subdirectory(libs/renderer)
 add_subdirectory(libs/ui)
 add_subdirectory(libs/app)
 
-# The sandbox needs a window, so it is native only.
-if(NOT EMSCRIPTEN)
-    add_subdirectory(apps/sandbox)
-endif()
+add_subdirectory(apps/sandbox)

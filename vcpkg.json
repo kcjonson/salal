@@ -2,9 +2,9 @@
   "name": "salal",
   "version": "0.1.0",
   "dependencies": [
-    { "name": "opengl", "platform": "!emscripten" },
-    { "name": "glfw3", "platform": "!emscripten" },
-    { "name": "glew", "platform": "!emscripten" },
+    "opengl",
+    "glfw3",
+    "glew",
     "glm",
     "nlohmann-json",
     "stb",
@@ -14,9 +14,9 @@
       "default-features": false,
       "features": ["extensions"]
     },
-    { "name": "cpp-httplib", "platform": "!emscripten" },
-    { "name": "gtest", "platform": "!emscripten" },
-    { "name": "benchmark", "platform": "!emscripten" }
+    "cpp-httplib",
+    "gtest",
+    "benchmark"
   ],
   "builtin-baseline": "bfc6984dcbe4a165741aa95411cb5e77d9c88068",
   "overrides": [

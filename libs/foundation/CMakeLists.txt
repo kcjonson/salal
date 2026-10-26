@@ -2,6 +2,7 @@ add_library(foundation
     Foundation.cpp
 )
 
+target_compile_features(foundation PUBLIC cxx_std_20)
 target_include_directories(foundation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # The bottom layer: no salal library below it.

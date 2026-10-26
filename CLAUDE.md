@@ -62,7 +62,9 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 
 ## Status and what to work on
 
-Nothing is built. **Phase 0, the audit, is done** (2026-10-25); findings in
+The build skeleton is in: four placeholder libraries, a sandbox stub, and CI on
+Windows, macOS and Linux. No engine code yet. **Phase 0, the audit, is done**
+(2026-10-25); findings in
 [docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
 `clipboard/ClipboardManager.h`), its `renderer` reached back into `ui` through
@@ -77,8 +79,8 @@ the CMake cleanup landed, and the dev server left `foundation` for
 dropping `engine` from ui's link list, both waiting on decision D.
 
 Next is **decision D** (where input types live), which unblocks that move.
-Then phase 1, the skeleton here and the extraction of `foundation` and
-`renderer`; phase 2 carves `app` out of `libs/engine`; `ui` is extracted last.
+Then phase 1, extracting `foundation` and `renderer` into the skeleton here;
+phase 2 carves `app` out of `libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -173,10 +175,10 @@ removing legacy code. One way to do each thing.
 ## Verifying changes
 
 There is no game in this repo, so the verification loop is the **sandbox app**
-plus the HTTP dev server, both of which come across from worldsim and do not
-exist here yet.
+plus the HTTP dev server. The sandbox is a stub today (`apps/sandbox`, links
+`app` and exits); the real one and the server come across from worldsim.
 
-Once they do: `/api/ui/screenshot`, `/api/ui/tree` for element bounds,
+Once they are in: `/api/ui/screenshot`, `/api/ui/tree` for element bounds,
 `/api/ui/lint` for layout invariant violations (expect `"count":0` before
 screenshotting anything), `/api/input` for synthetic input, `/api/control` for
 scene switching and shutdown. Those five are the contract every app exposes.
@@ -194,21 +196,25 @@ macOS and Linux, Ninja Multi-Config with MSVC on Windows, ccache in front of
 both. `CMakePresets.json` is worldsim's, unchanged.
 
 ```
-cmake --preset windows        # or: cmake --preset default
+cmake --preset windows        # or: cmake --preset default -DCMAKE_BUILD_TYPE=Debug
 cmake --build --preset windows
 ctest --test-dir build -C Debug
 ```
 
+The `windows` preset names `cl` bare, so run configure from a Visual Studio
+developer shell (or after `vcvars64.bat`), where it resolves.
+
 The libraries are placeholders until phase 1 moves code in: one translation
-unit and one gtest each, there to exercise the wiring. Each lib's `*.test.cpp`
-files become `<lib>-tests` through `salal_add_tests` in
-`cmake/SalalTesting.cmake`. CI (`.github/workflows/ci.yml`) builds and tests on
-Windows, macOS and Linux and checks clang-format 21; `web.yml` compiles
-`foundation` and `renderer` for `wasm32-emscripten` and is not a required check.
+unit and one gtest each, there to exercise the wiring. Their namespaces
+(`foundation`, `renderer`, `ui`, `app`, lowercase per the coding-standards doc)
+are not a decision about the namespaces of moved worldsim code; that casing is
+an open worldsim follow-up. Each lib's `*.test.cpp` files become `<lib>-tests`
+through `salal_add_tests` in `cmake/SalalTesting.cmake`. CI
+(`.github/workflows/ci.yml`) builds and tests on Windows, macOS and Linux and
+checks clang-format 21.
 
 Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
-`nanosvg`, `msdfgen`, `cpp-httplib`, `gtest`, `benchmark`, the native-only ones
-qualified `!emscripten` in `vcpkg.json`. Worldsim's
+`nanosvg`, `msdfgen`, `cpp-httplib`, `gtest`, `benchmark`. Worldsim's
 `pugixml`, `lua` and `sol2` serve its `assets` target and stay behind. An audio
 library is proposed and not decided (worldsim has none; `miniaudio` with its
 Emscripten backend is the recommendation).
