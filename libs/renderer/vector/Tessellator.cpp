@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 
 namespace renderer {
 
@@ -15,12 +16,14 @@ namespace renderer {
 
 		constexpr size_t kMaxOutputVertices = 65535; // index type is uint16_t
 
-		// Convex test: all edge cross products share a sign. Convex shapes can use an O(n) fan.
+		// Convex test: all edge cross products share a sign and the outline turns once round,
+		// which a pentagram (same-sign turns, twice round) does not. Convex shapes can use an O(n) fan.
 		bool isConvexPolygon(const std::vector<Foundation::Vec2>& vertices) {
 			if (vertices.size() < 3) {
 				return false;
 			}
 			int			 sign = 0;
+			float		 turning = 0.0F;
 			const size_t n = vertices.size();
 			for (size_t i = 0; i < n; ++i) {
 				const auto&		 p0 = vertices[i];
@@ -38,8 +41,10 @@ namespace renderer {
 				} else if (sign != currentSign) {
 					return false;
 				}
+				turning += std::atan2(cross, (edge1.x * edge2.x) + (edge1.y * edge2.y));
 			}
-			return true;
+			// One turn round is 2 pi, twice is 4 pi; anything past 3 pi crosses itself.
+			return std::abs(turning) < 3.0F * std::numbers::pi_v<float>;
 		}
 
 		// Fan from an inserted centroid: one interior sample point so per-vertex gradient fills
