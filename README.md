@@ -9,9 +9,12 @@ everything else grows up out of, which is the job this repo has.
 
 ## Status
 
-**`foundation` and `renderer` are imported** from worldsim as plain copies;
-`ui` and `app` are placeholders, with a sandbox stub and CI on Windows, macOS
-and Linux.
+**`foundation` and `renderer` are imported** from worldsim as plain copies,
+`v0.1.0` is tagged, and worldsim consumes it through FetchContent; `ui` and
+`app` are placeholders, with a sandbox stub and CI on Windows, macOS and Linux.
+The renderer backend boundary is designed in
+[docs/renderer-boundary.md](docs/renderer-boundary.md), and its first PR is in
+progress.
 
 The engine is being extracted from [worldsim](https://github.com/kcjonson/worldsim),
 which has implemented this architecture once already and is where the code comes

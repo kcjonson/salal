@@ -5,9 +5,9 @@ dual-deck-builder to C++, and revised again the same day after the Phase 0
 surveys. Updated 2026-10-26 with what phase 0.5 landed in worldsim, and again
 with how phase 1 is being executed and what scoping it turned up.
 
-This is the engine repo. `foundation` is imported (a plain copy of worldsim at
-`870dd755`); `renderer`, `ui` and `app` are placeholders until their phases
-land. "Sequencing" below says where each stands.
+This is the engine repo. `foundation` and `renderer` are imported (plain copies
+of worldsim at `870dd755` and `2cc7e40a`); `ui` and `app` are placeholders until
+their phases land. "Sequencing" below says where each stands.
 
 ## Corrections in this revision (2026-10-25)
 
@@ -571,12 +571,13 @@ roughly this order:
 
 ### Phase 1, the skeleton, then `foundation` and `renderer`
 
-Under way. The skeleton (CMake, `CMakePresets.json` copied, a `vcpkg.json`
-without pugixml, lua and sol2, CI on Windows, macOS and Linux) was in before
-the first step below. Then the two generic libraries move and worldsim consumes
-them via FetchContent pinned to a tag, still building and running identically.
-The order is small PRs alternating between the two repos, with worldsim's
-pre-moves first so each import is a pure move. State as of 2026-10-26:
+The import and the worldsim pin are done; the GL-boundary PRs are what remains
+of phase 1. The skeleton (CMake, `CMakePresets.json` copied, a `vcpkg.json`
+without pugixml, lua and sol2, CI on Windows, macOS and Linux) was in before the
+first step below. Then the two generic libraries move and worldsim consumes them
+via FetchContent pinned to a tag, still building and running identically. The
+order is small PRs alternating between the two repos, with worldsim's pre-moves
+first so each import is a pure move. State as of 2026-10-26:
 
 1. Skeleton hardening, salal [#7](https://github.com/kcjonson/salal/pull/7). `salal_<lib>` targets with
    `salal::<lib>` aliases, `SALAL_BUILD_UI/APP/SANDBOX/TESTS` options that
@@ -593,8 +594,8 @@ pre-moves first so each import is a pure move. State as of 2026-10-26:
 4. Renderer import, salal. From worldsim @ `2cc7e40a`: 79 files, the
    placeholder `Renderer.*` deleted, stb through `find_package`, msdfgen out of
    the manifest. The GL fixtures skip without a context, so headless CI passes
-   and a Windows machine with a display runs them. In progress.
-5. Tag `v0.1.0`. Next.
+   and a Windows machine with a display runs them. Done, merged as `1b433304`.
+5. Tag `v0.1.0`. Done 2026-10-26, tagged at `1b433304`.
 6. Worldsim consumes, worldsim. Delete `libs/foundation` and `libs/renderer`,
    add the FetchContent block, move about a dozen `target_link_libraries` lines
    to the `salal::` targets, point the four `<app>-shaders` targets'
@@ -602,11 +603,12 @@ pre-moves first so each import is a pure move. State as of 2026-10-26:
    ui-sandbox and world-sim), fix the tests-heavy path filter and the include
    resolver's roots. Verify with a full Windows build, ctest, ui-sandbox
    screenshots on text_shapes, sdf_minimal, svg and button plus the game scene,
-   identical to the pre-branch shots, and green CI. Next.
+   identical to the pre-branch shots, and green CI. Done 2026-10-26, merged as
+   `4a68085f`.
 7. The GL-boundary PRs, salal, after step 6 so worldsim pins a tag before the
    API moves underneath it: four PRs, tagged `v0.2.0` through `v0.5.0` with a
    worldsim pin after each, sequenced in
-   [renderer-boundary.md](renderer-boundary.md). Next.
+   [renderer-boundary.md](renderer-boundary.md). PR 1 in progress.
 
 Settled while scoping, beyond the import method and fonts under "What the repo
 looks like":
@@ -622,18 +624,18 @@ looks like":
   ctest.
 
 The GL boundary is a phase 1 design item, implemented after the import as its
-own PRs. Worldsim's renderer has about 180 direct GL calls in about ten files
-(measured on worldsim main @ `870dd755`, before the renderer import), and
-`BatchRenderer.h` and `FontRenderer.h` put `<GL/glew.h>` in front of every
-includer; the measurements are under decision G in
-[open-decisions.md](open-decisions.md). The target is a backend boundary with
-OpenGL 3.3 core as the first backend and Vulkan possible later. The order is GL
-off the public surface (about 15 files), then every texture through
+own PRs. Worldsim's renderer has 182 direct GL calls in twelve files (measured
+on worldsim @ `2cc7e40a`), and `BatchRenderer.h` and `FontRenderer.h` put
+`<GL/glew.h>` in front of every includer; the measurements are under decision G
+in [open-decisions.md](open-decisions.md) and the PR sequence is in
+[renderer-boundary.md](renderer-boundary.md). The target is a backend boundary
+with OpenGL 3.3 core as the first backend and Vulkan possible later. The order
+is GL off the public surface (about 25 files), then every texture through
 `gl/GLTexture`, then the offscreen render-target API designed as a backend
 object. The full backend interface is a later refactor. Blend state in the batch
 sort key, the offscreen render-target API, and the polygon, arc and wide-line
-primitives must land before a second consumer depends on the renderer API, which
-is after worldsim pins `v0.1.0` (worldsim consumes the renderer as it is,
+primitives must land before a second consumer depends on the renderer API.
+Worldsim's pin of `v0.1.0` is in place (worldsim consumes the renderer as it is,
 behaviour-identical, and takes API changes through a tag bump). Blend state and
 the primitives shape the batch sort key and the shader layout.
 
