@@ -1,5 +1,6 @@
 #include "resources/RenderToTexture.h"
 
+#include "backend/gl/GLNames.h"
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
@@ -41,7 +42,8 @@ TEST(RenderToTextureTest, ClearsToColor) {
 	glClear(GL_COLOR_BUFFER_BIT);
 	rtt.end();
 
-	glBindTexture(GL_TEXTURE_2D, rtt.texture());
+	EXPECT_TRUE(rtt.texture().isValid());
+	glBindTexture(GL_TEXTURE_2D, Renderer::backend::gl::name(rtt.texture()));
 	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 	glBindTexture(GL_TEXTURE_2D, 0);
 

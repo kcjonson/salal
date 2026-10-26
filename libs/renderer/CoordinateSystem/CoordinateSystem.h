@@ -2,9 +2,24 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-struct GLFWwindow;
-
 namespace Renderer { // NOLINT(readability-identifier-naming)
+
+	/**
+	 * The window's size in logical pixels and in framebuffer (physical) pixels, as the
+	 * platform layer reports it. The app feeds it to CoordinateSystem::setViewport from
+	 * its resize callbacks; the renderer never asks the window system itself.
+	 */
+	struct Viewport {
+		int logicalWidth = 0;
+		int logicalHeight = 0;
+		int framebufferWidth = 0;
+		int framebufferHeight = 0;
+
+		/// Physical pixels per logical pixel (e.g. 2.0 on Retina); 1 when unsized.
+		[[nodiscard]] float pixelRatio() const {
+			return logicalWidth > 0 ? static_cast<float>(framebufferWidth) / static_cast<float>(logicalWidth) : 1.0F;
+		}
+	};
 
 	/**
 	 * CoordinateSystem abstracts high-DPI display complexity and provides coordinate system management.
@@ -17,9 +32,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	 *
 	 * Design:
 	 * - All public APIs use logical pixels (window coordinates)
-	 * - Only glViewport uses physical pixels (framebuffer size)
 	 * - Projection matrices use logical pixels for consistent coordinate spaces
-	 * - Mouse input is already in logical pixels from GLFW
+	 * - Mouse input is already in logical pixels from the window system
 	 */
 	class CoordinateSystem {
 	  public:
@@ -33,11 +47,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		CoordinateSystem& operator=(CoordinateSystem&&) = delete;
 
 		/**
-		 * Initialize the coordinate system with a GLFW window.
-		 * @param window The GLFW window to use for coordinate calculations
-		 * @return true if initialization succeeded
+		 * Set the window size the projections and conversions are computed from.
+		 * Call on creation and from every resize callback.
 		 */
-		bool Initialize(GLFWwindow* window);
+		void setViewport(const Viewport& viewport);
+
+		/**
+		 * The size set last; 1920x1080 at ratio 1 until setViewport is called.
+		 */
+		const Viewport& viewport() const { return current; }
 
 		/**
 		 * Create screen-space orthographic projection matrix.
@@ -59,23 +77,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		glm::vec2 getWindowSize() const;
 
 		/**
-		 * Set OpenGL viewport to full framebuffer size (physical pixels).
-		 * This is the only method that uses physical pixels.
-		 */
-		void setFullViewport() const;
-
-		/**
-		 * Update internal state when window is resized.
-		 * @param width New window width in logical pixels
-		 * @param height New window height in logical pixels
-		 */
-		void updateWindowSize(int width, int height);
-
-		/**
 		 * Get the pixel ratio (physical pixels / logical pixels).
-		 * Cached for performance.
 		 */
-		float getPixelRatio() const;
+		float getPixelRatio() const { return current.pixelRatio(); }
 
 		/**
 		 * Convert window coordinates (logical pixels) to framebuffer coordinates (physical pixels).
@@ -117,9 +121,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		glm::vec2 PercentPosition(float xPercent, float yPercent) const;
 
 	  private:
-		GLFWwindow*	  window = nullptr;
-		mutable float cachedPixelRatio = 1.0F;
-		mutable bool  pixelRatioDirty = true;
+		// What the class answered before any window was attached, kept so an unsized
+		// CoordinateSystem still projects something sensible.
+		Viewport current{1920, 1080, 1920, 1080};
 	};
 
 } // namespace Renderer

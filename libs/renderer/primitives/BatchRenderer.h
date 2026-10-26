@@ -7,19 +7,20 @@
 // renders them in a single pass with correct z-ordering.
 //
 // Also provides GPU instancing for efficient rendering of many identical meshes.
+//
+// GL objects and uniform locations live behind BatchRenderer::GL in the .cpp, so
+// this header carries no GL types.
 
-#include "gl/GLBuffer.h"
-#include "gl/GLVertexArray.h"
+#include "Handle.h"
 #include "graphics/Color.h"
 #include "graphics/PrimitiveStyles.h"
 #include "graphics/Rect.h"
 #include "math/Types.h"
 #include "primitives/InstanceData.h"
-#include "shader/Shader.h"
+#include "primitives/Primitives.h"
 #include "vector/Tessellator.h"
-#include <GL/glew.h>
 #include <cstdint>
-#include <glm/vec4.hpp>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -106,10 +107,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   identity/translate-only transforms the run origin is snapped to the
 		//   device pixel grid and every glyph shifted by the same delta, keeping
 		//   glyph edges stable without disturbing advances/kerning.
-		// atlasTexture: MSDF atlas this glyph samples from. 0 selects the default
-		//   atlas set via setFontAtlas() (Roboto), preserving prior behavior for
-		//   callers that don't pass a texture. A frame may mix multiple atlases;
-		//   flush() splits draws by atlas so each glyph samples the right texture.
+		// atlas: MSDF atlas this glyph samples from. An invalid handle selects the
+		//   default atlas set via setFontAtlas() (Roboto). A frame may mix multiple
+		//   atlases; flush() splits draws by atlas so each glyph samples the right
+		//   texture.
 		void addTextQuad(
 			const Foundation::Vec2&	 position,
 			const Foundation::Vec2&	 size,
@@ -117,13 +118,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::Vec2&	 uvMax,
 			const Foundation::Color& color,
 			const Foundation::Vec2&	 runOrigin,
-			GLuint					 atlasTexture = 0,
+			TextureHandle			 atlas = {},
 			float					 zIndex = 0.0F
 		);
 
-		// Set the default MSDF font atlas texture (used by text quads added with
-		// atlasTexture == 0). pixelRange comes from atlas generation.
-		void setFontAtlas(GLuint atlasTexture, float pixelRange = 4.0F);
+		// Set the default MSDF font atlas (used by text quads added with an invalid
+		// atlas handle). pixelRange comes from atlas generation.
+		void setFontAtlas(TextureHandle atlas, float pixelRange = 4.0F);
 
 		// --- Rendering ---
 
@@ -179,9 +180,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		size_t		getDrawCallCount() const { return drawCallCount; }
 		RenderStats getStats() const;
 
-		// Shader access for batching
-		GLuint getShaderProgram() const { return shader.getProgram(); }
-
 		// --- GPU Instancing (World-Space) ---
 
 		/// Upload a tessellated mesh to GPU for instanced rendering.
@@ -193,7 +191,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		/// Release GPU resources for an instanced mesh.
 		/// @param handle Handle to release (will be invalidated)
-		void releaseInstancedMesh(InstancedMeshHandle& handle);
+		static void releaseInstancedMesh(InstancedMeshHandle& handle);
 
 		/// Draw multiple instances of a mesh with GPU instancing.
 		/// Transforms are computed on GPU using camera uniforms.
@@ -212,15 +210,28 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float					   pixelsPerMeter
 		);
 
+		/// The groundcover deform and cursor uniforms (instancing.glsl), read by the
+		/// instanced path while `params.enabled`.
+		void setGroundcover(const Primitives::GroundcoverParams& params);
+
+		/// u_bakedAlpha, the alpha the instanced and baked paths multiply in.
+		void setBakedAlpha(float alpha);
+
+		/// Bind the uber program in its baked world-space mode (u_instanced = 2) with
+		/// the camera uniforms and the projection from the setViewport() size, so a
+		/// caller can draw its own world-space VAOs under it until endBakedPass().
+		void beginBakedPass(const Primitives::WorldCamera& camera);
+		void endBakedPass();
+
 	  private:
 		// Vertex data (CPU-side accumulation)
 		std::vector<UberVertex> vertices;
 		std::vector<uint32_t>	indices;
 
-		// Per-vertex atlas tag, parallel to `vertices`. 0 = shape (no texture
-		// requirement); non-zero = the MSDF atlas a text vertex must sample from.
+		// Per-vertex atlas tag, parallel to `vertices`. Invalid = shape (no texture
+		// requirement); valid = the MSDF atlas a text vertex must sample from.
 		// flush() uses these to split text into per-atlas draw runs.
-		std::vector<GLuint> vertexAtlas;
+		std::vector<TextureHandle> vertexAtlas;
 
 		// Per-draw-call z-order groups. Each add* records one {indexStart, indexCount,
 		// zIndex}. flush() keeps submission order untouched unless some group carries
@@ -237,25 +248,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Record the index range [groupStart, current end) as one z-order group.
 		void recordGroup(uint32_t groupStart, float zIndex);
 
-		// OpenGL resources (RAII wrappers for automatic cleanup)
-		GLVertexArray vao;
-		GLBuffer	  vbo;
-		GLBuffer	  ibo;
-		Shader		  shader;
-
-		// Uniform locations (standard batched rendering)
-		GLint projectionLoc = -1;
-		GLint transformLoc = -1;
-		GLint atlasLoc = -1;
-		GLint viewportHeightLoc = -1;
-		GLint pixelRatioLoc = -1;
-
-		// Uniform locations (instanced rendering)
-		GLint cameraPositionLoc = -1;
-		GLint cameraZoomLoc = -1;
-		GLint pixelsPerMeterLoc = -1;
-		GLint viewportSizeLoc = -1;
-		GLint instancedLoc = -1;
+		// OpenGL resources and uniform locations (defined in BatchRenderer.cpp)
+		struct GL;
+		std::unique_ptr<GL> gl;
 
 		// Viewport dimensions
 		int viewportWidth = 800;
@@ -264,9 +259,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Coordinate system (optional, for DPI-aware rendering)
 		CoordinateSystem* coordinateSystem = nullptr;
 
-		// Default font atlas: bound for text quads added with atlasTexture == 0.
-		GLuint defaultFontAtlas = 0;
-		float  fontPixelRange = 4.0F;
+		// Default font atlas: bound for text quads added with an invalid atlas handle.
+		TextureHandle defaultFontAtlas;
+		float		  fontPixelRange = 4.0F;
+
+		// Last value written to u_bakedAlpha; endBakedPass() restores 1 only if it moved.
+		float bakedAlpha = 1.0F;
 
 		// Current clip bounds (applied to all vertices)
 		// (0,0,0,0) means no clipping

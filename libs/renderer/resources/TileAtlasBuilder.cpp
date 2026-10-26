@@ -56,8 +56,8 @@ namespace Renderer {
 		return rects;
 	}
 
-	GLuint TileAtlasBuilder::texture() const {
-		return atlas_ ? atlas_->texture() : 0;
+	TextureHandle TileAtlasBuilder::texture() const {
+		return atlas_ ? atlas_->texture() : TextureHandle{};
 	}
 
 	bool TileAtlasBuilder::loadSvgPattern(const std::string& surfaceName, std::vector<uint8_t>& pixels) {

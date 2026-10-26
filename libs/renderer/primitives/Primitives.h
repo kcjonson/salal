@@ -11,24 +11,29 @@
 // Implementation uses batching to minimize draw calls while maintaining a simple API.
 // Uses C++20 designated initializers (.Args{} pattern) for clean, readable code.
 
+#include "Handle.h"
+#include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "graphics/Color.h"
 #include "graphics/PrimitiveStyles.h"
 #include "graphics/Rect.h"
 #include "math/Types.h"
 #include "primitives/FontFamily.h"
+#include "primitives/InstanceData.h"
 #include <cstdint>
 #include <glm/vec4.hpp>
 #include <string>
 #include <vector>
+
+namespace renderer {
+	struct TessellatedMesh;
+}
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	// Forward declarations
 	class Renderer;
 	class CoordinateSystem;
-	class BatchRenderer;
-	class FontRenderer;
 
 	namespace Primitives { // NOLINT(readability-identifier-naming)
 
@@ -73,32 +78,24 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Returns: Pointer to FontRenderer, or nullptr if not set
 		FontRenderer* getFontRenderer();
 
-		// Set the font atlas texture for text rendering.
+		// Set the default font atlas for text rendering.
 		//
-		// This configures the BatchRenderer with the MSDF font atlas texture
-		// that will be used for text rendering. Must be called after Init()
-		// and before rendering any text.
+		// This configures the batch with the MSDF font atlas that text quads sample
+		// when no family is given. Must be called after init() and before rendering
+		// any text.
 		//
 		// Parameters:
-		//   - atlasTexture: OpenGL texture ID of the MSDF font atlas
+		//   - atlas: the MSDF font atlas, from FontRenderer::getAtlasTexture()
 		//   - pixelRange: Distance field pixel range (default 4.0, from atlas generation)
-		void setFontAtlas(unsigned int atlasTexture, float pixelRange = 4.0F);
+		void setFontAtlas(TextureHandle atlas, float pixelRange = 4.0F);
 
-		// Set tile atlas texture (GL texture) and UV rects per surface index.
+		// Set the tile atlas texture and UV rects per surface index.
 		// Consumed by the engine tile pass (ChunkRenderer), not the batch renderer.
-		void setTileAtlas(unsigned int atlasTexture, const std::vector<glm::vec4>& rects);
+		void setTileAtlas(TextureHandle atlas, const std::vector<glm::vec4>& rects);
 
 		// Tile atlas accessors for the tile render pass
-		unsigned int				  getTileAtlasTexture();
+		TextureHandle				  getTileAtlasTexture();
 		const std::vector<glm::vec4>& getTileAtlasRects();
-
-		// Get the internal batch renderer for direct text rendering.
-		//
-		// Used internally by Text shapes to call AddTextQuad() for batched
-		// text rendering with proper z-ordering alongside shapes.
-		//
-		// Returns: Pointer to BatchRenderer, or nullptr if not initialized
-		BatchRenderer* getBatchRenderer();
 
 		// Set a callback to update frame counter for FontRenderer cache LRU tracking.
 		//
@@ -110,6 +107,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void setFrameUpdateCallback(FrameUpdateCallback callback);
 
 		// --- Frame Lifecycle ---
+
+		// Clear the bound colour target to one colour.
+		void clear(const Foundation::Color& color);
 
 		void beginFrame();
 		void endFrame(); // Flushes all batches
@@ -242,6 +242,57 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   - color: RGBA text color
 		//   - zIndex: Draw order (higher values drawn later, allows proper layering with shapes)
 		void drawText(const TextArgs& args);
+
+		// Batch glyph quads a caller laid out itself (FontRenderer::generateGlyphQuads
+		// and friends), each in its own colour, sampling the family's atlas. Text is
+		// interleaved with shapes in submission order.
+		void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family = FontFamily::Roboto, float zIndex = 0.0F);
+
+		// --- World-Space Instancing ---
+
+		// The view an instanced or baked world draw is projected with: world meters
+		// to screen pixels through position, zoom and pixelsPerMeter, centred on the
+		// viewport.
+		struct WorldCamera {
+			Foundation::Vec2 position{0.0F, 0.0F};
+			float			 zoom = 1.0F;
+			float			 pixelsPerMeter = 1.0F;
+		};
+
+		// The groundcover deform (instancing.glsl): clumps rest at `openness` of
+		// full size and open and bend away within `cursorRadius` of `cursorWorld`.
+		// Off by default; a no-op for ordinary instanced entities.
+		struct GroundcoverParams {
+			bool			 enabled = false;
+			float			 openness = 1.0F;
+			float			 reach = 0.0F;
+			Foundation::Vec2 cursorWorld{0.0F, 0.0F};
+			float			 cursorRadius = 0.0F;
+			float			 cursorStrength = 0.0F;
+		};
+
+		// Upload a tessellated mesh once for drawInstanced(); the handle releases the
+		// GPU buffers when destroyed or passed to releaseInstancedMesh().
+		InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
+		void				releaseInstancedMesh(InstancedMeshHandle& handle);
+
+		// Draw `count` instances of an uploaded mesh immediately (not batched), with
+		// the per-instance transforms applied on the GPU under `camera`.
+		void drawInstanced(const InstancedMeshHandle& handle, const InstanceData* instances, uint32_t count, const WorldCamera& camera);
+
+		// Groundcover and cursor uniforms for subsequent instanced draws.
+		void setGroundcover(const GroundcoverParams& params);
+
+		// Alpha multiplied into instanced and baked draws (u_bakedAlpha); 1 is opaque.
+		void setBakedAlpha(float alpha);
+
+		// Bracket a caller's own world-space mesh draws: the uber program in its baked
+		// mode with `camera` and the projection from the setViewport() size, blending
+		// on and depth and culling off, as the batch itself draws. Flush pending
+		// batched geometry first if draw order matters. setBakedAlpha() may be called
+		// between draws; endBakedPass() restores it to 1.
+		void beginBakedPass(const WorldCamera& camera);
+		void endBakedPass();
 
 		// --- State Management ---
 

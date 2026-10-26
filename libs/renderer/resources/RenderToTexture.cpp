@@ -1,47 +1,87 @@
 #include "resources/RenderToTexture.h"
 
+#include "backend/gl/GLNames.h"
+#include "gl/GLFramebuffer.h"
+#include "gl/GLTexture.h"
+
+#include <GL/glew.h>
 #include <stdexcept>
 
 namespace Renderer {
 
-	RenderToTexture::RenderToTexture(int width, int height)
-		// Create texture using RAII wrapper (sets up filtering and wrapping)
-		: texture_(width, height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, nullptr),
-		  fbo_(GLFramebuffer::create()) {
+	struct RenderToTexture::Impl {
+		GLFramebuffer fbo;	   // RAII framebuffer wrapper
+		GLTexture	  texture; // RAII texture wrapper
+		TextureHandle handle;
+		GLint		  prevViewport[4] = {0, 0, 0, 0};
+		GLint		  prevFbo = 0;
+		bool		  inUse = false;
 
-		// Unbind texture after GLTexture constructor (it leaves it bound)
-		GLTexture::unbind();
+		Impl(int width, int height)
+			// Create texture using RAII wrapper (sets up filtering and wrapping)
+			: texture(width, height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, nullptr),
+			  fbo(GLFramebuffer::create()) {
+			// Unbind texture after GLTexture constructor (it leaves it bound)
+			GLTexture::unbind();
 
-		// Attach texture to framebuffer
-		fbo_.bind();
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_, 0);
+			// Attach texture to framebuffer
+			fbo.bind();
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
 
-		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-		GLFramebuffer::unbind();
-		if (status != GL_FRAMEBUFFER_COMPLETE) {
-			// RAII wrappers will clean up automatically when exception is thrown
-			throw std::runtime_error("RenderToTexture FBO incomplete");
+			GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+			GLFramebuffer::unbind();
+			if (status != GL_FRAMEBUFFER_COMPLETE) {
+				// RAII wrappers will clean up automatically when exception is thrown
+				throw std::runtime_error("RenderToTexture FBO incomplete");
+			}
+			handle = backend::gl::registerTexture(texture);
 		}
-	}
+
+		~Impl() { backend::gl::unregisterTexture(handle); }
+
+		Impl(const Impl&) = delete;
+		Impl& operator=(const Impl&) = delete;
+		Impl(Impl&&) = delete;
+		Impl& operator=(Impl&&) = delete;
+	};
+
+	RenderToTexture::RenderToTexture(int width, int height)
+		: impl(std::make_unique<Impl>(width, height)) {}
+
+	RenderToTexture::~RenderToTexture() = default;
+	RenderToTexture::RenderToTexture(RenderToTexture&&) noexcept = default;
+	RenderToTexture& RenderToTexture::operator=(RenderToTexture&&) noexcept = default;
 
 	void RenderToTexture::begin() {
-		if (inUse_) {
+		if (!impl || impl->inUse) {
 			return;
 		}
-		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo_);
-		glGetIntegerv(GL_VIEWPORT, prevViewport_);
-		fbo_.bind();
-		glViewport(0, 0, texture_.width(), texture_.height());
-		inUse_ = true;
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &impl->prevFbo);
+		glGetIntegerv(GL_VIEWPORT, impl->prevViewport);
+		impl->fbo.bind();
+		glViewport(0, 0, impl->texture.width(), impl->texture.height());
+		impl->inUse = true;
 	}
 
 	void RenderToTexture::end() {
-		if (!inUse_) {
+		if (!impl || !impl->inUse) {
 			return;
 		}
-		glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo_));
-		glViewport(prevViewport_[0], prevViewport_[1], prevViewport_[2], prevViewport_[3]);
-		inUse_ = false;
+		glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(impl->prevFbo));
+		glViewport(impl->prevViewport[0], impl->prevViewport[1], impl->prevViewport[2], impl->prevViewport[3]);
+		impl->inUse = false;
+	}
+
+	TextureHandle RenderToTexture::texture() const {
+		return impl ? impl->handle : TextureHandle{};
+	}
+
+	int RenderToTexture::width() const {
+		return impl ? impl->texture.width() : 0;
+	}
+
+	int RenderToTexture::height() const {
+		return impl ? impl->texture.height() : 0;
 	}
 
 } // namespace Renderer

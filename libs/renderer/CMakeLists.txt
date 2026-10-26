@@ -27,6 +27,7 @@ add_library(salal_renderer STATIC
     shader/Shader.cpp
     shader/ShaderLoader.cpp
     shader/ShaderPreprocessor.cpp
+    backend/gl/GLNames.cpp
     resources/RenderToTexture.cpp
     resources/TileTextureAtlas.cpp
     resources/TilePatternBaker.cpp
@@ -45,14 +46,17 @@ target_include_directories(salal_renderer
         ${Stb_INCLUDE_DIR}
 )
 
+# GL stays behind the renderer's public headers (salal_check_layering walks them at
+# configure time), so OpenGL and GLEW are PRIVATE; nothing in the library touches
+# GLFW any more (the app feeds CoordinateSystem its window sizes). The GL test
+# fixtures open their own context and link all three below.
 target_link_libraries(salal_renderer
     PUBLIC
         salal::foundation
-        OpenGL::GL
-        GLEW::GLEW
-        glfw
         glm::glm
     PRIVATE
+        OpenGL::GL
+        GLEW::GLEW
         NanoSVG::nanosvg             # SVGLoader.cpp and TilePatternBaker.cpp only
         nlohmann_json::nlohmann_json # FontRenderer.cpp parses the atlas JSON
 )
@@ -77,3 +81,6 @@ add_dependencies(salal_renderer salal_renderer_shaders)
 set_target_properties(salal_renderer_shaders PROPERTIES FOLDER salal)
 
 salal_add_tests(renderer)
+if(TARGET salal_renderer_tests)
+    target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw)
+endif()

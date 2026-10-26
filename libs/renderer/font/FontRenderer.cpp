@@ -1,8 +1,10 @@
 // Font rendering implementation using MSDF (Multi-channel Signed Distance Field) atlas
 
 #include "font/FontRenderer.h"
+#include "backend/gl/GLNames.h"
 #include "utils/Log.h"
 #include "utils/ResourcePath.h"
+#include <GL/glew.h>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -51,9 +53,11 @@ namespace Renderer {
 	FontRenderer::~FontRenderer() {
 		// Clean up every loaded atlas texture
 		for (Atlas& atlas : atlases) {
-			if (atlas.texture != 0) {
-				glDeleteTextures(1, &atlas.texture);
-				atlas.texture = 0;
+			if (atlas.textureName != 0) {
+				backend::gl::unregisterTexture(atlas.texture);
+				atlas.texture = {};
+				glDeleteTextures(1, &atlas.textureName);
+				atlas.textureName = 0;
 			}
 		}
 	}
@@ -286,8 +290,8 @@ namespace Renderer {
 		LOG_INFO(UI, "Loaded atlas texture: %dx%d, %d channels", width, height, channels);
 
 		// Create OpenGL texture
-		glGenTextures(1, &atlas.texture);
-		glBindTexture(GL_TEXTURE_2D, atlas.texture);
+		glGenTextures(1, &atlas.textureName);
+		glBindTexture(GL_TEXTURE_2D, atlas.textureName);
 
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, imageData.get());
 
@@ -297,6 +301,7 @@ namespace Renderer {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 		glBindTexture(GL_TEXTURE_2D, 0);
+		atlas.texture = backend::gl::registerTexture(atlas.textureName);
 
 		// imageData automatically freed by unique_ptr
 
@@ -629,7 +634,7 @@ namespace Renderer {
 		}
 	}
 
-	GLuint FontRenderer::getAtlasTexture(FontFamily family) const {
+	TextureHandle FontRenderer::getAtlasTexture(FontFamily family) const {
 		return atlasFor(family).texture;
 	}
 

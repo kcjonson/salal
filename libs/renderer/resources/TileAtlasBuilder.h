@@ -2,7 +2,6 @@
 
 #include "resources/TileTextureAtlas.h"
 
-#include <GL/glew.h>
 #include <glm/vec4.hpp>
 #include <graphics/Color.h>
 
@@ -48,8 +47,8 @@ namespace Renderer {
 		[[nodiscard]] std::vector<glm::vec4>
 		buildForSurfaces(int surfaceCount, const SurfaceNameFn& surfaceNameFn, const SurfaceColorFn& surfaceColorFn);
 
-		// Get the underlying atlas texture handle.
-		[[nodiscard]] GLuint texture() const;
+		// Get the underlying atlas texture; invalid before buildForSurfaces().
+		[[nodiscard]] TextureHandle texture() const;
 
 		// Get the atlas size.
 		[[nodiscard]] int atlasSize() const { return config_.atlasSize; }

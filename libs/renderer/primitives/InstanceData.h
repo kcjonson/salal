@@ -5,11 +5,8 @@
 // These structures define the per-instance data uploaded to the GPU
 // for instanced rendering of entities.
 
-#include "gl/GLBuffer.h"
-#include "gl/GLVertexArray.h"
 #include "graphics/Color.h"
 #include "math/Types.h"
-#include <GL/glew.h>
 #include <cstdint>
 
 namespace Renderer {
@@ -48,32 +45,34 @@ namespace Renderer {
 	static_assert(sizeof(InstanceData) == 32, "InstanceData must be 32 bytes for GPU alignment");
 	static_assert(alignof(InstanceData) == 16, "InstanceData must be 16-byte aligned for GPU upload");
 
-	/// Handle to a mesh uploaded for instanced rendering.
-	/// Created by BatchRenderer::uploadInstancedMesh(), released by releaseInstancedMesh().
-	/// Uses RAII for automatic GPU resource cleanup - resources are freed when the handle is destroyed.
-	/// Movable but not copyable (GPU resources have single ownership).
-	struct InstancedMeshHandle {
-		GLVertexArray vao;				// VAO with mesh + instance attributes configured
-		GLBuffer	  meshVBO;			// Vertex buffer for mesh data (static)
-		GLBuffer	  meshIBO;			// Index buffer for mesh triangles
-		GLBuffer	  instanceVBO;		// Instance data buffer (per-instance, divisor=1)
-		uint32_t	  indexCount = 0;	// Number of indices in mesh
-		uint32_t	  vertexCount = 0;	// Number of vertices in mesh (for stats)
-		uint32_t	  maxInstances = 0; // Capacity of instance buffer
-
-		// Default constructor - creates an invalid handle
+	/// A mesh uploaded for instanced drawing, from Primitives::uploadInstancedMesh().
+	/// Move-only; the destructor releases the GPU buffers (so does
+	/// Primitives::releaseInstancedMesh(), which also leaves the handle invalid).
+	class InstancedMeshHandle {
+	  public:
 		InstancedMeshHandle() = default;
+		~InstancedMeshHandle();
 
-		// Non-copyable (RAII wrappers are non-copyable)
 		InstancedMeshHandle(const InstancedMeshHandle&) = delete;
 		InstancedMeshHandle& operator=(const InstancedMeshHandle&) = delete;
 
-		// Movable
-		InstancedMeshHandle(InstancedMeshHandle&&) = default;
-		InstancedMeshHandle& operator=(InstancedMeshHandle&&) = default;
+		InstancedMeshHandle(InstancedMeshHandle&& other) noexcept;
+		InstancedMeshHandle& operator=(InstancedMeshHandle&& other) noexcept;
 
 		/// Check if this handle is valid (has GPU resources)
-		[[nodiscard]] bool isValid() const { return vao.isValid(); }
+		[[nodiscard]] bool isValid() const { return vao != 0; }
+
+	  private:
+		friend class BatchRenderer;
+
+		// GL object names; the renderer's GL side owns the calls that create and delete them.
+		uint32_t vao = 0;		   // VAO with mesh + instance attributes configured
+		uint32_t meshVBO = 0;	   // Vertex buffer for mesh data (static)
+		uint32_t meshIBO = 0;	   // Index buffer for mesh triangles
+		uint32_t instanceVBO = 0;  // Instance data buffer (per-instance, divisor=1)
+		uint32_t indexCount = 0;   // Number of indices in mesh
+		uint32_t vertexCount = 0;  // Number of vertices in mesh (for stats)
+		uint32_t maxInstances = 0; // Capacity of instance buffer
 	};
 
 	/// Vertex format for instanced meshes (simpler than UberVertex)

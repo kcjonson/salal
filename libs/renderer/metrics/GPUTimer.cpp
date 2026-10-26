@@ -1,24 +1,45 @@
 #include "metrics/GPUTimer.h"
 
+#include "gl/GLQuery.h"
+
 #include <GL/glew.h>
+#include <array>
 
 namespace Renderer {
+
+	struct GPUTimer::Spans {
+		struct Span {
+			GLQuery start;
+			GLQuery stop;
+			bool	pending = false;
+		};
+
+		std::array<Span, kFrames> spans;
+
+		Spans() {
+			for (Span& span : spans) {
+				span.start = GLQuery::create();
+				span.stop = GLQuery::create();
+			}
+		}
+	};
+
+	GPUTimer::GPUTimer() = default;
+	GPUTimer::~GPUTimer() = default;
+	GPUTimer::GPUTimer(GPUTimer&&) noexcept = default;
+	GPUTimer& GPUTimer::operator=(GPUTimer&&) noexcept = default;
 
 	void GPUTimer::begin() {
 		if (open) {
 			return;
 		}
-		if (!created) {
-			for (Span& span : spans) {
-				span.start = GLQuery::create();
-				span.stop = GLQuery::create();
-			}
-			created = true;
+		if (!spans) {
+			spans = std::make_unique<Spans>();
 		}
 
 		// The span about to be reused was issued kFrames spans ago. A result still
 		// pending after that long is dropped rather than waited for.
-		Span& span = spans[current];
+		Spans::Span& span = spans->spans[current];
 		if (span.pending && span.stop.isResultAvailable()) {
 			const GLuint64 startNs = span.start.getResult();
 			const GLuint64 stopNs = span.stop.getResult();
@@ -33,7 +54,7 @@ namespace Renderer {
 		if (!open) {
 			return;
 		}
-		Span& span = spans[current];
+		Spans::Span& span = spans->spans[current];
 		span.stop.recordTimestamp();
 		span.pending = true;
 		open = false;

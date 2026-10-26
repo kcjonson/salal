@@ -66,7 +66,7 @@ class TileTextureAtlasTest : public ::testing::Test {
 TEST_F(TileTextureAtlasTest, ConstructorDefaultSize) {
 	TileTextureAtlas atlas(1024);
 	EXPECT_EQ(atlas.size(), 1024);
-	EXPECT_NE(atlas.texture(), 0U);
+	EXPECT_TRUE(atlas.texture().isValid());
 }
 
 TEST_F(TileTextureAtlasTest, AllocationLogic) {
@@ -161,10 +161,13 @@ TEST_F(TileTextureAtlasTest, MoveConstructor) {
 	TileTextureAtlas atlas1(512);
 	atlas1.allocate(64, 64);
 
-	TileTextureAtlas atlas2(std::move(atlas1));
+	const TextureHandle texture = atlas1.texture();
+	TileTextureAtlas	atlas2(std::move(atlas1));
 	EXPECT_EQ(atlas2.size(), 512);
+	EXPECT_EQ(atlas2.texture(), texture);
 	// Original should be in moved-from state
 	EXPECT_EQ(atlas1.size(), 0);
+	EXPECT_FALSE(atlas1.texture().isValid());
 }
 
 TEST_F(TileTextureAtlasTest, MoveAssignment) {
