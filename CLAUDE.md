@@ -253,8 +253,8 @@ Don't guess at these; ask. The live list, each with a recommendation and the
 phase that needs the answer, is
 [docs/open-decisions.md](docs/open-decisions.md), mirrored as items on the
 board: the engine PRNG, audio, adopting dual-deck-builder's UI spec, the
-ECS core, the `ui` storage model, render targets and particles, vector/SVG
-conventions, multi-device focus, and the dual-deck-builder golden corpus.
+ECS core, the `ui` storage model, vector/SVG conventions, multi-device focus,
+and the dual-deck-builder golden corpus.
 
 Resolved since the first version of this file: work is tracked in Specboard
 (see above). Input types in `foundation/input/`, poller in `app`, settled

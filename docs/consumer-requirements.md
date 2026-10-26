@@ -150,7 +150,7 @@ needs an FBO or render-to-texture, a blur chain, and additive blend state in
 the batch sort key; HDR bloom wants float colour attachments, which GL 3.3
 core has. Particles exist nowhere in salal or worldsim; game-side over
 Primitives is the cheap start, an engine pool with batch-friendly additive
-draw the likely end state. Open decision G.
+draw the likely end state. Decision G, settled 2026-10-26.
 
 ### Inspector
 
