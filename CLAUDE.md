@@ -204,8 +204,8 @@ Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
 `nanosvg`, `msdfgen`, `cpp-httplib`, `gtest`, `benchmark`, the native-only ones
 qualified `!emscripten` in `vcpkg.json`. Worldsim's
 `pugixml`, `lua` and `sol2` serve its `assets` target and stay behind. An audio
-library is proposed and not decided (worldsim has none; `miniaudio` with its
-Emscripten backend is the recommendation).
+library is proposed and not decided (worldsim has none; `miniaudio` is the
+recommendation).
 
 ## Testing
 
