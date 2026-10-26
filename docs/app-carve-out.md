@@ -4,9 +4,10 @@ The map of `worldsim/libs/engine` for the phase-2 carve-out: which files are
 generic, where they knot into the game, ui and renderer, and what the proposed
 `libs/app` slice weighs. Surveyed read-only against worldsim main @ db335a2b
 on 2026-10-25. This document is the map. The design of the new app API (tick,
-InputSnapshot, scene stack, config) is phase-2 work and is not written here;
-what follows is meant to let that design be written without re-reading
-worldsim.
+scene stack, config, the device layer that feeds the input accumulator) is
+phase-2 work and is not written here; the input types themselves are settled
+(decision D) and go to `foundation/input/`. What follows is meant to let that
+design be written without re-reading worldsim.
 
 Seven phase 0.5 PRs ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)) merged 2026-10-25/26, taking
 worldsim main to 42885471. Counts, sizes and line numbers below are the survey
@@ -148,8 +149,9 @@ clipboard interface that app implements.
 Since the survey: the two dead `InputManager.h` includes are gone ([worldsim#292](https://github.com/kcjonson/worldsim/pull/292)),
 and TextInput reaches the clipboard through `UI::IClipboard` in
 `libs/ui/clipboard`, which `engine::ClipboardManager` implements ([worldsim#294](https://github.com/kcjonson/worldsim/pull/294)).
-The seven `InputTypes.h` includes are what is left of ui -> engine, waiting on
-decision D.
+The seven `InputTypes.h` includes are what is left of ui -> engine; decision D
+(settled 2026-10-26) puts the file in `foundation/input/`, and that move is
+next.
 
 ## Subsystem notes
 
@@ -428,7 +430,7 @@ Core, moves once the knots are cut (15 files, 2,900 lines):
 | `scene/Overlay.h` | 40 |
 | `scene/SceneManager.h` | 159 |
 | `scene/SceneManager.cpp` | 237 |
-| `input/InputTypes.h` | 133 (ends up below ui; decision D) |
+| `input/InputTypes.h` | 133 (moves to `foundation/input/`; decision D) |
 | `input/InputManager.h` | 182 |
 | `input/InputManager.cpp` | 628 |
 | `input/InputManager.test.cpp` | 89 |

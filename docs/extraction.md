@@ -284,13 +284,14 @@ salal/
                              assets target and stay behind)
   libs/
     foundation/              math, platform, logging, arenas, resource handles,
-                             seeded PRNG with forking
+                             seeded PRNG with forking, input types
     renderer/                gl, shader, primitives, batch, vector, text,
                              fonts, coords, metrics
     ui/                      component, components, layout, focus, theme,
                              shapes, animation, inspector
     app/                     window, fixed-step loop, scenes, config,
-                             input (keyboard, mouse, gamepad), dev server
+                             device input (keyboard, mouse, gamepad),
+                             dev server
   apps/
     sandbox/                 the ui-sandbox harness and its pure-UI scenes
   tests/
@@ -492,8 +493,9 @@ design; it is gated by two header moves, one clipboard seam and CMake cleanup.
 
 ### Phase 0.5, untangle worldsim
 
-Done 2026-10-25/26 except the `InputTypes.h` move, which waits on decision D
-along with dropping `engine` from `ui`'s link list: [worldsim#292](https://github.com/kcjonson/worldsim/pull/292) (dead includes),
+Done 2026-10-25/26 except the `InputTypes.h` move (into `foundation/input/`,
+decision D, settled 2026-10-26), now unblocked, along with dropping `engine`
+from `ui`'s link list: [worldsim#292](https://github.com/kcjonson/worldsim/pull/292) (dead includes),
 [worldsim#294](https://github.com/kcjonson/worldsim/pull/294) (clipboard seam), [worldsim#293](https://github.com/kcjonson/worldsim/pull/293) (`FontRenderer`), [worldsim#295](https://github.com/kcjonson/worldsim/pull/295) (CMake, bar the
 `engine` link) and [worldsim#297](https://github.com/kcjonson/worldsim/pull/297) (dev server), plus [worldsim#291](https://github.com/kcjonson/worldsim/pull/291) (the include resolver)
 and [worldsim#296](https://github.com/kcjonson/worldsim/pull/296) (asset bootstrap out of `AppLauncher`). The dev server now lives
@@ -505,9 +507,9 @@ roughly this order:
 
 - Delete the two dead `InputManager.h` includes in `ui`
   (`components/button/Button.cpp:10`, `components/TextInput/TextInput.cpp:10`).
-- Move `input/InputTypes.h` below `ui`: into `foundation` if decision D goes as
-  proposed, into `ui` otherwise. Engine's `InputManager.h` includes it from
-  there. The `engine::` namespace can stay for the first pass.
+- Move `input/InputTypes.h` below `ui`, into `foundation/input/` (decision D).
+  Engine's `InputManager.h` includes it from there. The `engine::` namespace
+  can stay for the first pass.
 - Give `ui` a clipboard seam, a small interface or `std::function` hooks that
   `Application` installs, so TextInput stops calling
   `engine::ClipboardManager::Get()` (`TextInput.cpp:460,470,478`).
@@ -549,8 +551,10 @@ the consumers need from a frame owner and worldsim never built:
   `Application::run()` is already one frame's work
   (`libs/engine/application/Application.cpp:112-306`), so the split is
   mechanical; the accumulator is net-new.
-- `InputSnapshot` and gamepad input with hot-plug and device-to-player-slot
-  claiming. Worldsim has keyboard and mouse only.
+- Gamepad input with hot-plug and device-to-player-slot claiming, and GLFW
+  callbacks feeding the accumulator that produces `InputSnapshot`. The types,
+  accumulator and `ActionMap` live in `foundation/input/` (decision D); `app`
+  owns the device layer. Worldsim has keyboard and mouse only.
 - The clipboard, behind the seam from phase 0.5.
 - A scene manager with a stack, overlays and typed payloads.
   `IScene::exportState()` is deleted on the way; it serves a route that no
@@ -632,7 +636,6 @@ and each tracked on the board. By letter:
 - B. Audio: in the engine or per game, and which library.
 - C. Adopt dual-deck-builder's `docs/ui-rendering-spec/` as the normative spec
   for `ui`.
-- D. Where input types live, which also settles the old app-versus-input split.
 - E. The ECS core: ship it as an optional header module or leave it in worldsim.
 - F. The `ui` storage model during extraction, shared_ptr graph or value
   semantics.
@@ -645,5 +648,6 @@ and each tracked on the board. By letter:
 
 Resolved since the first version: the phase 0 audit (done, above), whether this
 document moves into the salal repo (it did), whether work is tracked in
-Specboard (it is; `.mcp.json` holds the binding), and the browser build
-(dropped, above).
+Specboard (it is; `.mcp.json` holds the binding), the browser build (dropped,
+above), and where input types live (decision D, 2026-10-26: `foundation/input/`,
+with the poller in `app`).

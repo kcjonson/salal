@@ -34,10 +34,10 @@ doc.
 
 ```
 libs/
-  foundation/   math, platform, logging, arenas, resource handles, seeded PRNG
+  foundation/   math, platform, logging, arenas, resource handles, seeded PRNG, input types
   renderer/     gl, shader, primitives, batching, vector/SVG, fonts, SDF text, coords
   ui/           components, layout, focus, theme, shapes, animation
-  app/          window, fixed-step loop, scenes, config, input, dev server
+  app/          window, fixed-step loop, scenes, config, device input, dev server
   audio/        proposed, not decided: mixer, buses, stems, one-shots
 apps/
   sandbox/      boots straight into a single UI scene

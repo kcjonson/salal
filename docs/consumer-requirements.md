@@ -65,7 +65,8 @@ of worldsim's code" (`tech-stack.md:110`).
 - Rebinding: Settings has an input-binding section
   (`screens.md:17, 91, 255`). Implies action maps per device per player,
   persisted. Inferred: a capture-next-input API.
-- Inferred: a press shorter than a tick must not be lost at 120 Hz.
+- Inferred: a press shorter than a tick must not be lost at 120 Hz. The
+  snapshot's per-button transition counts cover it (decision D).
 - Mouse and pointer are never mentioned. Controller and keyboard only.
 
 ### PRNG and determinism [P], required
@@ -276,13 +277,13 @@ inherit them.
 | 6 | The prototype needs text (debug overlay), audio and `app`, while the docs say "no UI layer" and ui is extracted last | `tech-stack.md:239-243`; salal sequencing | FontRenderer into renderer; audio as phase 2b; the prototype starts at phase 2 |
 | 7 | `/api/input` is "synthetic input injection in logical pixels" (pointer), asteroids has no pointer, and the arena is absent from `/api/ui/tree` | architecture.md | `/api/input` grows pad and axis injection; games register endpoints |
 | 8 | Monorepo and "copy worldsim" language predates salal; "worldsim's OpenGL engine" | `tech-stack.md:3-4, :23, :39-57, :266-281`; `docs/README.md:18` | rewrite against salal |
-| 9 | Input placed in `engine`; if the per-tick snapshot type lives in `app` (above ui and renderer), sim consuming it breaks the dependency rule | `tech-stack.md:153` | decision D: plain-data input types in foundation |
+| 9 | Input placed in `engine` (salal's `app`, above ui and renderer), so a sim consuming a snapshot type defined there would break the dependency rule | `tech-stack.md:153` | decision D, settled 2026-10-26: input types in `foundation/input/`, poller in `app`; sim consumes a game-owned action POD built from foundation's `ActionMap` |
 | 10 | `DrawRect`/`DrawText`/`DrawCircle` PascalCase | `tech-stack.md:66`; salal README | functions are camelCase: `drawRect` |
 | 11 | PRNG listed under foundation but sequenced in phase 2 "carve out app" | architecture.md; extraction.md | the fork API lands in foundation during phase 2; no conflict once stated |
 
 Checked and not conflicts: nothing assumes a loop owning main; screens and
 scenes are reconciled; 120 Hz as a consumer choice matches; no physics,
-networking or scripting matches; input polled per tick matches; no feel tests
+networking or scripting matches; input consumed per tick matches; no feel tests
 matches.
 
 ## Dual-deck-builder
