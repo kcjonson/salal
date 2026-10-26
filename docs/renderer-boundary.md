@@ -93,7 +93,7 @@ namespace Primitives {
 	void updateTexture(TextureHandle, int x, int y, int width, int height, const void* pixels);
 	void destroyTexture(TextureHandle);
 	void clear(Color); // PR 1 adds it and migrates no caller; scenes and apps move to it as they are touched (AssetRenderer in PR 2)
-	void invalidateState(); // PR 4: a foreign GL pass that leaves depth test, culling or scissor on says so; the renderer never queries state (dual-deck-builder R2.15)
+	void invalidateState(); // PR 4: a foreign GL pass that leaves depth test, culling or scissor on, or binds uniform point 0, says so; the renderer never queries state (dual-deck-builder R2.15)
 	void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height); // PR 2: the screenshot route
 	struct WorldCamera { Vec2 position; float zoom = 1.0F; float pixelsPerMeter = 1.0F; }; // from here down: what replaces getBatchRenderer() and getShaderProgram()
 	struct GroundcoverParams { bool enabled = false; float openness = 1.0F; float reach = 0.0F; Vec2 cursorWorld; float cursorRadius = 0.0F; float cursorStrength = 0.0F; };
@@ -207,7 +207,10 @@ tile atlas on unit 0, and `PlanetMesh`, `PlanetColorizer` and
 `BakedChunkRenderer` uploads bind buffers and textures. Buffers are written
 through `GL_COPY_WRITE_BUFFER`, which no vertex array records. Fixed state is
 set once and trusted, and every worldsim pass that touches it (`ChunkRenderer`,
-`PlanetRenderer`) restores it, so worldsim calls `invalidateState` nowhere.
+`PlanetRenderer`) restores it, so worldsim calls `invalidateState` nowhere. The
+uniforms are the one binding that outlives a call: uniform binding point 0 is the
+renderer's, and `invalidateState` rebinds it for a pass that bound its own buffer
+there (no worldsim shader declares a block).
 
 Storage. The batch's vertex and index buffers are `Stream`: each flush writes
 from offset 0, and the GL backend respecifies with `glBufferData(nullptr)`
