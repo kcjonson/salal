@@ -31,9 +31,8 @@ repo's `specboard.md`.
 
 - **[docs/architecture.md](docs/architecture.md)** is normative. The four-layer
   stack, what each library owns, the dependency rule, the component model, the
-  frame contract, determinism, the inspector contract, and the WebAssembly
-  constraints. Where it and the code disagree, the document is right. Where it
-  says "proposed", it means it.
+  frame contract, determinism, and the inspector contract. Where it and the
+  code disagree, the document is right. Where it says "proposed", it means it.
 - **[docs/extraction.md](docs/extraction.md)** is the plan: what comes from
   where, in what order, what it costs, and what is still open.
 - **[docs/phase-0-audit.md](docs/phase-0-audit.md)** is the layering audit of
@@ -102,20 +101,15 @@ A consuming game's simulation layer may depend on neither `renderer` nor `ui`.
 That is what keeps determinism and headless testing possible in the games, and
 it is the first thing that quietly breaks if nobody is watching.
 
-**WebAssembly constrains the renderer.** Emscripten is a target, so:
+**Two seams.**
 
-- Stay inside the GL ES 3.0 subset. No geometry shaders, no compute, no
-  `glMapBuffer`.
-- Author shaders so swapping `#version 330 core` for `#version 300 es` is the
-  entire change.
 - The fixed-step loop is a **tick function the platform calls**, not a loop that
-  owns `main()`. `emscripten_set_main_loop` needs this, and it is better design
-  anyway.
+  owns `main()`. A tick function is testable headlessly, and the platform, not
+  the engine, owns the frame.
 - The HTTP dev server sits behind a compile flag. No listening sockets in a
-  browser. Worldsim has no such flag today (the server is always compiled into
-  `libs/engine` and switched on at runtime), so this is new discipline, added
-  when the server moves into `app`.
-- Asset loading goes through an indirection that can be MEMFS.
+  shipped build. Worldsim has no such flag today (the server is always compiled
+  into `libs/engine` and switched on at runtime), so this is new discipline,
+  added when the server moves into `app`.
 
 These are cheap now and expensive once three games depend on the API.
 
