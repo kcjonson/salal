@@ -25,8 +25,8 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		static constexpr size_t kMaxComponents = 3;
 
 		struct Entry {
-			std::string							 name;
-			size_t								 count = 1;
+			std::string						  name;
+			size_t							  count = 1;
 			std::array<float, kMaxComponents> value{};
 			std::array<float, kMaxComponents> defaultValue{};
 		};

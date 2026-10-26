@@ -13,9 +13,9 @@ using namespace Foundation;
 // Tunables::instance() is process-wide, so each test uses its own name prefix.
 
 TEST(Tunables, AddReturnsStableStorageSeededWithTheDefault) {
-	Tunables&	 t		= Tunables::instance();
+	Tunables&	 t = Tunables::instance();
 	const float* scalar = t.add("test/add/scalar", std::array{1.5F});
-	const float* color	= t.add("test/add/color", std::array{0.1F, 0.2F, 0.3F});
+	const float* color = t.add("test/add/color", std::array{0.1F, 0.2F, 0.3F});
 	EXPECT_FLOAT_EQ(*scalar, 1.5F);
 	EXPECT_FLOAT_EQ(color[2], 0.3F);
 
@@ -28,7 +28,7 @@ TEST(Tunables, AddReturnsStableStorageSeededWithTheDefault) {
 }
 
 TEST(Tunables, SetChecksNameAndComponentCount) {
-	Tunables&	 t	   = Tunables::instance();
+	Tunables&	 t = Tunables::instance();
 	const float* color = t.add("test/set/color", std::array{0.0F, 0.0F, 0.0F});
 
 	EXPECT_TRUE(t.set("test/set/color", std::array{0.5F, 0.6F, 0.7F}));

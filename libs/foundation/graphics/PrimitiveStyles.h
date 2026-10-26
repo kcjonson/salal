@@ -29,8 +29,8 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 	// the batch renderer as per-corner vertex colors interpolated across the quad,
 	// so it composes with the rounded-corner/border SDF.
 	struct LinearGradient {
-		Color from;				 // start color (top, or left if horizontal)
-		Color to;				 // end color (bottom, or right if horizontal)
+		Color from;				  // start color (top, or left if horizontal)
+		Color to;				  // end color (bottom, or right if horizontal)
 		bool  horizontal = false; // false = vertical (top->bottom)
 	};
 
@@ -39,8 +39,8 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 	// grown) shape, so it is one draw, perfectly rounded, no stacked geometry.
 	struct BoxShadow {
 		Color color = Color(0.0F, 0.0F, 0.0F, 0.5F);
-		float blur = 8.0F;	   // softness radius (px)
-		float spread = 0.0F;   // grow the shadow shape before blurring (px)
+		float blur = 8.0F;			 // softness radius (px)
+		float spread = 0.0F;		 // grow the shadow shape before blurring (px)
 		Vec2  offset = {0.0F, 0.0F}; // shadow displacement (px); +y is down
 	};
 

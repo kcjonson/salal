@@ -26,8 +26,8 @@ namespace Foundation {
 			return existing->value.data();
 		}
 		Entry& e = entryList.emplace_back();
-		e.name	 = std::string(name);
-		e.count	 = std::clamp<size_t>(defaults.size(), 1, kMaxComponents);
+		e.name = std::string(name);
+		e.count = std::clamp<size_t>(defaults.size(), 1, kMaxComponents);
 		std::copy_n(defaults.begin(), std::min(defaults.size(), kMaxComponents), e.defaultValue.begin());
 		e.value = e.defaultValue;
 		return e.value.data();
@@ -74,8 +74,8 @@ namespace Foundation {
 
 	size_t Tunables::reset(std::string_view name) {
 		const bool			   wildcard = !name.empty() && name.back() == '*';
-		const std::string_view prefix	= wildcard ? name.substr(0, name.size() - 1) : name;
-		size_t				   count	= 0;
+		const std::string_view prefix = wildcard ? name.substr(0, name.size() - 1) : name;
+		size_t				   count = 0;
 		for (Entry& e : entryList) {
 			const bool match = wildcard ? std::string_view(e.name).starts_with(prefix) : e.name == name;
 			if (match) {

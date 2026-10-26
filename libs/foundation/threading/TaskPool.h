@@ -23,49 +23,48 @@
 
 namespace foundation {
 
-class TaskPool {
-  public:
-    explicit TaskPool(unsigned threadCount = 0);
-    ~TaskPool();
+	class TaskPool {
+	  public:
+		explicit TaskPool(unsigned threadCount = 0);
+		~TaskPool();
 
-    // Non-copyable, non-movable (owns threads)
-    TaskPool(const TaskPool&) = delete;
-    TaskPool& operator=(const TaskPool&) = delete;
-    TaskPool(TaskPool&&) = delete;
-    TaskPool& operator=(TaskPool&&) = delete;
+		// Non-copyable, non-movable (owns threads)
+		TaskPool(const TaskPool&) = delete;
+		TaskPool& operator=(const TaskPool&) = delete;
+		TaskPool(TaskPool&&) = delete;
+		TaskPool& operator=(TaskPool&&) = delete;
 
-    // ParallelFor: execute fn(slabBegin, slabEnd) for each slab of grainSize within
-    // [begin, end). Blocks until all slabs complete. Rethrows first worker exception.
-    // fn must be thread-safe across different slab ranges.
-    void parallelFor(size_t begin, size_t end, size_t grainSize,
-                     const std::function<void(size_t, size_t)>& fn);
+		// ParallelFor: execute fn(slabBegin, slabEnd) for each slab of grainSize within
+		// [begin, end). Blocks until all slabs complete. Rethrows first worker exception.
+		// fn must be thread-safe across different slab ranges.
+		void parallelFor(size_t begin, size_t end, size_t grainSize, const std::function<void(size_t, size_t)>& fn);
 
-    unsigned threadCount() const { return static_cast<unsigned>(workers.size()); }
+		unsigned threadCount() const { return static_cast<unsigned>(workers.size()); }
 
-  private:
-    struct Job {
-        size_t totalSlabs{};
-        size_t begin{};
-        size_t end{};
-        size_t grainSize{};
-        const std::function<void(size_t, size_t)>* fn{};
-    };
+	  private:
+		struct Job {
+			size_t									   totalSlabs{};
+			size_t									   begin{};
+			size_t									   end{};
+			size_t									   grainSize{};
+			const std::function<void(size_t, size_t)>* fn{};
+		};
 
-    void workerLoop();
+		void workerLoop();
 
-    std::vector<std::thread> workers;
-    std::mutex               mutex;
-    std::condition_variable  cv;
-    std::condition_variable  doneCv;
+		std::vector<std::thread> workers;
+		std::mutex				 mutex;
+		std::condition_variable	 cv;
+		std::condition_variable	 doneCv;
 
-    Job                      currentJob{};
-    std::atomic<size_t>      nextSlab{0};
-    std::atomic<size_t>      completedSlabs{0};
-    std::exception_ptr       firstException{};
-    int                      activeParticipants{0}; // guarded by mutex
-    uint64_t                 jobSeq{0};             // guarded by mutex
-    bool                     shutdown{false};
-    bool                     jobReady{false};
-};
+		Job					currentJob{};
+		std::atomic<size_t> nextSlab{0};
+		std::atomic<size_t> completedSlabs{0};
+		std::exception_ptr	firstException{};
+		int					activeParticipants{0}; // guarded by mutex
+		uint64_t			jobSeq{0};			   // guarded by mutex
+		bool				shutdown{false};
+		bool				jobReady{false};
+	};
 
 } // namespace foundation

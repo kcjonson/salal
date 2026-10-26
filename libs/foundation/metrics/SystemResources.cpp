@@ -27,14 +27,13 @@ namespace Foundation {
 		mach_task_basic_info_data_t taskInfo;
 		mach_msg_type_number_t		infoCount = MACH_TASK_BASIC_INFO_COUNT;
 
-		if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&taskInfo), &infoCount) ==
-			KERN_SUCCESS) {
+		if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&taskInfo), &infoCount) == KERN_SUCCESS) {
 			snapshot.memoryUsedBytes = taskInfo.resident_size;
 			snapshot.memoryPeakBytes = taskInfo.resident_size_max;
 		}
 
 		// Get CPU usage
-		thread_array_t		  threadList;
+		thread_array_t		   threadList;
 		mach_msg_type_number_t threadCount;
 
 		if (task_threads(mach_task_self(), &threadList, &threadCount) == KERN_SUCCESS) {
@@ -45,25 +44,21 @@ namespace Foundation {
 				thread_basic_info_data_t threadInfo;
 				mach_msg_type_number_t	 threadInfoCount = THREAD_BASIC_INFO_COUNT;
 
-				if (thread_info(threadList[i], THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&threadInfo),
-								&threadInfoCount) == KERN_SUCCESS) {
+				if (thread_info(threadList[i], THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&threadInfo), &threadInfoCount) ==
+					KERN_SUCCESS) {
 					// Convert to microseconds
-					totalUserTime +=
-						static_cast<uint64_t>(threadInfo.user_time.seconds) * 1000000 + threadInfo.user_time.microseconds;
-					totalSystemTime += static_cast<uint64_t>(threadInfo.system_time.seconds) * 1000000 +
-									   threadInfo.system_time.microseconds;
+					totalUserTime += static_cast<uint64_t>(threadInfo.user_time.seconds) * 1000000 + threadInfo.user_time.microseconds;
+					totalSystemTime +=
+						static_cast<uint64_t>(threadInfo.system_time.seconds) * 1000000 + threadInfo.system_time.microseconds;
 				}
 
 				mach_port_deallocate(mach_task_self(), threadList[i]);
 			}
 
-			vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threadList),
-						  threadCount * sizeof(thread_t));
+			vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threadList), threadCount * sizeof(thread_t));
 
 			// Calculate CPU percentage since last sample
-			auto now =
-				std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
-					.count();
+			auto now = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 
 			if (s_lastSampleTime > 0) {
 				uint64_t elapsedUs = static_cast<uint64_t>(now) - s_lastSampleTime;

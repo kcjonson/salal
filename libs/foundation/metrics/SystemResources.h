@@ -10,10 +10,10 @@
 namespace Foundation {
 
 	struct ResourceSnapshot {
-		uint64_t memoryUsedBytes{};	 // Resident set size (physical memory)
-		uint64_t memoryPeakBytes{};	 // Peak RSS
-		float	 cpuUsagePercent{};	 // CPU usage since last sample (0-100%+)
-		uint32_t cpuCoreCount{};	 // Number of CPU cores
+		uint64_t memoryUsedBytes{}; // Resident set size (physical memory)
+		uint64_t memoryPeakBytes{}; // Peak RSS
+		float	 cpuUsagePercent{}; // CPU usage since last sample (0-100%+)
+		uint32_t cpuCoreCount{};	// Number of CPU cores
 	};
 
 	class SystemResources {
