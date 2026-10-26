@@ -81,9 +81,10 @@ the CMake cleanup landed, the dev server left `foundation` for
 `libs/engine/debug`, and `InputTypes.h` is in `foundation/input/` with `engine`
 off ui's link list (decision D, settled 2026-10-26).
 
-Phase 1 is under way: `foundation` and `renderer` are imported; next is the
-`v0.1.0` tag, then worldsim converts to consume this repo. Phase 2 carves `app`
-out of `libs/engine`; `ui` is extracted last.
+Phase 1 landed (2026-10-26): `foundation` and `renderer` are imported, `v0.1.0`
+is tagged, and worldsim consumes this repo. The renderer boundary PRs are next,
+sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md); PR 1 is in
+progress. Phase 2 carves `app` out of `libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
