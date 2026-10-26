@@ -604,7 +604,9 @@ pre-moves first so each import is a pure move. State as of 2026-10-26:
    screenshots on text_shapes, sdf_minimal, svg and button plus the game scene,
    identical to the pre-branch shots, and green CI. Next.
 7. The GL-boundary PRs, salal, after step 6 so worldsim pins a tag before the
-   API moves underneath it; tag `v0.2.0` when they are done. Next.
+   API moves underneath it: four PRs, tagged `v0.2.0` through `v0.5.0` with a
+   worldsim pin after each, sequenced in
+   [renderer-boundary.md](renderer-boundary.md). Next.
 
 Settled while scoping, beyond the import method and fonts under "What the repo
 looks like":

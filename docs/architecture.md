@@ -54,7 +54,8 @@ library nor its placement is settled.
 
 The backend boundary in the `renderer` row has a settled direction and a planned
 design; nothing is built, and decision G in
-[open-decisions.md](open-decisions.md) holds the plan. The layer is OpenGL
+[open-decisions.md](open-decisions.md) holds the plan and
+[renderer-boundary.md](renderer-boundary.md) the design. The layer is OpenGL
 throughout today: worldsim's renderer, which salal will import unchanged, has
 about 180 direct GL calls in about ten files (measured on worldsim main @
 `870dd755`, before the renderer import), and `BatchRenderer.h` and
