@@ -31,7 +31,7 @@ document is the one that is right.
 | Library | Owns | Does not own |
 |---|---|---|
 | `foundation` | math, platform abstraction, logging, memory arenas, resource handles, seeded PRNG, and the plain-data input types in `input/` (`Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`, the event structs, the accumulator behind the per-tick `InputSnapshot`, the `ActionMap`), none of which include GLFW | anything that knows about pixels; the HTTP dev server, which is `app`'s (worldsim has moved it out of foundation into `libs/engine/debug`, and it moves on in phase 2) |
-| `renderer` | GL abstraction (to sit behind a backend boundary, with OpenGL 3.3 core as the first backend; the direction is settled, the design is planned; see [open-decisions.md](open-decisions.md) decision G), shaders, Primitives, BatchRenderer, vector/SVG, the font renderer and SDF text rendering (the game owns the fonts and atlases; the renderer will take atlas sources from the game, a phase 2 item), coordinate system, draw metrics | layout, interaction, widgets |
+| `renderer` | GL abstraction (behind a backend boundary, with OpenGL 3.3 core as the first backend; the design is merged and its first two PRs are in; see [open-decisions.md](open-decisions.md) decision G), shaders, Primitives, BatchRenderer, vector/SVG, the font renderer and SDF text rendering (the game owns the fonts and atlases; the renderer will take atlas sources from the game, a phase 2 item), coordinate system, draw metrics | layout, interaction, widgets |
 | `ui` | Layer hierarchy, components, layout, focus, theme, text components and font theme tokens, text layout for widgets, animation, inspector | the window, the loop, game logic, the font renderer |
 | `app` | window, fixed-step loop, scenes, config, device input (GLFW callbacks, gamepads, hot-plug, device-to-player-slot claiming, key names for rebinding) feeding the per-tick snapshot, clipboard, dev server | anything drawable |
 | `audio` (proposed) | a mixer with priority buses and ducking, looping voices with per-frame pitch, filter and gain, synchronized stems, one-shots with pitch, gain and pan; depends on `foundation` only | game-side sound design |
@@ -56,17 +56,18 @@ The backend boundary in the `renderer` row has a settled direction and a
 design; decision G in [open-decisions.md](open-decisions.md) is settled
 (2026-10-26) and [renderer-boundary.md](renderer-boundary.md) holds the design
 and the PR sequence.
-The first step is in: no public renderer header (every header under
-`libs/renderer` outside `gl/`, `shader/` and `backend/`) reaches a GL, GLES,
-OpenGL, GLFW or glad header, which `salal_check_layering()` walks at configure time,
-and consumers see `TextureHandle`, `Viewport` and `Primitives` calls where they
-saw `GLuint`, `GLFWwindow*` and the batch renderer. `gl/`, `shader/` and
-`backend/gl/` are the explicit GL opt-in for a game's own passes. Behind the
-headers the layer is still OpenGL throughout (the imported renderer had 182
-direct GL calls in twelve files, measured at worldsim `2cc7e40a`); next every
-texture goes through one wrapper and the render-target API is designed as a
-backend object. OpenGL 3.3 core is the only backend until then, and Vulkan is
-possible later, not scheduled. Blend state in the batch sort key, that
+The first two steps are in: no public renderer header (every header under
+`libs/renderer` outside `backend/`) reaches a GL, GLES, OpenGL, GLFW or glad
+header, which `salal_check_layering()` walks at configure time, and consumers
+see `TextureHandle`, `Viewport` and `Primitives` calls where they saw `GLuint`,
+`GLFWwindow*` and the batch renderer. `backend/gl/` (the GL wrappers, `Shader`,
+`ShaderLoader`, the texture table) is the explicit GL opt-in for a game's own
+passes. Every texture the renderer makes lives in its texture table, and
+`RenderTarget` is the first backend object. Behind the headers the layer is
+still OpenGL throughout (the imported renderer had 182 direct GL calls in
+twelve files, measured at worldsim `2cc7e40a`). OpenGL 3.3 core is the only
+backend until the backend interface lands, and Vulkan is possible later, not
+scheduled. Blend state in the batch sort key, that
 render-target API, and the polygon, arc and wide-line primitives land before a
 second consumer depends on the renderer API; worldsim consumes the renderer
 behaviour-identical and takes API changes through a tag bump. The diagram

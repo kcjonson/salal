@@ -4,7 +4,7 @@
 #include "primitives/BatchRenderer.h"
 #include "CoordinateSystem/CoordinateSystem.h"
 #include "backend/gl/GLBuffer.h"
-#include "backend/gl/GLNames.h"
+#include "backend/gl/GLTextures.h"
 #include "backend/gl/GLVertexArray.h"
 #include "backend/gl/Shader.h"
 #include <GL/glew.h>

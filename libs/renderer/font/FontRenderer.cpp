@@ -1,10 +1,9 @@
 // Font rendering implementation using MSDF (Multi-channel Signed Distance Field) atlas
 
 #include "font/FontRenderer.h"
-#include "backend/gl/GLNames.h"
+#include "backend/gl/GLTextures.h"
 #include "utils/Log.h"
 #include "utils/ResourcePath.h"
-#include <GL/glew.h>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -53,12 +52,8 @@ namespace Renderer {
 	FontRenderer::~FontRenderer() {
 		// Clean up every loaded atlas texture
 		for (Atlas& atlas : atlases) {
-			if (atlas.textureName != 0) {
-				backend::gl::unregisterTexture(atlas.texture);
-				atlas.texture = {};
-				glDeleteTextures(1, &atlas.textureName);
-				atlas.textureName = 0;
-			}
+			backend::gl::destroyTexture(atlas.texture);
+			atlas.texture = {};
 		}
 	}
 
@@ -289,19 +284,15 @@ namespace Renderer {
 
 		LOG_INFO(UI, "Loaded atlas texture: %dx%d, %d channels", width, height, channels);
 
-		// Create OpenGL texture
-		glGenTextures(1, &atlas.textureName);
-		glBindTexture(GL_TEXTURE_2D, atlas.textureName);
-
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, imageData.get());
-
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-		glBindTexture(GL_TEXTURE_2D, 0);
-		atlas.texture = backend::gl::registerTexture(atlas.textureName);
+		// RGB8, linear, clamped: the SDF is sampled bilinearly and decoded in the shader.
+		backend::gl::destroyTexture(atlas.texture);
+		atlas.texture = backend::gl::createTexture(
+			{.width = width, .height = height, .format = TextureFormat::Rgb8, .linear = true, .pixels = imageData.get()}
+		);
+		if (!atlas.texture.isValid()) {
+			LOG_ERROR(UI, "Failed to create SDF atlas texture: %s", pngPath.c_str());
+			return false;
+		}
 
 		// imageData automatically freed by unique_ptr
 

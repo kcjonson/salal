@@ -1,29 +1,23 @@
 #include "resources/TileTextureAtlas.h"
 
-#include "backend/gl/GLNames.h"
-#include "backend/gl/GLTexture.h"
+#include "backend/gl/GLTextures.h"
 
-#include <GL/glew.h>
 #include <algorithm>
 #include <utility>
 
 namespace Renderer {
 
 	TileTextureAtlas::TileTextureAtlas(int atlasSize)
-		// Create square texture using RAII wrapper (sets up filtering and wrapping)
-		: texture_(std::make_unique<GLTexture>(atlasSize, atlasSize, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, nullptr)) {
-		// Unbind texture after GLTexture constructor (it leaves it bound)
-		GLTexture::unbind();
-		handle_ = backend::gl::registerTexture(*texture_);
-	}
+		: handle_(backend::gl::createTexture({.width = atlasSize, .height = atlasSize})),
+		  size_(handle_.isValid() ? atlasSize : 0) {}
 
 	TileTextureAtlas::~TileTextureAtlas() {
 		release();
 	}
 
 	TileTextureAtlas::TileTextureAtlas(TileTextureAtlas&& other) noexcept
-		: texture_(std::move(other.texture_)),
-		  handle_(std::exchange(other.handle_, TextureHandle{})),
+		: handle_(std::exchange(other.handle_, TextureHandle{})),
+		  size_(std::exchange(other.size_, 0)),
 		  cursorX_(std::exchange(other.cursorX_, 0)),
 		  cursorY_(std::exchange(other.cursorY_, 0)),
 		  currentRowHeight_(std::exchange(other.currentRowHeight_, 0)) {}
@@ -31,8 +25,8 @@ namespace Renderer {
 	TileTextureAtlas& TileTextureAtlas::operator=(TileTextureAtlas&& other) noexcept {
 		if (this != &other) {
 			release();
-			texture_ = std::move(other.texture_);
 			handle_ = std::exchange(other.handle_, TextureHandle{});
+			size_ = std::exchange(other.size_, 0);
 			cursorX_ = std::exchange(other.cursorX_, 0);
 			cursorY_ = std::exchange(other.cursorY_, 0);
 			currentRowHeight_ = std::exchange(other.currentRowHeight_, 0);
@@ -41,13 +35,9 @@ namespace Renderer {
 	}
 
 	void TileTextureAtlas::release() {
-		backend::gl::unregisterTexture(handle_);
+		backend::gl::destroyTexture(handle_);
 		handle_ = {};
-		texture_.reset();
-	}
-
-	int TileTextureAtlas::size() const {
-		return texture_ ? texture_->width() : 0;
+		size_ = 0;
 	}
 
 	AtlasRegion TileTextureAtlas::allocate(int width, int height) {
@@ -73,12 +63,10 @@ namespace Renderer {
 	}
 
 	bool TileTextureAtlas::upload(const AtlasRegion& region, const uint8_t* rgbaData) {
-		if (!region.valid || !texture_ || !texture_->isValid() || rgbaData == nullptr) {
+		if (!region.valid || !handle_.isValid() || rgbaData == nullptr) {
 			return false;
 		}
-		texture_->bind();
-		glTexSubImage2D(GL_TEXTURE_2D, 0, region.x, region.y, region.width, region.height, GL_RGBA, GL_UNSIGNED_BYTE, rgbaData);
-		GLTexture::unbind();
+		backend::gl::updateTexture(handle_, region.x, region.y, region.width, region.height, rgbaData);
 		return true;
 	}
 

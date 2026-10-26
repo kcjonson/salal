@@ -12,6 +12,7 @@
 // Uses C++20 designated initializers (.Args{} pattern) for clean, readable code.
 
 #include "Handle.h"
+#include "Texture.h"
 #include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "graphics/Color.h"
@@ -22,6 +23,7 @@
 #include "primitives/InstanceData.h"
 #include <cstdint>
 #include <glm/vec4.hpp>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -97,6 +99,22 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		TextureHandle				  getTileAtlasTexture();
 		const std::vector<glm::vec4>& getTileAtlasRects();
 
+		// --- Textures ---
+		//
+		// Every texture the renderer samples lives in its texture table, keyed by
+		// TextureHandle; the handle is the texture to every caller outside the
+		// renderer. A destroyed handle is stale: later calls with it do nothing, and
+		// a draw that samples it gets no texture (warned once).
+
+		// A new texture from `desc`, uploaded from desc.pixels when given; invalid,
+		// with an error logged, if it could not be made.
+		TextureHandle createTexture(const TextureDesc& desc);
+
+		// Replace a rectangle of the texture with `pixels`, in the texture's format.
+		void updateTexture(TextureHandle handle, int x, int y, int width, int height, const void* pixels);
+
+		void destroyTexture(TextureHandle handle);
+
 		// Set a callback to update frame counter for FontRenderer cache LRU tracking.
 		//
 		// The application registers FontRenderer::updateFrame() here when it creates
@@ -111,6 +129,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Clear the bound colour target to one colour.
 		void clear(const Foundation::Color& color);
 
+		// The backbuffer as RGBA8, bottom row first as GL reads it, at the size the
+		// last setViewport() with no RenderTarget open recorded. `width` and `height`
+		// are set first; the pixels are read only when `rgba` holds width * height * 4
+		// bytes, so a call with an empty span sizes the buffer for the next one.
+		// Synchronous by design: it waits for the GPU.
+		void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height);
+
 		void beginFrame();
 		void endFrame(); // Flushes all batches
 
@@ -120,7 +145,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// and guarantees the later pass paints on top.
 		void flush();
 
-		// Set viewport dimensions for projection matrix
+		// Size of the bound target in pixels: the projection for batched drawing,
+		// and, with no RenderTarget open, the backbuffer size the renderer remembers
+		// (what RenderTarget::end() restores and readBackbuffer() reports). The
+		// platform layer calls it with the framebuffer size whenever that changes.
 		void setViewport(int width, int height);
 
 		// Get current viewport dimensions
