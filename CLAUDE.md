@@ -83,8 +83,8 @@ off ui's link list (decision D, settled 2026-10-26).
 
 Phase 1 landed (2026-10-26): `foundation` and `renderer` are imported, `v0.1.0`
 is tagged, and worldsim consumes this repo. The renderer boundary PRs are under
-way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PR 1
-(GL off the public surface) is in (`v0.2.0`), PR 2 is next. Phase 2 carves
+way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PRs 1
+to 3 are in (`v0.2.0` to `v0.4.0`), PR 4 is next. Phase 2 carves
 `app` out of `libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 

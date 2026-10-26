@@ -23,6 +23,7 @@
 #include "primitives/InstanceData.h"
 #include <cstdint>
 #include <glm/vec4.hpp>
+#include <numbers>
 #include <span>
 #include <string>
 #include <vector>
@@ -126,14 +127,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Frame Lifecycle ---
 
-		// Clear the bound colour target to one colour.
+		// Clear the bound colour target to one colour, straight alpha like every colour
+		// at this API; the target stores it premultiplied.
 		void clear(const Foundation::Color& color);
 
 		// The backbuffer as RGBA8, bottom row first as GL reads it, at the size the
-		// last setViewport() with no RenderTarget open recorded. `width` and `height`
-		// are set first; the pixels are read only when `rgba` holds width * height * 4
-		// bytes, so a call with an empty span sizes the buffer for the next one.
-		// Synchronous by design: it waits for the GPU.
+		// last setViewport() with no RenderTarget open recorded. Its colour is
+		// premultiplied by its alpha, as everything the renderer draws and clears is.
+		// `width` and `height` are set first; the pixels are read only when `rgba`
+		// holds width * height * 4 bytes, so a call with an empty span sizes the buffer
+		// for the next one. Synchronous by design: it waits for the GPU.
 		void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height);
 
 		void beginFrame();
@@ -171,12 +174,22 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Drawing Functions ---
 
+		// How a draw combines with what is under it. Colours are straight alpha at
+		// this API; the shader premultiplies, and every mode blends premultiplied.
+		//   Alpha     "over": the colour covers the destination by its alpha.
+		//   Additive  the colour, times its alpha, is added to the destination, which
+		//             keeps its own alpha. Glows, particles, bloom compositing.
+		// Both draw in one GL blend state (additive zeroes the output alpha), so mixing
+		// them never splits a draw, and the mode never changes draw order.
+		enum class BlendMode : uint8_t { Alpha, Additive };
+
 		// Arguments for DrawRect
 		struct RectArgs {
 			Foundation::Rect	  bounds;
 			Foundation::RectStyle style;
 			const char*			  id = nullptr; // Optional: for inspection/debugging
 			int					  zIndex = 0;	// Optional: explicit draw order
+			BlendMode			  blend = BlendMode::Alpha;
 		};
 
 		// Arguments for DrawLine
@@ -186,6 +199,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::LineStyle style;
 			const char*			  id = nullptr;
 			int					  zIndex = 0;
+			BlendMode			  blend = BlendMode::Alpha;
 		};
 
 		// Arguments for DrawTriangles
@@ -198,6 +212,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::Color* colors = nullptr;	 // Optional: per-vertex colors (array, same size as vertices)
 			const char*				 id = nullptr;		 // Optional: for inspection/debugging
 			int						 zIndex = 0;		 // Optional: explicit draw order
+			BlendMode				 blend = BlendMode::Alpha;
 		};
 
 		// Draw a rectangle with optional fill and border
@@ -216,6 +231,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::CircleStyle style;
 			const char*				id = nullptr;
 			int						zIndex = 0;
+			BlendMode				blend = BlendMode::Alpha;
 		};
 
 		// Draw a circle with optional fill and border.
@@ -232,6 +248,95 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   - id: Optional debug identifier
 		//   - zIndex: Draw order (higher values drawn later)
 		void drawCircle(const CircleArgs& args);
+
+		// How an open polyline's two ends finish: flat at the end point, a half disk
+		// around it, or a half square past it.
+		enum class LineCap : uint8_t { Butt, Round, Square };
+
+		// How two segments meet. Round puts a disk on the joint. Miter runs the outer
+		// edges on to their meeting point for a turn of up to a right angle and rounds
+		// sharper turns (a miter limit of sqrt 2, rounding where SVG bevels).
+		enum class LineJoin : uint8_t { Round, Miter };
+
+		// Arguments for DrawPolygon
+		struct PolygonArgs {
+			std::span<const Foundation::Vec2> vertices; // One closed outline, in order; the last point joins the first
+			Foundation::PolygonStyle		  style;
+			const char*						  id = nullptr;
+			int								  zIndex = 0;
+			BlendMode						  blend = BlendMode::Alpha;
+		};
+
+		// Draw a filled polygon, convex or not, self-crossing filled by the nonzero
+		// rule. The outline is tessellated once per distinct vertex list and cached,
+		// so a silhouette drawn every frame under PushTransform costs one
+		// tessellation. The fill is not anti-aliased (as drawTriangles). A border is a
+		// closed stroke with miter joins (strokeOutline) whose outer edge runs its width
+		// outside the outline and whose inner edge runs a pixel inside, so its
+		// anti-aliased edge covers the fill's aliased one and no background shows
+		// between them; a notch sharper than a right angle gets a flat wedge into its
+		// corner.
+		void drawPolygon(const PolygonArgs& args);
+
+		// Arguments for DrawPolyline
+		struct PolylineArgs {
+			std::span<const Foundation::Vec2> points;
+			float							  width = 1.0F;
+			Foundation::Color				  color = Foundation::Color::white();
+			LineCap							  cap = LineCap::Butt;
+			LineJoin						  join = LineJoin::Round;
+			bool		closed = false; // Join the last point back to the first, uncapped; two points stay an open segment
+			const char* id = nullptr;
+			int			zIndex = 0;
+			BlendMode	blend = BlendMode::Alpha;
+		};
+
+		// Draw a stroked polyline, anti-aliased: one SDF quad per segment, one per
+		// round or mitered joint, one per round cap. The pieces overlap at joints, so
+		// a translucent or additive stroke is brighter or denser there.
+		void drawPolyline(const PolylineArgs& args);
+
+		// Arguments for DrawArc. Angles are radians from +x, and a positive sweep turns
+		// the way atan2(y, x) does in screen space: clockwise on screen, since y points
+		// down. A negative sweep runs the other way from startAngle; a sweep of 2 pi or
+		// more is the full ring. innerRadius 0 makes a pie slice or a disk.
+		struct ArcArgs {
+			Foundation::Vec2  center;
+			float			  innerRadius = 0.0F;
+			float			  outerRadius = 0.0F;
+			float			  startAngle = 0.0F;
+			float			  sweep = 2.0F * std::numbers::pi_v<float>;
+			Foundation::Color color = Foundation::Color::white();
+			const char*		  id = nullptr;
+			int				  zIndex = 0;
+			BlendMode		  blend = BlendMode::Alpha;
+		};
+
+		// Draw a ring, arc or pie: one quad, its shape a signed distance field in the
+		// shader, anti-aliased like the rounded rectangle, with straight radial ends.
+		void drawArc(const ArcArgs& args);
+
+		// Arguments for DrawImage. `uvMin` maps to the top-left of `bounds` and `uvMax`
+		// to the bottom-right, v counting texture rows from row 0. A texture uploaded
+		// through createTexture (first row at row 0) draws upright with the defaults; a
+		// RenderTarget's texture holds its bottom row at row 0, so draw it upright with
+		// uvMin {0, 1} and uvMax {1, 0}.
+		struct ImageArgs {
+			TextureHandle	  texture;
+			Foundation::Rect  bounds;
+			Foundation::Vec2  uvMin{0.0F, 0.0F};
+			Foundation::Vec2  uvMax{1.0F, 1.0F};
+			Foundation::Color tint = Foundation::Color::white(); // Multiplies the texel; its alpha is the opacity
+			const char*		  id = nullptr;
+			int				  zIndex = 0;
+			BlendMode		  blend = BlendMode::Alpha;
+		};
+
+		// Draw a texture into a rectangle, sampled linearly or nearest as the texture
+		// was made. Texels are taken as premultiplied alpha, which a RenderTarget's
+		// output already is; upload straight-alpha pixels premultiplied. Images batch
+		// with everything else, splitting the draw only where the texture changes.
+		void drawImage(const ImageArgs& args);
 
 		// Arguments for DrawText
 		struct TextArgs {
@@ -257,6 +362,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::TextTransform transform = Foundation::TextTransform::None;
 			const char*				  id = nullptr;
 			float					  zIndex = 0.0F;
+			BlendMode				  blend = BlendMode::Alpha;
 		};
 
 		// Draw text using the font renderer.
@@ -275,7 +381,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Batch glyph quads a caller laid out itself (FontRenderer::generateGlyphQuads
 		// and friends), each in its own colour, sampling the family's atlas. Text is
 		// interleaved with shapes in submission order.
-		void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family = FontFamily::Roboto, float zIndex = 0.0F);
+		void drawGlyphs(
+			const FontRenderer::GlyphQuad* quads,
+			size_t						   count,
+			FontFamily					   family = FontFamily::Roboto,
+			float						   zIndex = 0.0F,
+			BlendMode					   blend = BlendMode::Alpha
+		);
 
 		// --- World-Space Instancing ---
 

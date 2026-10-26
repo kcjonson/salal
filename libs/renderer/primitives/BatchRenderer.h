@@ -18,10 +18,12 @@
 #include "math/Types.h"
 #include "primitives/InstanceData.h"
 #include "primitives/Primitives.h"
+#include "primitives/Stroke.h"
 #include "vector/Tessellator.h"
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
@@ -32,24 +34,70 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// Unified vertex format for shapes and text (uber shader)
 	// Layout matches uber.vert attributes:
 	//   location 0: a_position (vec2)
-	//   location 1: a_texCoord (vec2) - UV for text, rectLocalPos for shapes
+	//   location 1: a_texCoord (vec2) - UV for text and images, rectLocalPos for shapes, arc-local for arcs
 	//   location 2: a_color (vec4)
-	//   location 3: a_data1 (vec4) - borderData for shapes, unused for text
-	//   location 4: a_data2 (vec4) - shapeParams for shapes, (pixelRange, 0, 0, -1) for text
+	//   location 3: a_data1 (vec4) - borderData for shapes, blur for shadows, unused otherwise
+	//   location 4: a_data2 (vec4) - per-mode parameters, the render mode in w
 	//   location 5: a_clipBounds (vec4) - (minX, minY, maxX, maxY) or (0,0,0,0) for no clip
 	struct UberVertex {
 		Foundation::Vec2 position;	 // Screen-space position
-		Foundation::Vec2 texCoord;	 // UV for text, rectLocalPos for shapes
-		Foundation::Vec4 color;		 // Fill color RGBA
-		Foundation::Vec4 data1;		 // Border: (color.rgb, width) for shapes, unused for text
-		Foundation::Vec4 data2;		 // Shape: (halfW, halfH, cornerRadius, borderPos), Text: (pixelRange, 0, 0, -1)
+		Foundation::Vec2 texCoord;	 // UV for text and images, rectLocalPos for shapes
+		Foundation::Vec4 color;		 // Fill color RGBA, straight alpha
+		Foundation::Vec4 data1;		 // Border: (color.rgb, width) for shapes, (blur, 0, 0, 0) for shadows
+		Foundation::Vec4 data2;		 // xyz per mode, w the mode (table below). Shape: (halfW, halfH, cornerRadius, borderPos);
+									 // text: (pixelRange, 0, 0, w); shadow: (halfW, halfH, cornerRadius, w);
+									 // arc: (innerR, outerR, sweep / 2, w); image: (0, 0, 0, w)
 		Foundation::Vec4 clipBounds; // Clip rect (minX, minY, maxX, maxY), or (0,0,0,0) for no clipping
 	};
 
-	// Render mode constants for data2.w
-	constexpr float kRenderModeText = -1.0F;   // Text rendering (MSDF)
-	constexpr float kRenderModeShadow = -3.0F; // Box-shadow / glow (SDF soft falloff)
-	// Shapes use borderPosition (0, 1, 2) in data2.w
+	// data2.w holds the render mode and the additive flag together; uber.frag
+	// decodes the same table with half-unit margins.
+	//
+	//   mode              alpha        additive
+	//   shape             0, 1, 2      4, 5, 6     border position inside, center, outside
+	//   text              -1           -11
+	//   instanced, baked  -2           -           written by uber.vert, never additive
+	//   shadow            -3           -13
+	//   arc               -4           -14
+	//   image             -5           -15
+	constexpr float kRenderModeText = -1.0F;	  // MSDF text
+	constexpr float kRenderModeShadow = -3.0F;	  // Box-shadow / glow (SDF soft falloff)
+	constexpr float kRenderModeArc = -4.0F;		  // Ring, arc or pie (SDF)
+	constexpr float kRenderModeImage = -5.0F;	  // Plain texture sample
+	constexpr float kAdditiveShapeOffset = 4.0F;  // Added to a shape's border position
+	constexpr float kAdditiveModeOffset = -10.0F; // Added to a negative mode
+
+	// data2.w for a border position (0..2) or a negative mode, drawn with `blend`.
+	constexpr float renderMode(float mode, Primitives::BlendMode blend) {
+		if (blend != Primitives::BlendMode::Additive) {
+			return mode;
+		}
+		return mode >= 0.0F ? mode + kAdditiveShapeOffset : mode + kAdditiveModeOffset;
+	}
+
+	// The GL blend state a mode draws in. Output is premultiplied and blended
+	// (ONE, ONE_MINUS_SRC_ALPHA); Additive is that state with the output alpha
+	// zeroed in uber.frag, so it shares Alpha's state and never splits a run.
+	constexpr Primitives::BlendMode glBlendState(Primitives::BlendMode mode) {
+		return mode == Primitives::BlendMode::Additive ? Primitives::BlendMode::Alpha : mode;
+	}
+
+	// One glDrawElements: `indexCount` indices from `indexStart` in the emit order,
+	// sampling `texture` (bound for the run; invalid binds nothing) in one GL blend
+	// state.
+	struct DrawRun {
+		uint32_t			  indexStart = 0;
+		uint32_t			  indexCount = 0;
+		TextureHandle		  texture;
+		Primitives::BlendMode blendState = Primitives::BlendMode::Alpha;
+	};
+
+	// What flush() submits: the indices in emit order and the runs they split into.
+	// Both point into the batch and stay valid until the next add or flush.
+	struct DrawPlan {
+		std::span<const uint32_t> indices;
+		std::span<const DrawRun>  runs;
+	};
 
 	// Batch accumulator - collects geometry before GPU upload
 	class BatchRenderer { // NOLINT(cppcoreguidelines-special-member-functions)
@@ -75,13 +123,20 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const std::optional<Foundation::BorderStyle>&	 border = std::nullopt,
 			float											 cornerRadius = 0.0F,
 			const std::optional<Foundation::LinearGradient>& gradient = std::nullopt,
-			float											 zIndex = 0.0F
+			float											 zIndex = 0.0F,
+			Primitives::BlendMode							 blend = Primitives::BlendMode::Alpha
 		);
 
 		// Add an outer box-shadow / glow quad behind a rect. The SDF shader renders
 		// it as a soft falloff over `shadow.blur` px outside the (spread-grown)
 		// shape. Emit before the element's own quad so it sits behind.
-		void addShadowQuad(const Foundation::Rect& bounds, const Foundation::BoxShadow& shadow, float cornerRadius, float zIndex = 0.0F);
+		void addShadowQuad(
+			const Foundation::Rect&		 bounds,
+			const Foundation::BoxShadow& shadow,
+			float						 cornerRadius,
+			float						 zIndex = 0.0F,
+			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
+		);
 
 		// Add raw triangles (for circles, polygons, etc.)
 		// If inputColors is provided, uses per-vertex colors; otherwise uses uniform color
@@ -92,8 +147,27 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			size_t					 indexCount,
 			const Foundation::Color& color,
 			const Foundation::Color* inputColors = nullptr,
-			float					 zIndex = 0.0F
+			float					 zIndex = 0.0F,
+			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha
 		);
+
+		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
+		// an SDF box quad padded by a pixel so its edge ramp is not cut off, and its flat
+		// `triangles`, three points each (strokeOutline's wedges).
+		void addStroke(
+			std::span<const StrokePiece>	  pieces,
+			std::span<const Foundation::Vec2> triangles,
+			const Foundation::Color&		  color,
+			float							  zIndex = 0.0F,
+			Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha
+		);
+
+		// Add a ring, arc or pie as one SDF quad (see Primitives::ArcArgs).
+		void addArc(const Primitives::ArcArgs& args);
+
+		// Add a textured quad sampling args.texture (see Primitives::ImageArgs). An
+		// invalid texture adds nothing.
+		void addImageQuad(const Primitives::ImageArgs& args);
 
 		// --- Text rendering (MSDF) ---
 
@@ -119,7 +193,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::Color& color,
 			const Foundation::Vec2&	 runOrigin,
 			TextureHandle			 atlas = {},
-			float					 zIndex = 0.0F
+			float					 zIndex = 0.0F,
+			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha
 		);
 
 		// Set the default MSDF font atlas (used by text quads added with an invalid
@@ -127,6 +202,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void setFontAtlas(TextureHandle atlas, float pixelRange = 4.0F);
 
 		// --- Rendering ---
+
+		// The emit order and draw runs of what has been added, built without GL so
+		// tests can run headless; flush() submits exactly this. Groups are
+		// stable-sorted by z when any carries an explicit z (submission order
+		// otherwise), and the emit order is cut into a new run wherever a triangle
+		// needs a texture other than the bound one or a group's GL blend state
+		// differs. Shapes, arcs and the like need no texture and never split.
+		DrawPlan plan();
 
 		// Flush accumulated geometry to GPU and render
 		void flush();
@@ -168,6 +251,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Get current transform matrix
 		const Foundation::Mat4& getTransform() const { return currentTransform; }
 
+		// Local units per logical pixel under the current transform.
+		float getLocalPixel() const { return pixelPadding; }
+
 		// Rendering statistics structure
 		struct RenderStats {
 			uint32_t drawCalls = 0;
@@ -179,6 +265,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		size_t		getVertexCount() const { return vertices.size(); }
 		size_t		getDrawCallCount() const { return drawCallCount; }
 		RenderStats getStats() const;
+
+		// The vertices added since the last flush, in the order added.
+		std::span<const UberVertex> getPendingVertices() const { return vertices; }
 
 		// --- GPU Instancing (World-Space) ---
 
@@ -228,25 +317,42 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		std::vector<UberVertex> vertices;
 		std::vector<uint32_t>	indices;
 
-		// Per-vertex atlas tag, parallel to `vertices`. Invalid = shape (no texture
-		// requirement); valid = the MSDF atlas a text vertex must sample from.
-		// flush() uses these to split text into per-atlas draw runs.
+		// Per-vertex texture tag, parallel to `vertices`. Invalid = no texture
+		// requirement (shapes, arcs); valid = the MSDF atlas a text vertex or the
+		// texture an image vertex samples. plan() splits runs on these.
 		std::vector<TextureHandle> vertexAtlas;
 
-		// Per-draw-call z-order groups. Each add* records one {indexStart, indexCount,
-		// zIndex}. flush() keeps submission order untouched unless some group carries
-		// an explicit (non-zero) z, in which case groups are stable-sorted by z and the
-		// emit-order index list is rebuilt. zIndex originates in the component layer.
+		// Per-draw-call groups. Each add* records one {indexStart, indexCount, zIndex,
+		// blend}. plan() keeps submission order unless some group carries an explicit
+		// (non-zero) z, in which case groups are stable-sorted by z and the emit-order
+		// index list is rebuilt. zIndex originates in the component layer.
 		struct DrawGroup {
-			uint32_t indexStart;
-			uint32_t indexCount;
-			float	 zIndex;
+			uint32_t			  indexStart;
+			uint32_t			  indexCount;
+			float				  zIndex;
+			Primitives::BlendMode blend;
 		};
 		std::vector<DrawGroup> drawGroups;
 		bool				   anyExplicitZ = false;
 
-		// Record the index range [groupStart, current end) as one z-order group.
-		void recordGroup(uint32_t groupStart, float zIndex);
+		// plan()'s output, reused across flushes: the z-sorted index list (unused in
+		// submission order) and the runs.
+		std::vector<uint32_t> sortedIndices;
+		std::vector<DrawRun>  runs;
+
+		// Record the index range [groupStart, current end) as one draw group.
+		void recordGroup(uint32_t groupStart, float zIndex, Primitives::BlendMode blend);
+
+		// Append the four corners of a quad, TL, TR, BR, BL, positions through the
+		// current transform, and its two triangles, all tagged with `texture`.
+		void pushQuad(
+			const Foundation::Vec2 (&corners)[4],
+			const Foundation::Vec2 (&texCoords)[4],
+			const Foundation::Vec4& color,
+			const Foundation::Vec4& data1,
+			const Foundation::Vec4& data2,
+			TextureHandle			texture = {}
+		);
 
 		// OpenGL resources and uniform locations (defined in BatchRenderer.cpp)
 		struct GL;
@@ -280,6 +386,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		Foundation::Mat4 currentTransform{1.0F}; // Identity
 		TransformClass	 transformClass = TransformClass::kIdentity;
 		Foundation::Vec2 transformTranslation{0.0F, 0.0F}; // Valid for kTranslateOnly (zero for kIdentity)
+
+		// Local units per logical pixel under currentTransform (the inverse of its
+		// area scale), the padding SDF quads get so their edge ramp fits.
+		float pixelPadding = 1.0F;
 
 		// Caches addTextQuad's run-origin snap: every glyph of a text run shares the
 		// same {pixelRatio, translation, runOrigin}, so the delta is computed once per

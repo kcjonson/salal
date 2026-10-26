@@ -102,6 +102,35 @@ TEST(TessellatorSweep, SelfIntersectingBowtie) {
 	EXPECT_NEAR(meshArea(mesh), 5000.0, 2.0); // two 2500-area lobes
 }
 
+// A pentagram turns the same way at every point, so it passes a sign-only convexity test,
+// but it winds twice round and must go through the sweep: nonzero fills the whole star,
+// even-odd leaves the centre pentagon empty. A fan from one point covers neither.
+TEST(TessellatorSweep, SelfIntersectingPentagram) {
+	const double				  kPi = 3.14159265358979323846;
+	const double				  outer = 100.0;
+	const double				  inner = outer * std::cos(0.4 * kPi) / std::cos(0.2 * kPi);
+	std::vector<Foundation::Vec2> points;
+	for (int i = 0; i < 5; ++i) {
+		const double angle = (2.0 * kPi * ((i * 2) % 5) / 5.0) - (kPi * 0.5);
+		points.emplace_back(static_cast<float>(outer * std::cos(angle)), static_cast<float>(outer * std::sin(angle)));
+	}
+	const double starArea = 5.0 * outer * inner * std::sin(0.2 * kPi);
+	const double centreArea = 2.5 * inner * inner * std::sin(0.4 * kPi);
+
+	Tessellator		   t;
+	TessellatedMesh	   nonzero;
+	TessellatorOptions nz;
+	nz.useNonZeroFillRule = true;
+	ASSERT_TRUE(t.Tessellate(makePath(points), nonzero, nz));
+	EXPECT_NEAR(meshArea(nonzero), starArea, 2.0);
+
+	TessellatedMesh	   odd;
+	TessellatorOptions eo;
+	eo.useNonZeroFillRule = false;
+	ASSERT_TRUE(t.Tessellate(makePath(points), odd, eo));
+	EXPECT_NEAR(meshArea(odd), starArea - centreArea, 2.0);
+}
+
 // Two nested same-winding squares differentiate the winding rules:
 //  - nonzero: inner region winds twice -> still inside -> whole outer fills (10000)
 //  - even-odd: inner region is even -> a ring (10000 - 2500 = 7500)

@@ -8,15 +8,19 @@
 #include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "primitives/BatchRenderer.h"
+#include "primitives/Stroke.h"
+#include "vector/Tessellator.h"
 #include "vector/Types.h"
 #include <GL/glew.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
 #include <numbers>
 #include <stack>
+#include <unordered_map>
 #include <utils/Log.h>
 #include <vector>
 
@@ -45,6 +49,19 @@ namespace Renderer::Primitives {
 	};
 	static std::stack<ClipStackEntry> g_clipStack;
 
+	// Tessellated polygon fills, keyed by a hash of the outline's vertex bits and
+	// checked against a copy of the outline, so a hash collision is a miss, never a
+	// wrong mesh. A silhouette drawn every frame (under a changing PushTransform)
+	// tessellates once. Bounded by emptying the whole cache when it is full: a
+	// frame's working set of silhouettes is far below the capacity, so it refills
+	// in one frame, and nothing per entry needs tracking.
+	struct PolygonCacheEntry {
+		std::vector<Foundation::Vec2> outline;
+		renderer::TessellatedMesh	  mesh;
+	};
+	constexpr size_t									   kPolygonCacheCapacity = 1024;
+	static std::unordered_map<uint64_t, PolygonCacheEntry> g_polygonCache;
+
 	// --- Initialization ---
 
 	void init(Renderer* renderer) {
@@ -61,6 +78,7 @@ namespace Renderer::Primitives {
 			g_batchRenderer.reset();
 		}
 		g_coordinateSystem = nullptr;
+		g_polygonCache.clear();
 	}
 
 	void setCoordinateSystem(CoordinateSystem* coordSystem) {
@@ -119,7 +137,8 @@ namespace Renderer::Primitives {
 	// --- Frame Lifecycle ---
 
 	void clear(const Foundation::Color& color) {
-		glClearColor(color.r, color.g, color.b, color.a);
+		// Targets hold premultiplied colour, as everything drawn into them is.
+		glClearColor(color.r * color.a, color.g * color.a, color.b * color.a, color.a);
 		glClear(GL_COLOR_BUFFER_BIT);
 	}
 
@@ -272,13 +291,15 @@ namespace Renderer::Primitives {
 
 		// Outer box-shadow / glow sits behind the fill (emit first).
 		if (args.style.boxShadow.has_value()) {
-			g_batchRenderer->addShadowQuad(args.bounds, args.style.boxShadow.value(), cornerRadius, static_cast<float>(args.zIndex));
+			g_batchRenderer->addShadowQuad(
+				args.bounds, args.style.boxShadow.value(), cornerRadius, static_cast<float>(args.zIndex), args.blend
+			);
 		}
 
 		// Single AddQuad call handles fill, border, rounded corners, and an optional
 		// gradient (per-corner vertex colors) via the GPU.
 		g_batchRenderer->addQuad(
-			args.bounds, args.style.fill, args.style.border, cornerRadius, args.style.gradient, static_cast<float>(args.zIndex)
+			args.bounds, args.style.fill, args.style.border, cornerRadius, args.style.gradient, static_cast<float>(args.zIndex), args.blend
 		);
 	}
 
@@ -308,7 +329,7 @@ namespace Renderer::Primitives {
 			args.end - offset,	 // end, left
 		};
 		static constexpr uint16_t kQuadIndices[6] = {0, 1, 2, 0, 2, 3};
-		g_batchRenderer->addTriangles(quad, kQuadIndices, 4, 6, args.style.color, nullptr, static_cast<float>(args.zIndex));
+		g_batchRenderer->addTriangles(quad, kQuadIndices, 4, 6, args.style.color, nullptr, static_cast<float>(args.zIndex), args.blend);
 	}
 
 	void drawTriangles(const TrianglesArgs& args) {
@@ -317,7 +338,14 @@ namespace Renderer::Primitives {
 		}
 
 		g_batchRenderer->addTriangles(
-			args.vertices, args.indices, args.vertexCount, args.indexCount, args.color, args.colors, static_cast<float>(args.zIndex)
+			args.vertices,
+			args.indices,
+			args.vertexCount,
+			args.indexCount,
+			args.color,
+			args.colors,
+			static_cast<float>(args.zIndex),
+			args.blend
 		);
 	}
 
@@ -370,7 +398,8 @@ namespace Renderer::Primitives {
 				 .indexCount = indices.size(),
 				 .color = args.style.fill,
 				 .id = args.id,
-				 .zIndex = args.zIndex}
+				 .zIndex = args.zIndex,
+				 .blend = args.blend}
 			);
 		}
 
@@ -382,8 +411,107 @@ namespace Renderer::Primitives {
 			for (int i = 0; i < segments; ++i) {
 				Foundation::Vec2 start = vertices[i + 1];
 				Foundation::Vec2 end = vertices[1 + (i + 1) % segments];
-				drawLine({.start = start, .end = end, .style = {.color = border.color, .width = border.width}});
+				drawLine({.start = start, .end = end, .style = {.color = border.color, .width = border.width}, .blend = args.blend});
 			}
+		}
+	}
+
+	namespace {
+
+		// FNV-1a over the outline's coordinate bits.
+		uint64_t hashOutline(std::span<const Foundation::Vec2> outline) {
+			uint64_t hash = 14695981039346656037ULL;
+			for (const Foundation::Vec2& point : outline) {
+				for (const float coordinate : {point.x, point.y}) {
+					uint32_t bits = 0;
+					std::memcpy(&bits, &coordinate, sizeof(bits));
+					for (int byte = 0; byte < 4; ++byte) {
+						hash ^= (bits >> (byte * 8)) & 0xFFU;
+						hash *= 1099511628211ULL;
+					}
+				}
+			}
+			return hash;
+		}
+
+		// The cached fill for `outline`, tessellating it on a miss. An outline the
+		// tessellator rejects caches an empty mesh, so it is reported once.
+		const renderer::TessellatedMesh& polygonFill(std::span<const Foundation::Vec2> outline) {
+			const uint64_t hash = hashOutline(outline);
+			const auto	   found = g_polygonCache.find(hash);
+			if (found != g_polygonCache.end() && std::ranges::equal(found->second.outline, outline)) {
+				return found->second.mesh;
+			}
+			if (g_polygonCache.size() >= kPolygonCacheCapacity) {
+				g_polygonCache.clear();
+			}
+			PolygonCacheEntry entry;
+			entry.outline.assign(outline.begin(), outline.end());
+			renderer::Tessellator tessellator;
+			if (!tessellator.Tessellate(renderer::VectorPath(entry.outline), entry.mesh)) {
+				LOG_WARNING(Renderer, "drawPolygon: could not tessellate a %zu-point outline", outline.size());
+				entry.mesh.clear();
+			}
+			PolygonCacheEntry& stored = g_polygonCache.insert_or_assign(hash, std::move(entry)).first->second;
+			return stored.mesh;
+		}
+
+	} // namespace
+
+	void drawPolygon(const PolygonArgs& args) {
+		if (g_batchRenderer == nullptr || args.vertices.size() < 3) {
+			return;
+		}
+
+		const float zIndex = static_cast<float>(args.zIndex);
+		if (args.style.fill.a > 0.0F) {
+			const renderer::TessellatedMesh& mesh = polygonFill(args.vertices);
+			if (!mesh.indices.empty()) {
+				g_batchRenderer->addTriangles(
+					mesh.vertices.data(),
+					mesh.indices.data(),
+					mesh.vertices.size(),
+					mesh.indices.size(),
+					args.style.fill,
+					nullptr,
+					zIndex,
+					args.blend
+				);
+			}
+		}
+
+		if (args.style.border.has_value() && args.style.border->width > 0.0F) {
+			const Foundation::LineStyle& border = args.style.border.value();
+			// The fill is not anti-aliased: a pixel is fill or not by its centre. The
+			// border's inner edge runs a pixel inside the outline, so its edge ramp (a pixel
+			// either side) lies over fill and every pixel outside the fill is fully border.
+			static thread_local std::vector<StrokePiece>	  pieces;
+			static thread_local std::vector<Foundation::Vec2> wedges;
+			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces, wedges);
+			g_batchRenderer->addStroke(pieces, wedges, border.color, zIndex, args.blend);
+		}
+	}
+
+	void drawPolyline(const PolylineArgs& args) {
+		if (g_batchRenderer == nullptr) {
+			return;
+		}
+		static thread_local std::vector<StrokePiece> pieces;
+		strokePolyline(args, pieces);
+		if (!pieces.empty()) {
+			g_batchRenderer->addStroke(pieces, {}, args.color, static_cast<float>(args.zIndex), args.blend);
+		}
+	}
+
+	void drawArc(const ArcArgs& args) {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->addArc(args);
+		}
+	}
+
+	void drawImage(const ImageArgs& args) {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->addImageQuad(args);
 		}
 	}
 
@@ -430,7 +558,7 @@ namespace Renderer::Primitives {
 			g_fontRenderer->generateGlyphQuads(
 				effective, glm::vec2(pos.x, pos.y), args.scale, glm::vec4(col.r, col.g, col.b, col.a), quads, args.font, args.letterSpacing
 			);
-			drawGlyphs(quads.data(), quads.size(), args.font, static_cast<float>(args.zIndex));
+			drawGlyphs(quads.data(), quads.size(), args.font, static_cast<float>(args.zIndex), args.blend);
 		};
 
 		if (args.shadowColor.a > 0.0F) {
@@ -439,7 +567,7 @@ namespace Renderer::Primitives {
 		emit(origin, args.color);
 	}
 
-	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family, float zIndex) {
+	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family, float zIndex, BlendMode blend) {
 		if (g_batchRenderer == nullptr) {
 			return;
 		}
@@ -458,7 +586,8 @@ namespace Renderer::Primitives {
 				Foundation::Color(quad.color.r, quad.color.g, quad.color.b, quad.color.a),
 				Foundation::Vec2(quad.runOrigin.x, quad.runOrigin.y),
 				atlas,
-				zIndex
+				zIndex,
+				blend
 			);
 		}
 	}

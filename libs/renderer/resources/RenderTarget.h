@@ -45,8 +45,10 @@ namespace Renderer {
 		[[nodiscard]] int			height() const;
 
 		// Read the colour attachment as RGBA8 into `out`, width() * height() * 4
-		// bytes, bottom row first as GL reads it. Synchronous by design: it waits
-		// for the GPU. Works whether or not the target is begun.
+		// bytes, bottom row first as GL reads it. The colour is premultiplied by its
+		// alpha, as everything the renderer draws and clears is; un-premultiply it for
+		// a straight-alpha image. Synchronous by design: it waits for the GPU. Works
+		// whether or not the target is begun.
 		void readPixels(std::span<uint8_t> out) const;
 
 	  private:

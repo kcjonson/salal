@@ -3,9 +3,9 @@
 The seam between `renderer` and OpenGL: what leaks today, what the public surface
 becomes, what sits behind it, and the PRs that get there. Written 2026-10-26 from
 worldsim @ `2cc7e40a` (the imported renderer and its callers); decision G in
-[open-decisions.md](open-decisions.md) has the reasoning. PR 1 is in; the leak
-table under "The public surface today" is the state it started from, kept as
-the record of what moved, and PRs 2 to 4 are still to build.
+[open-decisions.md](open-decisions.md) has the reasoning. PRs 1 to 3 are in; the
+leak table under "The public surface today" is the state it started from, kept as
+the record of what moved, and PR 4 is still to build.
 
 ## Goal and non-goals
 
@@ -134,8 +134,8 @@ What `BatchRenderer`, `Shader`, `RenderToTexture` and `GPUTimer` ask of GL today
 | vertex layouts | two: `UberVertex` (80 bytes, attributes 0-5, `uint32` indices) and `InstancedMeshVertex` + `InstanceData` (attributes 0, 2 and 6, 7 with divisor 1, `uint16` indices) |
 | program | one: `uber.vert`, `uber.frag`, `includes/instancing.glsl`, GLSL 330 through `ShaderPreprocessor`; 17 uniforms (`u_projection`, `u_transform`, `u_atlas`, `u_bakedAlpha`, `u_viewportHeight`, `u_pixelRatio`, `u_cameraPosition`, `u_cameraZoom`, `u_pixelsPerMeter`, `u_viewportSize`, `u_instanced`, and six groundcover and cursor uniforms) |
 | textures, framebuffers | 2D, RGBA8 or RGB8, linear, clamp to edge, one unit; `glTexSubImage2D` updates; a draw run split per atlas; one FBO with one RGBA8 colour attachment, float formats allowed |
-| pipeline state | blend on, `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`, off again after each flush; depth test off; cull off; no scissor (clip is per-vertex in the shader) |
-| draws | `glDrawElements(TRIANGLES, uint32)` per atlas run; `glDrawElementsInstanced(TRIANGLES, uint16)` per instance batch |
+| pipeline state | blend on, `ONE, ONE_MINUS_SRC_ALPHA` over premultiplied output (`SRC_ALPHA, ONE_MINUS_SRC_ALPHA` until PR 3), off again after each flush; depth test off; cull off; no scissor (clip is per-vertex in the shader) |
+| draws | `glDrawElements(TRIANGLES, uint32)` per run, cut where the texture or the GL blend state changes; `glDrawElementsInstanced(TRIANGLES, uint16)` per instance batch |
 | queries | `GL_TIMESTAMP` pairs, availability polled, `uint64` result |
 | context | `glewInit` after the GLFW context (`AppLauncher.cpp:149`, app's; becomes the backend's `create`) |
 
@@ -186,28 +186,34 @@ core has them; `u_atlas` stays a sampler binding) and the preprocessor swaps the
 version line, in PR 4. A second backend then provides the virtuals, the vertex
 layouts as vertex-input descriptions, and the clip test's y flip
 (`u_viewportHeight` exists because `gl_FragCoord` is bottom-left and Vulkan's is
-top-left: a shader-variant fact). A null backend for headless tests of the z
-sort, blend split and atlas split comes with it; `BatchRenderer.test.cpp` has two
-trivial tests today. This interface is PR 4 and may wait: PRs 1 and 2 change
+top-left: a shader-variant fact). A null backend comes with it, for headless tests
+of what reaches the backend; the z sort, blend split and atlas split are already
+tested headless against `BatchRenderer::plan()`, since PR 3. This interface is PR 4 and may wait: PRs 1 and 2 change
 headers, handles and texture ownership, PR 3 the shader and the batch.
 
 ## Decision G, folded in
 
 Blend state in the sort key: a per-group key that splits, not sorts. `DrawGroup`
-gets a `BlendMode` next to `zIndex`; emit order is kept, and the walk in `flush`
-starts a new run where the mode changes, as it already does for atlases.
-Premultiplied alpha decides the cost: with it, additive is over's blend state
-(`ONE, ONE_MINUS_SRC_ALPHA`, alpha zeroed in the shader, dual-deck-builder R5.22a)
-and never splits a draw; without it, additive is `SRC_ALPHA, ONE` and splits. The
-per-vertex flag rides in `data2.w`, since `UberVertex` has no spare field for
-shapes: border position 0 to 2 plus 4 for additive, new negative constants for
-additive text and shadow. Decided: premultiplied, in the same PR, also
-because compositing a straight-alpha render target over the scene (bloom) gives
-dark fringes. Nothing the uber program samples carries alpha in PR 3 (font atlases
-are RGB8; the tile atlas is sampled only by worldsim's tile shader,
-`ChunkRenderer.cpp:537`, blending off, and is left alone), so the costs are
-`uber.frag` multiplying at output, premultiply-on-upload for `drawImage` textures
-when they arrive, and screenshots moving by rounding.
+gets a `BlendMode` next to `zIndex`; emit order is kept, and the run walk
+(`BatchRenderer::plan`, which `flush` submits, GL-free so the batch tests run
+headless) starts a new run where a group's GL blend state changes, as it already
+does for atlases. Premultiplied alpha decides the cost: with it, additive is
+over's blend state (`ONE, ONE_MINUS_SRC_ALPHA`, alpha zeroed in the shader,
+dual-deck-builder R5.22a) and never splits a draw; without it, additive is
+`SRC_ALPHA, ONE` and splits. The per-vertex flag rides in `data2.w`, since
+`UberVertex` has no spare field for shapes: border position 0 to 2 plus 4 for
+additive, and every negative mode (text and shadow, and the arc and image modes
+PR 3 added) 10 lower when additive; `BatchRenderer.h` and `uber.frag` carry the
+same table. Decided: premultiplied, in the same PR, also because compositing a
+straight-alpha render target over the scene (bloom) gives dark fringes. Nothing
+the uber program samples carries alpha in PR 3 (font atlases are RGB8; the tile
+atlas is sampled only by worldsim's tile shader, `ChunkRenderer.cpp:537`,
+blending off, and is left alone), so the costs are `uber.frag` multiplying at
+output, `drawImage` taking its texels as premultiplied (a `RenderTarget`'s
+already are; `createTexture` is unchanged, so a caller with straight-alpha
+pixels premultiplies them before upload), and screenshots moving by rounding.
+One readback does change: a draw over a transparent target stores alpha `a`
+where straight blending stored `a * a`.
 
 Offscreen render target as the first backend object: `RenderTarget` above,
 `Rgba16F` for bloom, in PR 2. The primitives asteroids needs, and whether each is
@@ -215,10 +221,10 @@ a new batch entry:
 
 | need | how | new batch entry? |
 |---|---|---|
-| filled polygon with a per-frame transform | `drawPolygon({vertices, style, zIndex})` under `PushTransform`: tessellate (`vector/Tessellator`, cached per silhouette) into `addTriangles` | no |
-| arc or ring with partial fill | one quad in a new SDF mode, `data2 = (innerR, outerR, startAngle, sweep)`, next to text and shadow in `uber.frag` | yes: one render-mode constant and about twenty lines of GLSL; a 64-segment fan (`drawCircle` today) facets at HUD radii |
-| line with width, polyline | `drawLine` is already a rotated quad; `drawPolyline({points, width, cap, join})` is quads plus round caps, dual-deck-builder's shape | no |
-| silhouette stroke, rim light | `drawPolygon` with `style.border`: the outline as a polyline, offset outward by half the width | no |
+| filled polygon with a per-frame transform | `drawPolygon({vertices, style, zIndex, blend})` under `PushTransform`: tessellate (`vector/Tessellator`, cached per outline, keyed by its vertex bits and emptied whole at 1024 entries) into `addTriangles` | no |
+| arc or ring with partial fill | one quad in a new SDF mode, `data2 = (innerR, outerR, sweep / 2, mode)`, the start angle folded into the quad's local coordinates (turned so the arc's middle lies along +x), next to text and shadow in `uber.frag` | yes: one render-mode constant and about twenty lines of GLSL; a 64-segment fan (`drawCircle` today) facets at HUD radii |
+| line with width, polyline | `drawLine` is already a rotated quad; `drawPolyline({points, width, color, cap, join, closed})` is an SDF box per segment plus a disk per joint and round cap, dual-deck-builder's shape; joins round or miter (exact up to a right-angle turn, round past it), caps butt, round or square | no |
+| silhouette stroke, rim light | `drawPolygon` with `style.border`: a closed stroke with miter joins, its outer edge the border's width outside the outline and its inner edge a pixel inside, under the fill's aliased edge; a flat wedge carries it into a notch sharper than a right angle | no |
 | clip by silhouette, hold-fill | the fill rises, so it is the polygon under a rect clip, which the fast per-vertex path already does; the stencil path clip stays unbuilt | no |
 | transform stack for wrap ghosts | exists: `PushTransform`, baked at add time; draw an entity up to four times | no |
 | fixed-aspect viewport with letterboxing | a scale-and-translate transform plus a rect clip pushed at frame start; the backend viewport stays full | no |
@@ -231,13 +237,15 @@ Particles stay game-side: a pool over `drawTriangles` or `drawCircle` with
 
 Four PRs in salal, each followed by a tag worldsim pins; worldsim changes only
 where its callers move, and PR 1 presumes worldsim already consumes `v0.1.0`.
-Behaviour is identical through PR 2, identical to rounding after PR 3.
+Behaviour is identical through PR 2. After PR 3 what is drawn is identical to
+rounding, but a target holds premultiplied colour: a draw over transparent reads
+back alpha `a` where it read `a * a`, and `clear` stores its colour premultiplied.
 
 | PR | salal | worldsim | verified by |
 |---|---|---|---|
 | 1. GL off the public surface (minor bump, `v0.2.0`) | `BatchRenderer.{h,cpp}`, `InstanceData.h`, `Primitives.{h,cpp}`, `FontRenderer.{h,cpp}`, `CoordinateSystem.{h,cpp,test.cpp}`, `RenderToTexture.h`, `TileTextureAtlas.h`, `TileAtlasBuilder.h`, `GPUTimer.{h,cpp}`, new `Handle.h`, the handle-to-name registry with `backend::gl::name()` in new `backend/gl/GLNames.h` (the only file under `backend/` until PR 2), `Primitives::clear` (no callers migrated), the four GL test fixtures, `CMakeLists.txt` (`OpenGL::GL` and `GLEW::GLEW` PRIVATE on `salal_renderer`, `glfw` off it, since nothing in the library touches GLFW once `CoordinateSystem` is fed its sizes; the GL test fixtures link all three), the layering check gaining "no GL, GLES, OpenGL, GLFW or glad header reachable from a public renderer header", public meaning every header under `libs/renderer` outside `gl/`, `shader/` and `backend/`, which is how `gl/` and `shader/` stay where they are until PR 2 moves them. About 25 files | about 20 files: the dozen in the table above, the `render(ctx, InstancingUniforms&, stats)` signatures across the entity renderers, `GrassScene`'s release, `libs/engine/CMakeLists.txt` linking OpenGL, GLEW and glfw PUBLIC (the apps' clear pairs and `GrassScene`'s 20 GL calls reach GL through `engine`) | `salal_renderer_tests` (CoordinateSystem now headless); worldsim full Windows build and ctest; ui-sandbox `text_shapes`, `sdf_minimal`, `svg`, `button`, `grass` and the game scene through the dev server, screenshots identical |
 | 2. Textures through `GLTexture`, `RenderTarget` (`v0.3.0`) | `FontRenderer.cpp:289-299` (the one raw `glGenTextures` left in the renderer) via `createTexture`, `RenderToTexture.*` becomes `RenderTarget`, `TileTextureAtlas` on the texture table, the registry becomes the table (`backend/gl/GLTextures.h`, entries owned, `name()` kept), the stack of bound targets in `backend/gl/GLTargets.h` (the backbuffer at the bottom, its size refreshed by `Primitives::setViewport` while no target is open: the coordinate system's framebuffer size when one is set, else the size given), new public `Texture.h` (`TextureFormat`, `TextureDesc`), `Primitives` gains `createTexture`, `updateTexture`, `destroyTexture`, `readBackbuffer`; `gl/*.h`, `Shader.h`, `ShaderLoader.h`, `ShaderPreprocessor.h` move to `backend/gl/`, the layering check exempts `backend/` alone | `AssetRenderer.cpp` (drops its `glClear` and `glReadPixels`), `DebugServer.cpp` screenshot (optional), the include paths in `ChunkRenderer.h:16-19`, `BakedChunkRenderer.h:10-11`, `PlanetRenderer.cpp:7` | `RenderTarget` test (clear, read back); `asset-cli` output PNG identical; `FontRenderer` test |
-| 3. Blend in the sort key, premultiplied alpha, new primitives (`v0.4.0`) | `BatchRenderer` (`DrawGroup.blend`, run split), `uber.frag` (premultiplied output, the `data2.w` flag, arc and image modes), `Primitives` (`PolygonArgs`, `PolylineArgs`, `ArcArgs`, `ImageArgs`, `blend` on the existing Args); a batch sort and split unit test | none expected; `BakedChunkRenderer`'s own blend func already went with PR 1 | sandbox scenes for polygon, arc, polyline and blend; existing scenes diffed by hand against PR 2's shots, within rounding, no baseline committed |
+| 3. Blend in the sort key, premultiplied alpha, new primitives (`v0.4.0`) | `BatchRenderer` (`DrawGroup.blend`, the run walk out of `flush` into GL-free `plan()`, split on texture and GL blend state, `addArc`, `addImageQuad`, `addStrokePieces`), `uber.frag` (premultiplied output in every branch, the `data2.w` flag, arc and image modes), the three blend-func sites on `ONE, ONE_MINUS_SRC_ALPHA`, `Primitives::clear` premultiplying its colour, `Primitives` (`BlendMode`, `LineCap`, `LineJoin`, `PolygonArgs`, `PolylineArgs`, `ArcArgs`, `ImageArgs`, `blend` on the existing Args and `drawGlyphs`), new `primitives/Stroke.{h,cpp}`, `PolygonStyle` in foundation, and `Tessellator`'s convex fast path no longer taking a pentagram; headless tests of the sort and split, the mode table, arcs and strokes, and GL tests reading premultiplied output back from a `RenderTarget` | no caller moves, since every new parameter defaults to `Alpha`; four new ui-sandbox scenes, `polygon`, `arc`, `polyline` and `blend`; `AssetRenderer` un-premultiplies its readback for straight-alpha PNGs | sandbox scenes for polygon, arc, polyline and blend; existing scenes diffed by hand against PR 2's shots, within rounding, no baseline committed |
 | 4. The backend interface (`v0.5.0`) | `backend/Backend.h`, `backend/gl/GLBackend.{h,cpp}` absorbing the GL halves listed above, the std140 uniform block, `createPipeline`, `Primitives::invalidateState`, `NullBackend` for tests | none | renderer tests headless against the null backend (sort, blend split, atlas split, clip bounds); sandbox screenshots identical |
 
 ## Questions, decided

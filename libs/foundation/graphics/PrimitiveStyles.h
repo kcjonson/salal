@@ -64,6 +64,13 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		std::optional<BorderStyle> border = std::nullopt;
 	};
 
+	// Polygon visual style. The border is a stroke outside the outline, `width`
+	// wide, that reaches a pixel under the fill's edge so nothing shows between them.
+	struct PolygonStyle {
+		Color					 fill = Color::white();
+		std::optional<LineStyle> border = std::nullopt;
+	};
+
 	// Text horizontal alignment
 	enum class HorizontalAlign { Left, Center, Right };
 
