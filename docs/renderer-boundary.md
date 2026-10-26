@@ -55,7 +55,7 @@ Declarations, not code. `Primitives` keeps its API except where it hands out GL.
 
 ```cpp
 namespace Renderer {
-// Tagged handle, 16-bit index + 16-bit generation as in resources/ResourceHandle.h, which goes (nothing in renderer uses it).
+// Tagged handle, 16-bit index + 16-bit generation as in resources/ResourceHandle.h; PR 1 deletes that header, ResourceManager and their tests (nothing else uses them).
 template <typename Tag> struct Handle { uint32_t value = 0xFFFFFFFF; bool isValid() const; bool operator==(Handle) const = default; };
 using TextureHandle = Handle<struct TextureTag>; // BufferHandle, GeometryHandle, RenderTargetHandle, PipelineHandle, QueryHandle likewise, PR 4
 enum class TextureFormat : uint8_t { Rgba8, Rgb8, Rgba16F, Rgba32F };
@@ -89,7 +89,7 @@ namespace Primitives {
 	TextureHandle createTexture(const TextureDesc&); // PR 2: every texture through here, and so through gl/GLTexture
 	void updateTexture(TextureHandle, int x, int y, int width, int height, const void* pixels);
 	void destroyTexture(TextureHandle);
-	void clear(Color); // PR 1: the glClearColor/glClear pair every scene opens with
+	void clear(Color); // PR 1 adds it and migrates no caller; scenes and apps move to it as they are touched (AssetRenderer in PR 2)
 	void invalidateState(); // PR 4: a foreign GL pass says so; the renderer never queries state (dual-deck-builder R2.15)
 	void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height); // PR 2: the screenshot route
 	struct WorldCamera { Vec2 position; float zoom = 1.0F; float pixelsPerMeter = 1.0F; }; // from here down: what replaces getBatchRenderer() and getShaderProgram()
@@ -145,8 +145,7 @@ the backend's; salal has one program and one format and keeps `BatchRenderer` in
 front, building `UberVertex` as plain data the backend uploads. The GL
 implementation is today's code moved into `renderer/backend/gl/` (the GL halves of
 `BatchRenderer.cpp`, `Shader.cpp`, `ShaderLoader.cpp`, `RenderToTexture.cpp`,
-`TileTextureAtlas.cpp`, `GPUTimer.cpp`, `FontRenderer.cpp:289-299`), the `gl/*.h`
-wrappers its internals.
+`TileTextureAtlas.cpp`, `GPUTimer.cpp`), the `gl/*.h` wrappers its internals.
 
 ```cpp
 namespace Renderer::backend {
@@ -180,14 +179,15 @@ and `endPass()` on Vulkan; GL is unaffected. The per-flush `glBufferData`
 respecify becomes `updateBuffer` into a fixed buffer, so growth and
 write-after-read need a ring or an orphan inside the GL backend. One shader source
 is possible but not free: Vulkan GLSL rejects loose `uniform float` and wants
-`#version 450`, so the 17 uniforms move into a std140 block (GL 3.3 core has them)
-and the preprocessor swaps the version line, in PR 4. A second backend then
-provides the virtuals, the vertex layouts as vertex-input descriptions, and the
-clip test's y flip (`u_viewportHeight` exists because `gl_FragCoord` is
-bottom-left and Vulkan's is top-left: a shader-variant fact). A null backend for
-headless tests of the z sort, blend split and atlas split comes with it;
-`BatchRenderer.test.cpp` has two trivial tests today. This interface is step 3
-and may wait: PRs 1 to 3 change headers and handles only.
+`#version 450`, so the 16 non-sampler uniforms move into a std140 block (GL 3.3
+core has them; `u_atlas` stays a sampler binding) and the preprocessor swaps the
+version line, in PR 4. A second backend then provides the virtuals, the vertex
+layouts as vertex-input descriptions, and the clip test's y flip
+(`u_viewportHeight` exists because `gl_FragCoord` is bottom-left and Vulkan's is
+top-left: a shader-variant fact). A null backend for headless tests of the z
+sort, blend split and atlas split comes with it; `BatchRenderer.test.cpp` has two
+trivial tests today. This interface is PR 4 and may wait: PRs 1 and 2 change
+headers, handles and texture ownership, PR 3 the shader and the batch.
 
 ## Decision G, folded in
 
@@ -233,7 +233,7 @@ Behaviour is identical through PR 2, identical to rounding after PR 3.
 
 | PR | salal | worldsim | verified by |
 |---|---|---|---|
-| 1. GL off the public surface (minor bump, `v0.2.0`) | `BatchRenderer.{h,cpp}`, `InstanceData.h`, `Primitives.{h,cpp}`, `FontRenderer.{h,cpp}`, `CoordinateSystem.{h,cpp,test.cpp}`, `RenderToTexture.h`, `TileTextureAtlas.h`, `TileAtlasBuilder.h`, `GPUTimer.{h,cpp}`, new `Handle.h`, the handle-to-name registry, `Primitives::clear`, the four GL test fixtures, `CMakeLists.txt` (`OpenGL::GL`, `GLEW::GLEW` and `glfw` PRIVATE on `salal_renderer`), the layering check gaining "no `GL/glew.h` or `GLFW/glfw3.h` reachable from a public renderer header". `gl/` and `shader/` stay where they are (open question 3 gates their move). About 25 files | about 20 files: the dozen in the table above, the `render(ctx, InstancingUniforms&, stats)` signatures across the entity renderers, `GrassScene`'s release, `libs/engine/CMakeLists.txt` linking OpenGL, GLEW and glfw PUBLIC (the apps' clear pairs and `GrassScene`'s 20 GL calls reach GL through `engine`) | `salal_renderer_tests` (CoordinateSystem now headless); worldsim full Windows build and ctest; ui-sandbox `text_shapes`, `sdf_minimal`, `svg`, `button`, `grass` and the game scene through the dev server, screenshots identical |
+| 1. GL off the public surface (minor bump, `v0.2.0`) | `BatchRenderer.{h,cpp}`, `InstanceData.h`, `Primitives.{h,cpp}`, `FontRenderer.{h,cpp}`, `CoordinateSystem.{h,cpp,test.cpp}`, `RenderToTexture.h`, `TileTextureAtlas.h`, `TileAtlasBuilder.h`, `GPUTimer.{h,cpp}`, new `Handle.h`, the handle-to-name registry with `backend::gl::name()` in new `backend/gl/GLNames.h` (the only file under `backend/` until PR 2), `Primitives::clear` (no callers migrated), `ResourceHandle.h`, `ResourceManager.h` and their tests deleted, the four GL test fixtures, `CMakeLists.txt` (`OpenGL::GL`, `GLEW::GLEW` and `glfw` PRIVATE on `salal_renderer`), the layering check gaining "no `GL/glew.h` or `GLFW/glfw3.h` reachable from a public renderer header", public meaning every header under `libs/renderer` outside `gl/`, `shader/` and `backend/`, which is how `gl/` and `shader/` stay where they are (open question 3 gates their move). About 25 files | about 20 files: the dozen in the table above, the `render(ctx, InstancingUniforms&, stats)` signatures across the entity renderers, `GrassScene`'s release, `libs/engine/CMakeLists.txt` linking OpenGL, GLEW and glfw PUBLIC (the apps' clear pairs and `GrassScene`'s 20 GL calls reach GL through `engine`) | `salal_renderer_tests` (CoordinateSystem now headless); worldsim full Windows build and ctest; ui-sandbox `text_shapes`, `sdf_minimal`, `svg`, `button`, `grass` and the game scene through the dev server, screenshots identical |
 | 2. Textures through `GLTexture`, `RenderTarget` (`v0.3.0`) | `FontRenderer.cpp:289-299` (the one raw `glGenTextures` left in the renderer) via `createTexture`, `RenderToTexture.*` becomes `RenderTarget`, `TileTextureAtlas` on the texture table, registry entries become owned, `Primitives` gains `createTexture`, `updateTexture`, `destroyTexture`, `readBackbuffer`; `gl/*.h`, `Shader.h`, `ShaderLoader.h` move to `backend/gl/` if question 3 says yes | `AssetRenderer.cpp` (drops its `glClear` and `glReadPixels`), `DebugServer.cpp` screenshot (optional), the include paths in `ChunkRenderer.h:16-19`, `BakedChunkRenderer.h:10-11`, `PlanetRenderer.cpp:7` if the move happens | `RenderTarget` test (clear, read back); `asset-cli` output PNG identical; `FontRenderer` test |
 | 3. Blend in the sort key, premultiplied alpha, new primitives (`v0.4.0`) | `BatchRenderer` (`DrawGroup.blend`, run split), `uber.frag` (premultiplied output, the `data2.w` flag, arc and image modes), `Primitives` (`PolygonArgs`, `PolylineArgs`, `ArcArgs`, `ImageArgs`, `blend` on the existing Args); a batch sort and split unit test | none expected; `BakedChunkRenderer`'s own blend func already went with PR 1 | sandbox scenes for polygon, arc, polyline and blend; existing scenes diffed by hand against PR 2's shots, within rounding, no baseline committed |
 | 4. The backend interface (`v0.5.0`) | `backend/Backend.h`, `backend/gl/GLBackend.{h,cpp}` absorbing the GL halves listed above, the std140 uniform block, `createPipeline`, `Primitives::invalidateState`, `NullBackend` for tests | none | renderer tests headless against the null backend (sort, blend split, atlas split, clip bounds); sandbox screenshots identical |
@@ -246,11 +246,11 @@ Behaviour is identical through PR 2, identical to rounding after PR 3.
    `beginBakedPass`/`endBakedPass` keeps the program private but admits a game
    draws under it; the alternative is renderer-owned world meshes, 29 game GL
    calls becoming API. Recommendation: the pass pair in PR 1, the mesh API later.
-3. Whether `backend/gl/` (the wrappers, `Shader`, `ShaderLoader`,
-   `name(TextureHandle)`) stays includable by consumers; worldsim's chunk and
-   planet renderers include them today, and the answer gates moving `gl/` and
-   `shader/` there in PR 2. Recommendation: yes, an explicit opt-in path outside
-   the layering check, dropped the day a second backend exists.
+3. Whether the `gl/`, `shader/` and `backend/` exemption from the layering check
+   survives PR 2's move into `backend/gl/`, so consumers can still include the
+   wrappers, `Shader`, `ShaderLoader` and `GLNames.h`; worldsim's chunk and planet
+   renderers do today. Recommendation: yes, an explicit opt-in path, dropped the
+   day a second backend exists.
 4. The groundcover and cursor uniforms are a worldsim feature inside salal's
    uber shader; `setGroundcover` exists only for them. Recommendation: keep them
    through PR 1 (behaviour-identical), file the move to a game shader separately.

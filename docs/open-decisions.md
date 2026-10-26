@@ -273,14 +273,10 @@ nothing that moves to salal uses float render targets. Dual-deck-builder's
 batcher sorts by layer ordinal only. The polygon, arc and wide-line primitives
 are the required shape additions listed in [architecture.md](architecture.md).
 
-GL isolation, measured on 2026-10-26 in worldsim's renderer (worldsim main @
-`870dd755`, before the renderer import). There are about 180 direct GL calls in
-about ten files, 112 of them in `BatchRenderer.cpp` and `shader/`.
-The `gl/` wrappers are RAII handles and nothing more. `BatchRenderer.h` and
-`FontRenderer.h` leak `<GL/glew.h>` and `GLuint` into every includer.
-`getShaderProgram()` and `getBatchRenderer()` are used by ten files in ui,
-engine and the apps to poke GL directly, and the game's own code makes about 400
-more GL calls outside the renderer.
+GL isolation, measured at worldsim `2cc7e40a` for
+[renderer-boundary.md](renderer-boundary.md): 19 GL and GLFW leaks in 16
+renderer headers, 182 GL calls in 12 renderer files behind them, 346 calls in
+the game's own renderers and about 480 outside the renderer in all.
 
 Recommendation. Renderer gets blend state in the batch sort key, an offscreen
 render-target API, and polygon, arc and wide-line primitives, all landed before
@@ -293,23 +289,15 @@ is promoted when a second game wants one. The design, with the public-surface
 audit, the target declarations, the backend seam and the PR sequence, is
 [renderer-boundary.md](renderer-boundary.md).
 
-The first steps toward a backend boundary (OpenGL 3.3 core as the first
-backend, Vulkan possible later, the full backend interface a later refactor),
-as their own PRs after worldsim pins `v0.1.0`:
-
-1. Take GL off the public surface, about 15 files. Drop `<GL/glew.h>` from
-   `BatchRenderer.h`, `FontRenderer.h` and `Primitives.cpp`; return opaque
-   texture handles from `getAtlasTexture`, `TileAtlasBuilder::texture` and
-   `RenderToTexture::texture`; make `CoordinateSystem::Initialize` take sizes or
-   a callback instead of a `GLFWwindow*`; replace `getShaderProgram()` and
-   `getBatchRenderer()` with the operations their callers need.
-2. Route all texture creation through `gl/GLTexture`.
-3. Design the offscreen render-target API as a backend object, which is the
-   render-target half of this decision.
+The boundary lands as four salal PRs tagged `v0.2.0` through `v0.5.0`, each
+followed by a worldsim pin: GL off the public surface, textures and the render
+target as backend objects, blend state in the sort key with the new primitives,
+then the backend interface. File lists, target declarations and open questions
+are in [renderer-boundary.md](renderer-boundary.md).
 
 Needed by. Before a second consumer depends on the renderer API, which is
 after worldsim pins `v0.1.0`: blend state in the sort key, the render-target
-API (step 3 above) and the polygon, arc and wide-line primitives. Bloom and
+API (the second of the four PRs) and the polygon, arc and wide-line primitives. Bloom and
 particles themselves are Quick Run or later.
 
 If deferred. Blend state gets added to the sort key after three games depend

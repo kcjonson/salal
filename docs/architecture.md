@@ -56,9 +56,8 @@ The backend boundary in the `renderer` row has a settled direction and a planned
 design; nothing is built, and decision G in
 [open-decisions.md](open-decisions.md) holds the plan and
 [renderer-boundary.md](renderer-boundary.md) the design. The layer is OpenGL
-throughout today: worldsim's renderer, which salal will import unchanged, has
-about 180 direct GL calls in about ten files (measured on worldsim main @
-`870dd755`, before the renderer import), and `BatchRenderer.h` and
+throughout today: the imported renderer has 182 direct GL calls in twelve files
+(measured at worldsim `2cc7e40a`), and `BatchRenderer.h` and
 `FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. The plan
 takes GL off the public surface first, then routes textures through one wrapper
 and designs the render-target API as a backend object. OpenGL 3.3 core is the
