@@ -9,6 +9,7 @@ find_package(Stb REQUIRED)
 add_library(salal_renderer STATIC
     primitives/Primitives.cpp
     primitives/BatchRenderer.cpp
+    primitives/Stroke.cpp
     font/FontRenderer.cpp
     stb_image.cpp
     metrics/MetricsCollector.cpp
@@ -84,4 +85,13 @@ set_target_properties(salal_renderer_shaders PROPERTIES FOLDER salal)
 salal_add_tests(renderer)
 if(TARGET salal_renderer_tests)
     target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw)
+    # The fixtures that draw through Primitives load the uber shaders from beside the exe.
+    add_custom_target(salal_renderer_tests_shaders ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/shaders $<TARGET_FILE_DIR:salal_renderer_tests>/shaders
+        COMMENT "Mirroring shaders beside salal_renderer_tests"
+        VERBATIM
+    )
+    add_dependencies(salal_renderer_tests_shaders salal_renderer_shaders)
+    add_dependencies(salal_renderer_tests salal_renderer_tests_shaders)
+    set_target_properties(salal_renderer_tests_shaders PROPERTIES FOLDER salal/tests)
 endif()
