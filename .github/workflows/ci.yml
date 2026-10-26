@@ -1,19 +1,13 @@
 name: CI
 
+# No paths-ignore: these jobs are required checks, and a check that never runs
+# leaves a docs-only PR waiting on it forever.
 on:
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '.claude/**'
   # Actions caches are branch-scoped: a PR can restore caches from its own runs
   # or from main, so the post-merge run on main is what new PRs warm-start from.
   push:
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '.claude/**'
   workflow_dispatch:
 
 concurrency:
