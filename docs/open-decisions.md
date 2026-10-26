@@ -129,7 +129,10 @@ rule. The GLFW-backed poller, hot-plug and device-to-player-slot claiming in
 `app`. No separate `input` library.
 
 Needed by. Untangling step b (where InputTypes.h moves to) and phase 2 (the
-snapshot).
+snapshot). Phase 0.5's last two steps, the InputTypes.h move and dropping
+`engine` from ui's link list, are now the only things waiting on it; the rest
+of the untangle landed in worldsim on 2026-10-25/26 ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through
+[worldsim#297](https://github.com/kcjonson/worldsim/pull/297)).
 
 If deferred. InputTypes.h goes into `libs/ui/input/` as the fallback, which
 fixes worldsim's breach but leaves sim unable to consume a snapshot type

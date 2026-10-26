@@ -63,19 +63,23 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 ## Status and what to work on
 
 Nothing is built. **Phase 0, the audit, is done** (2026-10-25); findings in
-[docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reaches
+[docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
-`clipboard/ClipboardManager.h`), its `renderer` reaches back into `ui` through
-`FontRenderer`, and its `foundation` carries the HTTP dev server with OpenGL
+`clipboard/ClipboardManager.h`), its `renderer` reached back into `ui` through
+`FontRenderer`, and its `foundation` carried the HTTP dev server with OpenGL
 and httplib behind it.
 
-Next is **phase 0.5, untangling worldsim**: small PRs in that repo (two dead
-includes, `InputTypes.h` moved down, a clipboard seam, `FontRenderer` into
-`renderer`, CMake cleanup, the dev server out of `foundation`), each leaving it
-building and running identically. Then phase 1, the skeleton here and the
-extraction of `foundation` and `renderer`; phase 2 carves `app` out of
-`libs/engine`; `ui` is extracted last. The extraction doc has the detail and
-the reasoning for the order.
+**Phase 0.5, untangling worldsim, is done apart from the `InputTypes.h`
+move** (seven PRs, [worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297), merged 2026-10-25/26): the dead
+includes are gone, the clipboard is a seam, `FontRenderer` is in `renderer`,
+the CMake cleanup landed, and the dev server left `foundation` for
+`libs/engine/debug`. What remains is moving `InputTypes.h` below `ui` and
+dropping `engine` from ui's link list, both waiting on decision D.
+
+Next is **decision D** (where input types live), which unblocks that move.
+Then phase 1, the skeleton here and the extraction of `foundation` and
+`renderer`; phase 2 carves `app` out of `libs/engine`; `ui` is extracted last.
+The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
 consume this repo. Not one giant branch: worldsim is active, and a long-lived
@@ -109,7 +113,7 @@ it is the first thing that quietly breaks if nobody is watching.
   anyway.
 - The HTTP dev server sits behind a compile flag. No listening sockets in a
   browser. Worldsim has no such flag today (the server is always compiled into
-  `foundation` and switched on at runtime), so this is new discipline, added
+  `libs/engine` and switched on at runtime), so this is new discipline, added
   when the server moves into `app`.
 - Asset loading goes through an indirection that can be MEMFS.
 
