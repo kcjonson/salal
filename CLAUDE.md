@@ -208,6 +208,11 @@ worldsim follow-up. Blame and history for imported code live in worldsim;
 `git remote add worldsim ../worldsim && git fetch worldsim` makes
 `git blame worldsim/main -- libs/foundation/<file>` work from here.
 
+Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
+The deterministic math and hash noise are header-inline polynomials; Clang fuses
+`a*b+c` into an FMA on arm64 and the golden bit patterns, computed on x64,
+moved by one ULP the first time the tests ran on macOS. Do not drop the flag.
+
 Each lib's `*.test.cpp` files become `salal_<lib>_tests` through
 `salal_add_tests` in `cmake/SalalTesting.cmake`.
 Targets are `salal_<lib>` behind `salal::<lib>` aliases, so a FetchContent

@@ -17,7 +17,9 @@ target_compile_features(salal_foundation PUBLIC cxx_std_20)
 # has one (arm64 always, x64 only with -mfma); the golden bit patterns were computed without
 # fusion and failed on the first macOS run. PUBLIC because the math is inlined into every
 # TU that includes the headers. MSVC's default /fp:precise does not contract.
-target_compile_options(salal_foundation PUBLIC $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-ffp-contract=off>)
+target_compile_options(salal_foundation PUBLIC
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<NOT:$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>>>:-ffp-contract=off>
+)
 
 # The library directory is the include root: consumers write <utils/Log.h>,
 # <math/Types.h>, the spellings worldsim has always used.
