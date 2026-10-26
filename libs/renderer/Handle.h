@@ -27,4 +27,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	using TextureHandle = Handle<struct TextureTag>;
 
+	// The backend's objects (backend/Backend.h); TextureHandle is the only one consumers hold.
+	using BufferHandle = Handle<struct BufferTag>;
+	using GeometryHandle = Handle<struct GeometryTag>;
+	using RenderTargetHandle = Handle<struct RenderTargetTag>;
+	using PipelineHandle = Handle<struct PipelineTag>;
+	using QueryHandle = Handle<struct QueryTag>;
+
 } // namespace Renderer

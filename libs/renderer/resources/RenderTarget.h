@@ -1,9 +1,10 @@
 #pragma once
 
-// An offscreen colour target: a texture from the renderer's table behind a
-// framebuffer. begin() makes it the bound target and end() rebinds the one
-// below it on the renderer's own target stack (the backbuffer at the bottom),
-// so the GL binding is never queried. The texture goes with the target.
+// An offscreen colour target: a texture from the renderer's table and a backend
+// render target drawing into it. begin() makes it the bound target and end()
+// rebinds the one below it on the renderer's own target stack (the backbuffer at
+// the bottom), so the GPU is never asked what is bound. The texture goes with the
+// target. Needs Primitives::init(); before it, create() logs and is invalid.
 
 #include "Handle.h"
 #include "Texture.h"
@@ -50,6 +51,10 @@ namespace Renderer {
 		// a straight-alpha image. Synchronous by design: it waits for the GPU. Works
 		// whether or not the target is begun.
 		void readPixels(std::span<uint8_t> out) const;
+
+		// Whether any target is begun; Primitives::setViewport() records the window's
+		// size only when none is.
+		[[nodiscard]] static bool anyBegun();
 
 	  private:
 		struct Impl;

@@ -1,9 +1,14 @@
 #include "resources/TileTextureAtlas.h"
 
+#include "backend/NullBackend.h"
+#include "backend/gl/GLBackend.h"
+#include "primitives/Primitives.h"
+
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <vector>
 
 using namespace Renderer;
@@ -44,17 +49,20 @@ class TileTextureAtlasTest : public ::testing::Test {
 			GTEST_SKIP() << "Could not create GLFW window (no OpenGL context available)";
 		}
 		glfwMakeContextCurrent(window);
-		glewExperimental = GL_TRUE;
-		if (glewInit() != GLEW_OK) {
+		// The GL backend initialises GLEW on this context
+		std::unique_ptr<backend::gl::GLBackend> gl = backend::gl::GLBackend::create();
+		if (gl == nullptr) {
 			glfwDestroyWindow(window);
 			window = nullptr;
 			glfwTerminate();
 			GTEST_SKIP() << "GLEW initialization failed";
 		}
+		Primitives::init(std::move(gl));
 	}
 
 	void TearDown() override {
 		if (window != nullptr) {
+			Primitives::shutdown();
 			glfwDestroyWindow(window);
 			glfwTerminate();
 		}
@@ -62,6 +70,30 @@ class TileTextureAtlasTest : public ::testing::Test {
 
 	GLFWwindow* window = nullptr;
 };
+
+TEST(TileTextureAtlasNullTest, UploadsGoToTheBackendAndTheTextureGoesWithTheAtlas) {
+	auto						owned = std::make_unique<backend::NullBackend>();
+	const backend::NullBackend& gpu = *owned;
+	Primitives::init(std::move(owned));
+	{
+		TileTextureAtlas atlas(64);
+		ASSERT_TRUE(atlas.texture().isValid());
+		ASSERT_NE(gpu.texture(atlas.texture()), nullptr);
+		EXPECT_EQ(gpu.texture(atlas.texture())->width, 64);
+		EXPECT_EQ(gpu.texture(atlas.texture())->format, TextureFormat::Rgba8);
+
+		const AtlasRegion		   region = atlas.allocate(8, 4);
+		const std::vector<uint8_t> pixels(8 * 4 * 4, 7);
+		EXPECT_TRUE(atlas.upload(region, pixels.data()));
+		ASSERT_EQ(gpu.textureUpdates().size(), 1U);
+		EXPECT_EQ(gpu.textureUpdates()[0].texture, atlas.texture());
+		EXPECT_EQ(gpu.textureUpdates()[0].width, 8);
+		EXPECT_EQ(gpu.textureUpdates()[0].height, 4);
+		EXPECT_EQ(gpu.live().textures, 1U);
+	}
+	EXPECT_EQ(gpu.live().textures, 0U);
+	Primitives::shutdown();
+}
 
 TEST_F(TileTextureAtlasTest, ConstructorDefaultSize) {
 	TileTextureAtlas atlas(1024);

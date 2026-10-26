@@ -13,6 +13,7 @@
 
 #include "Handle.h"
 #include "Texture.h"
+#include "backend/Backend.h"
 #include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "graphics/Color.h"
@@ -23,6 +24,7 @@
 #include "primitives/InstanceData.h"
 #include <cstdint>
 #include <glm/vec4.hpp>
+#include <memory>
 #include <numbers>
 #include <span>
 #include <string>
@@ -35,14 +37,17 @@ namespace renderer {
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	// Forward declarations
-	class Renderer;
 	class CoordinateSystem;
 
 	namespace Primitives { // NOLINT(readability-identifier-naming)
 
 		// --- Initialization ---
 
-		void init(Renderer* renderer);
+		// Start the renderer on `backend`, which it owns from here until shutdown():
+		// backend::gl::GLBackend::create() on the GL context the platform made, or a
+		// backend::NullBackend for tests that run without a GPU. Every call before
+		// init() or after shutdown() does nothing.
+		void init(std::unique_ptr<backend::Backend> backend);
 		void shutdown();
 
 		// Set the coordinate system (must be called after Init)
@@ -141,6 +146,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		void beginFrame();
 		void endFrame(); // Flushes all batches
+
+		// GPU code outside the renderer left depth test, culling or scissor on: set the
+		// renderer's fixed state again (all three off) before it draws. Bindings need
+		// no call; every flush makes its own, since a game's GL runs between flushes.
+		void invalidateState();
 
 		// Draw-order barrier: flush pending batched primitives now. Groups only
 		// z-sort against each other within one flush, so flushing between two

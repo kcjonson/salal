@@ -1,7 +1,7 @@
 #pragma once
 
-// GPUTimer - GPU time of a span of GL commands, measured with a pair of
-// GL_TIMESTAMP queries. Timestamps nest and overlap freely (only one
+// GPUTimer - GPU time of a span of GPU commands, measured with a pair of the
+// backend's timestamp queries. Timestamps nest and overlap freely (only one
 // GL_TIME_ELAPSED query can be active at a time), so a pass can be timed inside
 // the frame's own span. Each span's result is read kFrames spans later, long
 // after the GPU finished it, so reading never stalls the CPU.
@@ -20,7 +20,7 @@ namespace Renderer {
 		GPUTimer(GPUTimer&&) noexcept;
 		GPUTimer& operator=(GPUTimer&&) noexcept;
 
-		/// Start a span. Needs a current GL context; the queries are created on first use.
+		/// Start a span. Does nothing before Primitives::init(); the queries are created on first use.
 		void begin();
 
 		/// End the span begun last.
@@ -32,7 +32,7 @@ namespace Renderer {
 	  private:
 		static constexpr int kFrames = 4;
 
-		// The query pairs (GL objects, defined in GPUTimer.cpp); null until begin().
+		// The query pairs (backend handles, defined in GPUTimer.cpp); null until begin().
 		struct Spans;
 		std::unique_ptr<Spans> spans;
 

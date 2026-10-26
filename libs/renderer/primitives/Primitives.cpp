@@ -3,15 +3,13 @@
 
 #include "primitives/Primitives.h"
 #include "CoordinateSystem/CoordinateSystem.h"
-#include "backend/gl/GLTargets.h"
-#include "backend/gl/GLBackend.h"
 #include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "primitives/BatchRenderer.h"
 #include "primitives/Stroke.h"
+#include "resources/RenderTarget.h"
 #include "vector/Tessellator.h"
 #include "vector/Types.h"
-#include <GL/glew.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -28,6 +26,12 @@
 // Text shapes call BatchRenderer::addTextQuad() directly to batch text with shapes.
 
 namespace Renderer::Primitives {
+
+	// The backend init() was given, and the window's framebuffer size as setViewport()
+	// last recorded it with no RenderTarget begun.
+	static std::unique_ptr<backend::Backend> g_backend = nullptr;
+	static int								 g_backbufferWidth = 0;
+	static int								 g_backbufferHeight = 0;
 
 	// Internal state
 	static std::unique_ptr<BatchRenderer> g_batchRenderer = nullptr;
@@ -64,19 +68,24 @@ namespace Renderer::Primitives {
 
 	// --- Initialization ---
 
-	void init(Renderer* renderer) {
-		g_batchRenderer = std::make_unique<BatchRenderer>();
-		g_batchRenderer->init();
+	void init(std::unique_ptr<backend::Backend> backend) {
+		if (backend == nullptr) {
+			LOG_ERROR(Renderer, "Primitives::init: no backend; the renderer stays off");
+			return;
+		}
+		g_batchRenderer.reset();
+		g_backend = std::move(backend);
+		g_backend->setWindowSize(g_backbufferWidth, g_backbufferHeight);
+		g_batchRenderer = std::make_unique<BatchRenderer>(*g_backend);
+		g_batchRenderer->setCoordinateSystem(g_coordinateSystem);
 
 		// Initialize identity transform
 		g_currentTransform = Foundation::Mat4(1.0F);
 	}
 
 	void shutdown() {
-		if (g_batchRenderer != nullptr) {
-			g_batchRenderer->shutdown();
-			g_batchRenderer.reset();
-		}
+		g_batchRenderer.reset();
+		g_backend.reset();
 		g_coordinateSystem = nullptr;
 		g_polygonCache.clear();
 	}
@@ -119,15 +128,23 @@ namespace Renderer::Primitives {
 	// --- Textures ---
 
 	TextureHandle createTexture(const TextureDesc& desc) {
-		return backend::gl::createTexture(desc);
+		if (g_backend == nullptr) {
+			LOG_ERROR(Renderer, "createTexture: the renderer is not initialized");
+			return {};
+		}
+		return g_backend->createTexture(desc);
 	}
 
 	void updateTexture(TextureHandle handle, int x, int y, int width, int height, const void* pixels) {
-		backend::gl::updateTexture(handle, x, y, width, height, pixels);
+		if (g_backend != nullptr) {
+			g_backend->updateTexture(handle, x, y, width, height, pixels);
+		}
 	}
 
 	void destroyTexture(TextureHandle handle) {
-		backend::gl::destroyTexture(handle);
+		if (g_backend != nullptr) {
+			g_backend->destroyTexture(handle);
+		}
 	}
 
 	void setFrameUpdateCallback(FrameUpdateCallback callback) {
@@ -138,15 +155,15 @@ namespace Renderer::Primitives {
 
 	void clear(const Foundation::Color& color) {
 		// Targets hold premultiplied colour, as everything drawn into them is.
-		glClearColor(color.r * color.a, color.g * color.a, color.b * color.a, color.a);
-		glClear(GL_COLOR_BUFFER_BIT);
+		if (g_backend != nullptr) {
+			g_backend->clear({color.r * color.a, color.g * color.a, color.b * color.a, color.a});
+		}
 	}
 
 	void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height) {
-		const backend::gl::BoundTarget& backbuffer = backend::gl::backbuffer();
-		width = backbuffer.width;
-		height = backbuffer.height;
-		if (rgba.empty() || width <= 0 || height <= 0) {
+		width = g_backbufferWidth;
+		height = g_backbufferHeight;
+		if (rgba.empty() || width <= 0 || height <= 0 || g_backend == nullptr) {
 			return;
 		}
 		const size_t needed = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
@@ -154,17 +171,19 @@ namespace Renderer::Primitives {
 			LOG_ERROR(Renderer, "readBackbuffer: %zu bytes given, %zu needed for %dx%d", rgba.size(), needed, width, height);
 			return;
 		}
-		const GLuint bound = backend::gl::currentTarget().framebuffer;
-		if (bound != 0) {
-			glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-		}
-		glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-		if (bound != 0) {
-			glBindFramebuffer(GL_READ_FRAMEBUFFER, bound);
+		g_backend->readPixels({}, rgba);
+	}
+
+	void invalidateState() {
+		if (g_backend != nullptr) {
+			g_backend->invalidateState();
 		}
 	}
 
 	void beginFrame() {
+		if (g_backend != nullptr) {
+			g_backend->beginFrame();
+		}
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->beginFrame();
 		}
@@ -181,6 +200,9 @@ namespace Renderer::Primitives {
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->endFrame();
 		}
+		if (g_backend != nullptr) {
+			g_backend->endFrame();
+		}
 	}
 
 	void flush() {
@@ -196,12 +218,17 @@ namespace Renderer::Primitives {
 		// A RenderTarget's size is its own; only the backbuffer's is learned here. With
 		// a coordinate system the window's framebuffer size is the backbuffer, whatever
 		// size a world pass sets the projection to (worldsim's baked pass uses the logical size).
-		if (backend::gl::currentTarget().framebuffer == 0) {
+		if (!RenderTarget::anyBegun()) {
 			if (g_coordinateSystem != nullptr) {
 				const Viewport& window = g_coordinateSystem->viewport();
-				backend::gl::setBackbufferSize(window.framebufferWidth, window.framebufferHeight);
+				g_backbufferWidth = window.framebufferWidth;
+				g_backbufferHeight = window.framebufferHeight;
 			} else {
-				backend::gl::setBackbufferSize(width, height);
+				g_backbufferWidth = width;
+				g_backbufferHeight = height;
+			}
+			if (g_backend != nullptr) {
+				g_backend->setWindowSize(g_backbufferWidth, g_backbufferHeight);
 			}
 		}
 	}
@@ -602,7 +629,7 @@ namespace Renderer::Primitives {
 	}
 
 	void releaseInstancedMesh(InstancedMeshHandle& handle) {
-		BatchRenderer::releaseInstancedMesh(handle);
+		BatchRenderer::releaseInstancedMesh(g_backend.get(), handle);
 	}
 
 	void drawInstanced(const InstancedMeshHandle& handle, const InstanceData* instances, uint32_t count, const WorldCamera& camera) {
@@ -873,3 +900,11 @@ namespace Renderer::Primitives {
 	}
 
 } // namespace Renderer::Primitives
+
+namespace Renderer::backend {
+
+	Backend* active() {
+		return Primitives::g_backend.get();
+	}
+
+} // namespace Renderer::backend

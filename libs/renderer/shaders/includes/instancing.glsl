@@ -12,23 +12,8 @@
 layout(location = 6) in vec4 a_instanceData1;
 layout(location = 7) in vec4 a_instanceData2;
 
-// Instancing uniforms (camera and viewport for world→screen transform)
-uniform vec2 u_cameraPosition;   // Camera world position (center of view)
-uniform float u_cameraZoom;      // Zoom level (1.0 = normal, >1 = zoomed in)
-uniform float u_pixelsPerMeter;  // World scale (pixels per world unit)
-uniform vec2 u_viewportSize;     // Viewport dimensions in pixels
-uniform int u_instanced;         // Flag: 1 for instanced rendering path, 0 otherwise
-
-// Groundcover deform (all default 0 → no-op for normal instanced entities like trees).
-// When u_groundcoverMode == 1, a clump is compact by default (scaled by u_groundcoverOpenness, so
-// top-down it reads small) and reveals — expands toward full size and bends away — within
-// u_cursorRadius of u_cursorWorld, like groundcover parting as a colonist walks through.
-uniform int   u_groundcoverMode;       // 1 = apply the groundcover deform
-uniform float u_groundcoverOpenness;   // resting clump scale 0..1 (1.0 = full size)
-uniform float u_groundcoverReach;      // max local vertex distance from a clump's base (meters)
-uniform vec2  u_cursorWorld;     // interaction center, world space
-uniform float u_cursorRadius;    // interaction radius, world space
-uniform float u_cursorStrength;  // push distance at the clump's outer tips, world space
+// The camera, viewport and groundcover uniforms it reads are in the DrawUniforms
+// block (uniforms.glsl), which uber.vert includes first.
 
 /// Transform a local mesh vertex to screen space using instance data.
 /// @param localPos Vertex position in local mesh space (usually centered around origin)

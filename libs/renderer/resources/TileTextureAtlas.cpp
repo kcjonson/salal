@@ -1,6 +1,6 @@
 #include "resources/TileTextureAtlas.h"
 
-#include "backend/gl/GLBackend.h"
+#include "primitives/Primitives.h"
 
 #include <algorithm>
 #include <utility>
@@ -8,7 +8,7 @@
 namespace Renderer {
 
 	TileTextureAtlas::TileTextureAtlas(int atlasSize)
-		: handle_(backend::gl::createTexture({.width = atlasSize, .height = atlasSize})),
+		: handle_(Primitives::createTexture({.width = atlasSize, .height = atlasSize})),
 		  size_(handle_.isValid() ? atlasSize : 0) {}
 
 	TileTextureAtlas::~TileTextureAtlas() {
@@ -35,7 +35,7 @@ namespace Renderer {
 	}
 
 	void TileTextureAtlas::release() {
-		backend::gl::destroyTexture(handle_);
+		Primitives::destroyTexture(handle_);
 		handle_ = {};
 		size_ = 0;
 	}
@@ -66,7 +66,7 @@ namespace Renderer {
 		if (!region.valid || !handle_.isValid() || rgbaData == nullptr) {
 			return false;
 		}
-		backend::gl::updateTexture(handle_, region.x, region.y, region.width, region.height, rgbaData);
+		Primitives::updateTexture(handle_, region.x, region.y, region.width, region.height, rgbaData);
 		return true;
 	}
 

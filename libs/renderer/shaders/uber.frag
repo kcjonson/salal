@@ -21,15 +21,9 @@ out vec4 FragColor;
 // (ignored by every other mode)
 uniform sampler2D u_atlas;
 
-// Global alpha for baked entity meshes (far-zoom impostor cross-fade).
-// Only read by the instanced/baked branch; reset to 1.0 after baked draws.
-uniform float u_bakedAlpha;
-
-// Viewport height for Y-coordinate flip (OpenGL origin is bottom-left, UI is top-left)
-// NOTE: This is the PHYSICAL framebuffer height in physical pixels
-uniform float u_viewportHeight;
-// Pixel ratio for DPI scaling (physical pixels / logical pixels)
-uniform float u_pixelRatio;
+// u_bakedAlpha (instanced and baked draws), and u_viewportHeight and u_pixelRatio
+// (the clip test's y flip: OpenGL's origin is bottom-left, the UI's top-left)
+#include "includes/uniforms.glsl"
 
 // ============================================================================
 // SHAPE SDF FUNCTIONS (from primitive.frag)

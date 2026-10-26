@@ -8,10 +8,11 @@
 //
 // Also provides GPU instancing for efficient rendering of many identical meshes.
 //
-// GL objects and uniform locations live behind BatchRenderer::GL in the .cpp, so
-// this header carries no GL types.
+// It sits in front of the backend seam: it builds UberVertex data, the draw runs
+// and the uniforms as plain data, and a backend::Backend uploads and draws them.
 
 #include "Handle.h"
+#include "backend/Backend.h"
 #include "graphics/Color.h"
 #include "graphics/PrimitiveStyles.h"
 #include "graphics/Rect.h"
@@ -21,7 +22,6 @@
 #include "primitives/Stroke.h"
 #include "vector/Tessellator.h"
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -31,25 +31,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// Forward declaration
 	class CoordinateSystem;
 
-	// Unified vertex format for shapes and text (uber shader)
-	// Layout matches uber.vert attributes:
-	//   location 0: a_position (vec2)
-	//   location 1: a_texCoord (vec2) - UV for text and images, rectLocalPos for shapes, arc-local for arcs
-	//   location 2: a_color (vec4)
-	//   location 3: a_data1 (vec4) - borderData for shapes, blur for shadows, unused otherwise
-	//   location 4: a_data2 (vec4) - per-mode parameters, the render mode in w
-	//   location 5: a_clipBounds (vec4) - (minX, minY, maxX, maxY) or (0,0,0,0) for no clip
-	struct UberVertex {
-		Foundation::Vec2 position;	 // Screen-space position
-		Foundation::Vec2 texCoord;	 // UV for text and images, rectLocalPos for shapes
-		Foundation::Vec4 color;		 // Fill color RGBA, straight alpha
-		Foundation::Vec4 data1;		 // Border: (color.rgb, width) for shapes, (blur, 0, 0, 0) for shadows
-		Foundation::Vec4 data2;		 // xyz per mode, w the mode (table below). Shape: (halfW, halfH, cornerRadius, borderPos);
-									 // text: (pixelRange, 0, 0, w); shadow: (halfW, halfH, cornerRadius, w);
-									 // arc: (innerR, outerR, sweep / 2, w); image: (0, 0, 0, w)
-		Foundation::Vec4 clipBounds; // Clip rect (minX, minY, maxX, maxY), or (0,0,0,0) for no clipping
-	};
-
+	// UberVertex, the batch's vertex, is in backend/Backend.h: the backend uploads it.
+	//
 	// data2.w holds the render mode and the additive flag together; uber.frag
 	// decodes the same table with half-unit margins.
 	//
@@ -75,21 +58,21 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		return mode >= 0.0F ? mode + kAdditiveShapeOffset : mode + kAdditiveModeOffset;
 	}
 
-	// The GL blend state a mode draws in. Output is premultiplied and blended
+	// The GPU blend state a mode draws in. Output is premultiplied and blended
 	// (ONE, ONE_MINUS_SRC_ALPHA); Additive is that state with the output alpha
 	// zeroed in uber.frag, so it shares Alpha's state and never splits a run.
-	constexpr Primitives::BlendMode glBlendState(Primitives::BlendMode mode) {
-		return mode == Primitives::BlendMode::Additive ? Primitives::BlendMode::Alpha : mode;
+	constexpr backend::BlendState blendState(Primitives::BlendMode /*mode*/) {
+		return backend::BlendState::Alpha;
 	}
 
-	// One glDrawElements: `indexCount` indices from `indexStart` in the emit order,
-	// sampling `texture` (bound for the run; invalid binds nothing) in one GL blend
-	// state.
+	// One draw call: `indexCount` indices from `indexStart` in the emit order,
+	// sampling `texture` (bound for the run; invalid binds nothing) in one GPU
+	// blend state.
 	struct DrawRun {
-		uint32_t			  indexStart = 0;
-		uint32_t			  indexCount = 0;
-		TextureHandle		  texture;
-		Primitives::BlendMode blendState = Primitives::BlendMode::Alpha;
+		uint32_t			indexStart = 0;
+		uint32_t			indexCount = 0;
+		TextureHandle		texture;
+		backend::BlendState blendState = backend::BlendState::Alpha;
 	};
 
 	// What flush() submits: the indices in emit order and the runs they split into.
@@ -100,16 +83,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	};
 
 	// Batch accumulator - collects geometry before GPU upload
-	class BatchRenderer { // NOLINT(cppcoreguidelines-special-member-functions)
+	class BatchRenderer {
 	  public:
-		BatchRenderer();
+		// Makes its pipeline (the uber shaders), its stream buffers and their geometry
+		// on `renderBackend`, which must outlive it; destroys them again on destruction.
+		explicit BatchRenderer(backend::Backend& renderBackend);
 		~BatchRenderer();
 
-		// Initialize OpenGL resources (shaders, VBOs)
-		void init();
-
-		// Cleanup OpenGL resources
-		void shutdown();
+		BatchRenderer(const BatchRenderer&) = delete;
+		BatchRenderer& operator=(const BatchRenderer&) = delete;
+		BatchRenderer(BatchRenderer&&) = delete;
+		BatchRenderer& operator=(BatchRenderer&&) = delete;
 
 		// --- Shape rendering (SDF) ---
 
@@ -203,15 +187,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Rendering ---
 
-		// The emit order and draw runs of what has been added, built without GL so
-		// tests can run headless; flush() submits exactly this. Groups are
-		// stable-sorted by z when any carries an explicit z (submission order
-		// otherwise), and the emit order is cut into a new run wherever a triangle
-		// needs a texture other than the bound one or a group's GL blend state
-		// differs. Shapes, arcs and the like need no texture and never split.
+		// The emit order and draw runs of what has been added; flush() submits
+		// exactly this. Groups are stable-sorted by z when any carries an explicit z
+		// (submission order otherwise), and the emit order is cut into a new run
+		// wherever a triangle needs a texture other than the bound one or a group's
+		// GPU blend state differs. Shapes, arcs and the like need no texture and
+		// never split.
 		DrawPlan plan();
 
-		// Flush accumulated geometry to GPU and render
+		// Upload the vertices and the planned indices, set the uniforms and submit
+		// one draw call per run.
 		void flush();
 
 		// Frame lifecycle
@@ -278,9 +263,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		/// @return Handle for subsequent draw calls
 		InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 
-		/// Release GPU resources for an instanced mesh.
-		/// @param handle Handle to release (will be invalidated)
-		static void releaseInstancedMesh(InstancedMeshHandle& handle);
+		/// Release an instanced mesh's buffers and geometry on `owner` (nothing to
+		/// release when it is null, after shutdown) and leave the handle invalid.
+		static void releaseInstancedMesh(backend::Backend* owner, InstancedMeshHandle& handle);
 
 		/// Draw multiple instances of a mesh with GPU instancing.
 		/// Transforms are computed on GPU using camera uniforms.
@@ -306,7 +291,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		/// u_bakedAlpha, the alpha the instanced and baked paths multiply in.
 		void setBakedAlpha(float alpha);
 
-		/// Bind the uber program in its baked world-space mode (u_instanced = 2) with
+		/// Bind the uber pipeline in its baked world-space mode (u_instanced = 2) with
 		/// the camera uniforms and the projection from the setViewport() size, so a
 		/// caller can draw its own world-space VAOs under it until endBakedPass().
 		void beginBakedPass(const Primitives::WorldCamera& camera);
@@ -354,9 +339,24 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			TextureHandle			texture = {}
 		);
 
-		// OpenGL resources and uniform locations (defined in BatchRenderer.cpp)
-		struct GL;
-		std::unique_ptr<GL> gl;
+		// The backend and what this batch made on it.
+		backend::Backend& gpu;
+		PipelineHandle	  pipeline;
+		BufferHandle	  vertexBuffer;
+		BufferHandle	  indexBuffer;
+		GeometryHandle	  geometry;
+
+		// The uniforms as the last draw read them. Each draw path sets the fields it
+		// uses and submits the whole block, so the others (the groundcover deform,
+		// u_bakedAlpha) carry over between draws as GL uniforms did.
+		backend::DrawUniforms uniforms;
+
+		// flush()'s draw calls, reused.
+		std::vector<backend::DrawCall> drawCalls;
+
+		// Between beginBakedPass() and endBakedPass(): setBakedAlpha() submits the
+		// uniforms at once, for the caller's next draw.
+		bool bakedPassOpen = false;
 
 		// Viewport dimensions
 		int viewportWidth = 800;
@@ -368,9 +368,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Default font atlas: bound for text quads added with an invalid atlas handle.
 		TextureHandle defaultFontAtlas;
 		float		  fontPixelRange = 4.0F;
-
-		// Last value written to u_bakedAlpha; endBakedPass() restores 1 only if it moved.
-		float bakedAlpha = 1.0F;
 
 		// Current clip bounds (applied to all vertices)
 		// (0,0,0,0) means no clipping

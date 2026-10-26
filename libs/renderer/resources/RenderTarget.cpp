@@ -1,28 +1,58 @@
 #include "resources/RenderTarget.h"
 
-#include "backend/gl/GLFramebuffer.h"
-#include "backend/gl/GLTargets.h"
-#include "backend/gl/GLBackend.h"
+#include "backend/Backend.h"
 #include "utils/Log.h"
 
-#include <GL/glew.h>
+#include <vector>
 
 namespace Renderer {
 
+	namespace {
+		// The renderer's stack of begun targets, the window ({}) at the bottom. Leaked
+		// on purpose: a RenderTarget held in a static can end itself after a static
+		// vector here is gone.
+		std::vector<RenderTargetHandle>& stack() {
+			static auto& s = *new std::vector<RenderTargetHandle>{RenderTargetHandle{}};
+			return s;
+		}
+
+		// Pop `target`, which must be the top, and bind the one below. A mismatch (an
+		// inner target still open) leaves the stack alone, logs once, and returns false.
+		bool pop(RenderTargetHandle target) {
+			if (stack().size() < 2 || stack().back() != target) {
+				// A caller bug (end() out of nesting order); once, or it would repeat every frame.
+				static bool warned = false;
+				if (!warned) {
+					warned = true;
+					LOG_ERROR(Renderer, "RenderTarget::end: target %u is not the bound render target; the end is refused", target.value);
+				}
+				return false;
+			}
+			stack().pop_back();
+			if (backend::Backend* gpu = backend::active(); gpu != nullptr) {
+				gpu->setRenderTarget(stack().back());
+			}
+			return true;
+		}
+	} // namespace
+
 	struct RenderTarget::Impl {
-		GLFramebuffer fbo;
-		TextureHandle texture;
-		int			  width = 0;
-		int			  height = 0;
-		bool		  inUse = false;
+		RenderTargetHandle target;
+		TextureHandle	   texture;
+		int				   width = 0;
+		int				   height = 0;
+		bool			   inUse = false;
 
 		Impl() = default;
 
 		~Impl() {
 			if (inUse) {
-				backend::gl::popTarget(fbo);
+				pop(target);
 			}
-			backend::gl::destroyTexture(texture);
+			if (backend::Backend* gpu = backend::active(); gpu != nullptr) {
+				gpu->destroyRenderTarget(target);
+				gpu->destroyTexture(texture);
+			}
 		}
 
 		Impl(const Impl&) = delete;
@@ -42,23 +72,22 @@ namespace Renderer {
 			LOG_ERROR(Renderer, "RenderTarget: empty size %dx%d", width, height);
 			return target;
 		}
+		backend::Backend* gpu = backend::active();
+		if (gpu == nullptr) {
+			LOG_ERROR(Renderer, "RenderTarget: the renderer is not initialized");
+			return target;
+		}
 
 		auto impl = std::make_unique<Impl>();
 		impl->width = width;
 		impl->height = height;
-		impl->texture = backend::gl::createTexture({.width = width, .height = height, .format = format});
+		impl->texture = gpu->createTexture({.width = width, .height = height, .format = format});
 		if (!impl->texture.isValid()) {
 			return target;
 		}
-
-		impl->fbo = GLFramebuffer::create();
-		impl->fbo.bind();
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, backend::gl::name(impl->texture), 0);
-		const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-		glBindFramebuffer(GL_FRAMEBUFFER, backend::gl::currentTarget().framebuffer);
-		if (status != GL_FRAMEBUFFER_COMPLETE) {
-			LOG_ERROR(Renderer, "RenderTarget %dx%d: framebuffer incomplete (0x%x)", width, height, status);
-			return target;
+		impl->target = gpu->createRenderTarget(impl->texture);
+		if (!impl->target.isValid()) {
+			return target; // the Impl's destructor destroys the texture
 		}
 
 		target.impl = std::move(impl);
@@ -69,7 +98,10 @@ namespace Renderer {
 		if (!impl || impl->inUse) {
 			return;
 		}
-		backend::gl::pushTarget(impl->fbo, impl->width, impl->height);
+		stack().push_back(impl->target);
+		if (backend::Backend* gpu = backend::active(); gpu != nullptr) {
+			gpu->setRenderTarget(impl->target);
+		}
 		impl->inUse = true;
 	}
 
@@ -77,7 +109,7 @@ namespace Renderer {
 		if (!impl || !impl->inUse) {
 			return;
 		}
-		if (backend::gl::popTarget(impl->fbo)) {
+		if (pop(impl->target)) {
 			impl->inUse = false;
 		}
 	}
@@ -95,7 +127,8 @@ namespace Renderer {
 	}
 
 	void RenderTarget::readPixels(std::span<uint8_t> out) const {
-		if (!impl) {
+		backend::Backend* gpu = backend::active();
+		if (!impl || gpu == nullptr) {
 			return;
 		}
 		const size_t needed = static_cast<size_t>(impl->width) * static_cast<size_t>(impl->height) * 4;
@@ -103,9 +136,11 @@ namespace Renderer {
 			LOG_ERROR(Renderer, "RenderTarget::readPixels: %zu bytes given, %zu needed", out.size(), needed);
 			return;
 		}
-		glBindFramebuffer(GL_READ_FRAMEBUFFER, impl->fbo);
-		glReadPixels(0, 0, impl->width, impl->height, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
-		glBindFramebuffer(GL_READ_FRAMEBUFFER, backend::gl::currentTarget().framebuffer);
+		gpu->readPixels(impl->target, out);
+	}
+
+	bool RenderTarget::anyBegun() {
+		return stack().size() > 1;
 	}
 
 } // namespace Renderer

@@ -6,7 +6,9 @@
 
 #include "primitives/Primitives.h"
 
+#include "backend/gl/GLBackend.h"
 #include "resources/RenderTarget.h"
+#include "vector/Types.h"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -15,6 +17,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <numbers>
 #include <vector>
 
@@ -39,15 +42,16 @@ namespace Renderer {
 				GTEST_SKIP() << "Could not create GLFW window (no OpenGL context available)";
 			}
 			glfwMakeContextCurrent(window);
-			glewExperimental = GL_TRUE;
-			if (glewInit() != GLEW_OK) {
+			// The GL backend initialises GLEW on this context
+			std::unique_ptr<backend::gl::GLBackend> gl = backend::gl::GLBackend::create();
+			if (gl == nullptr) {
 				glfwDestroyWindow(window);
 				window = nullptr;
 				glfwTerminate();
 				GTEST_SKIP() << "GLEW initialization failed";
 			}
+			Primitives::init(std::move(gl));
 			glViewport(0, 0, kSize, kSize);
-			Primitives::init(nullptr);
 			Primitives::setCoordinateSystem(nullptr);
 			Primitives::setViewport(kSize, kSize);
 			target = RenderTarget::create(kSize, kSize);
@@ -230,6 +234,48 @@ namespace Renderer {
 		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { Primitives::drawImage({.texture = source.texture(), .bounds = bounds}); });
 		expectNear(pixel(16, 4), {0, 0, 255, 255});
 		expectNear(pixel(16, 28), {255, 0, 0, 255});
+	}
+
+	TEST_F(PrimitivesDrawTest, ABatchPastTheStreamBuffersFirstSizeDrawsWhole) {
+		// 2,048 quads, 8,192 vertices and 12,288 indices: twice what the stream buffers
+		// start with. Only the last quad shows; a short upload would lose it.
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [] {
+			for (int i = 0; i < 2047; ++i) {
+				fill({1.0F, 1.0F, 1.0F, 0.0F}, Primitives::BlendMode::Alpha);
+			}
+			fill({0.0F, 0.0F, 1.0F, 1.0F}, Primitives::BlendMode::Alpha);
+		});
+		expectNear(pixel(16, 16), {0, 0, 255, 255});
+		expectNear(pixel(1, 30), {0, 0, 255, 255});
+	}
+
+	TEST_F(PrimitivesDrawTest, InstancedDrawsPastTheUniformRingEachReadTheirOwnCamera) {
+		// One 1 x 1 square, drawn kSize * kSize times, each draw with its own camera and
+		// tint: 1,024 sets of uniforms, twice round the backend's ring of 512. Every
+		// pixel is one draw, so a draw reading another's uniforms shows.
+		renderer::TessellatedMesh square;
+		square.vertices = {{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}};
+		square.indices = {0, 1, 2, 0, 2, 3};
+		InstancedMeshHandle mesh = Primitives::uploadInstancedMesh(square, 1);
+		ASSERT_TRUE(mesh.isValid());
+		const float half = static_cast<float>(kSize) * 0.5F;
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			for (int y = 0; y < kSize; ++y) {
+				for (int x = 0; x < kSize; ++x) {
+					const InstanceData instance({0.0F, 0.0F}, 0.0F, 1.0F, Foundation::Vec4(x / 31.0F, y / 31.0F, 0.5F, 1.0F));
+					// The square lands at screen (x, y): world minus camera, plus the viewport's centre.
+					Primitives::drawInstanced(
+						mesh, &instance, 1, {.position = {half - static_cast<float>(x), half - static_cast<float>(y)}}
+					);
+				}
+			}
+		});
+		for (int y = 0; y < kSize; ++y) {
+			for (int x = 0; x < kSize; ++x) {
+				const std::array<int, 4> expected = {(x * 255 + 15) / 31, (y * 255 + 15) / 31, 128, 255};
+				expectNear(pixel(x, y), expected);
+			}
+		}
 	}
 
 } // namespace Renderer
