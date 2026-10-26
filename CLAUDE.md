@@ -74,12 +74,12 @@ and httplib behind it.
 move** (seven PRs, [worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297), merged 2026-10-25/26): the dead
 includes are gone, the clipboard is a seam, `FontRenderer` is in `renderer`,
 the CMake cleanup landed, and the dev server left `foundation` for
-`libs/engine/debug`. What remains is moving `InputTypes.h` below `ui` and
-dropping `engine` from ui's link list, both waiting on decision D.
+`libs/engine/debug`. What remains is moving `InputTypes.h` into
+`foundation/input/` and dropping `engine` from ui's link list, both unblocked by
+decision D (settled 2026-10-26).
 
-Next is **decision D** (where input types live), which unblocks that move.
-Then phase 1, extracting `foundation` and `renderer` into the skeleton here;
-phase 2 carves `app` out of `libs/engine`; `ui` is extracted last.
+Next is that move. Then phase 1, extracting `foundation` and `renderer` into
+the skeleton here; phase 2 carves `app` out of `libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -225,14 +225,12 @@ No tests on feel, and no screenshot baselines or pixel comparisons.
 Don't guess at these; ask. The live list, each with a recommendation and the
 phase that needs the answer, is
 [docs/open-decisions.md](docs/open-decisions.md), mirrored as items on the
-board: the engine PRNG, audio, adopting dual-deck-builder's UI spec, where
-input types live, the ECS core, the `ui` storage model, render targets and
-particles, vector/SVG conventions, multi-device focus, and the
-dual-deck-builder golden corpus.
+board: the engine PRNG, audio, adopting dual-deck-builder's UI spec, the
+ECS core, the `ui` storage model, render targets and particles, vector/SVG
+conventions, multi-device focus, and the dual-deck-builder golden corpus.
 
 Resolved since the first version of this file: work is tracked in Specboard
-(see above). The app-versus-input split now has a proposal, plain-data input
-types in `foundation` with the device poller in `app` and no separate library,
-and is decision D there. The "engine-extraction.md" item is dropped; that file
+(see above). Input types in `foundation/input/`, poller in `app`, settled
+2026-10-26 (decision D). The "engine-extraction.md" item is dropped; that file
 never existed in worldsim, and the plan is
 [docs/extraction.md](docs/extraction.md).

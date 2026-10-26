@@ -24,6 +24,7 @@ Written into the docs as decided, with the reason.
 | Phase 0 is complete; an "untangle worldsim" step precedes phase 1 | both ui -> engine and renderer -> ui must be cut before phase 1 can leave worldsim building |
 | The ui-sandbox harness moves with the pure-UI scenes; game-flavoured scenes stay | the harness is generic; Planet, Grass, Tree and Salvage* link planet-view, world and assets |
 | The TileAtlasBuilder bootstrap and asset-system init move out of AppLauncher into the game | `AppLauncher.cpp:209-226` and `:231-264` hardcode terrain surfaces and asset paths |
+| Input types live in `foundation/input/`, the device poller in `app`, and there is no separate `input` library (decision D, 2026-10-26) | every surveyed engine keeps input types in a leaf module below UI and gameplay with the platform layer depending on it (design and evidence under D below) |
 | WebAssembly is not an engine target (2026-10-26) | a temporary playtest idea for dual-deck-builder's migration that had started shaping the engine (the GL ES 3.0 subset rule pushed decision G to LDR-only render targets, the Emscripten CI job cost two vcpkg commits); dual-deck-builder's TypeScript build stays the playtest URL |
 
 ## A. Engine PRNG
@@ -102,7 +103,7 @@ implementations against the same rules, and the conformance scorecard is a
 ready-made acceptance test for phase 3.
 
 Needed by. Phase 3 design. Phases 1 and 2 are unaffected, except that the
-batch sort key (G) and the input types (D) should not contradict it.
+batch sort key (G) and the settled input types (D) should not contradict it.
 
 If deferred. Phase 3 designs ui from worldsim's code alone and re-derives what
 the spec already settled; dual-deck-builder's presentation port then meets a
@@ -111,33 +112,100 @@ against.
 
 ## D. Where input types live
 
+Settled 2026-10-26, after a survey of how established engines place input
+types.
+
 Question. Where do `Key`, `MouseButton`, the gamepad enums and the per-tick
-`InputSnapshot` live, given that ui needs the enums (26 files, 98 uses of
+input snapshot live, given that ui needs the enums (26 files, 98 uses of
 `engine::Key` and `engine::MouseButton` in worldsim's ui) and a game's sim
-needs the snapshot, and neither may depend on `app`?
+needs input in some form, and neither may depend on `app`?
 
-Evidence. Today the enums are in `worldsim/libs/engine/input/InputTypes.h`
-(133 lines, no includes) and ui includes them from engine, the main cause of
-the ui -> engine breach. Asteroids' tech-stack.md puts input in its `engine`
+Decision. Input types live in `foundation/input/`, the device poller lives in
+`app`, and there is no separate `input` library. The directory is the seam if
+one is ever wanted (Godot's `core/input` is the precedent).
+
+- `foundation/input/` holds `Key` (the GLFW token set, with position
+  semantics), `MouseButton`, `GamepadButton`, `GamepadAxis`, the event structs,
+  the accumulator that folds events into a per-tick `InputSnapshot`, and an
+  `ActionMap`. The snapshot carries, per button, the down state and a
+  transition count, plus axes, pointer and player slot; the `ActionMap`
+  evaluates a snapshot into named action states. Nothing in the directory
+  includes GLFW, so headless tests and the dev server's `/api/input` build
+  snapshots without a window.
+- `app` owns GLFW callbacks (not polling), gamepad state through
+  `glfwGetGamepadState` with the SDL controller database mappings, hot-plug,
+  device-to-player-slot claiming, and `glfwGetKeyName` for the key names the
+  rebinding UI shows. It feeds the accumulator and consumes a snapshot once per
+  tick.
+- `ui` consumes the ordered event list and the enums: shortcuts, focus, and
+  text as char events.
+- A game's sim takes its own action-level POD, built from `ActionMap` output in
+  the game's tick. That POD is the replay log, recorded next to the seed, so
+  bindings and keyboard layouts never reach determinism and the sim's input
+  type is the game's rather than foundation's `InputSnapshot`.
+
+Two rules from the survey ride along.
+
+Transition counts, not per-frame "just pressed" flags. A flag cleared once per
+rendered frame is wrong under a fixed step: two ticks in one frame both see it,
+and a frame with no tick loses it. Bevy has had that open since 0.8
+([bevy#6183](https://github.com/bevyengine/bevy/issues/6183); #10077 fixed
+`EventReader` in `FixedUpdate` but not `ButtonInput`), and Unity tracks the same
+gap as ISXB-1006 while advising that `WasPressedThisFrame` be read in `Update`
+and passed through to `FixedUpdate`. The fixes converge on consuming events per
+fixed step or timestamping them. Handmade Hero's `halfTransitionCount` is the
+cheap version and is what the snapshot carries, so a press and release inside
+one tick is not lost.
+
+Keys are physical positions. SDL (scancodes for WASD, keycodes for named keys,
+text events for text), Godot (`physical_keycode`, the one meant for game
+input), Unity (`Key`, a US reference layout), Bevy (`KeyCode`, the W3C code),
+O3DE (ANSI physical positions) and GLFW's own tokens all agree; Unreal's
+virtual-key `FKey` is the outlier. Worldsim's `Key` is a rename of GLFW tokens,
+so it already means a position and the move changes nothing there. The rebinding
+UI asks `app` for the layout-aware name.
+
+Evidence. Today the enums are in `worldsim/libs/engine/input/InputTypes.h` (133
+lines, no includes) and ui includes them from engine, the main cause of the
+ui -> engine breach. Asteroids' tech-stack.md puts input in its `engine`
 (`asteroids-roguelike/docs/tech-stack.md:153`), which would put the snapshot
-type above sim. Dual-deck-builder's dispatcher is a queue of `PlatformInput`
-drained per frame, with no snapshot and no device layer. extraction.md's open
-item "one library or `app` plus `input`" is this question.
+above sim. Dual-deck-builder's dispatcher is a queue of `PlatformInput` drained
+per frame, with no snapshot and no device layer.
 
-Recommendation. Plain-data enums and `InputSnapshot` in `foundation`, where
-ui, app and a game's sim can all see them without breaking the dependency
-rule. The GLFW-backed poller, hot-plug and device-to-player-slot claiming in
-`app`. No separate `input` library.
+The survey covered Unreal, Unity's Input System, Godot 4, Bevy, SDL3 and GLFW,
+raylib, Hazel, Halley, O3DE, Flax and Defold, plus GGPO, Factorio, Overwatch
+(GDC 2017) and Handmade Hero for replay. Every engine keeps key enums and input
+state in a leaf module below both UI and gameplay, and the window or platform
+layer depends on it, not the reverse. In Unreal, InputCore sits below
+ApplicationCore, which hands in integer codes that `FInputKeyManager` maps to
+`FKey`. Godot has `core/os/keyboard.h` and `core/input`, which `servers/display`
+includes. `bevy_winit` depends on `bevy_input`, whose own dependencies are app,
+ecs, math and platform. Halley keeps input in core with SDL in a plugin; O3DE
+has `AzFramework/Input` with platform code as private implementations; Flax has
+`Engine/Input` with no module dependencies and `Platform/Windows/WindowsInput.cpp`
+above it; Hazel has `Core/KeyCodes.h`; raylib and Handmade Hero share one
+header. Nobody puts the enums in the UI layer. Player-slot claiming above
+devices and below gameplay has precedent as well (Unity's `InputUser`, O3DE's
+`User`).
 
-Needed by. Untangling step b (where InputTypes.h moves to) and phase 2 (the
-snapshot). Phase 0.5's last two steps, the InputTypes.h move and dropping
-`engine` from ui's link list, are now the only things waiting on it; the rest
-of the untangle landed in worldsim on 2026-10-25/26 ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through
+Deterministic systems record a game-defined struct, not raw keys. GGPO's input
+packet is fixed-size; Factorio transfers only player actions and replays them;
+Overwatch samples input per 16 ms command frame and replays buffered inputs
+after a rollback; Handmade Hero's `game_input` crosses a stdint-only header
+(`dt`, mouse, and controllers with named buttons such as `moveUp`, each with a
+`halfTransitionCount` and `isEndedDown`). Gameplay-facing engine APIs are
+action-first: Enhanced Input, Unity Actions, Godot's `is_action_pressed`, Flax
+virtual input, O3DE event bindings, and Defold, which exposes nothing else. On
+the polling side, GLFW's
+[input guide](https://www.glfw.org/docs/latest/input_guide.html) warns that
+`glfwGetKey` can miss state changes and points at callbacks.
+
+Unblocks. Untangling step b (`InputTypes.h` moves into `foundation/input/`) and
+phase 2 (the snapshot, accumulator and `ActionMap`). That move and dropping
+`engine` from ui's link list are the last two steps of phase 0.5; the rest of
+the untangle landed in worldsim on 2026-10-25/26
+([worldsim#291](https://github.com/kcjonson/worldsim/pull/291) through
 [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)).
-
-If deferred. InputTypes.h goes into `libs/ui/input/` as the fallback, which
-fixes worldsim's breach but leaves sim unable to consume a snapshot type
-without a second copy.
 
 ## E. ECS core
 

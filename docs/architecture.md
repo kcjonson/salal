@@ -30,23 +30,27 @@ document is the one that is right.
 
 | Library | Owns | Does not own |
 |---|---|---|
-| `foundation` | math, platform abstraction, logging, memory arenas, resource handles, seeded PRNG. Proposed: the plain-data input types (`Key`, `MouseButton`, gamepad enums, the per-tick `InputSnapshot`) | anything that knows about pixels; the HTTP dev server, which sits here in worldsim today and moves to `app` |
+| `foundation` | math, platform abstraction, logging, memory arenas, resource handles, seeded PRNG, and the plain-data input types in `input/` (`Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`, the event structs, the accumulator behind the per-tick `InputSnapshot`, the `ActionMap`), none of which include GLFW | anything that knows about pixels; the HTTP dev server, which sits here in worldsim today and moves to `app` |
 | `renderer` | GL abstraction, shaders, Primitives, BatchRenderer, vector/SVG, fonts and glyph generation, SDF text rendering, coordinate system, draw metrics | layout, interaction, widgets |
 | `ui` | Layer hierarchy, components, layout, focus, theme, text components and font theme tokens, text layout for widgets, animation, inspector | the window, the loop, game logic, the font renderer |
-| `app` | window, fixed-step loop, scenes, config, device input (the GLFW poller, hot-plug, device-to-player-slot claiming), clipboard, dev server | anything drawable |
+| `app` | window, fixed-step loop, scenes, config, device input (GLFW callbacks, gamepads, hot-plug, device-to-player-slot claiming, key names for rebinding) feeding the per-tick snapshot, clipboard, dev server | anything drawable |
 | `audio` (proposed) | a mixer with priority buses and ducking, looping voices with per-frame pitch, filter and gain, synchronized stems, one-shots with pitch, gain and pan; depends on `foundation` only | game-side sound design |
 
-Two of those rows are proposals, and the text says so because this document is
-otherwise normative. Input types in `foundation` is decision D in
-[open-decisions.md](open-decisions.md): the enums and the per-tick snapshot
-have to sit below `ui` (its components take `Key` and `MouseButton` in their
-public API, `libs/ui/focus/Focusable.h:51`, `libs/ui/input/InputEvent.h:27`)
-and below a game's `sim` (which consumes the snapshot and may not depend on
-`ui`), so the proposal puts them in `foundation` as plain data and keeps
-everything that touches GLFW in `app`, with no separate `input` library. The
-`audio` row is decision B: the recommendation is an engine library beside
-`renderer` over miniaudio, scheduled after `app`, but neither the library nor
-its placement is settled.
+Input types in `foundation` are settled: decision D in
+[open-decisions.md](open-decisions.md), 2026-10-26. The enums and the per-tick
+snapshot have to sit below `ui` (its components take `Key` and `MouseButton` in
+their public API, `libs/ui/focus/Focusable.h:51`,
+`libs/ui/input/InputEvent.h:27`) and below a game's `sim` (which may not depend
+on `ui` or `app`), so they are plain data in `foundation/input/` and everything
+that touches GLFW stays in `app`. There is no separate `input` library. A
+game's sim does not consume `InputSnapshot` itself; it takes a game-owned
+action-level struct built from the `ActionMap`, and that struct is the replay
+log.
+
+The `audio` row is a proposal, and the text says so because this document is
+otherwise normative. It is decision B: the recommendation is an engine library
+beside `renderer` over miniaudio, scheduled after `app`, but neither the
+library nor its placement is settled.
 
 Fonts moving into `renderer` is settled, and forced. Worldsim's
 `renderer/primitives/Primitives.cpp:12` includes `ui/font/FontRenderer.h` and
@@ -147,9 +151,11 @@ interpolating render are net-new in `app`.
 The accumulator freezes while paused and on focus loss, so a backgrounded
 window does not come back and replay ten seconds of ticks.
 
-Input is polled **once per sim tick**, not once per rendered frame, and collected
-into a per-tick snapshot. Inputs are recorded alongside the seed so any session
-replays.
+Input events are accumulated from platform callbacks and consumed **once per
+sim tick**, not once per rendered frame, into a per-tick snapshot carrying
+per-button down state and transition counts, so a press and release inside one
+tick is not lost. Inputs are recorded at the action level alongside the seed so
+any session replays.
 
 ## Determinism
 
