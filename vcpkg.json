@@ -14,6 +14,13 @@
       "default-features": false,
       "features": ["extensions"]
     },
+    {
+      "$comment": "msdfgen pulls freetype in, whose default brotli feature fails to install on wasm. Brotli is only for WOFF2 fonts.",
+      "name": "freetype",
+      "default-features": false,
+      "features": ["png", "zlib"],
+      "platform": "emscripten"
+    },
     { "name": "cpp-httplib", "platform": "!emscripten" },
     { "name": "gtest", "platform": "!emscripten" },
     { "name": "benchmark", "platform": "!emscripten" }
