@@ -51,8 +51,10 @@ namespace Renderer::backend {
 	// an InstanceData per instance.
 	enum class VertexLayout : uint8_t { Uber, InstancedMesh };
 
-	// How a buffer is written after it is made. Static: never. Dynamic: in place.
-	// Stream: whole, once per submission; a Stream write at offset 0 starts the
+	// How a buffer is written after it is made. Static: never. Dynamic: in place, the
+	// write ordered after every draw already submitted, which still reads the old
+	// contents (drawInstanced rewrites one instance buffer between draws and relies on
+	// it). Stream: whole, once per submission; a Stream write at offset 0 starts the
 	// buffer over (what it held is discarded, never waited on) and grows it to fit.
 	enum class BufferUsage : uint8_t { Static, Dynamic, Stream };
 
@@ -140,7 +142,10 @@ namespace Renderer::backend {
 	// State: depth test, culling and scissor are off for every draw, fixed state set
 	// at creation, beginFrame() and invalidateState(). Bindings (pipeline, geometry,
 	// texture, blend) are made by each draw() and assumed to survive nothing outside
-	// it, because a game's own GPU code runs between the renderer's submissions.
+	// it, because a game's own GPU code runs between the renderer's submissions. The
+	// one exception is the uniforms: setUniforms() binds them to uniform binding point
+	// 0, which is the renderer's, and draws read them there, so a game's GL that binds
+	// a uniform buffer to point 0 calls invalidateState() before the renderer draws.
 	class Backend {
 	  public:
 		Backend() = default;
@@ -163,7 +168,8 @@ namespace Renderer::backend {
 		// Clear the bound target's colour to `color` exactly (the caller premultiplies).
 		virtual void clear(const Foundation::Color& color) = 0;
 
-		// GPU code outside the renderer changed the fixed state; set it again.
+		// GPU code outside the renderer changed the fixed state or uniform binding point
+		// 0; set both again.
 		virtual void invalidateState() = 0;
 
 		// --- Textures ---
@@ -212,7 +218,8 @@ namespace Renderer::backend {
 		virtual void setUniforms(const DrawUniforms& uniforms) = 0;
 
 		// One submission, in order: bindings change only where consecutive calls
-		// differ, and nothing bound is left behind but the pipeline.
+		// differ, and nothing bound is left behind but the pipeline and the uniforms on
+		// point 0 (and, on GL, the generic buffer bindings its writes used).
 		virtual void draw(std::span<const DrawCall> calls) = 0;
 
 		// Bind `pipeline` in `blend` for draws the caller issues itself, from its own

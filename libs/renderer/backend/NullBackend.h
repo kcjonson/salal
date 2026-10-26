@@ -3,7 +3,8 @@
 // A backend that touches no GPU: it issues handles, keeps what is written into
 // buffers, and records what it is asked to do, so the renderer's tests (and a
 // game's) run headless and check what would have reached the GPU. Nothing is
-// drawn; readPixels() reads zeros and every timestamp is ready at 0.
+// drawn; readPixels() reads zeros where GL would read, and a timestamp is ready, at
+// 0, once it is written.
 
 #include "backend/Backend.h"
 #include "backend/SlotTable.h"
@@ -72,9 +73,9 @@ namespace Renderer::backend {
 		void beginForeignDraws(PipelineHandle pipeline, BlendState blend) override;
 		void endForeignDraws() override { ++foreignDrawEnds; }
 
-		QueryHandle createTimestampQuery() override { return queryTable.insert(0); }
+		QueryHandle createTimestampQuery() override { return queryTable.insert(false); }
 		void		writeTimestamp(QueryHandle query) override;
-		bool		timestampReady(QueryHandle query) override { return queryTable.find(query) != nullptr; }
+		bool		timestampReady(QueryHandle query) override;
 		uint64_t	timestampNs(QueryHandle /*query*/) override { return 0; }
 		void		destroyTimestampQuery(QueryHandle query) override { queryTable.erase(query); }
 
@@ -120,7 +121,7 @@ namespace Renderer::backend {
 		SlotTable<BufferHandle, BufferRecord>						   bufferTable;
 		SlotTable<GeometryHandle, GeometryDesc>						   geometryTable;
 		SlotTable<PipelineHandle, std::pair<std::string, std::string>> pipelineTable;
-		SlotTable<QueryHandle, int>									   queryTable;
+		SlotTable<QueryHandle, bool>								   queryTable; // written yet
 
 		std::vector<RecordedDraw>		recordedDraws;
 		std::vector<DrawUniforms>		uniformHistory;

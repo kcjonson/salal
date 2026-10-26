@@ -11,9 +11,6 @@
 namespace Renderer::backend::gl {
 
 	namespace {
-		// The one GLBackend alive, for name(); set and cleared by its constructor and destructor.
-		GLBackend* g_live = nullptr;
-
 		struct GLFormat {
 			GLenum internal;
 			GLenum format;
@@ -34,10 +31,57 @@ namespace Renderer::backend::gl {
 			}
 		}
 
-		// Three-byte pixels break GL's default four-byte row alignment at widths
-		// that are not a multiple of four; the other formats are always aligned.
-		void setUnpackAlignment(TextureFormat format) {
+		// Set the unpack alignment an upload in `format` needs and return the host's, to
+		// put back after: three-byte pixels break GL's default four-byte row alignment at
+		// widths that are not a multiple of four. Pixel store is client state, so reading
+		// it costs no GPU round trip; it is the one GL state the backend reads.
+		GLint setUnpackAlignment(TextureFormat format) {
+			GLint host = 4;
+			glGetIntegerv(GL_UNPACK_ALIGNMENT, &host);
 			glPixelStorei(GL_UNPACK_ALIGNMENT, format == TextureFormat::Rgb8 ? 1 : 4);
+			return host;
+		}
+
+		// Where std140 puts each member of the DrawUniforms block, which is where the
+		// C++ struct has it; createPipeline() checks the linked program against it.
+		struct BlockMember {
+			const char* name;
+			size_t		offset;
+		};
+		constexpr BlockMember kBlockMembers[] = {
+			{"u_projection", offsetof(DrawUniforms, projection)},
+			{"u_transform", offsetof(DrawUniforms, transform)},
+			{"u_cameraPosition", offsetof(DrawUniforms, cameraPosition)},
+			{"u_viewportSize", offsetof(DrawUniforms, viewportSize)},
+			{"u_cursorWorld", offsetof(DrawUniforms, cursorWorld)},
+			{"u_cameraZoom", offsetof(DrawUniforms, cameraZoom)},
+			{"u_pixelsPerMeter", offsetof(DrawUniforms, pixelsPerMeter)},
+			{"u_bakedAlpha", offsetof(DrawUniforms, bakedAlpha)},
+			{"u_viewportHeight", offsetof(DrawUniforms, viewportHeight)},
+			{"u_pixelRatio", offsetof(DrawUniforms, pixelRatio)},
+			{"u_instanced", offsetof(DrawUniforms, instanced)},
+			{"u_groundcoverMode", offsetof(DrawUniforms, groundcoverMode)},
+			{"u_groundcoverOpenness", offsetof(DrawUniforms, groundcoverOpenness)},
+			{"u_groundcoverReach", offsetof(DrawUniforms, groundcoverReach)},
+			{"u_cursorRadius", offsetof(DrawUniforms, cursorRadius)},
+			{"u_cursorStrength", offsetof(DrawUniforms, cursorStrength)},
+		};
+
+		// Whether the linked program's block holds every member where kBlockMembers says, logging the first that does not.
+		bool blockMatches(GLuint program) {
+			for (const BlockMember& member : kBlockMembers) {
+				GLuint index = GL_INVALID_INDEX;
+				glGetUniformIndices(program, 1, &member.name, &index);
+				GLint offset = -1;
+				if (index != GL_INVALID_INDEX) {
+					glGetActiveUniformsiv(program, 1, &index, GL_UNIFORM_OFFSET, &offset);
+				}
+				if (offset != static_cast<GLint>(member.offset)) {
+					LOG_ERROR(Renderer, "createPipeline: %s is at %d in the shaders, %zu in C++", member.name, offset, member.offset);
+					return false;
+				}
+			}
+			return true;
 		}
 
 		GLenum glUsage(BufferUsage usage) {
@@ -102,14 +146,9 @@ namespace Renderer::backend::gl {
 		glBindBuffer(GL_UNIFORM_BUFFER, uniformRing);
 		glBufferData(GL_UNIFORM_BUFFER, uniformStride * kUniformSlots, nullptr, GL_STREAM_DRAW);
 		applyFixedState();
-		g_live = this;
 	}
 
-	GLBackend::~GLBackend() {
-		if (g_live == this) {
-			g_live = nullptr;
-		}
-	}
+	GLBackend::~GLBackend() = default;
 
 	// --- Frame and state ---
 
@@ -137,6 +176,9 @@ namespace Renderer::backend::gl {
 
 	void GLBackend::invalidateState() {
 		applyFixedState();
+		if (lastUniformOffset >= 0) {
+			glBindBufferRange(GL_UNIFORM_BUFFER, kUniformBinding, uniformRing, lastUniformOffset, sizeof(DrawUniforms));
+		}
 	}
 
 	// --- Textures ---
@@ -147,9 +189,10 @@ namespace Renderer::backend::gl {
 			return {};
 		}
 		const GLFormat gl = glFormat(desc.format);
-		setUnpackAlignment(desc.format);
-		GLTexture texture(desc.width, desc.height, gl.internal, gl.format, gl.type, desc.pixels);
-		setUnpackAlignment(TextureFormat::Rgba8);
+		glActiveTexture(GL_TEXTURE0); // the renderer's unit; GLTexture binds the new texture on the active one
+		const GLint hostAlignment = setUnpackAlignment(desc.format);
+		GLTexture	texture(desc.width, desc.height, gl.internal, gl.format, gl.type, desc.pixels);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, hostAlignment);
 		if (!texture.isValid()) { // glGenTextures issued nothing: no GL context is current
 			LOG_ERROR(Renderer, "createTexture: GL issued no texture for %dx%d; is a GL context current?", desc.width, desc.height);
 			return {};
@@ -179,10 +222,11 @@ namespace Renderer::backend::gl {
 			return;
 		}
 		const GLFormat format = glFormat(slot->format);
+		glActiveTexture(GL_TEXTURE0);
 		gl.bind();
-		setUnpackAlignment(slot->format);
+		const GLint hostAlignment = setUnpackAlignment(slot->format);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, format.format, format.type, pixels);
-		setUnpackAlignment(TextureFormat::Rgba8);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, hostAlignment);
 		GLTexture::unbind();
 	}
 
@@ -210,7 +254,8 @@ namespace Renderer::backend::gl {
 	}
 
 	GLuint name(TextureHandle texture) {
-		return g_live != nullptr ? g_live->textureName(texture) : 0;
+		const auto* gl = dynamic_cast<const GLBackend*>(backend::active());
+		return gl != nullptr ? gl->textureName(texture) : 0;
 	}
 
 	// --- Render targets ---
@@ -362,12 +407,19 @@ namespace Renderer::backend::gl {
 			LOG_ERROR(Renderer, "createPipeline: %s and %s declare no %s block", source.vertex, source.fragment, kDrawUniformsBlock);
 			return {};
 		}
+		// The block's size between its last member's end and the struct's padded size, and
+		// every member where the struct has it: a shader reordered within 208 bytes would
+		// otherwise link and draw garbage, wherever no GL test runs.
 		GLint blockSize = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
-		if (blockSize <= 0 || static_cast<size_t>(blockSize) > sizeof(DrawUniforms)) {
+		constexpr size_t kBlockEnd = offsetof(DrawUniforms, cursorStrength) + sizeof(float);
+		if (blockSize < static_cast<GLint>(kBlockEnd) || static_cast<size_t>(blockSize) > sizeof(DrawUniforms)) {
 			LOG_ERROR(
 				Renderer, "createPipeline: %s is %d bytes in the shaders, %zu in C++", kDrawUniformsBlock, blockSize, sizeof(DrawUniforms)
 			);
+			return {};
+		}
+		if (!blockMatches(program)) {
 			return {};
 		}
 		glUniformBlockBinding(program, block, kUniformBinding);
@@ -468,10 +520,10 @@ namespace Renderer::backend::gl {
 
 	void GLBackend::beginForeignDraws(PipelineHandle pipeline, BlendState blend) {
 		applyBlend(blend);
+		// No pipeline binds no program, so the caller's draws draw nothing rather than
+		// run under whatever program a game's pass left bound.
 		const Shader* shader = pipelines.find(pipeline);
-		if (shader != nullptr) {
-			shader->use();
-		}
+		glUseProgram(shader != nullptr ? shader->getProgram() : 0);
 	}
 
 	void GLBackend::endForeignDraws() {

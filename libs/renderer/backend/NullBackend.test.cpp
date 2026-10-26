@@ -112,4 +112,59 @@ namespace Renderer::backend {
 		EXPECT_FALSE(gpu.createTexture({.width = 0, .height = 2}).isValid());
 	}
 
+	TEST(NullBackendTest, AnEarlierBackendsHandlesAreStaleInTheNext) {
+		TextureHandle fromA;
+		BufferHandle  bufferA;
+		{
+			NullBackend a;
+			fromA = a.createTexture({.width = 2, .height = 2});
+			bufferA = a.createBuffer(BufferUsage::Static, 4, nullptr);
+		}
+		NullBackend			b;
+		const TextureHandle fromB = b.createTexture({.width = 4, .height = 4});
+		const BufferHandle	bufferB = b.createBuffer(BufferUsage::Static, 8, nullptr);
+		EXPECT_EQ(fromB.index(), fromA.index()); // the same slot, a new generation
+		EXPECT_NE(fromB, fromA);
+		EXPECT_NE(bufferB, bufferA);
+		EXPECT_EQ(b.texture(fromA), nullptr);
+		EXPECT_TRUE(b.bufferContents(bufferA).empty());
+
+		// Destroying A's handles in B touches nothing of B's.
+		b.destroyTexture(fromA);
+		b.destroyBuffer(bufferA);
+		ASSERT_NE(b.texture(fromB), nullptr);
+		EXPECT_EQ(b.texture(fromB)->width, 4);
+		EXPECT_EQ(b.bufferContents(bufferB).size(), 8U);
+		EXPECT_EQ(b.live().textures, 1U);
+		EXPECT_EQ(b.live().buffers, 1U);
+	}
+
+	TEST(NullBackendTest, ATimestampIsReadyOnceWritten) {
+		NullBackend		  gpu;
+		const QueryHandle query = gpu.createTimestampQuery();
+		EXPECT_FALSE(gpu.timestampReady(query));
+		gpu.writeTimestamp(query);
+		EXPECT_TRUE(gpu.timestampReady(query));
+		EXPECT_FALSE(gpu.timestampReady(QueryHandle{}));
+	}
+
+	TEST(NullBackendTest, ReadPixelsReadsZerosWhereGLWouldRead) {
+		NullBackend gpu;
+		gpu.setWindowSize(2, 1);
+		std::vector<uint8_t> window(12, 7);
+		gpu.readPixels({}, window); // the window's 2 x 1, the rest untouched
+		EXPECT_EQ(window, (std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7}));
+
+		const TextureHandle		 colour = gpu.createTexture({.width = 1, .height = 1});
+		const RenderTargetHandle target = gpu.createRenderTarget(colour);
+		std::vector<uint8_t>	 shortSpan(3, 7);
+		gpu.readPixels(target, shortSpan);
+		EXPECT_EQ(shortSpan, std::vector<uint8_t>(3, 7));
+
+		gpu.destroyRenderTarget(target);
+		std::vector<uint8_t> stale(4, 7);
+		gpu.readPixels(target, stale);
+		EXPECT_EQ(stale, std::vector<uint8_t>(4, 7));
+	}
+
 } // namespace Renderer::backend

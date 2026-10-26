@@ -315,7 +315,7 @@ namespace Renderer {
 	}
 
 	TEST(FlushNoBackendTest, InitWithoutABackendLeavesTheRendererOff) {
-		Primitives::init(nullptr);
+		Primitives::init(std::unique_ptr<backend::Backend>{});
 		Primitives::beginFrame();
 		Primitives::drawRect({.bounds = {0.0F, 0.0F, 1.0F, 1.0F}});
 		Primitives::endFrame();

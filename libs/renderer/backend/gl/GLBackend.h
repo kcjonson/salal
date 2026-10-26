@@ -129,8 +129,9 @@ namespace Renderer::backend::gl {
 		int				   windowHeight = 0;
 	};
 
-	// The GL name of `texture` in the live GLBackend's table; 0 for an invalid or
-	// stale handle, or with no GLBackend. A game pass binds a renderer texture with it.
+	// The GL name of `texture` in the backend Primitives::init() was given, when that
+	// is a GLBackend; 0 for an invalid or stale handle, or with no GLBackend there. A
+	// game pass binds a renderer texture to its own sampler with it.
 	GLuint name(TextureHandle texture);
 
 } // namespace Renderer::backend::gl

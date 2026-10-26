@@ -1,8 +1,8 @@
 #pragma once
 
 // A backend's objects of one kind, keyed by a Handle: a 16-bit slot index and a
-// 16-bit generation that advances when the slot is freed, so a stale handle finds
-// nothing. Freed slots are reused. GL-free; each backend keeps one per kind.
+// 16-bit generation, so a stale handle finds nothing. Freed slots are reused.
+// GL-free; each backend keeps one per kind.
 
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +11,17 @@
 #include <vector>
 
 namespace Renderer::backend {
+
+	// The generation the next object of a kind gets, one counter per kind for the whole
+	// process, so no backend repeats a handle an earlier one issued: a handle kept across
+	// Primitives::shutdown() and init() is stale in the new backend, not the name of
+	// its first texture. A handle names a new object again only after 65536 more
+	// objects of its kind.
+	template <typename HandleType>
+	uint16_t nextGeneration() {
+		static uint16_t next = 0;
+		return next++;
+	}
 
 	template <typename HandleType, typename T>
 	class SlotTable {
@@ -30,6 +41,7 @@ namespace Renderer::backend {
 			}
 			Slot& slot = slots[index];
 			slot.value.emplace(std::move(value));
+			slot.generation = nextGeneration<HandleType>();
 			++liveCount;
 			return HandleType::make(index, slot.generation);
 		}
@@ -45,7 +57,6 @@ namespace Renderer::backend {
 			}
 			Slot& slot = slots[handle.index()];
 			slot.value.reset();
-			slot.generation = static_cast<uint16_t>(slot.generation + 1); // wraps after 65536 reuses of one slot
 			freeSlots.push_back(handle.index());
 			--liveCount;
 			return true;

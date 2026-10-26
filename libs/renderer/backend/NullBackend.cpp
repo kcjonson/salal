@@ -28,8 +28,21 @@ namespace Renderer::backend {
 		return textureTable.find(colour) != nullptr ? targetTable.insert(colour) : RenderTargetHandle{};
 	}
 
-	void NullBackend::readPixels(RenderTargetHandle /*target*/, std::span<uint8_t> rgba) {
-		std::fill(rgba.begin(), rgba.end(), uint8_t{0});
+	void NullBackend::readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) {
+		// What GL reads, zeroed: the target's texture (the window at its set size), and
+		// nothing for a stale target or a span short of width * height * 4.
+		const TextureHandle* colour = targetTable.find(target);
+		if (target.isValid() && colour == nullptr) {
+			return;
+		}
+		const TextureDesc* texture = colour != nullptr ? textureTable.find(*colour) : nullptr;
+		const int		   width = colour != nullptr ? (texture != nullptr ? texture->width : 0) : window.first;
+		const int		   height = colour != nullptr ? (texture != nullptr ? texture->height : 0) : window.second;
+		const size_t	   bytes = static_cast<size_t>(std::max(width, 0)) * static_cast<size_t>(std::max(height, 0)) * 4;
+		if (bytes == 0 || rgba.size() < bytes) {
+			return;
+		}
+		std::fill_n(rgba.begin(), bytes, uint8_t{0});
 	}
 
 	BufferHandle NullBackend::createBuffer(BufferUsage usage, size_t bytes, const void* data) {
@@ -83,9 +96,15 @@ namespace Renderer::backend {
 	}
 
 	void NullBackend::writeTimestamp(QueryHandle query) {
-		if (queryTable.find(query) != nullptr) {
+		if (bool* written = queryTable.find(query); written != nullptr) {
+			*written = true;
 			++timestampCount;
 		}
+	}
+
+	bool NullBackend::timestampReady(QueryHandle query) {
+		const bool* written = queryTable.find(query);
+		return written != nullptr && *written;
 	}
 
 	std::span<const uint8_t> NullBackend::bufferContents(BufferHandle buffer) const {

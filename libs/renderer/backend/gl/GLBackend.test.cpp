@@ -1,8 +1,10 @@
-// The GL backend on a hidden GL 3.3 core context, skipped where none can be made.
-// The headless cases make no GL call (a GL call with no context is undefined on
-// macOS): with no GLBackend alive, name() answers without one.
+// The GL backend on a hidden GL 3.3 core context, skipped where none can be made;
+// the fixture hands it to Primitives, as an app does. The headless case makes no GL
+// call (a GL call with no context is undefined on macOS): with no backend in
+// Primitives, name() answers without one.
 
 #include "backend/gl/GLBackend.h"
+#include "primitives/Primitives.h"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -41,18 +43,20 @@ namespace Renderer::backend::gl {
 				GTEST_SKIP() << "Could not create GLFW window (no OpenGL context available)";
 			}
 			glfwMakeContextCurrent(window);
-			gpu = GLBackend::create();
-			if (gpu == nullptr) {
+			std::unique_ptr<GLBackend> created = GLBackend::create();
+			if (created == nullptr) {
 				glfwDestroyWindow(window);
 				window = nullptr;
 				glfwTerminate();
 				GTEST_SKIP() << "GLEW initialization failed";
 			}
+			gpu = created.get();
+			Primitives::init(std::move(created));
 		}
 
 		void TearDown() override {
 			if (window != nullptr) {
-				gpu.reset();
+				Primitives::shutdown();
 				glfwDestroyWindow(window);
 				glfwTerminate();
 			}
@@ -91,8 +95,8 @@ namespace Renderer::backend::gl {
 			return value;
 		}
 
-		GLFWwindow*				   window = nullptr;
-		std::unique_ptr<GLBackend> gpu;
+		GLFWwindow* window = nullptr;
+		GLBackend*	gpu = nullptr; // owned by Primitives
 	};
 
 	TEST_F(GLBackendTest, CreatedTextureNamesAGLTexture) {
@@ -163,10 +167,51 @@ namespace Renderer::backend::gl {
 		ASSERT_TRUE(handle.isValid());
 		EXPECT_EQ(internalFormat(handle), GL_RGB8);
 		EXPECT_EQ(readBack(handle, 3, 2, 3), std::vector<uint8_t>(pixels.begin(), pixels.end()));
+		destroyTexture(handle);
+	}
+
+	TEST_F(GLBackendTest, UploadsUseUnitZeroAndPutBackTheHostsAlignment) {
+		// What a game's pass might leave: another unit active with its texture, and its own alignment.
+		GLuint foreign = 0;
+		glGenTextures(1, &foreign);
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_2D, foreign);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 8);
+
+		const std::array<uint8_t, 18> pixels{};
+		const TextureHandle handle = createTexture({.width = 3, .height = 2, .format = TextureFormat::Rgb8, .pixels = pixels.data()});
+		ASSERT_TRUE(handle.isValid());
+		updateTexture(handle, 0, 0, 3, 2, pixels.data());
+
 		GLint alignment = 0;
 		glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
-		EXPECT_EQ(alignment, 4); // the default is back for everyone else
+		EXPECT_EQ(alignment, 8);
+		GLint active = 0;
+		glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+		EXPECT_EQ(active, GL_TEXTURE0);
+		glActiveTexture(GL_TEXTURE3);
+		GLint bound = 0;
+		glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+		EXPECT_EQ(static_cast<GLuint>(bound), foreign); // unit 3 untouched
+
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		glDeleteTextures(1, &foreign);
 		destroyTexture(handle);
+	}
+
+	TEST_F(GLBackendTest, NameResolvesThroughTheBackendPrimitivesHolds) {
+		const TextureHandle handle = Primitives::createTexture({.width = 2, .height = 2});
+		ASSERT_NE(name(handle), 0U);
+		{
+			// A second backend made and dropped (a test's, say) leaves name() answering from Primitives' one.
+			const std::unique_ptr<GLBackend> spare = GLBackend::create();
+			ASSERT_NE(spare, nullptr);
+		}
+		EXPECT_EQ(name(handle), gpu->textureName(handle));
+		EXPECT_NE(name(handle), 0U);
+		Primitives::destroyTexture(handle);
 	}
 
 	TEST_F(GLBackendTest, FormatsAndFiltering) {
@@ -284,6 +329,38 @@ namespace Renderer::backend::gl {
 		enableAll();
 		gpu->beginFrame();
 		expectAllOff();
+	}
+
+	TEST_F(GLBackendTest, InvalidateStateRebindsTheUniforms) {
+		gpu->setUniforms({});
+		GLint ring = 0;
+		glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, GLBackend::kUniformBinding, &ring);
+		ASSERT_NE(ring, 0);
+
+		// A game's uniform buffer on point 0, then the call that says so.
+		GLuint foreign = 0;
+		glGenBuffers(1, &foreign);
+		glBindBuffer(GL_UNIFORM_BUFFER, foreign);
+		glBufferData(GL_UNIFORM_BUFFER, 256, nullptr, GL_STATIC_DRAW);
+		glBindBufferBase(GL_UNIFORM_BUFFER, GLBackend::kUniformBinding, foreign);
+		gpu->invalidateState();
+
+		GLint bound = 0;
+		glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, GLBackend::kUniformBinding, &bound);
+		EXPECT_EQ(bound, ring);
+		glDeleteBuffers(1, &foreign);
+	}
+
+	TEST_F(GLBackendTest, ForeignDrawsWithNoPipelineBindNoProgram) {
+		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"});
+		ASSERT_TRUE(pipeline.isValid());
+		glUseProgram(gpu->programName(pipeline)); // whatever a game's pass left bound
+		gpu->beginForeignDraws({}, BlendState::Alpha);
+		GLint program = -1;
+		glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+		EXPECT_EQ(program, 0);
+		gpu->endForeignDraws();
+		gpu->destroyPipeline(pipeline);
 	}
 
 	TEST_F(GLBackendTest, ADrawBindsEverythingItUsesAndLeavesOnlyItsProgram) {

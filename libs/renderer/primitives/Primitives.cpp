@@ -27,23 +27,28 @@
 
 namespace Renderer::Primitives {
 
-	// The backend init() was given, and the window's framebuffer size as setViewport()
-	// last recorded it with no RenderTarget begun.
-	static std::unique_ptr<backend::Backend> g_backend = nullptr;
-	static int								 g_backbufferWidth = 0;
-	static int								 g_backbufferHeight = 0;
+	// The backend init() was given and the batch drawing on it, leaked on purpose: a
+	// FontRenderer, TileTextureAtlas, RenderTarget or InstancedMeshHandle held in a
+	// static releases through them during static destruction, after an ordinary static
+	// here may be gone (MSVC's ~unique_ptr leaves the pointer set), and no GL runs at
+	// exit after the context. shutdown() empties both.
+	static auto& g_backend = *new std::unique_ptr<backend::Backend>;
+	static auto& g_batchRenderer = *new std::unique_ptr<BatchRenderer>;
+
+	// The window's framebuffer size, as setViewport() last recorded it with no RenderTarget begun.
+	static int g_backbufferWidth = 0;
+	static int g_backbufferHeight = 0;
 
 	// Internal state
-	static std::unique_ptr<BatchRenderer> g_batchRenderer = nullptr;
-	static CoordinateSystem*			  g_coordinateSystem = nullptr;
-	static FontRenderer*				  g_fontRenderer = nullptr;
-	static FrameUpdateCallback			  g_frameUpdateCallback = nullptr;
-	static TextureHandle				  g_tileAtlasTexture;
-	static std::vector<glm::vec4>		  g_tileAtlasRects;
-	static std::stack<Foundation::Rect>	  g_scissorStack;
-	static std::stack<Foundation::Mat4>	  g_transformStack;
-	static Foundation::Rect				  g_currentScissor;
-	static Foundation::Mat4				  g_currentTransform = Foundation::Mat4(1.0F);
+	static CoordinateSystem*			g_coordinateSystem = nullptr;
+	static FontRenderer*				g_fontRenderer = nullptr;
+	static FrameUpdateCallback			g_frameUpdateCallback = nullptr;
+	static TextureHandle				g_tileAtlasTexture;
+	static std::vector<glm::vec4>		g_tileAtlasRects;
+	static std::stack<Foundation::Rect> g_scissorStack;
+	static std::stack<Foundation::Mat4> g_transformStack;
+	static Foundation::Rect				g_currentScissor;
+	static Foundation::Mat4				g_currentTransform = Foundation::Mat4(1.0F);
 
 	// Clip stack for shader-based clipping (preserves batching)
 	// Each entry stores the ClipSettings and the computed bounds

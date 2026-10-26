@@ -111,6 +111,27 @@ namespace Renderer {
 		EXPECT_EQ(tooShort, std::vector<uint8_t>(3, 7));
 	}
 
+	TEST(RenderTargetNoBackendTest, ATargetKeptAcrossReinitLeavesTheNextSessionsTexturesAlone) {
+		// A target made in one session and destroyed in the next, after the next has
+		// made a texture in the same slot (a font atlas, say).
+		Primitives::init(std::make_unique<backend::NullBackend>());
+		RenderTarget kept = RenderTarget::create(4, 4);
+		ASSERT_TRUE(kept.isValid());
+		Primitives::shutdown();
+
+		auto				  owned = std::make_unique<backend::NullBackend>();
+		backend::NullBackend& next = *owned;
+		Primitives::init(std::move(owned));
+		const TextureHandle atlas = Primitives::createTexture({.width = 8, .height = 8});
+		ASSERT_TRUE(atlas.isValid());
+		EXPECT_NE(atlas, kept.texture());
+		kept = RenderTarget(); // releases its stale handles through the new backend
+		ASSERT_NE(next.texture(atlas), nullptr);
+		EXPECT_EQ(next.texture(atlas)->width, 8);
+		EXPECT_EQ(next.live().textures, 1U);
+		Primitives::shutdown();
+	}
+
 	TEST(RenderTargetNoBackendTest, CreateBeforeInitIsInvalid) {
 		const RenderTarget target = RenderTarget::create(4, 4);
 		EXPECT_FALSE(target.isValid());

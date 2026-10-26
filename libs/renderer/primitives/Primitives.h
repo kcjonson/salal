@@ -22,6 +22,7 @@
 #include "math/Types.h"
 #include "primitives/FontFamily.h"
 #include "primitives/InstanceData.h"
+#include <cstddef>
 #include <cstdint>
 #include <glm/vec4.hpp>
 #include <memory>
@@ -48,6 +49,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// backend::NullBackend for tests that run without a GPU. Every call before
 		// init() or after shutdown() does nothing.
 		void init(std::unique_ptr<backend::Backend> backend);
+		// init(nullptr), every v0.4.0 call, would otherwise compile and leave the renderer off.
+		void init(std::nullptr_t) = delete;
 		void shutdown();
 
 		// Set the coordinate system (must be called after Init)
@@ -147,9 +150,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void beginFrame();
 		void endFrame(); // Flushes all batches
 
-		// GPU code outside the renderer left depth test, culling or scissor on: set the
-		// renderer's fixed state again (all three off) before it draws. Bindings need
-		// no call; every flush makes its own, since a game's GL runs between flushes.
+		// GPU code outside the renderer left depth test, culling or scissor on, or bound
+		// a uniform buffer to binding point 0, which is the renderer's: set the fixed
+		// state again (all three off) and rebind the renderer's uniforms before it draws.
+		// Other bindings need no call; every flush makes its own, since a game's GL runs
+		// between flushes.
 		void invalidateState();
 
 		// Draw-order barrier: flush pending batched primitives now. Groups only
