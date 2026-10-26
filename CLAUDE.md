@@ -185,12 +185,26 @@ as you are done with it.
 
 ## Build
 
-Not set up yet. It will be worldsim's arrangement: CMake 3.25+ with vcpkg, Ninja
-on macOS and Linux, Ninja Multi-Config with MSVC on Windows, ccache in front of
-both. Copy `CMakePresets.json` from worldsim when phase 1 starts.
+Worldsim's arrangement: CMake 3.25+ with vcpkg (`VCPKG_ROOT` set), Ninja on
+macOS and Linux, Ninja Multi-Config with MSVC on Windows, ccache in front of
+both. `CMakePresets.json` is worldsim's, unchanged.
 
-Expected dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
-`nanosvg`, `msdfgen`, `cpp-httplib`, `gtest`, `benchmark`. Worldsim's
+```
+cmake --preset windows        # or: cmake --preset default
+cmake --build --preset windows
+ctest --test-dir build -C Debug
+```
+
+The libraries are placeholders until phase 1 moves code in: one translation
+unit and one gtest each, there to exercise the wiring. Each lib's `*.test.cpp`
+files become `<lib>-tests` through `salal_add_tests` in
+`cmake/SalalTesting.cmake`. CI (`.github/workflows/ci.yml`) builds and tests on
+Windows, macOS and Linux and checks clang-format 21; `web.yml` compiles
+`foundation` and `renderer` for `wasm32-emscripten` and is not a required check.
+
+Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
+`nanosvg`, `msdfgen`, `cpp-httplib`, `gtest`, `benchmark`, the native-only ones
+qualified `!emscripten` in `vcpkg.json`. Worldsim's
 `pugixml`, `lua` and `sol2` serve its `assets` target and stay behind. An audio
 library is proposed and not decided (worldsim has none; `miniaudio` with its
 Emscripten backend is the recommendation).
