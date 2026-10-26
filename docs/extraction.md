@@ -608,7 +608,7 @@ first so each import is a pure move. State as of 2026-10-26:
 7. The GL-boundary PRs, salal, after step 6 so worldsim pins a tag before the
    API moves underneath it: four PRs, tagged `v0.2.0` through `v0.5.0` with a
    worldsim pin after each, sequenced in
-   [renderer-boundary.md](renderer-boundary.md). PR 1 in progress.
+   [renderer-boundary.md](renderer-boundary.md). PR 1 is in.
 
 Settled while scoping, beyond the import method and fonts under "What the repo
 looks like":

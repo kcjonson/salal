@@ -52,20 +52,23 @@ otherwise normative. It is decision B: the recommendation is an engine library
 beside `renderer` over miniaudio, scheduled after `app`, but neither the
 library nor its placement is settled.
 
-The backend boundary in the `renderer` row has a settled direction and a planned
-design; nothing is built, and decision G in
-[open-decisions.md](open-decisions.md) holds the plan and
-[renderer-boundary.md](renderer-boundary.md) the design. The layer is OpenGL
-throughout today: the imported renderer has 182 direct GL calls in twelve files
-(measured at worldsim `2cc7e40a`), and `BatchRenderer.h` and
-`FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. The plan
-takes GL off the public surface first, then routes textures through one wrapper
-and designs the render-target API as a backend object. OpenGL 3.3 core is the
-only backend until then, and Vulkan is possible later, not scheduled. Blend
-state in the batch sort key, that render-target API, and the polygon, arc and
-wide-line primitives land before a second consumer depends on the renderer API,
-which is after worldsim pins `v0.1.0` (worldsim consumes the renderer as it is,
-behaviour-identical, and takes API changes through a tag bump). The diagram
+The backend boundary in the `renderer` row has a settled direction and a
+design; decision G in [open-decisions.md](open-decisions.md) holds the plan and
+[renderer-boundary.md](renderer-boundary.md) the design and the PR sequence.
+The first step is in: no public renderer header (every header under
+`libs/renderer` outside `gl/`, `shader/` and `backend/`) reaches `<GL/glew.h>`
+or `<GLFW/glfw3.h>`, which `salal_check_layering()` walks at configure time,
+and consumers see `TextureHandle`, `Viewport` and `Primitives` calls where they
+saw `GLuint`, `GLFWwindow*` and the batch renderer. `gl/`, `shader/` and
+`backend/gl/` are the explicit GL opt-in for a game's own passes. Behind the
+headers the layer is still OpenGL throughout (the imported renderer had 182
+direct GL calls in twelve files, measured at worldsim `2cc7e40a`); next every
+texture goes through one wrapper and the render-target API is designed as a
+backend object. OpenGL 3.3 core is the only backend until then, and Vulkan is
+possible later, not scheduled. Blend state in the batch sort key, that
+render-target API, and the polygon, arc and wide-line primitives land before a
+second consumer depends on the renderer API; worldsim consumes the renderer
+behaviour-identical and takes API changes through a tag bump. The diagram
 above is accurate for the code that exists.
 
 Fonts moving into `renderer` is settled, and forced. Worldsim's
