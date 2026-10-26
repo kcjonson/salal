@@ -754,7 +754,6 @@ and each tracked on the board. By letter:
 - E. The ECS core: ship it as an optional header module or leave it in worldsim.
 - F. The `ui` storage model during extraction, shared_ptr graph or value
   semantics.
-- G. Render targets, additive blending and particles: who owns them and when.
 - H. Whether worldsim's vector/SVG asset conventions come with `renderer` or
   get parameterised out, and what API `FontRenderer` takes for atlas sources
   (the fonts themselves stay in the game).
@@ -768,5 +767,6 @@ Specboard (it is; `.mcp.json` holds the binding), the browser build (dropped,
 above), where input types live (decision D, 2026-10-26: `foundation/input/`,
 with the poller in `app`), and, 2026-10-26, that imports are plain copies, that
 fonts and the atlas tool stay game-side, that floating-point contraction is off
-engine-wide, and that the renderer sits behind a backend boundary (all
-Settled).
+engine-wide, that the renderer sits behind a backend boundary, and that it owns
+offscreen render targets, with additive blend in the batch sort key and
+particles game-side (decision G; all Settled).

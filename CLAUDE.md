@@ -84,8 +84,8 @@ off ui's link list (decision D, settled 2026-10-26).
 Phase 1 landed (2026-10-26): `foundation` and `renderer` are imported, `v0.1.0`
 is tagged, and worldsim consumes this repo. The renderer boundary PRs are under
 way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PR 1
-(GL off the public surface) is in, PR 2 is next. Phase 2 carves `app` out of
-`libs/engine`; `ui` is extracted last.
+(GL off the public surface) is in (`v0.2.0`), PR 2 is next. Phase 2 carves
+`app` out of `libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -253,8 +253,8 @@ Don't guess at these; ask. The live list, each with a recommendation and the
 phase that needs the answer, is
 [docs/open-decisions.md](docs/open-decisions.md), mirrored as items on the
 board: the engine PRNG, audio, adopting dual-deck-builder's UI spec, the
-ECS core, the `ui` storage model, render targets and particles, vector/SVG
-conventions, multi-device focus, and the dual-deck-builder golden corpus.
+ECS core, the `ui` storage model, vector/SVG conventions, multi-device focus,
+and the dual-deck-builder golden corpus.
 
 Resolved since the first version of this file: work is tracked in Specboard
 (see above). Input types in `foundation/input/`, poller in `app`, settled

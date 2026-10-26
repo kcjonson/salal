@@ -103,7 +103,7 @@ namespace Primitives {
 	void setGroundcover(const GroundcoverParams&); // u_groundcover* and u_cursor*
 	void setBakedAlpha(float alpha); // u_bakedAlpha, also between baked draws
 	void beginBakedPass(const WorldCamera&); // uber program in mode 2, camera uniforms, projection from the setViewport size as today
-	void endBakedPass(); // around BakedChunkRenderer's own VAO draws; open question 2
+	void endBakedPass(); // around BakedChunkRenderer's own VAO draws; stays until a world mesh API exists
 }
 }
 ```
@@ -201,7 +201,7 @@ Premultiplied alpha decides the cost: with it, additive is over's blend state
 and never splits a draw; without it, additive is `SRC_ALPHA, ONE` and splits. The
 per-vertex flag rides in `data2.w`, since `UberVertex` has no spare field for
 shapes: border position 0 to 2 plus 4 for additive, new negative constants for
-additive text and shadow. Recommendation: premultiplied, in the same PR, also
+additive text and shadow. Decided: premultiplied, in the same PR, also
 because compositing a straight-alpha render target over the scene (bloom) gives
 dark fringes. Nothing the uber program samples carries alpha in PR 3 (font atlases
 are RGB8; the tile atlas is sampled only by worldsim's tile shader,
@@ -235,27 +235,24 @@ Behaviour is identical through PR 2, identical to rounding after PR 3.
 
 | PR | salal | worldsim | verified by |
 |---|---|---|---|
-| 1. GL off the public surface (minor bump, `v0.2.0`) | `BatchRenderer.{h,cpp}`, `InstanceData.h`, `Primitives.{h,cpp}`, `FontRenderer.{h,cpp}`, `CoordinateSystem.{h,cpp,test.cpp}`, `RenderToTexture.h`, `TileTextureAtlas.h`, `TileAtlasBuilder.h`, `GPUTimer.{h,cpp}`, new `Handle.h`, the handle-to-name registry with `backend::gl::name()` in new `backend/gl/GLNames.h` (the only file under `backend/` until PR 2), `Primitives::clear` (no callers migrated), the four GL test fixtures, `CMakeLists.txt` (`OpenGL::GL` and `GLEW::GLEW` PRIVATE on `salal_renderer`, `glfw` off it, since nothing in the library touches GLFW once `CoordinateSystem` is fed its sizes; the GL test fixtures link all three), the layering check gaining "no GL, GLES, OpenGL, GLFW or glad header reachable from a public renderer header", public meaning every header under `libs/renderer` outside `gl/`, `shader/` and `backend/`, which is how `gl/` and `shader/` stay where they are (open question 3 gates their move). About 25 files | about 20 files: the dozen in the table above, the `render(ctx, InstancingUniforms&, stats)` signatures across the entity renderers, `GrassScene`'s release, `libs/engine/CMakeLists.txt` linking OpenGL, GLEW and glfw PUBLIC (the apps' clear pairs and `GrassScene`'s 20 GL calls reach GL through `engine`) | `salal_renderer_tests` (CoordinateSystem now headless); worldsim full Windows build and ctest; ui-sandbox `text_shapes`, `sdf_minimal`, `svg`, `button`, `grass` and the game scene through the dev server, screenshots identical |
-| 2. Textures through `GLTexture`, `RenderTarget` (`v0.3.0`) | `FontRenderer.cpp:289-299` (the one raw `glGenTextures` left in the renderer) via `createTexture`, `RenderToTexture.*` becomes `RenderTarget`, `TileTextureAtlas` on the texture table, registry entries become owned, `Primitives` gains `createTexture`, `updateTexture`, `destroyTexture`, `readBackbuffer`; `gl/*.h`, `Shader.h`, `ShaderLoader.h` move to `backend/gl/` if question 3 says yes | `AssetRenderer.cpp` (drops its `glClear` and `glReadPixels`), `DebugServer.cpp` screenshot (optional), the include paths in `ChunkRenderer.h:16-19`, `BakedChunkRenderer.h:10-11`, `PlanetRenderer.cpp:7` if the move happens | `RenderTarget` test (clear, read back); `asset-cli` output PNG identical; `FontRenderer` test |
+| 1. GL off the public surface (minor bump, `v0.2.0`) | `BatchRenderer.{h,cpp}`, `InstanceData.h`, `Primitives.{h,cpp}`, `FontRenderer.{h,cpp}`, `CoordinateSystem.{h,cpp,test.cpp}`, `RenderToTexture.h`, `TileTextureAtlas.h`, `TileAtlasBuilder.h`, `GPUTimer.{h,cpp}`, new `Handle.h`, the handle-to-name registry with `backend::gl::name()` in new `backend/gl/GLNames.h` (the only file under `backend/` until PR 2), `Primitives::clear` (no callers migrated), the four GL test fixtures, `CMakeLists.txt` (`OpenGL::GL` and `GLEW::GLEW` PRIVATE on `salal_renderer`, `glfw` off it, since nothing in the library touches GLFW once `CoordinateSystem` is fed its sizes; the GL test fixtures link all three), the layering check gaining "no GL, GLES, OpenGL, GLFW or glad header reachable from a public renderer header", public meaning every header under `libs/renderer` outside `gl/`, `shader/` and `backend/`, which is how `gl/` and `shader/` stay where they are until PR 2 moves them. About 25 files | about 20 files: the dozen in the table above, the `render(ctx, InstancingUniforms&, stats)` signatures across the entity renderers, `GrassScene`'s release, `libs/engine/CMakeLists.txt` linking OpenGL, GLEW and glfw PUBLIC (the apps' clear pairs and `GrassScene`'s 20 GL calls reach GL through `engine`) | `salal_renderer_tests` (CoordinateSystem now headless); worldsim full Windows build and ctest; ui-sandbox `text_shapes`, `sdf_minimal`, `svg`, `button`, `grass` and the game scene through the dev server, screenshots identical |
+| 2. Textures through `GLTexture`, `RenderTarget` (`v0.3.0`) | `FontRenderer.cpp:289-299` (the one raw `glGenTextures` left in the renderer) via `createTexture`, `RenderToTexture.*` becomes `RenderTarget`, `TileTextureAtlas` on the texture table, registry entries become owned, `Primitives` gains `createTexture`, `updateTexture`, `destroyTexture`, `readBackbuffer`; `gl/*.h`, `Shader.h`, `ShaderLoader.h` move to `backend/gl/` | `AssetRenderer.cpp` (drops its `glClear` and `glReadPixels`), `DebugServer.cpp` screenshot (optional), the include paths in `ChunkRenderer.h:16-19`, `BakedChunkRenderer.h:10-11`, `PlanetRenderer.cpp:7` | `RenderTarget` test (clear, read back); `asset-cli` output PNG identical; `FontRenderer` test |
 | 3. Blend in the sort key, premultiplied alpha, new primitives (`v0.4.0`) | `BatchRenderer` (`DrawGroup.blend`, run split), `uber.frag` (premultiplied output, the `data2.w` flag, arc and image modes), `Primitives` (`PolygonArgs`, `PolylineArgs`, `ArcArgs`, `ImageArgs`, `blend` on the existing Args); a batch sort and split unit test | none expected; `BakedChunkRenderer`'s own blend func already went with PR 1 | sandbox scenes for polygon, arc, polyline and blend; existing scenes diffed by hand against PR 2's shots, within rounding, no baseline committed |
 | 4. The backend interface (`v0.5.0`) | `backend/Backend.h`, `backend/gl/GLBackend.{h,cpp}` absorbing the GL halves listed above, the std140 uniform block, `createPipeline`, `Primitives::invalidateState`, `NullBackend` for tests | none | renderer tests headless against the null backend (sort, blend split, atlas split, clip bounds); sandbox screenshots identical |
 
-## Open questions
+## Questions, decided
 
-1. Premultiplied alpha in PR 3. Recommendation: yes; the alternative keeps
+1. Premultiplied alpha in PR 3: yes (2026-10-26). The alternative keeps
    additive as a run split and leaves bloom compositing wrong.
-2. `BakedChunkRenderer` draws its own VAOs with the uber program in mode 2.
-   `beginBakedPass`/`endBakedPass` keeps the program private but admits a game
-   draws under it; the alternative is renderer-owned world meshes, 29 game GL
-   calls becoming API. Recommendation: the pass pair in PR 1, the mesh API later.
-3. Whether the `gl/`, `shader/` and `backend/` exemption from the layering check
-   survives PR 2's move into `backend/gl/`, so consumers can still include the
-   wrappers, `Shader`, `ShaderLoader` and `GLNames.h`; worldsim's chunk and planet
-   renderers do today. Recommendation: yes, an explicit opt-in path, dropped the
-   day a second backend exists.
-4. The groundcover and cursor uniforms are a worldsim feature inside salal's
-   uber shader; `setGroundcover` exists only for them. Recommendation: keep them
-   through PR 1 (behaviour-identical), file the move to a game shader separately.
+2. `BakedChunkRenderer` draws its own VAOs with the uber program in mode 2; the
+   `beginBakedPass`/`endBakedPass` pair, shipped in PR 1, stays until a
+   renderer-owned world mesh API exists (2026-10-26), which would turn 29 game
+   GL calls into API.
+3. `backend/gl/` stays includable by consumers (2026-10-26): an explicit opt-in
+   path outside the layering check, dropped the day a second backend exists.
+   `gl/` and `shader/` move there in PR 2.
+4. The groundcover and cursor uniforms stay in the uber shader for now
+   (2026-10-26); their move to a game shader is filed separately.
 
 The handle type is settled, not open: a distinct tagged `Handle<Tag>`, since
 nothing in `renderer` uses `ResourceHandle` or `ResourceManager` outside their
