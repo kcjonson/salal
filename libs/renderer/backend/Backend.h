@@ -206,8 +206,9 @@ namespace Renderer::backend {
 		virtual PipelineHandle createPipeline(const ShaderSource& source) = 0;
 		virtual void		   destroyPipeline(PipelineHandle pipeline) = 0;
 
-		// The uniforms every draw reads from here on, until the next call. Each call
-		// takes fresh storage, so a draw still in flight keeps the values it was given.
+		// The uniforms every draw reads from here on, until the next call. A draw still
+		// in flight keeps the values it was given: new values take fresh storage, and a
+		// repeat of the last values reuses theirs.
 		virtual void setUniforms(const DrawUniforms& uniforms) = 0;
 
 		// One submission, in order: bindings change only where consecutive calls

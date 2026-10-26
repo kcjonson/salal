@@ -250,9 +250,10 @@ namespace Renderer {
 	}
 
 	TEST_F(PrimitivesDrawTest, InstancedDrawsPastTheUniformRingEachReadTheirOwnCamera) {
-		// One 1 x 1 square, drawn kSize * kSize times, each draw with its own camera and
-		// tint: 1,024 sets of uniforms, twice round the backend's ring of 512. Every
-		// pixel is one draw, so a draw reading another's uniforms shows.
+		// One 1 x 1 square, drawn twice at each of the kSize * kSize pixels with that
+		// pixel's camera and tint: 1,024 sets of uniforms, twice round the backend's ring
+		// of 512, and each second draw a repeat that binds the slot just written. Every
+		// pixel has its own camera, so a draw reading another's uniforms shows.
 		renderer::TessellatedMesh square;
 		square.vertices = {{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}};
 		square.indices = {0, 1, 2, 0, 2, 3};
@@ -264,9 +265,9 @@ namespace Renderer {
 				for (int x = 0; x < kSize; ++x) {
 					const InstanceData instance({0.0F, 0.0F}, 0.0F, 1.0F, Foundation::Vec4(x / 31.0F, y / 31.0F, 0.5F, 1.0F));
 					// The square lands at screen (x, y): world minus camera, plus the viewport's centre.
-					Primitives::drawInstanced(
-						mesh, &instance, 1, {.position = {half - static_cast<float>(x), half - static_cast<float>(y)}}
-					);
+					const Primitives::WorldCamera camera{.position = {half - static_cast<float>(x), half - static_cast<float>(y)}};
+					Primitives::drawInstanced(mesh, &instance, 1, camera);
+					Primitives::drawInstanced(mesh, &instance, 1, camera);
 				}
 			}
 		});

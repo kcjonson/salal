@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <optional>
 
 namespace Renderer::backend::gl {
@@ -386,6 +387,13 @@ namespace Renderer::backend::gl {
 	}
 
 	void GLBackend::setUniforms(const DrawUniforms& uniforms) {
+		// A repeat of the last values (every instanced draw of a pass shares its camera)
+		// binds their slot again: a write into a buffer the GPU is drawing from costs GPU
+		// time, about 2.5 us each on NVIDIA.
+		if (lastUniformOffset >= 0 && std::memcmp(&lastUniforms, &uniforms, sizeof(DrawUniforms)) == 0) {
+			glBindBufferRange(GL_UNIFORM_BUFFER, kUniformBinding, uniformRing, lastUniformOffset, sizeof(DrawUniforms));
+			return;
+		}
 		glBindBuffer(GL_UNIFORM_BUFFER, uniformRing);
 		if (uniformSlot == kUniformSlots) {
 			// Every slot may still be read by a draw in flight: fresh storage rather than a wait.
@@ -396,6 +404,8 @@ namespace Renderer::backend::gl {
 		++uniformSlot;
 		glBufferSubData(GL_UNIFORM_BUFFER, offset, sizeof(DrawUniforms), &uniforms);
 		glBindBufferRange(GL_UNIFORM_BUFFER, kUniformBinding, uniformRing, offset, sizeof(DrawUniforms));
+		lastUniforms = uniforms;
+		lastUniformOffset = offset;
 	}
 
 	void GLBackend::draw(std::span<const DrawCall> calls) {

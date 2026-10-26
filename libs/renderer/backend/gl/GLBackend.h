@@ -117,9 +117,12 @@ namespace Renderer::backend::gl {
 
 		// setUniforms() writes slot after slot of one buffer, and orphans it (new
 		// storage, the old kept until the draws reading it finish) when it runs out.
-		GLBuffer   uniformRing;
-		GLsizeiptr uniformStride = 0;
-		int		   uniformSlot = 0;
+		// The last values written, and their slot, which a repeat of them binds again.
+		GLBuffer	 uniformRing;
+		GLsizeiptr	 uniformStride = 0;
+		int			 uniformSlot = 0;
+		DrawUniforms lastUniforms;
+		GLintptr	 lastUniformOffset = -1;
 
 		RenderTargetHandle boundTarget;
 		int				   windowWidth = 0;
