@@ -1,0 +1,130 @@
+name: CI
+
+# No paths-ignore: these jobs are required checks, and a check that never runs
+# leaves a docs-only PR waiting on it forever.
+on:
+  pull_request:
+  # Actions caches are branch-scoped: a PR can restore caches from its own runs
+  # or from main, so the post-merge run on main is what new PRs warm-start from.
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # vcpkg's tool scripts, not its ports; ports come from the builtin-baseline in
+  # vcpkg.json. This is the commit worldsim's Windows job moved to after the
+  # older one's msys2 packages disappeared from the mirrors.
+  VCPKG_COMMIT: '617ef1c0c422737d117eda00a471ea1be5bad088'
+
+jobs:
+  build-and-test:
+    name: build-and-test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            preset: windows
+          - os: macos-latest
+            preset: default
+            configure-args: -DCMAKE_BUILD_TYPE=Debug
+          - os: ubuntu-latest
+            preset: default
+            configure-args: -DCMAKE_BUILD_TYPE=Debug
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # glfw3 and glew build from source through vcpkg and need the X11 and GL
+    # headers. Clang so -Werror=reorder-init-list is live, as on macOS.
+    - name: Install Linux packages
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang pkg-config \
+          libxmu-dev libxi-dev libgl-dev libxrandr-dev libxinerama-dev \
+          libxcursor-dev libx11-dev
+        echo "CC=clang" >> "$GITHUB_ENV"
+        echo "CXX=clang++" >> "$GITHUB_ENV"
+
+    - name: Install CMake and Ninja
+      uses: lukka/get-cmake@latest
+
+    # The presets name ccache as the compiler launcher, so it has to be on PATH.
+    - name: Set up ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ${{ matrix.os }}
+
+    # Ninja needs cl.exe on PATH; the preset selects cl explicitly.
+    - name: Set up MSVC environment
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    # vcpkg's x-gha binary cache provider is gone, so the binary cache is a
+    # plain directory saved and restored with actions/cache.
+    - name: Point vcpkg at a binary cache directory
+      run: |
+        mkdir -p "$RUNNER_TEMP/vcpkg-binary-cache"
+        echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/vcpkg-binary-cache,readwrite" >> "$GITHUB_ENV"
+
+    - name: Restore vcpkg binary cache
+      id: vcpkg-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/vcpkg-binary-cache
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**') }}
+        restore-keys: vcpkg-${{ runner.os }}-
+
+    - name: Set up vcpkg
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
+
+    - name: Configure
+      run: cmake --preset ${{ matrix.preset }} ${{ matrix.configure-args }}
+
+    # Saved straight after configure, where vcpkg install runs, so a later
+    # compile or test failure doesn't throw away an hour of port builds.
+    - name: Save vcpkg binary cache
+      if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/vcpkg-binary-cache
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**') }}
+
+    - name: Build
+      run: cmake --build --preset ${{ matrix.preset }}
+
+    - name: Test
+      run: ctest --test-dir build -C Debug --output-on-failure
+
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    # Pinned to LLVM 21, the version worldsim checks with, since clang-format
+    # output drifts between major versions.
+    - name: Install clang-format 21
+      run: |
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+        sudo add-apt-repository -y "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main"
+        sudo apt-get update
+        sudo apt-get install -y clang-format-21
+        clang-format-21 --version
+
+    - name: Check formatting
+      run: |
+        git ls-files -z -- 'libs/*.h' 'libs/*.cpp' 'apps/*.h' 'apps/*.cpp' \
+          | xargs -0 --no-run-if-empty clang-format-21 --dry-run --Werror
