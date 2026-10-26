@@ -19,8 +19,8 @@ namespace Renderer {
 
 		Impl(int width, int height)
 			// Create texture using RAII wrapper (sets up filtering and wrapping)
-			: texture(width, height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, nullptr),
-			  fbo(GLFramebuffer::create()) {
+			: fbo(GLFramebuffer::create()),
+			  texture(width, height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, nullptr) {
 			// Unbind texture after GLTexture constructor (it leaves it bound)
 			GLTexture::unbind();
 

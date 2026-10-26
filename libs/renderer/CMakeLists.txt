@@ -46,8 +46,8 @@ target_include_directories(salal_renderer
         ${Stb_INCLUDE_DIR}
 )
 
-# GL stays behind the renderer's public headers (salal_check_layering walks them at
-# configure time), so OpenGL and GLEW are PRIVATE; nothing in the library touches
+# GL stays behind the renderer's public headers (salal_check_layering walks their
+# includes at configure time), so OpenGL and GLEW are PRIVATE; nothing in the library touches
 # GLFW any more (the app feeds CoordinateSystem its window sizes). The GL test
 # fixtures open their own context and link all three below.
 target_link_libraries(salal_renderer

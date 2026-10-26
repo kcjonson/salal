@@ -56,8 +56,8 @@ The backend boundary in the `renderer` row has a settled direction and a
 design; decision G in [open-decisions.md](open-decisions.md) holds the plan and
 [renderer-boundary.md](renderer-boundary.md) the design and the PR sequence.
 The first step is in: no public renderer header (every header under
-`libs/renderer` outside `gl/`, `shader/` and `backend/`) reaches `<GL/glew.h>`
-or `<GLFW/glfw3.h>`, which `salal_check_layering()` walks at configure time,
+`libs/renderer` outside `gl/`, `shader/` and `backend/`) reaches a GL, GLES,
+OpenGL, GLFW or glad header, which `salal_check_layering()` walks at configure time,
 and consumers see `TextureHandle`, `Viewport` and `Primitives` calls where they
 saw `GLuint`, `GLFWwindow*` and the batch renderer. `gl/`, `shader/` and
 `backend/gl/` are the explicit GL opt-in for a game's own passes. Behind the

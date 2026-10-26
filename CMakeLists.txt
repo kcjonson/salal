@@ -67,8 +67,8 @@ endif()
 # target, the salal:: alias, and the $<LINK_ONLY:...> form CMake adds for PRIVATE
 # links between static libraries. Also the renderer's backend boundary: GL and
 # GLFW are the renderer's private business, so it must not export them as link
-# dependencies, and no public renderer header may reach <GL/glew.h> or
-# <GLFW/glfw3.h> (docs/renderer-boundary.md).
+# dependencies, and no public renderer header may reach a GL, GLES, OpenGL, GLFW
+# or glad header (docs/renderer-boundary.md).
 function(salal_check_layering)
     set(above_foundation renderer ui app)
     set(above_renderer ui app)
@@ -104,8 +104,8 @@ endfunction()
 
 # Every header under libs/renderer outside gl/, shader/ and backend/ is public. Walk
 # each one's quoted and angle includes transitively through this repo's libraries
-# and fail on the first path that reaches GL/glew.h or GLFW/glfw3.h. Headers proven
-# clean once are not walked again.
+# and fail on the first path that reaches a GL, GLES, OpenGL, GLFW or glad header
+# (GL/glew.h, GL/gl.h, GLFW/glfw3.h, ...). Headers proven clean once are not walked again.
 function(salal_check_renderer_headers_gl_free)
     set(renderer_dir "${PROJECT_SOURCE_DIR}/libs/renderer")
     file(GLOB lib_roots LIST_DIRECTORIES true "${PROJECT_SOURCE_DIR}/libs/*")
@@ -137,7 +137,7 @@ function(_salal_walk_includes file chain visited_var roots)
         string(REGEX MATCH "#[ \t]*include[ \t]*([<\"])([^>\"]+)[>\"]" _ "${line}")
         set(form "${CMAKE_MATCH_1}")
         set(target "${CMAKE_MATCH_2}")
-        if(target STREQUAL "GL/glew.h" OR target STREQUAL "GLFW/glfw3.h")
+        if(target MATCHES "^(GL|GLES[23]?|OpenGL|GLFW|glad)/")
             message(FATAL_ERROR "Public renderer header reaches <${target}>: ${chain} (docs/renderer-boundary.md).")
         endif()
         set(candidates "")

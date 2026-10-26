@@ -51,7 +51,7 @@ namespace Renderer {
 	}
 
 	void GPUTimer::end() {
-		if (!open) {
+		if (!open || !spans) { // a moved-from timer keeps `open` but not its spans
 			return;
 		}
 		Spans::Span& span = spans->spans[current];

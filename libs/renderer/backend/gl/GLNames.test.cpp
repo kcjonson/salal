@@ -9,6 +9,10 @@ namespace Renderer::backend::gl {
 		EXPECT_EQ(name(TextureHandle{}), 0U);
 	}
 
+	TEST(GLNamesTest, OutOfRangeIndexNamesNothing) {
+		EXPECT_EQ(name(TextureHandle::make(999, 0)), 0U);
+	}
+
 	TEST(GLNamesTest, RegisteredNameReadsBack) {
 		const TextureHandle handle = registerTexture(42);
 		EXPECT_TRUE(handle.isValid());

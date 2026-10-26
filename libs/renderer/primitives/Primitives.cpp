@@ -391,13 +391,14 @@ namespace Renderer::Primitives {
 	}
 
 	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family, float zIndex) {
-		if (g_fontRenderer == nullptr || g_batchRenderer == nullptr) {
+		if (g_batchRenderer == nullptr) {
 			return;
 		}
 
 		// Each glyph carries its family's atlas so the batch groups it with other
-		// glyphs from the same atlas (see BatchRenderer::flush).
-		const TextureHandle atlas = g_fontRenderer->getAtlasTexture(family);
+		// glyphs from the same atlas (see BatchRenderer::flush). With no font
+		// renderer the quads sample the default atlas, as family-less callers always did.
+		const TextureHandle atlas = g_fontRenderer != nullptr ? g_fontRenderer->getAtlasTexture(family) : TextureHandle{};
 		for (size_t i = 0; i < count; ++i) {
 			const FontRenderer::GlyphQuad& quad = quads[i];
 			g_batchRenderer->addTextQuad(
