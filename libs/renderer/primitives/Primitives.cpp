@@ -456,7 +456,14 @@ namespace Renderer::Primitives {
 			for (int i = 0; i < segments; ++i) {
 				Foundation::Vec2 start = vertices[i + 1];
 				Foundation::Vec2 end = vertices[1 + (i + 1) % segments];
-				drawLine({.start = start, .end = end, .style = {.color = border.color, .width = border.width}, .blend = args.blend});
+				drawLine(
+					{.start = start,
+					 .end = end,
+					 .style = {.color = border.color, .width = border.width},
+					 .id = args.id,
+					 .zIndex = args.zIndex,
+					 .blend = args.blend}
+				);
 			}
 		}
 	}
