@@ -203,11 +203,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		TextureHandle getAtlasTexture(FontFamily family = FontFamily::Default) const;
 
 		/**
-		 * The glyphs whose sampled area leaves their atlas cell. A quad reads its atlas
-		 * out to half the distance range past the glyph's atlasBounds, plus half a texel
-		 * of bilinear footprint; where that crosses the cell the atlas JSON gives the
-		 * glyph, it draws slivers of its neighbours. Loading warns about them; a glyph
-		 * whose JSON gives no cell of four numbers is not checked.
+		 * The glyphs of the atlas this family draws with (the default's, for a family
+		 * that isn't loaded) whose sampled area leaves their atlas cell. A quad reads
+		 * its atlas out to half the distance range past the glyph's atlasBounds, plus
+		 * half a texel of bilinear footprint; where that crosses the cell the atlas
+		 * JSON gives the glyph, it draws slivers of its neighbours. Loading warns
+		 * about them; a glyph whose JSON gives no cell of four numbers is not checked.
 		 * @param family Font family whose atlas to check (default: the game's default family)
 		 * @return The offending glyphs in character order; empty when none, or nothing is loaded
 		 */

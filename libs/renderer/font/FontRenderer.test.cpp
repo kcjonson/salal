@@ -61,14 +61,26 @@ namespace Renderer {
 			0xea, 0xeb, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 		};
 
+		// Texels between a glyph and each edge of its cell.
+		struct Room {
+			float left = 4.0F;
+			float bottom = 4.0F;
+			float right = 4.0F;
+			float top = 4.0F;
+		};
+
+		constexpr Room roomAround(float texels) {
+			return {.left = texels, .bottom = texels, .right = texels, .top = texels};
+		}
+
 		struct AtlasMetrics {
-			float					  ascender = 0.9F;
-			float					  lineHeight = 1.2F;
-			float					  advanceScale = 1.0F;	// Every advance, and the glyph boxes with them
-			float					  distanceRange = 4.0F; // Texels
-			std::map<char, glm::vec2> room;		// Texels between a glyph and its cell's sides (x) and its top and bottom (y), where not 4
-			std::string				  cellless; // Glyphs whose "atlas" gives no cell rect
-			std::string				  oddCells; // Glyphs whose cell has fields that aren't numbers
+			float				 ascender = 0.9F;
+			float				 lineHeight = 1.2F;
+			float				 advanceScale = 1.0F;  // Every advance, and the glyph boxes with them
+			float				 distanceRange = 4.0F; // Texels
+			std::map<char, Room> room;				   // Where not 4 texels on every side
+			std::string			 cellless;			   // Glyphs whose "atlas" gives no cell rect
+			std::string			 oddCells;			   // Glyphs whose cell has fields that aren't numbers
 		};
 
 		std::string number(float value) {
@@ -92,10 +104,10 @@ namespace Renderer {
 				if (c == ' ') {
 					json += R"("atlas":null,"atlasBounds":null,"plane":null,)";
 				} else {
-					const float		col = static_cast<float>(cell % 16);
-					const float		row = static_cast<float>(cell / 16);
-					const auto		room = metrics.room.find(static_cast<char>(c));
-					const glm::vec2 inset = room != metrics.room.end() ? room->second : glm::vec2(4.0F);
+					const float col = static_cast<float>(cell % 16);
+					const float row = static_cast<float>(cell / 16);
+					const auto	room = metrics.room.find(static_cast<char>(c));
+					const Room	inset = room != metrics.room.end() ? room->second : Room{};
 					if (metrics.cellless.find(static_cast<char>(c)) != std::string::npos) {
 						json += R"("atlas":{},)";
 					} else if (metrics.oddCells.find(static_cast<char>(c)) != std::string::npos) {
@@ -104,9 +116,10 @@ namespace Renderer {
 						json += R"("atlas":{"x":)" + number(col / 16.0F) + R"(,"y":)" + number(row / 6.0F) +
 								R"(,"width":0.0625,"height":)" + number(1.0F / 6.0F) + "},";
 					}
-					json += R"("atlasBounds":{"left":)" + number((col * 32.0F + inset.x) / 512.0F) + R"(,"bottom":)" +
-							number((row * 32.0F + inset.y) / 192.0F) + R"(,"right":)" + number((col * 32.0F + 32.0F - inset.x) / 512.0F) +
-							R"(,"top":)" + number((row * 32.0F + 32.0F - inset.y) / 192.0F) + "},";
+					json += R"("atlasBounds":{"left":)" + number((col * 32.0F + inset.left) / 512.0F) + R"(,"bottom":)" +
+							number((row * 32.0F + inset.bottom) / 192.0F) + R"(,"right":)" +
+							number((col * 32.0F + 32.0F - inset.right) / 512.0F) + R"(,"top":)" +
+							number((row * 32.0F + 32.0F - inset.top) / 192.0F) + "},";
 					json += R"("plane":{"left":0.05,"bottom":-0.1,"right":)" + number(advance - 0.05F) + R"(,"top":0.7},)";
 				}
 				json += R"("advance":)" + number(advance) + "}";
@@ -578,17 +591,26 @@ namespace Renderer {
 	}
 
 	TEST_F(FontRendererInitializeTest, AGlyphWithLessRoomThanItsQuadReadsIsCramped) {
-		// The reach is half the distance range plus half a texel: 2.5 texels at a range of 4, where
-		// 2.5 of room fits and 2.4 does not, and 1.5 at a range of 2. '(' is short of room above and
-		// below, as a tall glyph is, ')' at its sides.
-		const std::map<char, glm::vec2> room{{'(', {4.0F, 1.0F}}, {')', {2.4F, 4.0F}}, {'[', {2.5F, 2.5F}}, {']', {3.0F, 3.0F}}};
-		const std::array				sources{
-			   folder.write(kBody, "body", {.room = room}),
-			   folder.write(kMono, "mono", {.distanceRange = 2.0F, .room = room}),
-		   };
+		// The reach is half the distance range plus half a texel: 2.5 texels at a range of 4, and 1.5
+		// at a range of 2. Each of '(', ')', '[' and ']' is short on one edge only: the top (as a tall
+		// glyph is), the bottom, the left and the right. '{' has exactly the reach, and '|' reads
+		// 0.003 texels past its cell, inside the tolerance for the JSON's rounding.
+		const std::map<char, Room> room{
+			{'(', {.top = 1.0F}},
+			{')', {.bottom = 1.0F}},
+			{'[', {.left = 2.4F}},
+			{']', {.right = 2.4F}},
+			{'{', roomAround(2.5F)},
+			{'|', roomAround(2.497F)},
+			{'}', roomAround(3.0F)},
+		};
+		const std::array sources{
+			folder.write(kBody, "body", {.room = room}),
+			folder.write(kMono, "mono", {.distanceRange = 2.0F, .room = room}),
+		};
 		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody)); // warned about, still loaded
-		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "()");
-		EXPECT_EQ(fontRenderer->crampedGlyphs(kMono), "(");
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "()[]");
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kMono), "()");
 
 		std::vector<FontRenderer::GlyphQuad> quads;
 		fontRenderer->generateGlyphQuads("()", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, kBody);
@@ -599,7 +621,7 @@ namespace Renderer {
 		// ')' and ']' are as cramped as '(', but ')' has no cell and ']' a cell of null and a string,
 		// nothing to be cramped in. The atlas still loads, and both still draw.
 		const AtlasMetrics atlas{
-			.room = {{'(', glm::vec2(1.0F)}, {')', glm::vec2(1.0F)}, {']', glm::vec2(1.0F)}}, .cellless = ")", .oddCells = "]"
+			.room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}, {']', roomAround(1.0F)}}, .cellless = ")", .oddCells = "]"
 		};
 		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body", atlas)}, kBody));
 		EXPECT_EQ(fontRenderer->crampedGlyphs(), "(");
@@ -630,9 +652,9 @@ namespace Renderer {
 		// Two cramped atlases and a roomy one between them.
 		constexpr FontFamily kDisplay{5};
 		const std::array	 sources{
-			folder.write(kBody, "body", {.room = {{'(', glm::vec2(1.0F)}, {')', glm::vec2(1.0F)}}}),
+			folder.write(kBody, "body", {.room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}}}),
 			folder.write(kMono, "mono"),
-			folder.write(kDisplay, "display", {.room = {{'[', glm::vec2(1.0F)}}}),
+			folder.write(kDisplay, "display", {.room = {{'[', roomAround(1.0F)}}}),
 		};
 		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody));
 		ASSERT_EQ(captured.warnings.size(), 2U);
