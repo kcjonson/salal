@@ -28,6 +28,7 @@
 #include "BaseShader.h"
 #include "backend/NullBackend.h"
 #include "primitives/Primitives.h"
+#include "utils/Log.h"
 
 #include <gtest/gtest.h>
 
@@ -538,5 +539,39 @@ namespace Renderer {
 		fontRenderer->generateGlyphQuads(")]", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads);
 		EXPECT_EQ(quads.size(), 2U);
 	}
+
+#ifdef DEVELOPMENT_BUILD
+	TEST_F(FontRendererInitializeTest, LoadingWarnsOncePerCrampedAtlasNamingItsGlyphs) {
+		struct Captured {
+			std::vector<std::string> warnings;
+		} captured;
+		// Declared after captured, so the sink is cleared before captured goes, however the test ends.
+		struct SinkReset {
+			~SinkReset() { foundation::Logger::setSink(nullptr, nullptr); }
+		} reset;
+		foundation::Logger::setSink(
+			[](void* context, const foundation::LogRecord& record) {
+				if (record.category == foundation::LogCategory::UI && record.level == foundation::LogLevel::Warning) {
+					static_cast<Captured*>(context)->warnings.emplace_back(record.message);
+				}
+			},
+			&captured
+		);
+
+		// Two cramped atlases and a roomy one between them.
+		constexpr FontFamily kDisplay{5};
+		const std::array	 sources{
+			folder.write(kBody, "body", {.room = {{'(', glm::vec2(1.0F)}, {')', glm::vec2(1.0F)}}}),
+			folder.write(kMono, "mono"),
+			folder.write(kDisplay, "display", {.room = {{'[', glm::vec2(1.0F)}}}),
+		};
+		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody));
+		ASSERT_EQ(captured.warnings.size(), 2U);
+		EXPECT_TRUE(captured.warnings[0].starts_with("SDF atlas body.json: ")) << captured.warnings[0];
+		EXPECT_TRUE(captured.warnings[0].ends_with(": ()")) << captured.warnings[0];
+		EXPECT_TRUE(captured.warnings[1].starts_with("SDF atlas display.json: ")) << captured.warnings[1];
+		EXPECT_TRUE(captured.warnings[1].ends_with(": [")) << captured.warnings[1];
+	}
+#endif
 
 } // namespace Renderer

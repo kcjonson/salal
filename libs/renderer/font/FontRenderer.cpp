@@ -344,14 +344,14 @@ namespace Renderer {
 
 		const std::string cramped = findCrampedGlyphs(atlas);
 		if (!cramped.empty()) {
-			// The file name, not the path: the logger stops at 256 characters.
+			// The file name, not the path, and the glyphs last: the logger stops at 256 characters.
 			LOG_WARNING(
 				UI,
-				"SDF atlas %s: glyphs \"%s\" read past their cells, which need %.1f texels of room around the glyph; they draw slivers "
-				"of their neighbours",
+				"SDF atlas %s: glyphs read past their cells, which need %.1f texels of room around the glyph, and draw slivers of their "
+				"neighbours: %s",
 				std::filesystem::path(jsonPath).filename().string().c_str(),
-				cramped.c_str(),
-				sampleReachTexels(atlasMetadata.distanceRange)
+				sampleReachTexels(atlasMetadata.distanceRange),
+				cramped.c_str()
 			);
 		}
 
