@@ -321,16 +321,19 @@ worldsim's `libs/engine` (16 files, 2,902 lines: `application/`, `scene/`,
 `input/`, `clipboard/`), plus the dev server and its metrics plumbing relocated
 up from `libs/engine/debug` (it left `foundation` in phase 0.5) and `renderer`
 (another ~2,100 lines), plus the fixed-step
-loop, gamepad input and PRNG fork API that [asteroids-roguelike/docs/tech-stack.md](https://github.com/kcjonson/asteroids-roguelike/blob/main/docs/tech-stack.md) found missing. Those belong to the
-engine, because all three games want them. The file list with sizes is in
+loop and gamepad input that [asteroids-roguelike/docs/tech-stack.md](https://github.com/kcjonson/asteroids-roguelike/blob/main/docs/tech-stack.md) found missing. Those belong to the
+engine, because all three games want them; so did the PRNG fork API it also
+found missing, which is in `foundation/random` (below). The file list with sizes is in
 [app-carve-out.md](app-carve-out.md).
 
-Determinism is a partial gap rather than an absent one. `libs/foundation/random/`
-already has `Pcg32.h` and `SplitMix64.h` with `deriveSeed(seed, streamId)`,
+Determinism was a partial gap rather than an absent one. `libs/foundation/random/`
+already had `Pcg32.h` and `SplitMix64.h` with `deriveSeed(seed, streamId)`,
 deterministic and identical across architectures by its own header comment.
-What is missing is a named-stream `fork` API and the discipline: `std::mt19937`
-is still used in `engine` and the apps outside worldgen. Which generator the
-engine standardises on is decision A.
+What was missing was a named-stream `fork` API and the discipline. The fork API
+is now `foundation/random/Rng.h`, dual-deck-builder's sfc32 and MurmurHash3
+`fork` ported bit for bit (decision A, settled 2026-10-26), with Pcg32 and
+SplitMix64 kept as they are for worldgen. `std::mt19937` is still used in
+worldsim's `engine` and apps outside worldgen, which is worldsim's to clean up.
 
 Found along the way: worldsim's headers claim bit-identical results across x64,
 ARM and WASM; that had never been tested on ARM. The first macOS (arm64) run of
@@ -436,9 +439,10 @@ dual-deck-builder (decision J), port the closure, run both on identical configs
 and seeds, diff the JSON. That is differential testing for the price of one
 script, and it means the riskiest question in the whole migration (does the
 game logic port faithfully?) gets answered mechanically rather than by
-playtesting. It also pins the engine's PRNG: bit-identical output needs
+playtesting. It also pinned the engine's PRNG: bit-identical output needs
 dual-deck-builder's sfc32 and MurmurHash3-based `fork(name, attempt)`
-(`src/renderer/game/core/Rng.ts`), which is decision A.
+(`src/renderer/game/core/Rng.ts`), so decision A made that generator the
+engine's, as `foundation/random/Rng.h`.
 
 The sim core plays through the game's real code rather than a copy of it, which
 is what makes this work: verifying the sim verifies `mechanics`, `campaign`,
@@ -683,7 +687,8 @@ the consumers need from a frame owner and worldsim never built:
   needs one; today worldsim's `findResourceString` path search is enough.
 - The dev server, relocated from `libs/engine/debug`, behind a compile flag, with
   game-registrable endpoints, tick stepping and pad injection.
-- The PRNG fork API (decision A) in `foundation/random`.
+- The PRNG fork API (decision A) in `foundation/random`: landed ahead of the
+  phase as `Rng.h`.
 - The sandbox harness.
 
 Job A of the migration lands here. Worldsim consumes. The asteroids feel
@@ -749,12 +754,9 @@ The questions that need Kevin are in [open-decisions.md](open-decisions.md),
 each with a recommendation, the evidence, and the phase that needs the answer,
 and each tracked on the board. By letter:
 
-- A. The engine PRNG: dual-deck-builder's sfc32 with MurmurHash3 `fork`, or
-  worldsim's Pcg32 with `deriveSeed`.
 - B. Audio: in the engine or per game, and which library.
 - C. Adopt dual-deck-builder's `docs/ui-rendering-spec/` as the normative spec
   for `ui`.
-- E. The ECS core: ship it as an optional header module or leave it in worldsim.
 - F. The `ui` storage model during extraction, shared_ptr graph or value
   semantics.
 - H. Whether worldsim's vector/SVG asset conventions come with `renderer` or
@@ -770,6 +772,9 @@ Specboard (it is; `.mcp.json` holds the binding), the browser build (dropped,
 above), where input types live (decision D, 2026-10-26: `foundation/input/`,
 with the poller in `app`), and, 2026-10-26, that imports are plain copies, that
 fonts and the atlas tool stay game-side, that floating-point contraction is off
-engine-wide, that the renderer sits behind a backend boundary, and that it owns
+engine-wide, that the renderer sits behind a backend boundary, that it owns
 offscreen render targets, with additive blend in the batch sort key and
-particles game-side (decision G; all Settled).
+particles game-side (decision G), that the engine's game PRNG is
+dual-deck-builder's `Rng`, in `foundation/random/Rng.h`, with Pcg32 and
+SplitMix64 kept for worldgen (decision A), and that the ECS core stays in
+worldsim (decision E; all Settled).

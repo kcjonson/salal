@@ -31,8 +31,15 @@ Written into the docs as decided, with the reason.
 | `-ffp-contract=off` is an engine-wide rule (2026-10-26) | set PUBLIC on `salal_foundation` for GCC, Clang and AppleClang (not clang-cl), so every consumer inherits it. The first macOS arm64 run failed three golden-bit tests by one ULP (`DeterministicMath` cos, `HashNoise` value and gradient noise) because Clang fuses `a*b+c` into an FMA there; worldsim's headers claim bit-identical results across x64, ARM and WASM; that had never been tested on ARM |
 | The renderer sits behind a backend boundary; OpenGL 3.3 core is the first backend, Vulkan possible later (direction settled 2026-10-26; the design is merged as [renderer-boundary.md](renderer-boundary.md)) | worldsim's renderer is OpenGL throughout: 19 GL or GLFW leaks in 16 public headers and 182 direct GL calls in twelve renderer files (measured at worldsim `2cc7e40a`), and `BatchRenderer.h` and `FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. Four PRs tagged `v0.2.0` through `v0.5.0`, with a worldsim pin after each, are sequenced in [renderer-boundary.md](renderer-boundary.md); PRs 1 to 4 are in (`v0.2.0` to `v0.5.0`), and worldsim's grass deform has since moved out of the base shader into a worldsim hook ([shader-hooks.md](shader-hooks.md)) |
 | The renderer owns offscreen render targets, and additive blend is a per-group key in the batch sort key that splits a run rather than sorting; particles stay game-side; float colour attachments are allowed (decision G, 2026-10-26; the questions the design left open are decided in [renderer-boundary.md](renderer-boundary.md)) | blend state and the render-target API have to settle before a second consumer depends on the renderer API, so none is retrofitted onto an API three games call; GL 3.3 core has float colour attachments without an extension; particles start as a pool over `Primitives` and are promoted to an engine pool when a second game wants one |
+| The engine's game PRNG is dual-deck-builder's `Rng`, sfc32 with a MurmurHash3-based `fork(name, attempt)`, in `foundation/random/Rng.h`; Pcg32 and SplitMix64 stay as they are for worldsim's worldgen (decision A, 2026-10-26) | bit-identical differential testing of dual-deck-builder's C++ port is only possible with its generator and its fork, and worldgen is built on Pcg32 and `deriveSeed`. The port is bit-identical to `Rng.ts` at `RNG_VERSION` 1, and every golden vector in `Rng.test.ts` runs as a gtest on all three CI platforms (design and evidence under A below) |
+| The ECS core stays in worldsim (decision E, 2026-10-26) | no other consumer wants it: asteroids' sim is data-oriented and "not an ECS framework", dual-deck-builder has none, and worldsim's own coding standards say "no ECS for UI components" |
 
 ## A. Engine PRNG
+
+Settled 2026-10-26: the engine's game PRNG is dual-deck-builder's `Rng`,
+ported bit for bit to `foundation/random/Rng.h`, and Pcg32 and SplitMix64
+stay as they are for worldgen. The recommendation below was ratified as
+written.
 
 Question. Does the engine's game PRNG become dual-deck-builder's sfc32 with
 MurmurHash3-based `fork(name, attempt)`, worldsim's Pcg32 plus `deriveSeed`,
@@ -50,18 +57,36 @@ possible if the C++ PRNG is dual-deck-builder's. Asteroids' tech-stack.md
 names `xoshiro128**` and no forking (`asteroids-roguelike/docs/tech-stack.md:131-132`),
 a third generator nobody depends on.
 
-Recommendation. Add `Rng` (sfc32 plus Murmur fork, with dual-deck-builder's
+Decision. Add `Rng` (sfc32 plus Murmur fork, with dual-deck-builder's
 golden vectors as gtest cases) to `foundation/random` as the engine's game
 PRNG. Keep Pcg32 and SplitMix64 as they are for worldsim's worldgen. Asteroids
 drops the xoshiro mention and uses `Rng`.
 
-Needed by. Phase 2 (the asteroids prototype draws from it) and before Job B
-starts. Foundation moves in phase 1 without it; the addition can land any time
-after.
+It landed as `foundation/random/Rng.h`, header-only and constexpr, which draws
+what `Rng.ts` draws at `RNG_VERSION` 1 (`kRngVersion`): `nextUInt32`,
+`nextDouble` (the TypeScript's `float`), `nextInt` (its `int`), `pick`,
+`shuffle` and `weighted`, with the same draw counts, and `fork(name,
+attempt)`, which hashes a UTF-8 name as the UTF-16 code units the TypeScript
+hashes. It adds `nextFloat`, which `Rng.ts` has no counterpart for. A stream
+is its uint32 seed. There is no default constructor and no copy, since a copy
+would save a stream mid-sequence, which `Rng.ts` can't do either;
+`freshSeed()` mints a root seed from `std::random_device` in its own header,
+`FreshSeed.h`, so a sim can leave it out. The argument checks reject what
+`Rng.ts` throws on where the types don't already: those that would otherwise
+be undefined behaviour (an empty or over-wide range) abort in every build, and
+the rest are asserts, as elsewhere in foundation. `Rng.test.cpp` ports every
+golden vector and behaviour test in `Rng.test.ts` that applies to C++, and a
+differential run against the TypeScript (32 seeds of 10,000 draws, 1,000 forks
+with ASCII, non-ASCII, astral and empty names, and 40 programs mixing every
+draw method) matched it byte for byte under MSVC and GCC.
 
-If deferred. The asteroids prototype picks something, and its replays and
-seeds become tied to it; dual-deck-builder's differential corpus cannot be run
-against C++ at all.
+Needed by. Settled, so no longer a gate. It was needed by phase 2 (the
+asteroids prototype draws from it) and before Job B starts.
+
+If deferred. Moot, as it is settled. The cost would have been an asteroids
+prototype whose replays and seeds were tied to whatever it picked, and a
+differential corpus from dual-deck-builder that could not be run against C++
+at all.
 
 ## B. Audio
 
@@ -215,6 +240,9 @@ through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)).
 
 ## E. ECS core
 
+Settled 2026-10-26: the ECS core stays in worldsim. The recommendation below
+was ratified as written.
+
 Question. Does the 7-header, 689-line ECS core
 (`worldsim/libs/engine/ecs/{EntityID,ComponentPool,Registry,View,ISystem,World,ECS}.h`)
 ship as an optional module in salal or stay in worldsim?
@@ -224,12 +252,14 @@ files in apps/world-sim use it. Asteroids' sim is data-oriented and "not an
 ECS framework" (`asteroids-roguelike/docs/tech-stack.md:165-168`);
 dual-deck-builder has no ECS.
 
-Recommendation. Leave it in worldsim. No other consumer wants it, and
+Decision. Leave it in worldsim. No other consumer wants it, and
 worldsim's own coding standards say "no ECS for UI components".
 
-Needed by. Phase 2, when the app slice is listed.
+Needed by. Settled, so no longer a gate. It was needed by phase 2, when the
+app slice is listed.
 
-If deferred. Nothing; it stays where it is by default.
+If deferred. Moot, as it is settled. Deferring would have cost nothing; it
+stays where it was.
 
 ## F. ui storage model during extraction
 
