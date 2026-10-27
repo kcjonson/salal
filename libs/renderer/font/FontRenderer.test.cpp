@@ -15,6 +15,10 @@
 // drawGlyphs samples it: there is no second place to name a family, and so no way
 // to draw one family's quads with another's atlas.
 //
+// A quad reads its atlas past the glyph's bounds, and the atlas generator has to
+// leave that much room in each glyph's cell; loading checks it, and crampedGlyphs
+// says what it found.
+//
 // The atlases are synthetic, in the JSON layout worldsim's generate_sdf_atlas
 // writes: printable ASCII as boxes on a 16 x 6 grid of 32 px cells, each glyph
 // with an advance of its own, and a one-texel PNG. These tests read metrics, not
@@ -31,6 +35,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
@@ -53,9 +58,12 @@ namespace Renderer {
 		};
 
 		struct AtlasMetrics {
-			float ascender = 0.9F;
-			float lineHeight = 1.2F;
-			float advanceScale = 1.0F; // Every advance, and the glyph boxes with them
+			float					  ascender = 0.9F;
+			float					  lineHeight = 1.2F;
+			float					  advanceScale = 1.0F;	// Every advance, and the glyph boxes with them
+			float					  distanceRange = 4.0F; // Texels
+			std::map<char, glm::vec2> room;		// Texels between a glyph and its cell's sides (x) and its top and bottom (y), where not 4
+			std::string				  cellless; // Glyphs whose "atlas" gives no cell rect
 		};
 
 		std::string number(float value) {
@@ -64,7 +72,8 @@ namespace Renderer {
 
 		// Space has no geometry; every other glyph is a box in its own cell.
 		std::string atlasJson(const AtlasMetrics& metrics) {
-			std::string json = R"({"atlas":{"type":"msdf","distanceRange":4,"size":32,"width":512,"height":192},)";
+			std::string json =
+				R"({"atlas":{"type":"msdf","distanceRange":)" + number(metrics.distanceRange) + R"(,"size":32,"width":512,"height":192},)";
 			json += R"("metrics":{"emSize":1,"ascender":)" + number(metrics.ascender) + R"(,"descender":-0.25,"lineHeight":)" +
 					number(metrics.lineHeight) + R"(},"glyphs":{)";
 			for (int c = ' '; c <= '~'; ++c) {
@@ -78,13 +87,19 @@ namespace Renderer {
 				if (c == ' ') {
 					json += R"("atlas":null,"atlasBounds":null,"plane":null,)";
 				} else {
-					const float col = static_cast<float>(cell % 16);
-					const float row = static_cast<float>(cell / 16);
-					json += R"("atlas":{"x":)" + number(col / 16.0F) + R"(,"y":)" + number(row / 6.0F) + R"(,"width":0.0625,"height":)" +
-							number(1.0F / 6.0F) + "},";
-					json += R"("atlasBounds":{"left":)" + number((col * 32.0F + 4.0F) / 512.0F) + R"(,"bottom":)" +
-							number((row * 32.0F + 4.0F) / 192.0F) + R"(,"right":)" + number((col * 32.0F + 28.0F) / 512.0F) + R"(,"top":)" +
-							number((row * 32.0F + 28.0F) / 192.0F) + "},";
+					const float		col = static_cast<float>(cell % 16);
+					const float		row = static_cast<float>(cell / 16);
+					const auto		room = metrics.room.find(static_cast<char>(c));
+					const glm::vec2 inset = room != metrics.room.end() ? room->second : glm::vec2(4.0F);
+					if (metrics.cellless.find(static_cast<char>(c)) != std::string::npos) {
+						json += R"("atlas":{},)";
+					} else {
+						json += R"("atlas":{"x":)" + number(col / 16.0F) + R"(,"y":)" + number(row / 6.0F) +
+								R"(,"width":0.0625,"height":)" + number(1.0F / 6.0F) + "},";
+					}
+					json += R"("atlasBounds":{"left":)" + number((col * 32.0F + inset.x) / 512.0F) + R"(,"bottom":)" +
+							number((row * 32.0F + inset.y) / 192.0F) + R"(,"right":)" + number((col * 32.0F + 32.0F - inset.x) / 512.0F) +
+							R"(,"top":)" + number((row * 32.0F + 32.0F - inset.y) / 192.0F) + "},";
 					json += R"("plane":{"left":0.05,"bottom":-0.1,"right":)" + number(advance - 0.05F) + R"(,"top":0.7},)";
 				}
 				json += R"("advance":)" + number(advance) + "}";
@@ -456,6 +471,44 @@ namespace Renderer {
 		EXPECT_EQ(atlasTextures(), 1U);
 		fontRenderer.reset();
 		EXPECT_EQ(atlasTextures(), 0U);
+	}
+
+	// --- Room around each glyph in its cell ---
+
+	TEST_F(FontRendererInitializeTest, ARoomyAtlasHasNoCrampedGlyphs) {
+		// Four texels around every glyph, and a quad reads 2 + 0.5 past it at a distance range of 4.
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body")}, kBody));
+		EXPECT_EQ(fontRenderer->crampedGlyphs(), "");
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "");
+	}
+
+	TEST_F(FontRendererInitializeTest, AGlyphWithLessRoomThanItsQuadReadsIsCramped) {
+		// The reach is half the distance range plus half a texel: 2.5 texels at a range of 4, where
+		// 2.5 of room fits and 2.4 does not, and 1.5 at a range of 2. '(' is short of room above and
+		// below, as a tall glyph is, ')' at its sides.
+		const std::map<char, glm::vec2> room{{'(', {4.0F, 1.0F}}, {')', {2.4F, 4.0F}}, {'[', {2.5F, 2.5F}}, {']', {3.0F, 3.0F}}};
+		const std::array				sources{
+			   folder.write(kBody, "body", {.room = room}),
+			   folder.write(kMono, "mono", {.distanceRange = 2.0F, .room = room}),
+		   };
+		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody)); // warned about, still loaded
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "()");
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kMono), "(");
+
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateGlyphQuads("()", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, kBody);
+		EXPECT_EQ(quads.size(), 2U);
+	}
+
+	TEST_F(FontRendererInitializeTest, AGlyphWithoutACellIsNotChecked) {
+		// ')' is as cramped as '(', but its atlas entry gives no cell to be cramped in. It still draws.
+		const AtlasMetrics atlas{.room = {{'(', glm::vec2(1.0F)}, {')', glm::vec2(1.0F)}}, .cellless = ")"};
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body", atlas)}, kBody));
+		EXPECT_EQ(fontRenderer->crampedGlyphs(), "(");
+
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateGlyphQuads(")", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads);
+		EXPECT_EQ(quads.size(), 1U);
 	}
 
 } // namespace Renderer

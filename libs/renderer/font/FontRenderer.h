@@ -200,6 +200,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		TextureHandle getAtlasTexture(FontFamily family = FontFamily::Default) const;
 
 		/**
+		 * The glyphs whose sampled area leaves their atlas cell. A quad reads its atlas
+		 * out to half the distance range past the glyph's atlasBounds, plus half a texel
+		 * of bilinear footprint; where that crosses the cell the atlas JSON gives the
+		 * glyph, it draws slivers of its neighbours. Loading warns about them; a glyph
+		 * whose JSON gives no cell is not checked.
+		 * @param family Font family whose atlas to check (default: the game's default family)
+		 * @return The offending glyphs in character order; empty when none, or nothing is loaded
+		 */
+		std::string crampedGlyphs(FontFamily family = FontFamily::Default) const;
+
+		/**
 		 * Update the internal frame counter for cache LRU tracking
 		 * Should be called once per frame from the main application loop
 		 */
@@ -225,8 +236,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			glm::vec2 atlasBoundsMax; // Top-right UV of actual glyph content
 			glm::vec2 planeBoundsMin; // Glyph bounds min (in em units)
 			glm::vec2 planeBoundsMax; // Glyph bounds max (in em units)
+			glm::vec2 cellMin;		  // Bottom-left UV of the atlas cell the glyph was given
+			glm::vec2 cellMax;		  // Top-right UV of that cell
 			float	  advance;		  // Horizontal advance (in em units)
 			bool	  hasGeometry;	  // False for whitespace characters
+			bool	  hasCell;		  // False when the JSON gives no cell rect
 		};
 
 		/**
@@ -264,6 +278,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * @return true if atlas was loaded successfully
 		 */
 		bool LoadSDFAtlas(Atlas& atlas, const std::string& pngPath, const std::string& jsonPath);
+
+		// The glyphs of `atlas` whose sampled area leaves their cell (see crampedGlyphs).
+		static std::string findCrampedGlyphs(const Atlas& atlas);
 
 		/**
 		 * The family a request draws with: itself when it is loaded, otherwise the
