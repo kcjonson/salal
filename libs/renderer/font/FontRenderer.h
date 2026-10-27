@@ -102,17 +102,19 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		/**
 		 * Glyph quad data for batched text rendering. The UVs index one family's
-		 * atlas, and the quad carries that atlas, so Primitives::drawGlyphs samples
-		 * the texture the UVs were laid out in.
+		 * atlas, and the quad carries that atlas and its distance range, so
+		 * Primitives::drawGlyphs samples the texture the UVs were laid out in and
+		 * draws its edges at that texture's range.
 		 */
 		struct GlyphQuad {
-			glm::vec2	  position;	 // Top-left position of the quad
-			glm::vec2	  size;		 // Width and height of the quad
-			glm::vec2	  uvMin;	 // Texture coordinate bottom-left
-			glm::vec2	  uvMax;	 // Texture coordinate top-right
-			glm::vec4	  color;	 // RGBA color
-			glm::vec2	  runOrigin; // Pen origin of the run at the baseline (shared per run, for pixel snapping)
-			TextureHandle atlas;	 // The atlas the UVs index, stale after another Initialize; invalid samples setFontAtlas's
+			glm::vec2	  position;			 // Top-left position of the quad
+			glm::vec2	  size;				 // Width and height of the quad
+			glm::vec2	  uvMin;			 // Texture coordinate bottom-left
+			glm::vec2	  uvMax;			 // Texture coordinate top-right
+			glm::vec4	  color;			 // RGBA color
+			glm::vec2	  runOrigin;		 // Pen origin of the run at the baseline (shared per run, for pixel snapping)
+			TextureHandle atlas;			 // The atlas the UVs index, stale after another Initialize; invalid samples setFontAtlas's
+			float		  pixelRange = 0.0F; // The atlas's distance range in texels; with an invalid atlas, setFontAtlas's range instead
 		};
 
 		/**

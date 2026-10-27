@@ -624,8 +624,9 @@ namespace Renderer::Primitives {
 			return;
 		}
 
-		// Each glyph samples the atlas its UVs were laid out in, which the quad carries;
-		// the batch splits draws where the atlas changes (see BatchRenderer::plan).
+		// Each glyph samples the atlas its UVs were laid out in, at that atlas's range,
+		// both of which the quad carries; the batch splits draws where the atlas
+		// changes (see BatchRenderer::plan).
 		for (size_t i = 0; i < count; ++i) {
 			const FontRenderer::GlyphQuad& quad = quads[i];
 			g_batchRenderer->addTextQuad(
@@ -636,6 +637,7 @@ namespace Renderer::Primitives {
 				Foundation::Color(quad.color.r, quad.color.g, quad.color.b, quad.color.a),
 				Foundation::Vec2(quad.runOrigin.x, quad.runOrigin.y),
 				quad.atlas,
+				quad.pixelRange,
 				zIndex,
 				blend
 			);

@@ -170,6 +170,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   default atlas set via setFontAtlas(), the game's default family's. A
 		//   frame may mix multiple atlases; flush() splits draws by atlas so each
 		//   glyph samples the right texture.
+		// pixelRange: that atlas's distance range in texels, which the shader turns
+		//   into the edge width. With an invalid atlas, setFontAtlas()'s range instead.
 		void addTextQuad(
 			const Foundation::Vec2&	 position,
 			const Foundation::Vec2&	 size,
@@ -177,13 +179,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::Vec2&	 uvMax,
 			const Foundation::Color& color,
 			const Foundation::Vec2&	 runOrigin,
-			TextureHandle			 atlas = {},
+			TextureHandle			 atlas,
+			float					 pixelRange,
 			float					 zIndex = 0.0F,
 			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha
 		);
 
-		// Set the default MSDF font atlas (used by text quads added with an invalid
-		// atlas handle). pixelRange comes from atlas generation.
+		// Set the default MSDF font atlas and its distance range, which text quads
+		// added with an invalid atlas handle sample.
 		void setFontAtlas(TextureHandle atlas, float pixelRange = 4.0F);
 
 		// --- Rendering ---

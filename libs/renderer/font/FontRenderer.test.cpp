@@ -34,11 +34,14 @@
 
 #include <array>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <random>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -428,6 +431,41 @@ namespace Renderer {
 		EXPECT_EQ(draws[0].call.indexCount, 24U); // four glyphs of six indices
 		EXPECT_EQ(draws[1].call.texture, body);
 		EXPECT_EQ(draws[1].call.indexCount, 24U);
+	}
+
+	TEST_F(FontRendererInitializeTest, EachQuadDrawsAtItsOwnAtlassDistanceRange) {
+		// Body at a range of 4, mono at 2, and setFontAtlas's 6 for a quad with no atlas.
+		ASSERT_TRUE(
+			fontRenderer->Initialize(std::array{folder.write(kBody, "body"), folder.write(kMono, "mono", {.distanceRange = 2.0F})}, kBody)
+		);
+		Primitives::setFontAtlas(fontRenderer->getAtlasTexture(kBody), 6.0F);
+
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateGlyphQuads("Mo", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, kMono);
+		fontRenderer->generateGlyphQuads("Bo", glm::vec2(0.0F, 20.0F), 1.0F, glm::vec4(1.0F), quads, kBody);
+		ASSERT_EQ(quads.size(), 4U);
+		EXPECT_EQ(quads[0].pixelRange, 2.0F);
+		EXPECT_EQ(quads[2].pixelRange, 4.0F);
+		FontRenderer::GlyphQuad handBuilt = quads.back();
+		handBuilt.atlas = {};
+		quads.push_back(handBuilt);
+
+		Primitives::setViewport(320, 200);
+		Primitives::beginFrame();
+		Primitives::drawGlyphs(quads.data(), quads.size());
+		Primitives::endFrame();
+
+		// One upload; its vertices run in submission order, four per quad.
+		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
+		ASSERT_FALSE(draws.empty());
+		const std::span<const uint8_t> bytes = nullBackend->bufferContents(nullBackend->geometry(draws[0].call.geometry)->vertices);
+		std::vector<BatchVertex>	   vertices(bytes.size() / sizeof(BatchVertex));
+		std::memcpy(vertices.data(), bytes.data(), vertices.size() * sizeof(BatchVertex));
+		ASSERT_EQ(vertices.size(), 20U);
+		const float expected[] = {2.0F, 2.0F, 4.0F, 4.0F, 6.0F};
+		for (size_t i = 0; i < vertices.size(); ++i) {
+			EXPECT_EQ(vertices[i].data2.x, expected[i / 4]) << "vertex " << i;
+		}
 	}
 
 	TEST_F(FontRendererInitializeTest, TheDefaultIsTheCallersChoice) {
