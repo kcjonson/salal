@@ -88,7 +88,12 @@ game; salal ships no fonts. The renderer takes its atlases from the game:
 `FontRenderer::Initialize` gets a span of `{FontFamily, pngPath, jsonPath}` and
 the default family, a `FontFamily` is a small id the game picks (salal names
 none), a family that fails to load is logged and draws with the default, and a
-failure is the return value, never a process exit.
+failure is the return value, never a process exit. A glyph quad carries the
+atlas its UVs index, so `Primitives::drawGlyphs` takes no family and text draws
+with the atlas it was laid out in. The quad reads its atlas half the distance
+range plus half a texel past the glyph's bounds, and the atlas generator has to
+leave that much room around each glyph inside its cell; loading warns about a
+glyph that lacks it (`FontRenderer::crampedGlyphs`) and loads it anyway.
 
 ### The dependency rule
 

@@ -239,7 +239,9 @@ time by `salal_base_shader()` ([docs/shader-hooks.md](docs/shader-hooks.md)),
 with the consumer's hooks, so no shader files sit beside an executable; it ships
 no fonts: a game hands `FontRenderer::Initialize` its atlases, each a PNG and
 JSON path under a `FontFamily` id the game defines, and names its default
-family; a bad set comes back as `false`, never a process exit.
+family; a bad set comes back as `false`, never a process exit, and a glyph
+whose atlas cell is too small for what its quad samples is a warning at load.
+Glyph quads carry their atlas, so `drawGlyphs` takes no family.
 
 Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
 The deterministic math and hash noise are header-inline polynomials; Clang fuses
