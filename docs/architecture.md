@@ -84,10 +84,11 @@ place the renderer reaches up into ui, and `FontRenderer` itself depends on
 nothing else in ui. Moving it removes that knot and gives a game text without
 the `ui` library, which asteroids-roguelike's debug overlay needs from day one.
 The font files, the atlas generator and the font-atlas build target stay in the
-game; salal ships no fonts. The renderer will take atlas sources from the game
-(a phase 2 item); today `FontRenderer::Initialize` looks for
-`fonts/<Family>-SDF.{png,json}` beside the executable and exits the process when
-Roboto is missing.
+game; salal ships no fonts. The renderer takes its atlases from the game:
+`FontRenderer::Initialize` gets a span of `{FontFamily, pngPath, jsonPath}` and
+the default family, a `FontFamily` is a small id the game picks (salal names
+none), a family that fails to load is logged and draws with the default, and a
+failure is the return value, never a process exit.
 
 ### The dependency rule
 
