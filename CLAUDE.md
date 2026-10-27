@@ -207,8 +207,11 @@ cmake --build --preset windows
 ctest --test-dir build -C Debug
 ```
 
-The `windows` preset names `cl` bare, so run configure from a Visual Studio
-developer shell (or after `vcvars64.bat`), where it resolves.
+The `windows` preset picks MSVC by setting `CC` and `CXX` to `cl` in its
+environment, which CMake reads only on a build dir's first configure: run that
+one from a Visual Studio developer shell (or after `vcvars64.bat`) so `cl`
+resolves. Later `cmake --preset windows` runs keep the cache, and a dir first
+configured with another compiler keeps it until `build/` is deleted.
 
 `foundation` and `renderer` are worldsim's code, imported as plain copies. `ui`
 and `app` are placeholders until later phases move their code in: one
