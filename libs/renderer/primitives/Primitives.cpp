@@ -610,7 +610,7 @@ namespace Renderer::Primitives {
 			g_fontRenderer->generateGlyphQuads(
 				effective, glm::vec2(pos.x, pos.y), args.scale, glm::vec4(col.r, col.g, col.b, col.a), quads, args.font, args.letterSpacing
 			);
-			drawGlyphs(quads.data(), quads.size(), args.font, static_cast<float>(args.zIndex), args.blend);
+			drawGlyphs(quads.data(), quads.size(), static_cast<float>(args.zIndex), args.blend);
 		};
 
 		if (args.shadowColor.a > 0.0F) {
@@ -619,15 +619,13 @@ namespace Renderer::Primitives {
 		emit(origin, args.color);
 	}
 
-	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family, float zIndex, BlendMode blend) {
+	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, float zIndex, BlendMode blend) {
 		if (g_batchRenderer == nullptr) {
 			return;
 		}
 
-		// Each glyph carries its family's atlas so the batch groups it with other
-		// glyphs from the same atlas (see BatchRenderer::flush). With no font
-		// renderer the quads sample the default atlas, as family-less callers always did.
-		const TextureHandle atlas = g_fontRenderer != nullptr ? g_fontRenderer->getAtlasTexture(family) : TextureHandle{};
+		// Each glyph samples the atlas its UVs were laid out in, which the quad carries;
+		// the batch splits draws where the atlas changes (see BatchRenderer::plan).
 		for (size_t i = 0; i < count; ++i) {
 			const FontRenderer::GlyphQuad& quad = quads[i];
 			g_batchRenderer->addTextQuad(
@@ -637,7 +635,7 @@ namespace Renderer::Primitives {
 				Foundation::Vec2(quad.uvMax.x, quad.uvMax.y),
 				Foundation::Color(quad.color.r, quad.color.g, quad.color.b, quad.color.a),
 				Foundation::Vec2(quad.runOrigin.x, quad.runOrigin.y),
-				atlas,
+				quad.atlas,
 				zIndex,
 				blend
 			);

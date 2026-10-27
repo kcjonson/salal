@@ -397,15 +397,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void drawText(const TextArgs& args);
 
 		// Batch glyph quads a caller laid out itself (FontRenderer::generateGlyphQuads
-		// and friends), each in its own colour, sampling the family's atlas. Text is
-		// interleaved with shapes in submission order.
-		void drawGlyphs(
-			const FontRenderer::GlyphQuad* quads,
-			size_t						   count,
-			FontFamily					   family = FontFamily::Default,
-			float						   zIndex = 0.0F,
-			BlendMode					   blend = BlendMode::Alpha
-		);
+		// and friends), each in its own colour, sampling the atlas it carries, so one
+		// call can hold several families. Text is interleaved with shapes in
+		// submission order.
+		void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, float zIndex = 0.0F, BlendMode blend = BlendMode::Alpha);
 
 		// --- World-Space Instancing ---
 

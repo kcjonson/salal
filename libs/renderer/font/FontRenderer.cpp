@@ -412,6 +412,7 @@ namespace Renderer {
 			quad.uvMin = glm::clamp(glm::vec2(glyph.atlasBoundsMin.x - padU, glyph.atlasBoundsMin.y - padV), 0.0F, 1.0F);
 			quad.uvMax = glm::clamp(glm::vec2(glyph.atlasBoundsMax.x + padU, glyph.atlasBoundsMax.y + padV), 0.0F, 1.0F);
 			quad.color = color;
+			quad.atlas = atlas.texture;
 
 			outQuads.push_back(quad);
 		});

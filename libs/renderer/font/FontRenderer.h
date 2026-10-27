@@ -100,15 +100,18 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		float getAscent(float scale = 1.0F, FontFamily family = FontFamily::Default) const;
 
 		/**
-		 * Glyph quad data for batched text rendering
+		 * Glyph quad data for batched text rendering. The UVs index one family's
+		 * atlas, and the quad carries that atlas, so Primitives::drawGlyphs samples
+		 * the texture the UVs were laid out in.
 		 */
 		struct GlyphQuad {
-			glm::vec2 position;	 // Top-left position of the quad
-			glm::vec2 size;		 // Width and height of the quad
-			glm::vec2 uvMin;	 // Texture coordinate bottom-left
-			glm::vec2 uvMax;	 // Texture coordinate top-right
-			glm::vec4 color;	 // RGBA color
-			glm::vec2 runOrigin; // Pen origin of the run at the baseline (shared per run, for pixel snapping)
+			glm::vec2	  position;	 // Top-left position of the quad
+			glm::vec2	  size;		 // Width and height of the quad
+			glm::vec2	  uvMin;	 // Texture coordinate bottom-left
+			glm::vec2	  uvMax;	 // Texture coordinate top-right
+			glm::vec4	  color;	 // RGBA color
+			glm::vec2	  runOrigin; // Pen origin of the run at the baseline (shared per run, for pixel snapping)
+			TextureHandle atlas;	 // The atlas the UVs index; invalid samples the one Primitives::setFontAtlas set
 		};
 
 		/**
@@ -129,6 +132,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * @param scale Scaling factor for the text size (1.0F = 16px base size)
 		 * @param color RGBA color of the text (0-1 range)
 		 * @param outQuads Output vector to append generated quads to
+		 * @param family Font family to lay the text out in; each quad carries its atlas
 		 * @param letterSpacing Extra px between glyphs (CSS letter-spacing); 0 = none
 		 */
 		void generateGlyphQuads(

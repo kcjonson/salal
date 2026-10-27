@@ -11,6 +11,10 @@
 // refuses, that a refusal leaves nothing loaded, and what a family that is not
 // loaded draws with.
 //
+// A glyph quad's UVs index one family's atlas, so each quad carries that atlas and
+// drawGlyphs samples it: there is no second place to name a family, and so no way
+// to draw one family's quads with another's atlas.
+//
 // The atlases are synthetic, in the JSON layout worldsim's generate_sdf_atlas
 // writes: printable ASCII as boxes on a 16 x 6 grid of 32 px cells, each glyph
 // with an advance of its own, and a one-texel PNG. These tests read metrics, not
@@ -30,6 +34,7 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Renderer {
@@ -357,6 +362,53 @@ namespace Renderer {
 			EXPECT_EQ(quads.size(), 5U);
 		}
 		EXPECT_EQ(fontRenderer->getGlyphQuadCacheSize(), 1U);
+	}
+
+	// --- Glyph quads and the atlas they sample ---
+
+	TEST_F(FontRendererInitializeTest, GlyphQuadsCarryTheAtlasTheirFamilyLaidThemOutIn) {
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body"), folder.write(kMono, "mono")}, kBody));
+		const TextureHandle body = fontRenderer->getAtlasTexture(kBody);
+		const TextureHandle mono = fontRenderer->getAtlasTexture(kMono);
+		ASSERT_NE(body, mono);
+
+		// The second pass comes from the glyph-quad cache. A family never given lays out in the default's atlas.
+		for (int pass = 0; pass < 2; ++pass) {
+			for (const auto& [family, atlas] :
+				 {std::pair{kMono, mono}, std::pair{kBody, body}, std::pair{FontFamily::Default, body}, std::pair{FontFamily{9}, body}}) {
+				std::vector<FontRenderer::GlyphQuad> quads;
+				fontRenderer->generateGlyphQuads("Hello", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, family);
+				ASSERT_EQ(quads.size(), 5U);
+				for (const FontRenderer::GlyphQuad& quad : quads) {
+					EXPECT_EQ(quad.atlas, atlas) << "family " << static_cast<int>(family) << " pass " << pass;
+				}
+			}
+		}
+	}
+
+	TEST_F(FontRendererInitializeTest, OneDrawGlyphsCallSamplesEachQuadsOwnAtlas) {
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body"), folder.write(kMono, "mono")}, kBody));
+		const TextureHandle body = fontRenderer->getAtlasTexture(kBody);
+		const TextureHandle mono = fontRenderer->getAtlasTexture(kMono);
+		Primitives::setFontAtlas(body);
+
+		// Two families in one call: nothing to name but the quads.
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateGlyphQuads("Mono", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, kMono);
+		fontRenderer->generateGlyphQuads("Body", glm::vec2(0.0F, 20.0F), 1.0F, glm::vec4(1.0F), quads, kBody);
+		ASSERT_EQ(quads.size(), 8U);
+
+		Primitives::setViewport(320, 200);
+		Primitives::beginFrame();
+		Primitives::drawGlyphs(quads.data(), quads.size());
+		Primitives::endFrame();
+
+		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
+		ASSERT_EQ(draws.size(), 2U);
+		EXPECT_EQ(draws[0].call.texture, mono);
+		EXPECT_EQ(draws[0].call.indexCount, 24U); // four glyphs of six indices
+		EXPECT_EQ(draws[1].call.texture, body);
+		EXPECT_EQ(draws[1].call.indexCount, 24U);
 	}
 
 	TEST_F(FontRendererInitializeTest, TheDefaultIsTheCallersChoice) {
