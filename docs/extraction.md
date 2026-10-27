@@ -681,8 +681,8 @@ the consumers need from a frame owner and worldsim never built:
   owns the device layer. Worldsim has keyboard and mouse only.
 - The clipboard, behind the seam from phase 0.5.
 - A scene manager with a stack, overlays and typed payloads.
-  `IScene::exportState()` is deleted on the way; it serves a route that no
-  longer exists.
+  `IScene::exportState()` is deleted on the way; [app-api.md](app-api.md)
+  proposes how its one caller, world-sim's `/api/state?what=scene`, is served.
 - A config file loader. Net-new: worldsim's `AppConfig` is a struct, and its
   only "config" is game XML under `assets/config/` parsed by game registries.
 - A byte-provider seam between asset lookup and file reads, only if a consumer

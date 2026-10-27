@@ -168,9 +168,15 @@ stays the normative one and the spec is a reference.
 `main()`.**
 
 ```
-tick(realDeltaSeconds) -> void
-render(interpolationAlpha) -> void
+bool tick()                 one frame: poll, dispatch, fixed ticks, update, render(alpha), present
+run()                       the native runner: while (tick()) pace();
+Scene::fixedUpdate(tick)    0..n times per frame, at a fixed step, reading no clock
+Scene::render(alpha)        alpha into the current fixed step
 ```
+
+`tick()` reads time through a `Clock` the platform supplies, so a test drives
+it with a clock it advances and never sleeps; [app-api.md](app-api.md) has the
+frame step by step (a proposal under review).
 
 Fixed timestep with an accumulator, render interpolating between the last two
 states, accumulator clamped so one long frame cannot cascade into a death

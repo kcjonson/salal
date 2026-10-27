@@ -122,8 +122,10 @@ The TileAtlasBuilder bootstrap (`:209-226`) and the asset-system init
 - `Scene.h:7-10`, `:80`, `:85` forward-declare `UI::InputEvent` and
   `UI::IComponent`; `handleInput(UI::InputEvent&)`, `getUiRoots()`.
 - `Scene.h:64-68` `exportState()` is pure virtual "for /api/scene/state", a
-  route that no longer exists. Every scene implements dead API. Deleted during
-  extraction; settled.
+  route that never existed. It is not dead: world-sim answers
+  `/api/state?what=scene` with it (`apps/world-sim/scenes/shared/UiStateDrain.cpp:24-26`).
+  Deleted during extraction; [app-api.md](app-api.md) (question 1) proposes
+  that its one use become a state provider the game registers.
 - `Overlay.h:3-5`, `:26`, `SceneManager.h:129`, `SceneManager.cpp:3` carry
   the same `UI::InputEvent` edge.
 
@@ -228,7 +230,7 @@ virtual with defaults `bool handleInput(UI::InputEvent&)` (false) and
 `std::vector<const UI::IComponent*> getUiRoots() const` (empty); non-virtual
 `setSceneManager(SceneManager*)` injected before onEnter. IOverlay
 (`scene/Overlay.h`): `handleEvent(UI::InputEvent&)`, `update(float)`,
-`render()`, `onWindowResize()`. `exportState` is the dead route above.
+`render()`, `onWindowResize()`. `exportState` is the method above.
 
 ### Main loop
 
@@ -532,6 +534,7 @@ the order they were found.
    constructs the app without argv, so defaults must stand alone.
 10. The hardcoded clear colour and glClear live in the loop
     (`Application.cpp:240-241`); they belong to the scene or the renderer.
-11. `IScene::exportState()` (`Scene.h:64-68`) is a pure-virtual contract for
-    a route that no longer exists. Deleted during extraction rather than
-    carried.
+11. `IScene::exportState()` (`Scene.h:64-68`) is a pure-virtual contract
+    every scene implements for one caller, world-sim's `/api/state?what=scene`.
+    Deleted during extraction rather than carried; the proposal for that
+    caller is in [app-api.md](app-api.md), question 1.
