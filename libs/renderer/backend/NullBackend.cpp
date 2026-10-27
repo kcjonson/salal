@@ -16,6 +16,7 @@ namespace Renderer::backend {
 		}
 		TextureDesc kept = desc;
 		kept.pixels = nullptr;
+		++textureCount;
 		return textureTable.insert(kept);
 	}
 
@@ -158,6 +159,7 @@ namespace Renderer::backend {
 		frameCount = 0;
 		invalidationCount = 0;
 		timestampCount = 0;
+		textureCount = 0;
 		submissionCount = 0;
 		foreignDrawBegins = 0;
 		foreignDrawEnds = 0;

@@ -114,6 +114,20 @@ namespace Renderer::backend {
 		EXPECT_FALSE(gpu.createTexture({.width = 0, .height = 2}).isValid());
 	}
 
+	TEST(NullBackendTest, ItCountsTheTexturesItMade) {
+		NullBackend			gpu;
+		const TextureHandle first = gpu.createTexture({.width = 2, .height = 2});
+		gpu.createTexture({.width = 4, .height = 4});
+		gpu.createTexture({.width = 0, .height = 4}); // refused, so not made
+		gpu.destroyTexture(first);
+		EXPECT_EQ(gpu.texturesMade(), 2);
+		EXPECT_EQ(gpu.live().textures, 1U);
+
+		gpu.clearRecord();
+		EXPECT_EQ(gpu.texturesMade(), 0);
+		EXPECT_EQ(gpu.live().textures, 1U);
+	}
+
 	TEST(NullBackendTest, AnEarlierBackendsHandlesAreStaleInTheNext) {
 		TextureHandle fromA;
 		BufferHandle  bufferA;

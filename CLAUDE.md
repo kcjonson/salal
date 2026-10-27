@@ -237,9 +237,9 @@ follow-up. Blame and history for imported code live in worldsim;
 The renderer's base shader is assembled and compiled into each consumer at build
 time by `salal_base_shader()` ([docs/shader-hooks.md](docs/shader-hooks.md)),
 with the consumer's hooks, so no shader files sit beside an executable; it ships
-no fonts: `FontRenderer::Initialize` looks for
-`fonts/<Family>-SDF.{png,json}` beside the executable, worldsim supplies them,
-and an API that takes atlas sources is a phase 2 item.
+no fonts: a game hands `FontRenderer::Initialize` its atlases, each a PNG and
+JSON path under a `FontFamily` id the game defines, and names its default
+family; a bad set comes back as `false`, never a process exit.
 
 Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
 The deterministic math and hash noise are header-inline polynomials; Clang fuses

@@ -84,7 +84,7 @@ class BatchRenderer { // renderer-internal after PR 1; getShaderProgram() delete
 	void addTextQuad(Vec2 pos, Vec2 size, Vec2 uvMin, Vec2 uvMax, Color color, Vec2 runOrigin, TextureHandle atlas = {}, float zIndex = 0.0F);
 	void setFontAtlas(TextureHandle atlas, float pixelRange = 4.0F);
 };
-class FontRenderer { TextureHandle getAtlasTexture(FontFamily family = FontFamily::Roboto) const; }; // header drops <GL/glew.h> and the unused shader/Shader.h
+class FontRenderer { TextureHandle getAtlasTexture(FontFamily family = FontFamily::Default) const; }; // header drops <GL/glew.h> and the unused shader/Shader.h
 class GPUTimer; // public API unchanged; the spans move behind a pimpl so the header drops gl/GLQuery.h
 namespace Primitives {
 	void setFontAtlas(TextureHandle atlas, float pixelRange = 4.0F); // the same three calls, handle type
@@ -97,7 +97,7 @@ namespace Primitives {
 	void invalidateState(); // PR 4: a foreign GL pass that leaves depth test, culling or scissor on, or binds uniform point 0, says so; the renderer never queries state (dual-deck-builder R2.15)
 	void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height); // PR 2: the screenshot route
 	struct WorldCamera { Vec2 position; float zoom = 1.0F; float pixelsPerMeter = 1.0F; }; // from here down: what replaces getBatchRenderer() and getShaderProgram()
-	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family = FontFamily::Roboto, float zIndex = 0.0F); // colour from each quad
+	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family = FontFamily::Default, float zIndex = 0.0F); // colour from each quad
 	InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 	void releaseInstancedMesh(InstancedMeshHandle&);
 	void drawInstanced(const InstancedMeshHandle&, const InstanceData* instances, uint32_t count, const WorldCamera&);

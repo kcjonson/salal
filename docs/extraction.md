@@ -314,7 +314,8 @@ Fonts stay with the game. Worldsim keeps `fonts/`, `tools/generate_sdf_atlas`,
 the font-atlas target and its three copy steps; salal
 ships no fonts and `msdfgen` leaves its manifest. `FontRenderer` moves as it is,
 `Initialize()` included. An API that takes atlas sources and stops calling
-`std::exit` is a phase 2 follow-up, and is what is left of decision H.
+`std::exit` was the follow-up; it is in (2026-10-27), and the font half of
+decision H with it.
 
 `libs/app/` is new and is the hard part: the generic slice carved out of
 worldsim's `libs/engine` (16 files, 2,902 lines: `application/`, `scene/`,
@@ -649,7 +650,8 @@ the primitives shape the batch sort key and the shader layout.
 Follow-ups recorded and kept out of the moves, so the imports stay pure:
 
 - `FontRenderer`: an atlas-sources API, no `std::exit`, data-driven families
-  (the neighbourhood of decision H).
+  (the neighbourhood of decision H). Done 2026-10-27: `Initialize` takes the
+  game's `{FontFamily, pngPath, jsonPath}` and its default family.
 - `ResourcePath`: drop the `cwd/build/apps/ui-sandbox` search, implement the
   Linux `getExecutableDir`.
 - `MetricsCollector` and `PerformanceMetrics`: tile, entity and visible-chunk
@@ -760,8 +762,8 @@ and each tracked on the board. By letter:
 - F. The `ui` storage model during extraction, shared_ptr graph or value
   semantics.
 - H. Whether worldsim's vector/SVG asset conventions come with `renderer` or
-  get parameterised out, and what API `FontRenderer` takes for atlas sources
-  (the fonts themselves stay in the game).
+  get parameterised out (the font half is settled: the game's atlases come in
+  through `FontRenderer::Initialize`).
 - I. Multi-device focus for the asteroids co-op shop.
 - J. The differential harness for dual-deck-builder: a committed golden JSON
   corpus, which is work in that repo.
