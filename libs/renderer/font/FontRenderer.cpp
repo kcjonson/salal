@@ -82,13 +82,8 @@ namespace Renderer {
 			Atlas& atlas = atlases[static_cast<size_t>(source.family)];
 			if (!LoadSDFAtlas(atlas, source.pngPath, source.jsonPath)) {
 				atlas = Atlas{};
-				LOG_WARNING(
-					UI,
-					"Font family %d unavailable, skipping (atlas %s and %s did not load)",
-					static_cast<int>(source.family),
-					source.pngPath.c_str(),
-					source.jsonPath.c_str()
-				);
+				// The error before this names the file; two paths would outrun the log line.
+				LOG_WARNING(UI, "Font family %d unavailable, skipping: it draws with the default", static_cast<int>(source.family));
 			}
 		}
 
