@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
@@ -122,6 +123,37 @@ namespace Renderer {
 		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
 		ASSERT_EQ(uploaded.size(), 12U);
 		EXPECT_EQ(uploaded[4].position.x, 20.0F);
+	}
+
+	TEST_F(FlushTest, ACirclesBorderDrawsAtItsZStraightAfterItsFill) {
+		Primitives::beginFrame();
+		Primitives::drawCircle(
+			{.center = {100.0F, 100.0F},
+			 .radius = 20.0F,
+			 .style =
+				 {.fill = Foundation::Color::red(), .border = Foundation::BorderStyle{.color = Foundation::Color::white(), .width = 2.0F}},
+			 .zIndex = 2}
+		);
+		rect(0.0F, BlendMode::Alpha, 1); // submitted after the circle, below its z
+		Primitives::endFrame();
+
+		// Vertices as added: the fill's fan 0-64, the border's 64 quads 65-320, the rect 321-324.
+		constexpr uint32_t kFanEnd = 65;
+		constexpr uint32_t kBorderEnd = kFanEnd + (64 * 4);
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		ASSERT_EQ(vertices(gpu->draws()[0]).size(), kBorderEnd + 4);
+		const std::vector<uint32_t> emitted = indices(gpu->draws()[0]);
+		ASSERT_EQ(emitted.size(), 6U + (64U * 3U) + (64U * 6U));
+
+		// Each run of the emit order, by the vertices it reaches.
+		const auto allWithin = [&](size_t from, size_t count, uint32_t low, uint32_t high) {
+			return std::ranges::all_of(std::span(emitted).subspan(from, count), [&](uint32_t index) {
+				return index >= low && index < high;
+			});
+		};
+		EXPECT_TRUE(allWithin(0, 6, kBorderEnd, kBorderEnd + 4)); // the rect, z 1
+		EXPECT_TRUE(allWithin(6, 192, 0, kFanEnd));				  // the fill, z 2
+		EXPECT_TRUE(allWithin(198, 384, kFanEnd, kBorderEnd));	  // the border, z 2, over the fill
 	}
 
 	TEST_F(FlushTest, AlphaAndAdditiveShareOneDrawCall) {
