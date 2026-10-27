@@ -114,6 +114,15 @@ jobs:
     - name: Test
       run: ctest --test-dir build -C Debug --output-on-failure
 
+    # foundation's goldens optimised on arm64, with NDEBUG, so the checks that
+    # stay on in a release build run too. vcpkg installs from the cache above.
+    - name: Test foundation optimised
+      if: runner.os == 'macOS'
+      run: |
+        cmake --preset default -B build-release -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        cmake --build build-release --target salal_foundation_tests
+        ctest --test-dir build-release -R salal_foundation_tests --output-on-failure
+
   clang-format:
     runs-on: ubuntu-latest
     steps:
