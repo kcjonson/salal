@@ -60,9 +60,9 @@ namespace Renderer {
 		return *this;
 	}
 
-	BatchRenderer::BatchRenderer(backend::Backend& renderBackend)
+	BatchRenderer::BatchRenderer(backend::Backend& renderBackend, const backend::ShaderSource& baseShader)
 		: gpu(renderBackend),
-		  pipeline(renderBackend.createPipeline({.vertex = "base.vert", .fragment = "base.frag"})),
+		  pipeline(renderBackend.createPipeline(baseShader)),
 		  vertexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialVertexBytes, nullptr)),
 		  indexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialIndexBytes, nullptr)),
 		  geometry(

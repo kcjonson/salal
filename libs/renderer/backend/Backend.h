@@ -63,10 +63,24 @@ namespace Renderer::backend {
 	// BatchRenderer.h), so mixing the two never splits a draw.
 	enum class BlendState : uint8_t { Alpha };
 
-	// A pipeline's shader files under shaders/, which the backend loads and compiles.
+	// A hook's uniform block in an assembled base shader (docs/shader-hooks.md), as the
+	// header salal_base_shader() generates names it: the hook (its file name before
+	// .vert.glsl), the block's name in the GLSL, the binding point the build gave it (1
+	// up; 0 is DrawUniforms') and its std140 size in bytes, padded to 16.
+	struct HookUniformBlock {
+		const char* hook = nullptr;
+		const char* block = nullptr;
+		uint32_t	binding = 0;
+		uint32_t	size = 0;
+	};
+
+	// A pipeline's GLSL source, one text per stage, and the hooks' uniform blocks its
+	// vertex stage declares. The base shader's is the generated <namespace>::source()
+	// of salal_base_shader().
 	struct ShaderSource {
-		const char* vertex = nullptr;
-		const char* fragment = nullptr;
+		const char*						  vertex = nullptr;
+		const char*						  fragment = nullptr;
+		std::span<const HookUniformBlock> hookBlocks;
 	};
 
 	// Buffers to draw from in `layout`; `instances` only for InstancedMesh.
@@ -144,8 +158,9 @@ namespace Renderer::backend {
 	// texture, blend) are made by each draw() and assumed to survive nothing outside
 	// it, because a game's own GPU code runs between the renderer's submissions. The
 	// one exception is the uniforms: setUniforms() binds them to uniform binding point
-	// 0, which is the renderer's, and draws read them there, so a game's GL that binds
-	// a uniform buffer to point 0 calls invalidateState() before the renderer draws.
+	// 0 and setHookUniforms() the hooks' blocks to points 1 up, which are the
+	// renderer's, and draws read them there, so a game's GL that binds a uniform buffer
+	// to one of those points calls invalidateState() before the renderer draws.
 	class Backend {
 	  public:
 		Backend() = default;
@@ -168,8 +183,8 @@ namespace Renderer::backend {
 		// Clear the bound target's colour to `color` exactly (the caller premultiplies).
 		virtual void clear(const Foundation::Color& color) = 0;
 
-		// GPU code outside the renderer changed the fixed state or uniform binding point
-		// 0; set both again.
+		// GPU code outside the renderer changed the fixed state or a uniform binding point
+		// the renderer's blocks read; set both again.
 		virtual void invalidateState() = 0;
 
 		// --- Textures ---
@@ -207,8 +222,11 @@ namespace Renderer::backend {
 
 		// --- Pipelines and drawing ---
 
-		// The program from `source`, its DrawUniforms block bound to the buffer
-		// setUniforms() writes and u_atlas to unit 0. The base shader is the only one.
+		// The program compiled and linked from `source`'s text: its DrawUniforms block
+		// bound to the buffer setUniforms() writes, each hook block to its binding point
+		// (zeroed until the first setHookUniforms() there), and u_atlas to unit 0.
+		// Invalid, logged, when the program does not build or a block is not the size the
+		// C++ side has. The base shader is the only one.
 		virtual PipelineHandle createPipeline(const ShaderSource& source) = 0;
 		virtual void		   destroyPipeline(PipelineHandle pipeline) = 0;
 
@@ -217,9 +235,16 @@ namespace Renderer::backend {
 		// repeat of the last values reuses theirs.
 		virtual void setUniforms(const DrawUniforms& uniforms) = 0;
 
+		// A hook block's contents for every draw from here on, until the next call for
+		// the same binding point, as setUniforms() is for DrawUniforms: a draw already
+		// submitted keeps its own. `bytes` is the block's std140 contents, its size
+		// exactly; a binding point no pipeline declared, or another size, is logged and
+		// ignored.
+		virtual void setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) = 0;
+
 		// One submission, in order: bindings change only where consecutive calls
 		// differ, and nothing bound is left behind but the pipeline and the uniforms on
-		// point 0 (and, on GL, the generic buffer bindings its writes used).
+		// their points (and, on GL, the generic buffer bindings its writes used).
 		virtual void draw(std::span<const DrawCall> calls) = 0;
 
 		// Bind `pipeline` in `blend` for draws the caller issues itself, from its own

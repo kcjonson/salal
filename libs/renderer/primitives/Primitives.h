@@ -29,6 +29,7 @@
 #include <numbers>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace renderer {
@@ -46,11 +47,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Start the renderer on `backend`, which it owns from here until shutdown():
 		// backend::gl::GLBackend::create() on the GL context the platform made, or a
-		// backend::NullBackend for tests that run without a GPU. Every call before
-		// init() or after shutdown() does nothing.
-		void init(std::unique_ptr<backend::Backend> backend);
-		// init(nullptr), every v0.4.0 call, would otherwise compile and leave the renderer off.
-		void init(std::nullptr_t) = delete;
+		// backend::NullBackend for tests that run without a GPU. It draws with
+		// `baseShader`, the base shader salal_base_shader() assembled for the consumer
+		// and its hooks (the generated <namespace>::source(), docs/shader-hooks.md),
+		// which needs to outlive only this call. Every call before init() or after
+		// shutdown() does nothing.
+		void init(std::unique_ptr<backend::Backend> backend, const backend::ShaderSource& baseShader);
 		void shutdown();
 
 		// Set the coordinate system (must be called after Init)
@@ -441,6 +443,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Alpha multiplied into instanced and baked draws (u_bakedAlpha); 1 is opaque.
 		void setBakedAlpha(float alpha);
+
+		// Fill a hook's uniform block (docs/shader-hooks.md) for the instanced draws
+		// issued from here on; a draw already issued keeps the values it was given.
+		// `bytes` is the block's std140 contents, the block's size exactly: a C++
+		// struct laid out like the GLSL, through std::as_bytes. `block` is the constant
+		// the generated header has for it, `hook` the hook's name (its file name before
+		// .vert.glsl). A block the base shader init() was given does not have, or the
+		// wrong size, is logged and ignored. Every block starts zeroed, which a hook
+		// takes as off.
+		void setHookUniforms(const backend::HookUniformBlock& block, std::span<const std::byte> bytes);
+		void setHookUniforms(std::string_view hook, std::span<const std::byte> bytes);
 
 		// Bracket a caller's own world-space mesh draws: the base shader in its baked
 		// mode with `camera` and the projection from the setViewport() size, blending

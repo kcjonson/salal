@@ -6,6 +6,7 @@
 
 #include "primitives/Primitives.h"
 
+#include "BaseShader.h"
 #include "backend/gl/GLBackend.h"
 #include "resources/RenderTarget.h"
 #include "vector/Types.h"
@@ -50,7 +51,7 @@ namespace Renderer {
 				glfwTerminate();
 				GTEST_SKIP() << "GLEW initialization failed";
 			}
-			Primitives::init(std::move(gl));
+			Primitives::init(std::move(gl), base_shader::source());
 			glViewport(0, 0, kSize, kSize);
 			Primitives::setCoordinateSystem(nullptr);
 			Primitives::setViewport(kSize, kSize);

@@ -63,9 +63,10 @@ namespace Renderer {
 			return false;
 		}
 
-		const char* vShaderCode = vertexCode->c_str();
-		const char* fShaderCode = fragmentCode->c_str();
+		return loadFromSource(vertexCode->c_str(), fragmentCode->c_str());
+	}
 
+	bool Shader::loadFromSource(const char* vertexSource, const char* fragmentSource) {
 		// Compile shaders
 		GLuint vertex = 0;
 		GLuint fragment = 0;
@@ -74,7 +75,7 @@ namespace Renderer {
 
 		// Vertex shader
 		vertex = glCreateShader(GL_VERTEX_SHADER);
-		glShaderSource(vertex, 1, &vShaderCode, nullptr);
+		glShaderSource(vertex, 1, &vertexSource, nullptr);
 		glCompileShader(vertex);
 		glGetShaderiv(vertex, GL_COMPILE_STATUS, &success);
 		if (success == 0) {
@@ -86,7 +87,7 @@ namespace Renderer {
 
 		// Fragment shader
 		fragment = glCreateShader(GL_FRAGMENT_SHADER);
-		glShaderSource(fragment, 1, &fShaderCode, nullptr);
+		glShaderSource(fragment, 1, &fragmentSource, nullptr);
 		glCompileShader(fragment);
 		glGetShaderiv(fragment, GL_COMPILE_STATUS, &success);
 		if (success == 0) {

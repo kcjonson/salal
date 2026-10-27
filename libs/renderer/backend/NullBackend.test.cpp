@@ -6,6 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -165,6 +167,58 @@ namespace Renderer::backend {
 		std::vector<uint8_t> stale(4, 7);
 		gpu.readPixels(target, stale);
 		EXPECT_EQ(stale, std::vector<uint8_t>(4, 7));
+	}
+
+	TEST(NullBackendTest, HookUniformsRideWithTheDrawsIssuedAfterThem) {
+		NullBackend gpu;
+		const auto	bytes = [](uint8_t value) {
+			 return std::vector<std::byte>(4, std::byte{value});
+		};
+		const std::vector<std::byte> a = bytes(1);
+		const std::vector<std::byte> b = bytes(2);
+		const std::vector<std::byte> c = bytes(3);
+		const DrawCall				 call{.indexCount = 3};
+		const auto					 asSpan = [](const std::vector<std::byte>& v) {
+			  return std::span<const std::byte>(v);
+		};
+		const auto same = [](std::span<const std::byte> x, const std::vector<std::byte>& y) {
+			return std::vector<std::byte>(x.begin(), x.end()) == y;
+		};
+
+		gpu.setHookUniforms(2, a);
+		gpu.draw({&call, 1});
+		gpu.setHookUniforms(1, b);
+		gpu.draw({&call, 1});
+		gpu.setHookUniforms(2, c);
+		gpu.draw({&call, 1});
+
+		ASSERT_EQ(gpu.draws().size(), 3U);
+		EXPECT_TRUE(same(gpu.draws()[0].hookBlock(2), a));
+		EXPECT_TRUE(gpu.draws()[0].hookBlock(1).empty());
+		EXPECT_TRUE(same(gpu.draws()[1].hookBlock(1), b));
+		EXPECT_TRUE(same(gpu.draws()[1].hookBlock(2), a)); // a draw reads the last write at each point
+		EXPECT_TRUE(same(gpu.draws()[2].hookBlock(2), c));
+		EXPECT_TRUE(same(gpu.draws()[2].hookBlock(1), b));
+		ASSERT_EQ(gpu.draws()[2].hookUniforms.size(), 2U);
+		EXPECT_EQ(gpu.draws()[2].hookUniforms[0].binding, 1U); // by binding point
+		EXPECT_EQ(gpu.draws()[2].hookUniforms[1].binding, 2U);
+
+		ASSERT_EQ(gpu.hookUniformWrites().size(), 3U);
+		EXPECT_EQ(gpu.hookUniformWrites()[1].binding, 1U);
+		EXPECT_TRUE(same(asSpan(gpu.hookUniformWrites()[2].bytes), c));
+	}
+
+	TEST(NullBackendTest, APipelineKeepsItsSourceAndHookBlocks) {
+		NullBackend			   gpu;
+		const HookUniformBlock blocks[] = {{.hook = "sway", .block = "SwayUniforms", .binding = 1, .size = 32}};
+		const PipelineHandle   pipeline = gpu.createPipeline({.vertex = "vertex", .fragment = "fragment", .hookBlocks = blocks});
+		const NullBackend::PipelineRecord* record = gpu.pipeline(pipeline);
+		ASSERT_NE(record, nullptr);
+		EXPECT_EQ(record->vertex, "vertex");
+		EXPECT_EQ(record->fragment, "fragment");
+		ASSERT_EQ(record->hookBlocks.size(), 1U);
+		EXPECT_EQ(record->hookBlocks[0].binding, 1U);
+		EXPECT_EQ(record->hookBlocks[0].size, 32U);
 	}
 
 } // namespace Renderer::backend

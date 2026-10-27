@@ -11,6 +11,7 @@
 // resources beside the executable and skips without them.
 
 #include "font/FontRenderer.h"
+#include "BaseShader.h"
 #include "backend/NullBackend.h"
 #include "primitives/Primitives.h"
 #include "utils/ResourcePath.h"
@@ -29,7 +30,7 @@ namespace Renderer {
 			if (Foundation::findResourceString("fonts/Roboto-SDF.json").empty()) {
 				GTEST_SKIP() << "Font atlas resources not found (run from the repo root)";
 			}
-			Primitives::init(std::make_unique<backend::NullBackend>());
+			Primitives::init(std::make_unique<backend::NullBackend>(), base_shader::source());
 			fontRenderer = std::make_unique<FontRenderer>();
 			ASSERT_TRUE(fontRenderer->Initialize());
 		}

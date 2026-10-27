@@ -13,7 +13,8 @@ layout(location = 6) in vec4 a_instanceData1;
 layout(location = 7) in vec4 a_instanceData2;
 
 // The camera, viewport and groundcover uniforms it reads are in the DrawUniforms
-// block (uniforms.glsl), which base.vert includes first.
+// block (uniforms.glsl), and the hook chain is in hooks.glsl; base.vert includes both
+// first.
 
 /// Transform a local mesh vertex to screen space using instance data.
 /// @param localPos Vertex position in local mesh space (usually centered around origin)
@@ -36,6 +37,7 @@ vec2 instanceToScreen(vec2 localPos) {
         float openness = mix(u_groundcoverOpenness, 1.0, infl);
         lp *= openness;
     }
+    lp = applyInstanceLocalHooks(lp, worldPos);
 
     // Apply rotation around origin
     float cosR = cos(rotation);
@@ -55,6 +57,7 @@ vec2 instanceToScreen(vec2 localPos) {
         vec2  pushDir = d > 0.0001 ? away / d : vec2(0.0, -1.0);
         worldVertex += pushDir * (infl * reachFrac * u_cursorStrength);
     }
+    worldVertex = applyInstanceWorldHooks(worldVertex, localPos, worldPos);
 
     // Transform world → screen
     // Screen center is viewport center, camera position is world center

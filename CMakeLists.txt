@@ -50,6 +50,7 @@ if(SALAL_BUILD_TESTS)
     include(CTest)
 endif()
 include(cmake/SalalTesting.cmake)
+include(cmake/SalalBaseShader.cmake)
 
 add_subdirectory(libs/foundation)
 add_subdirectory(libs/renderer)

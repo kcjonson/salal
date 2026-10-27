@@ -1,4 +1,5 @@
 #include "primitives/BatchRenderer.h"
+#include "BaseShader.h"
 #include "backend/NullBackend.h"
 #include <gtest/gtest.h>
 #include <numbers>
@@ -65,7 +66,7 @@ TEST(RenderModeTest, AdditiveSharesAlphasBlendState) {
 
 TEST(RenderModeTest, EveryAddWritesItsModeAndBlend) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	addRect(batch, BlendMode::Additive);
 	addGlyph(batch, kAtlasA, BlendMode::Additive);
 	batch.addShadowQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::BoxShadow{}, 0.0F, 0.0F, BlendMode::Additive);
@@ -94,7 +95,7 @@ TEST(RenderModeTest, EveryAddWritesItsModeAndBlend) {
 
 TEST(BatchPlanTest, EmptyBatchHasNoRuns) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	const DrawPlan		 plan = batch.plan();
 	EXPECT_TRUE(plan.indices.empty());
 	EXPECT_TRUE(plan.runs.empty());
@@ -102,7 +103,7 @@ TEST(BatchPlanTest, EmptyBatchHasNoRuns) {
 
 TEST(BatchPlanTest, InterleavedAlphaAndAdditiveOnOneAtlasIsOneRun) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.setFontAtlas(kAtlasA);
 	addRect(batch, BlendMode::Alpha);
 	addGlyph(batch, kAtlasA, BlendMode::Additive);
@@ -122,7 +123,7 @@ TEST(BatchPlanTest, InterleavedAlphaAndAdditiveOnOneAtlasIsOneRun) {
 
 TEST(BatchPlanTest, AtlasChangeStillSplits) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.setFontAtlas(kAtlasA);
 	addGlyph(batch, kAtlasA);
 	addRect(batch, BlendMode::Additive);
@@ -146,7 +147,7 @@ TEST(BatchPlanTest, AtlasChangeStillSplits) {
 
 TEST(BatchPlanTest, ShapesOnlyAreOneRunOnTheDefaultAtlas) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.setFontAtlas(kAtlasA);
 	addRect(batch);
 	addRect(batch, BlendMode::Additive);
@@ -159,7 +160,7 @@ TEST(BatchPlanTest, ShapesOnlyAreOneRunOnTheDefaultAtlas) {
 
 TEST(BatchPlanTest, AnImageSplitsOnItsTexture) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.setFontAtlas(kAtlasA);
 	addGlyph(batch, kAtlasA);
 	batch.addImageQuad({.texture = kImage, .bounds = {0.0F, 0.0F, 16.0F, 16.0F}});
@@ -178,7 +179,7 @@ TEST(BatchPlanTest, AnImageSplitsOnItsTexture) {
 
 TEST(BatchPlanTest, ExplicitZSortsGroupsStablyBeforeSplitting) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.setFontAtlas(kAtlasA);
 	addGlyph(batch, kAtlasA, BlendMode::Alpha, 1.0F);	 // vertices 0-3
 	addGlyph(batch, kAtlasB, BlendMode::Additive, 0.0F); // vertices 4-7
@@ -206,7 +207,7 @@ TEST(BatchPlanTest, ExplicitZSortsGroupsStablyBeforeSplitting) {
 
 TEST(BatchArcTest, LocalCoordinatesTurnTheArcsMiddleOntoPlusX) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	const float			 quarter = std::numbers::pi_v<float> * 0.5F;
 	batch.addArc({.center = {100.0F, 50.0F}, .innerRadius = 10.0F, .outerRadius = 20.0F, .startAngle = 0.0F, .sweep = quarter});
 
@@ -227,7 +228,7 @@ TEST(BatchArcTest, LocalCoordinatesTurnTheArcsMiddleOntoPlusX) {
 
 TEST(BatchArcTest, NegativeSweepRunsBackFromTheStart) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	const float			 pi = std::numbers::pi_v<float>;
 	// From 180 degrees back to 90: the middle is at 135, the bottom-left corner.
 	batch.addArc({.center = {0.0F, 0.0F}, .outerRadius = 10.0F, .startAngle = pi, .sweep = -pi * 0.5F});
@@ -241,7 +242,7 @@ TEST(BatchArcTest, NegativeSweepRunsBackFromTheStart) {
 
 TEST(BatchArcTest, SweepClampsToTheFullRingAndEmptyArcsAddNothing) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.addArc({.center = {0.0F, 0.0F}, .outerRadius = 10.0F, .sweep = 20.0F});
 	ASSERT_EQ(batch.getPendingVertices().size(), 4U);
 	EXPECT_NEAR(batch.getPendingVertices()[0].data2.z, std::numbers::pi_v<float>, kTolerance);
@@ -257,7 +258,7 @@ TEST(BatchArcTest, SweepClampsToTheFullRingAndEmptyArcsAddNothing) {
 
 TEST(BatchStrokeTest, PiecesAreOrientedBoxesAndTrianglesFlatInOneGroup) {
 	backend::NullBackend gpu;
-	BatchRenderer		 batch(gpu);
+	BatchRenderer		 batch(gpu, base_shader::source());
 	const StrokePiece	 pieces[2] = {
 		   {.center = {10.0F, 0.0F}, .axis = {0.0F, 1.0F}, .halfLength = 5.0F, .halfWidth = 2.0F},
 		   {.center = {0.0F, 0.0F}, .axis = {1.0F, 0.0F}, .halfLength = 2.0F, .halfWidth = 2.0F, .cornerRadius = 2.0F},

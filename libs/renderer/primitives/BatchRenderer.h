@@ -85,9 +85,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// Batch accumulator - collects geometry before GPU upload
 	class BatchRenderer {
 	  public:
-		// Makes its pipeline (the base shader), its stream buffers and their geometry
-		// on `renderBackend`, which must outlive it; destroys them again on destruction.
-		explicit BatchRenderer(backend::Backend& renderBackend);
+		// Makes its pipeline (the base shader, from `baseShader`), its stream buffers and
+		// their geometry on `renderBackend`, which must outlive it; destroys them again on
+		// destruction.
+		BatchRenderer(backend::Backend& renderBackend, const backend::ShaderSource& baseShader);
 		~BatchRenderer();
 
 		BatchRenderer(const BatchRenderer&) = delete;

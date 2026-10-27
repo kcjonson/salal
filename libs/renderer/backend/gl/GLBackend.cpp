@@ -138,13 +138,8 @@ namespace Renderer::backend::gl {
 	}
 
 	GLBackend::GLBackend() {
-		GLint alignment = 256;
-		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
-		const GLsizeiptr size = sizeof(DrawUniforms);
-		uniformStride = ((size + alignment - 1) / alignment) * alignment;
-		uniformRing = GLBuffer::create(GL_UNIFORM_BUFFER);
-		glBindBuffer(GL_UNIFORM_BUFFER, uniformRing);
-		glBufferData(GL_UNIFORM_BUFFER, uniformStride * kUniformSlots, nullptr, GL_STREAM_DRAW);
+		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uniformAlignment);
+		drawRing = makeRing(kUniformBinding, sizeof(DrawUniforms));
 		applyFixedState();
 	}
 
@@ -176,8 +171,11 @@ namespace Renderer::backend::gl {
 
 	void GLBackend::invalidateState() {
 		applyFixedState();
-		if (lastUniformOffset >= 0) {
-			glBindBufferRange(GL_UNIFORM_BUFFER, kUniformBinding, uniformRing, lastUniformOffset, sizeof(DrawUniforms));
+		if (drawRing.lastOffset >= 0) {
+			bind(drawRing);
+		}
+		for (const UniformRing& ring : hookRings) {
+			bind(ring); // written, zeros at least, when it was made
 		}
 	}
 
@@ -397,14 +395,14 @@ namespace Renderer::backend::gl {
 
 	PipelineHandle GLBackend::createPipeline(const ShaderSource& source) {
 		Shader shader;
-		if (!shader.LoadFromFile(source.vertex, source.fragment)) {
-			LOG_ERROR(Renderer, "createPipeline: could not build %s and %s", source.vertex, source.fragment);
+		if (source.vertex == nullptr || source.fragment == nullptr || !shader.loadFromSource(source.vertex, source.fragment)) {
+			LOG_ERROR(Renderer, "createPipeline: the program did not build");
 			return {};
 		}
 		const GLuint program = shader.getProgram();
 		const GLuint block = glGetUniformBlockIndex(program, kDrawUniformsBlock);
 		if (block == GL_INVALID_INDEX) {
-			LOG_ERROR(Renderer, "createPipeline: %s and %s declare no %s block", source.vertex, source.fragment, kDrawUniformsBlock);
+			LOG_ERROR(Renderer, "createPipeline: the program declares no %s block", kDrawUniformsBlock);
 			return {};
 		}
 		// The block's size between its last member's end and the struct's padded size, and
@@ -419,7 +417,7 @@ namespace Renderer::backend::gl {
 			);
 			return {};
 		}
-		if (!blockMatches(program)) {
+		if (!blockMatches(program) || !bindHookBlocks(program, source)) {
 			return {};
 		}
 		glUniformBlockBinding(program, block, kUniformBinding);
@@ -438,26 +436,92 @@ namespace Renderer::backend::gl {
 		return shader != nullptr ? shader->getProgram() : 0;
 	}
 
-	void GLBackend::setUniforms(const DrawUniforms& uniforms) {
+	GLBackend::UniformRing GLBackend::makeRing(GLuint binding, GLsizeiptr size) const {
+		UniformRing ring{
+			.binding = binding,
+			.size = size,
+			.stride = ((size + uniformAlignment - 1) / uniformAlignment) * uniformAlignment,
+			.buffer = GLBuffer::create(GL_UNIFORM_BUFFER),
+			.last = std::vector<std::byte>(static_cast<size_t>(size)),
+		};
+		glBindBuffer(GL_UNIFORM_BUFFER, ring.buffer);
+		glBufferData(GL_UNIFORM_BUFFER, ring.stride * kUniformSlots, nullptr, GL_STREAM_DRAW);
+		return ring;
+	}
+
+	void GLBackend::write(UniformRing& ring, const void* data) {
 		// A repeat of the last values (every instanced draw of a pass shares its camera)
 		// binds their slot again: a write into a buffer the GPU is drawing from costs GPU
 		// time, about 2.5 us each on NVIDIA.
-		if (lastUniformOffset >= 0 && std::memcmp(&lastUniforms, &uniforms, sizeof(DrawUniforms)) == 0) {
-			glBindBufferRange(GL_UNIFORM_BUFFER, kUniformBinding, uniformRing, lastUniformOffset, sizeof(DrawUniforms));
+		if (ring.lastOffset >= 0 && std::memcmp(ring.last.data(), data, ring.last.size()) == 0) {
+			bind(ring);
 			return;
 		}
-		glBindBuffer(GL_UNIFORM_BUFFER, uniformRing);
-		if (uniformSlot == kUniformSlots) {
+		glBindBuffer(GL_UNIFORM_BUFFER, ring.buffer);
+		if (ring.slot == kUniformSlots) {
 			// Every slot may still be read by a draw in flight: fresh storage rather than a wait.
-			glBufferData(GL_UNIFORM_BUFFER, uniformStride * kUniformSlots, nullptr, GL_STREAM_DRAW);
-			uniformSlot = 0;
+			glBufferData(GL_UNIFORM_BUFFER, ring.stride * kUniformSlots, nullptr, GL_STREAM_DRAW);
+			ring.slot = 0;
 		}
-		const GLintptr offset = uniformStride * uniformSlot;
-		++uniformSlot;
-		glBufferSubData(GL_UNIFORM_BUFFER, offset, sizeof(DrawUniforms), &uniforms);
-		glBindBufferRange(GL_UNIFORM_BUFFER, kUniformBinding, uniformRing, offset, sizeof(DrawUniforms));
-		lastUniforms = uniforms;
-		lastUniformOffset = offset;
+		ring.lastOffset = ring.stride * ring.slot;
+		++ring.slot;
+		glBufferSubData(GL_UNIFORM_BUFFER, ring.lastOffset, ring.size, data);
+		std::memcpy(ring.last.data(), data, ring.last.size());
+		bind(ring);
+	}
+
+	void GLBackend::bind(const UniformRing& ring) {
+		glBindBufferRange(GL_UNIFORM_BUFFER, ring.binding, ring.buffer, ring.lastOffset, ring.size);
+	}
+
+	GLBackend::UniformRing* GLBackend::hookRing(GLuint binding) {
+		const auto found =
+			std::find_if(hookRings.begin(), hookRings.end(), [binding](const UniformRing& ring) { return ring.binding == binding; });
+		return found != hookRings.end() ? &*found : nullptr;
+	}
+
+	bool GLBackend::bindHookBlocks(GLuint program, const ShaderSource& source) {
+		// Each block on its point, checked against the size the build generated: the
+		// driver's, padded to 16 as std140 pads the block and the generated size is. A
+		// point's ring is made, zeroed, the first time a pipeline declares it.
+		for (const HookUniformBlock& hook : source.hookBlocks) {
+			const char*	 hookName = hook.hook != nullptr ? hook.hook : "?";
+			const GLuint index = hook.block != nullptr ? glGetUniformBlockIndex(program, hook.block) : GL_INVALID_INDEX;
+			if (index == GL_INVALID_INDEX || hook.binding == kUniformBinding) {
+				LOG_ERROR(Renderer, "createPipeline: hook %s's block is not in the program, or claims binding point 0", hookName);
+				return false;
+			}
+			GLint size = 0;
+			glGetActiveUniformBlockiv(program, index, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+			const GLint	 padded = (size + 15) / 16 * 16;
+			UniformRing* ring = hookRing(hook.binding);
+			if (padded != static_cast<GLint>(hook.size) || (ring != nullptr && ring->size != static_cast<GLsizeiptr>(hook.size))) {
+				LOG_ERROR(Renderer, "createPipeline: hook %s's block is %d bytes in the program, %u in C++", hookName, padded, hook.size);
+				return false;
+			}
+			glUniformBlockBinding(program, index, hook.binding);
+			if (ring == nullptr) {
+				hookRings.push_back(makeRing(hook.binding, hook.size));
+				const std::vector<std::byte> zeros(hook.size);
+				write(hookRings.back(), zeros.data());
+			}
+		}
+		return true;
+	}
+
+	void GLBackend::setUniforms(const DrawUniforms& uniforms) {
+		write(drawRing, &uniforms);
+	}
+
+	void GLBackend::setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) {
+		UniformRing* ring = hookRing(binding);
+		if (ring == nullptr || static_cast<GLsizeiptr>(bytes.size()) != ring->size) {
+			LOG_ERROR(
+				Renderer, "setHookUniforms: %zu bytes for binding point %u, which no pipeline declares that size for", bytes.size(), binding
+			);
+			return;
+		}
+		write(*ring, bytes.data());
 	}
 
 	void GLBackend::draw(std::span<const DrawCall> calls) {

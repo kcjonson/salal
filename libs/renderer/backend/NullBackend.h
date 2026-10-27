@@ -8,6 +8,7 @@
 
 #include "backend/Backend.h"
 #include "backend/SlotTable.h"
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,11 +17,29 @@ namespace Renderer::backend {
 
 	class NullBackend final : public Backend {
 	  public:
+		// One setHookUniforms() call.
+		struct HookUniforms {
+			uint32_t			   binding = 0;
+			std::vector<std::byte> bytes;
+		};
+
 		// One DrawCall as submitted, with the uniforms it would have read.
 		struct RecordedDraw {
-			DrawCall	 call;
-			DrawUniforms uniforms;
-			int			 submission = 0; // which draw() it came in, from 0
+			DrawCall				  call;
+			DrawUniforms			  uniforms;
+			std::vector<HookUniforms> hookUniforms;	  // the last write at each binding point written, by binding point
+			int						  submission = 0; // which draw() it came in, from 0
+
+			// What the draw read at `binding`; empty when nothing was written there.
+			[[nodiscard]] std::span<const std::byte> hookBlock(uint32_t binding) const;
+		};
+
+		// A pipeline as made: its stages' text and the hook blocks it declared (their
+		// names still the caller's).
+		struct PipelineRecord {
+			std::string					  vertex;
+			std::string					  fragment;
+			std::vector<HookUniformBlock> hookBlocks;
 		};
 
 		struct TextureUpdate {
@@ -69,6 +88,7 @@ namespace Renderer::backend {
 		void		   destroyPipeline(PipelineHandle pipeline) override { pipelineTable.erase(pipeline); }
 
 		void setUniforms(const DrawUniforms& uniforms) override;
+		void setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) override;
 		void draw(std::span<const DrawCall> calls) override;
 		void beginForeignDraws(PipelineHandle pipeline, BlendState blend) override;
 		void endForeignDraws() override { ++foreignDrawEnds; }
@@ -83,6 +103,7 @@ namespace Renderer::backend {
 
 		[[nodiscard]] const std::vector<RecordedDraw>&		 draws() const { return recordedDraws; }
 		[[nodiscard]] const std::vector<DrawUniforms>&		 uniformWrites() const { return uniformHistory; }
+		[[nodiscard]] const std::vector<HookUniforms>&		 hookUniformWrites() const { return hookHistory; }
 		[[nodiscard]] const std::vector<RenderTargetHandle>& targetsBound() const { return targetBinds; }
 		[[nodiscard]] const std::vector<TextureUpdate>&		 textureUpdates() const { return updates; }
 		[[nodiscard]] const std::vector<Foundation::Color>&	 clears() const { return clearColors; }
@@ -97,15 +118,12 @@ namespace Renderer::backend {
 		// The buffer's bytes as last written; empty for an invalid or stale handle.
 		[[nodiscard]] std::span<const uint8_t> bufferContents(BufferHandle buffer) const;
 		// What the texture was made from (pixels not kept); null for an invalid or stale handle.
-		[[nodiscard]] const TextureDesc*  texture(TextureHandle texture) const { return textureTable.find(texture); }
-		[[nodiscard]] const GeometryDesc* geometry(GeometryHandle geometry) const { return geometryTable.find(geometry); }
-		// The shader file names, vertex then fragment.
-		[[nodiscard]] const std::pair<std::string, std::string>* pipeline(PipelineHandle pipeline) const {
-			return pipelineTable.find(pipeline);
-		}
-		[[nodiscard]] Counts live() const;
-		[[nodiscard]] int	 windowWidth() const { return window.first; }
-		[[nodiscard]] int	 windowHeight() const { return window.second; }
+		[[nodiscard]] const TextureDesc*	texture(TextureHandle texture) const { return textureTable.find(texture); }
+		[[nodiscard]] const GeometryDesc*	geometry(GeometryHandle geometry) const { return geometryTable.find(geometry); }
+		[[nodiscard]] const PipelineRecord* pipeline(PipelineHandle pipeline) const { return pipelineTable.find(pipeline); }
+		[[nodiscard]] Counts				live() const;
+		[[nodiscard]] int					windowWidth() const { return window.first; }
+		[[nodiscard]] int					windowHeight() const { return window.second; }
 
 		// Forget what it was asked (draws, uniforms, binds, updates, counters); its objects stay.
 		void clearRecord();
@@ -116,15 +134,17 @@ namespace Renderer::backend {
 			std::vector<uint8_t> bytes;
 		};
 
-		SlotTable<TextureHandle, TextureDesc>						   textureTable;
-		SlotTable<RenderTargetHandle, TextureHandle>				   targetTable;
-		SlotTable<BufferHandle, BufferRecord>						   bufferTable;
-		SlotTable<GeometryHandle, GeometryDesc>						   geometryTable;
-		SlotTable<PipelineHandle, std::pair<std::string, std::string>> pipelineTable;
-		SlotTable<QueryHandle, bool>								   queryTable; // written yet
+		SlotTable<TextureHandle, TextureDesc>		 textureTable;
+		SlotTable<RenderTargetHandle, TextureHandle> targetTable;
+		SlotTable<BufferHandle, BufferRecord>		 bufferTable;
+		SlotTable<GeometryHandle, GeometryDesc>		 geometryTable;
+		SlotTable<PipelineHandle, PipelineRecord>	 pipelineTable;
+		SlotTable<QueryHandle, bool>				 queryTable; // written yet
 
 		std::vector<RecordedDraw>		recordedDraws;
 		std::vector<DrawUniforms>		uniformHistory;
+		std::vector<HookUniforms>		hookHistory;
+		std::vector<HookUniforms>		currentHooks; // by binding point
 		std::vector<RenderTargetHandle> targetBinds;
 		std::vector<TextureUpdate>		updates;
 		std::vector<Foundation::Color>	clearColors;

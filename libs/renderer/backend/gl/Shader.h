@@ -1,5 +1,5 @@
-// Shader utility for loading and managing OpenGL shader programs
-// Loads vertex and fragment shaders from files in the shaders/ directory
+// Shader utility for loading and managing OpenGL shader programs, from GLSL text or
+// from files in the shaders/ directory
 
 #pragma once
 
@@ -25,11 +25,18 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		/**
 		 * Load and compile shaders from files
 		 * Files are loaded from the shaders/ directory relative to the executable
-		 * @param vertexPath Vertex shader filename (e.g., "base.vert")
-		 * @param fragmentPath Fragment shader filename (e.g., "base.frag")
+		 * @param vertexPath Vertex shader filename (e.g., "tile.vert")
+		 * @param fragmentPath Fragment shader filename (e.g., "tile.frag")
 		 * @return true if shaders were loaded and linked successfully
 		 */
 		bool LoadFromFile(const char* vertexPath, const char* fragmentPath);
+
+		/**
+		 * Compile and link a program from GLSL text, one string per stage, its includes
+		 * already resolved
+		 * @return true if both stages compiled and the program linked
+		 */
+		bool loadFromSource(const char* vertexSource, const char* fragmentSource);
 
 		/**
 		 * Activate this shader program for use

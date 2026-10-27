@@ -5,6 +5,7 @@
 
 #include "resources/RenderTarget.h"
 
+#include "BaseShader.h"
 #include "CoordinateSystem/CoordinateSystem.h"
 #include "backend/NullBackend.h"
 #include "backend/gl/GLBackend.h"
@@ -29,7 +30,7 @@ namespace Renderer {
 		void SetUp() override {
 			auto owned = std::make_unique<backend::NullBackend>();
 			gpu = owned.get();
-			Primitives::init(std::move(owned));
+			Primitives::init(std::move(owned), base_shader::source());
 			Primitives::setCoordinateSystem(nullptr);
 			Primitives::setViewport(32, 32);
 			gpu->clearRecord();
@@ -114,14 +115,14 @@ namespace Renderer {
 	TEST(RenderTargetNoBackendTest, ATargetKeptAcrossReinitLeavesTheNextSessionsTexturesAlone) {
 		// A target made in one session and destroyed in the next, after the next has
 		// made a texture in the same slot (a font atlas, say).
-		Primitives::init(std::make_unique<backend::NullBackend>());
+		Primitives::init(std::make_unique<backend::NullBackend>(), base_shader::source());
 		RenderTarget kept = RenderTarget::create(4, 4);
 		ASSERT_TRUE(kept.isValid());
 		Primitives::shutdown();
 
 		auto				  owned = std::make_unique<backend::NullBackend>();
 		backend::NullBackend& next = *owned;
-		Primitives::init(std::move(owned));
+		Primitives::init(std::move(owned), base_shader::source());
 		const TextureHandle atlas = Primitives::createTexture({.width = 8, .height = 8});
 		ASSERT_TRUE(atlas.isValid());
 		EXPECT_NE(atlas, kept.texture());
@@ -164,7 +165,7 @@ namespace Renderer {
 				glfwTerminate();
 				GTEST_SKIP() << "GLEW initialization failed";
 			}
-			Primitives::init(std::move(gl));
+			Primitives::init(std::move(gl), base_shader::source());
 			// What the platform layer does: the window's viewport, told to the renderer.
 			glViewport(0, 0, 32, 32);
 			Primitives::setViewport(32, 32);

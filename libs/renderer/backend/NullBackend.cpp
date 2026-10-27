@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace Renderer::backend {
 
@@ -74,8 +75,18 @@ namespace Renderer::backend {
 		return geometryTable.insert(desc);
 	}
 
+	std::span<const std::byte> NullBackend::RecordedDraw::hookBlock(uint32_t binding) const {
+		const auto found =
+			std::find_if(hookUniforms.begin(), hookUniforms.end(), [binding](const HookUniforms& hook) { return hook.binding == binding; });
+		return found != hookUniforms.end() ? std::span<const std::byte>(found->bytes) : std::span<const std::byte>();
+	}
+
 	PipelineHandle NullBackend::createPipeline(const ShaderSource& source) {
-		return pipelineTable.insert({source.vertex != nullptr ? source.vertex : "", source.fragment != nullptr ? source.fragment : ""});
+		return pipelineTable.insert({
+			.vertex = source.vertex != nullptr ? source.vertex : "",
+			.fragment = source.fragment != nullptr ? source.fragment : "",
+			.hookBlocks = {source.hookBlocks.begin(), source.hookBlocks.end()},
+		});
 	}
 
 	void NullBackend::setUniforms(const DrawUniforms& uniforms) {
@@ -83,9 +94,23 @@ namespace Renderer::backend {
 		uniformHistory.push_back(uniforms);
 	}
 
+	void NullBackend::setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) {
+		HookUniforms write{.binding = binding, .bytes = {bytes.begin(), bytes.end()}};
+		const auto	 at =
+			std::find_if(currentHooks.begin(), currentHooks.end(), [binding](const HookUniforms& hook) { return hook.binding >= binding; });
+		if (at != currentHooks.end() && at->binding == binding) {
+			at->bytes = write.bytes;
+		} else {
+			currentHooks.insert(at, write);
+		}
+		hookHistory.push_back(std::move(write));
+	}
+
 	void NullBackend::draw(std::span<const DrawCall> calls) {
 		for (const DrawCall& call : calls) {
-			recordedDraws.push_back({.call = call, .uniforms = currentUniforms, .submission = submissionCount});
+			recordedDraws.push_back(
+				{.call = call, .uniforms = currentUniforms, .hookUniforms = currentHooks, .submission = submissionCount}
+			);
 		}
 		++submissionCount;
 	}
@@ -126,6 +151,7 @@ namespace Renderer::backend {
 	void NullBackend::clearRecord() {
 		recordedDraws.clear();
 		uniformHistory.clear();
+		hookHistory.clear();
 		targetBinds.clear();
 		updates.clear();
 		clearColors.clear();
