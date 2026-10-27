@@ -196,7 +196,7 @@ namespace Renderer::assembler {
 			}
 		};
 
-		// A block member's part of its C++ constant: "Block.cursorWorld" is CursorWorld, "Block.s.x" SX, and an
+		// A block member's part of its C++ constant: "Block.windDir" is WindDir, "Block.s.x" SX, and an
 		// array's [0] goes.
 		std::string memberSuffix(const std::string& member, const std::string& block) {
 			const std::string name = member.starts_with(block + ".") ? member.substr(block.size() + 1) : member;
