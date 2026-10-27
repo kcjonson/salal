@@ -3,7 +3,8 @@
 The seam between `renderer` and OpenGL: what leaks today, what the public surface
 becomes, what sits behind it, and the PRs that get there. Written 2026-10-26 from
 worldsim @ `2cc7e40a` (the imported renderer and its callers); decision G in
-[open-decisions.md](open-decisions.md) has the reasoning. All four PRs are in. The
+[open-decisions.md](open-decisions.md) has the reasoning. All four PRs are in, and the
+base shader's build-time hooks followed them ([shader-hooks.md](shader-hooks.md)). The
 leak table under "The public surface today" and the table of what the renderer
 asked of GL under "The backend seam" are the state it started from, kept as the
 record of what moved.
@@ -28,12 +29,12 @@ users at `2cc7e40a`. `libs/ui` makes no GL call of its own.
 
 | header | symbol | leak | worldsim users |
 |---|---|---|---|
-| `primitives/BatchRenderer.h` | `#include <GL/glew.h>`, plus `gl/GLBuffer.h`, `gl/GLVertexArray.h`, `shader/Shader.h` for members | header include | 8 includers: `ui/shapes/Shapes.cpp`, `ui/components/TextInput/TextInput.cpp`, `engine/world/rendering/{BakedChunkRenderer,ChunkRenderer,GroundcoverRenderer,InstancedEntityRenderer}.cpp`, `ui-sandbox/scenes/{GrassScene,SdfMinimalScene}.cpp` |
-| | `getShaderProgram()` | returns `GLuint` | `BakedChunkRenderer.cpp:182`, `GroundcoverRenderer.cpp:145`, `GrassScene.cpp:194`, each followed by `glUseProgram` and `glUniform*` |
+| `primitives/BatchRenderer.h` | `#include <GL/glew.h>`, plus `gl/GLBuffer.h`, `gl/GLVertexArray.h`, `shader/Shader.h` for members | header include | 8 includers: `ui/shapes/Shapes.cpp`, `ui/components/TextInput/TextInput.cpp`, `engine/world/rendering/{BakedChunkRenderer,ChunkRenderer,InstancedEntityRenderer}.cpp` and the grass renderer beside them, `ui-sandbox/scenes/{GrassScene,SdfMinimalScene}.cpp` |
+| | `getShaderProgram()` | returns `GLuint` | `BakedChunkRenderer.cpp:182`, the grass renderer's `:145`, `GrassScene.cpp:194`, each followed by `glUseProgram` and `glUniform*` |
 | | `addTextQuad(..., GLuint atlasTexture = 0, ...)` | `GLuint` parameter | `Shapes.cpp:222`, `TextInput.cpp:583`, `:710`, `SdfMinimalScene.cpp:97` (all leave the default); `Primitives.cpp:387` passes the family atlas |
 | | `setFontAtlas(GLuint, float)` | `GLuint` parameter | through `Primitives::setFontAtlas`, `AppLauncher.cpp:195` |
-| | `uploadInstancedMesh`, `drawInstanced`, `releaseInstancedMesh` | take `InstancedMeshHandle`, a struct of GL wrappers | `GroundcoverRenderer.cpp:75`, `:182`, `InstancedEntityRenderer.cpp:32`, `:121`, `GrassScene.cpp:151`, `:209` |
-| `primitives/InstanceData.h` | `#include <GL/glew.h>`; `InstancedMeshHandle{GLVertexArray vao; GLBuffer meshVBO, meshIBO, instanceVBO}` | header include, GL members | `GroundcoverRenderer.h:12`, `InstancedEntityRenderer.h:9`, `GrassScene.cpp:17` |
+| | `uploadInstancedMesh`, `drawInstanced`, `releaseInstancedMesh` | take `InstancedMeshHandle`, a struct of GL wrappers | the grass renderer's `:75` and `:182`, `InstancedEntityRenderer.cpp:32`, `:121`, `GrassScene.cpp:151`, `:209` |
+| `primitives/InstanceData.h` | `#include <GL/glew.h>`; `InstancedMeshHandle{GLVertexArray vao; GLBuffer meshVBO, meshIBO, instanceVBO}` | header include, GL members | the grass renderer's header (`:12`), `InstancedEntityRenderer.h:9`, `GrassScene.cpp:17` |
 | `primitives/Primitives.h` | `getBatchRenderer()` | returns the GL-typed class | 14 call sites in the 8 files above |
 | | `setFontAtlas(unsigned int, float)` | GL texture name as `unsigned` | `AppLauncher.cpp:195` |
 | | `setTileAtlas(unsigned int, rects)`, `getTileAtlasTexture()` | GL texture name as `unsigned` | `world-sim/GameBootstrap.cpp:28`, `ChunkRenderer.cpp:537` |
@@ -96,14 +97,13 @@ namespace Primitives {
 	void invalidateState(); // PR 4: a foreign GL pass that leaves depth test, culling or scissor on, or binds uniform point 0, says so; the renderer never queries state (dual-deck-builder R2.15)
 	void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height); // PR 2: the screenshot route
 	struct WorldCamera { Vec2 position; float zoom = 1.0F; float pixelsPerMeter = 1.0F; }; // from here down: what replaces getBatchRenderer() and getShaderProgram()
-	struct GroundcoverParams { bool enabled = false; float openness = 1.0F; float reach = 0.0F; Vec2 cursorWorld; float cursorRadius = 0.0F; float cursorStrength = 0.0F; };
 	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, FontFamily family = FontFamily::Roboto, float zIndex = 0.0F); // colour from each quad
 	InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 	void releaseInstancedMesh(InstancedMeshHandle&);
 	void drawInstanced(const InstancedMeshHandle&, const InstanceData* instances, uint32_t count, const WorldCamera&);
-	void setGroundcover(const GroundcoverParams&); // u_groundcover* and u_cursor*
+	void setHookUniforms(const backend::HookUniformBlock&, std::span<const std::byte>); // a hook's uniform block; this sketch had a setter for worldsim's grass deform until it became a hook (decision 4)
 	void setBakedAlpha(float alpha); // u_bakedAlpha, also between baked draws
-	void beginBakedPass(const WorldCamera&); // uber program in mode 2, camera uniforms, projection from the setViewport size as today
+	void beginBakedPass(const WorldCamera&); // the base shader in mode 2, camera uniforms, projection from the setViewport size as today
 	void endBakedPass(); // around BakedChunkRenderer's own VAO draws; stays until a world mesh API exists
 }
 }
@@ -117,9 +117,9 @@ texture table and makes the entries owned, which keeps PR 1 to headers and handl
 | caller | today | becomes |
 |---|---|---|
 | `Shapes.cpp:90,222`; `TextInput.cpp:553,583,678,710`; `SdfMinimalScene.cpp:36,97` | `getBatchRenderer()->addTextQuad` per glyph | `Primitives::drawGlyphs`; `ui` stops including `BatchRenderer.h`. `TextInput` passes no family: it shapes with `fontUi` (Barlow, `theme/Variants.h:21`) but samples atlas 0 today, a separate worldsim fix |
-| `InstancedEntityRenderer.cpp:13,30,86`; `GroundcoverRenderer.cpp:18,66`; `GrassScene.cpp:122,151` | `getBatchRenderer()->uploadInstancedMesh`, `releaseInstancedMesh` | `Primitives::uploadInstancedMesh`; release through the handle's destructor or `releaseInstancedMesh` |
-| `InstancedEntityRenderer.cpp:121`; `GroundcoverRenderer.cpp:182`; `GrassScene.cpp:209` | `drawInstanced(handle, data, n, pos, zoom, ppm)` | `Primitives::drawInstanced(handle, data, n, WorldCamera)` |
-| `GroundcoverRenderer.cpp:145-161,187-193`; `GrassScene.cpp:194-201,212-213` | `getShaderProgram()` + `glUniform*` | `setGroundcover`, `setBakedAlpha`; `InstancingUniforms.h` deleted or kept as a GL-free carrier, that PR's call |
+| `InstancedEntityRenderer.cpp:13,30,86`; the grass renderer's `:18,66`; `GrassScene.cpp:122,151` | `getBatchRenderer()->uploadInstancedMesh`, `releaseInstancedMesh` | `Primitives::uploadInstancedMesh`; release through the handle's destructor or `releaseInstancedMesh` |
+| `InstancedEntityRenderer.cpp:121`; the grass renderer's `:182`; `GrassScene.cpp:209` | `drawInstanced(handle, data, n, pos, zoom, ppm)` | `Primitives::drawInstanced(handle, data, n, WorldCamera)` |
+| the grass renderer's `:145-161,187-193`; `GrassScene.cpp:194-201,212-213` | `getShaderProgram()` + `glUniform*` | a setter for the grass deform (since a hook's block, `setHookUniforms`, decision 4), `setBakedAlpha`; `InstancingUniforms.h` deleted or kept as a GL-free carrier, that PR's call |
 | `BakedChunkRenderer.cpp:153-200,238-242` | `flush`, `setViewport`, `getShaderProgram()`, eight uniforms, `u_bakedAlpha` per sub-chunk, own VAO draws | `Primitives::flush`, `beginBakedPass`, `setBakedAlpha` between draws, `endBakedPass`; its `glIsEnabled` save and restore goes |
 | `ChunkRenderer.cpp:506-509,537`; `InstancedEntityRenderer.cpp:139,174` | `getBatchRenderer()->flush()`; `getTileAtlasTexture()` bound to its own sampler | `Primitives::flush`; `getTileAtlasTexture()` as a handle, plus `backend::gl::name(TextureHandle)` for the one game-GL bind |
 | `AppLauncher.cpp:168,195` | `Initialize(window)`; `setFontAtlas(getAtlasTexture(), 4)` | `setViewport({...})` from the GLFW callbacks; the same `setFontAtlas` call with a handle |
@@ -132,8 +132,8 @@ What `BatchRenderer`, `Shader`, `RenderToTexture` and `GPUTimer` ask of GL today
 | resource | today |
 |---|---|
 | buffers | one dynamic VBO + IBO re-uploaded with `glBufferData` each flush; per instanced mesh a static VBO, static `uint16` IBO and a dynamic instance VBO (`glBufferSubData` per draw) |
-| vertex layouts | two: `UberVertex` (80 bytes, attributes 0-5, `uint32` indices) and `InstancedMeshVertex` + `InstanceData` (attributes 0, 2 and 6, 7 with divisor 1, `uint16` indices) |
-| program | one: `uber.vert`, `uber.frag`, `includes/instancing.glsl`, GLSL 330 through `ShaderPreprocessor`; 17 uniforms (`u_projection`, `u_transform`, `u_atlas`, `u_bakedAlpha`, `u_viewportHeight`, `u_pixelRatio`, `u_cameraPosition`, `u_cameraZoom`, `u_pixelsPerMeter`, `u_viewportSize`, `u_instanced`, and six groundcover and cursor uniforms) |
+| vertex layouts | two: `BatchVertex` (80 bytes, attributes 0-5, `uint32` indices) and `InstancedMeshVertex` + `InstanceData` (attributes 0, 2 and 6, 7 with divisor 1, `uint16` indices) |
+| program | one: `base.vert`, `base.frag`, `includes/instancing.glsl`, GLSL 330 through `ShaderPreprocessor` at startup; 17 uniforms (`u_projection`, `u_transform`, `u_atlas`, `u_bakedAlpha`, `u_viewportHeight`, `u_pixelRatio`, `u_cameraPosition`, `u_cameraZoom`, `u_pixelsPerMeter`, `u_viewportSize`, `u_instanced`, and six for worldsim's grass deform and its cursor). Since the hooks it is still one program, assembled at build time from the base shader and the game's hooks, checked by `glslangValidator` and compiled from embedded text ([shader-hooks.md](shader-hooks.md)): `u_atlas`, the ten others in the `DrawUniforms` block, and a std140 block per hook; the grass deform is a worldsim hook (decision 4) |
 | textures, framebuffers | 2D, RGBA8 or RGB8, linear, clamp to edge, one unit; `glTexSubImage2D` updates; a draw run split per atlas; one FBO with one RGBA8 colour attachment, float formats allowed |
 | pipeline state | blend on, `ONE, ONE_MINUS_SRC_ALPHA` over premultiplied output (`SRC_ALPHA, ONE_MINUS_SRC_ALPHA` until PR 3), off again after each flush; depth test off; cull off; no scissor (clip is per-vertex in the shader) |
 | draws | `glDrawElements(TRIANGLES, uint32)` per run, cut where the texture or the GL blend state changes; `glDrawElementsInstanced(TRIANGLES, uint16)` per instance batch |
@@ -145,22 +145,23 @@ The interface follows dual-deck-builder's `DrawBackend`
 `invalidateState`, `textures`, `loadFontAtlas`) one layer lower, at its R15.38
 seam. That design puts the batcher behind the seam because the vertex format is
 the backend's; salal has one program and one format and keeps `BatchRenderer` in
-front, building `UberVertex` as plain data the backend uploads. The GL
+front, building `BatchVertex` as plain data the backend uploads. The GL
 implementation is the old code moved into `backend/gl/GLBackend.{h,cpp}` (the GL
 halves of `BatchRenderer.cpp`, `RenderTarget.cpp`, `TileTextureAtlas.cpp` and
 `GPUTimer.cpp`, PR 2's texture table, and `glewInit`), with the `gl/*.h` wrappers
 and `Shader` its internals. `Shader`, `ShaderLoader` and the wrappers stay
-includable for a game's own GL. As landed in PR 4:
+includable for a game's own GL. As landed in PR 4, with the hooks' changes since:
 
 ```cpp
 namespace Renderer::backend {
-enum class VertexLayout : uint8_t { Uber, InstancedMesh }; // implies the index type: uint32 for Uber, uint16 for InstancedMesh
+enum class VertexLayout : uint8_t { Batched, InstancedMesh }; // implies the index type: uint32 for Batched, uint16 for InstancedMesh
 enum class BufferUsage : uint8_t { Static, Dynamic, Stream }; // a Stream write at offset 0 starts the buffer over and grows it to fit
 enum class BlendState : uint8_t { Alpha }; // premultiplied over, which additive draws share since PR 3
-struct ShaderSource { const char* vertex; const char* fragment; }; // file names under shaders/
+struct HookUniformBlock { const char* hook; const char* block; uint32_t binding; uint32_t size; }; // one per hook block, from the generated header
+struct ShaderSource { const char* vertex; const char* fragment; std::span<const HookUniformBlock> hookBlocks; }; // GLSL text, assembled at build time; file names under shaders/ until the hooks
 struct GeometryDesc { VertexLayout layout; BufferHandle vertices, indices, instances; };
 struct DrawCall { PipelineHandle pipeline; GeometryHandle geometry; BlendState blend; TextureHandle texture; uint32_t indexOffset; uint32_t indexCount; uint32_t instanceCount; };
-struct DrawUniforms { /* the 16 non-sampler uniforms, the std140 block in shaders/includes/uniforms.glsl: 208 bytes, every offset static_asserted */ };
+struct DrawUniforms { /* the 10 non-sampler uniforms, the std140 block in shaders/includes/uniforms.glsl: 176 bytes (16 and 208 until the grass deform left), every offset static_asserted */ };
 class Backend { // one per context; depth off, cull off and no scissor are fixed state, set at creation, beginFrame and invalidateState
 	virtual void beginFrame() = 0;
 	virtual void endFrame() = 0;
@@ -174,8 +175,9 @@ class Backend { // one per context; depth off, cull off and no scissor are fixed
 	virtual BufferHandle createBuffer(BufferUsage, size_t bytes, const void* data) = 0;
 	virtual void updateBuffer(BufferHandle, size_t offset, size_t bytes, const void* data) = 0;
 	virtual GeometryHandle createGeometry(const GeometryDesc&) = 0;
-	virtual PipelineHandle createPipeline(const ShaderSource&) = 0; // uber is the only pipeline until the bloom blur
+	virtual PipelineHandle createPipeline(const ShaderSource&) = 0; // the base shader is the only pipeline until the bloom blur
 	virtual void setUniforms(const DrawUniforms&) = 0; // new values take fresh storage, so a draw in flight keeps its own
+	virtual void setHookUniforms(uint32_t binding, std::span<const std::byte>) = 0; // a hook's block, the same way, on its binding point
 	virtual void draw(std::span<const DrawCall>) = 0; // one submission
 	virtual void beginForeignDraws(PipelineHandle, BlendState) = 0; // the baked pass's own VAO draws, until endForeignDraws()
 	virtual void endForeignDraws() = 0;
@@ -183,7 +185,7 @@ class Backend { // one per context; depth off, cull off and no scissor are fixed
 };
 Backend* active(); // the one Primitives::init was given, for RenderTarget and GPUTimer
 }
-namespace Renderer::Primitives { void init(std::unique_ptr<backend::Backend>); } // backend::gl::GLBackend::create(), which runs glewInit, or a backend::NullBackend
+namespace Renderer::Primitives { void init(std::unique_ptr<backend::Backend>, const backend::ShaderSource&); } // backend::gl::GLBackend::create(), which runs glewInit, or a backend::NullBackend; the consumer's assembled base shader
 ```
 
 Where it differs from the sketch PR 4 started from, and why. `draw` takes a span,
@@ -209,8 +211,9 @@ through `GL_COPY_WRITE_BUFFER`, which no vertex array records. Fixed state is
 set once and trusted, and every worldsim pass that touches it (`ChunkRenderer`,
 `PlanetRenderer`) restores it, so worldsim calls `invalidateState` nowhere. The
 uniforms are the one binding that outlives a call: uniform binding point 0 is the
-renderer's, and `invalidateState` rebinds it for a pass that bound its own buffer
-there (no worldsim shader declares a block).
+renderer's, and since the hooks points 1 up as well, one per hook block, and
+`invalidateState` rebinds them for a pass that bound its own buffer there (no
+worldsim shader declares a block).
 
 Storage. The batch's vertex and index buffers are `Stream`: each flush writes
 from offset 0, and the GL backend respecifies with `glBufferData(nullptr)`
@@ -218,9 +221,10 @@ from offset 0, and the GL backend respecifies with `glBufferData(nullptr)`
 would need `glFenceSync` to know when a region is free, or would have to be big
 enough never to lap the GPU, and a flush's size is unbounded; the orphan is what
 the old per-flush `glBufferData` already was, and needs no base vertex. The
-uniforms are a ring, 512 slots of 208 bytes rounded up to
-`GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`, written with `glBufferSubData` and bound
-with `glBindBufferRange`, orphaned when full. No slot is written twice between
+uniforms are a ring, 512 slots of 176 bytes (208 before the grass deform left)
+rounded up to `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`, written with
+`glBufferSubData` and bound with `glBindBufferRange`, orphaned when full, and
+each hook block has a ring of its own the same way. No slot is written twice between
 orphans, so nothing in flight is overwritten and nothing waits, and a repeat of
 the last values (every instanced draw of a pass shares its camera) binds their
 slot again rather than writing a new one: each write into a buffer the GPU is
@@ -230,7 +234,7 @@ repeats were skipped.
 `clear` and `setRenderTarget` fold into one `beginPass(target, optional clear)`
 and `endPass()` on Vulkan; GL is unaffected. One shader source is possible but
 not free: Vulkan GLSL rejects loose `uniform float` and wants `#version 450`,
-so the 16 non-sampler uniforms are a std140 block (GL 3.3 core has them;
+so the non-sampler uniforms are a std140 block, as each hook's are (GL 3.3 core has them;
 `u_atlas` stays a sampler, set to unit 0 at `createPipeline`). The
 preprocessor does not swap the version line: the Vulkan variant also needs
 `set` and `binding` qualifiers that GLSL 330 cannot spell, so the swap is not
@@ -252,14 +256,14 @@ does for atlases. Premultiplied alpha decides the cost: with it, additive is
 over's blend state (`ONE, ONE_MINUS_SRC_ALPHA`, alpha zeroed in the shader,
 dual-deck-builder R5.22a) and never splits a draw; without it, additive is
 `SRC_ALPHA, ONE` and splits. The per-vertex flag rides in `data2.w`, since
-`UberVertex` has no spare field for shapes: border position 0 to 2 plus 4 for
+`BatchVertex` has no spare field for shapes: border position 0 to 2 plus 4 for
 additive, and every negative mode (text and shadow, and the arc and image modes
-PR 3 added) 10 lower when additive; `BatchRenderer.h` and `uber.frag` carry the
+PR 3 added) 10 lower when additive; `BatchRenderer.h` and `base.frag` carry the
 same table. Decided: premultiplied, in the same PR, also because compositing a
 straight-alpha render target over the scene (bloom) gives dark fringes. Nothing
-the uber program samples carries alpha in PR 3 (font atlases are RGB8; the tile
+the base shader samples carries alpha in PR 3 (font atlases are RGB8; the tile
 atlas is sampled only by worldsim's tile shader, `ChunkRenderer.cpp:537`,
-blending off, and is left alone), so the costs are `uber.frag` multiplying at
+blending off, and is left alone), so the costs are `base.frag` multiplying at
 output, `drawImage` taking its texels as premultiplied (a `RenderTarget`'s
 already are; `createTexture` is unchanged, so a caller with straight-alpha
 pixels premultiplies them before upload), and screenshots moving by rounding.
@@ -273,21 +277,22 @@ a new batch entry:
 | need | how | new batch entry? |
 |---|---|---|
 | filled polygon with a per-frame transform | `drawPolygon({vertices, style, zIndex, blend})` under `PushTransform`: tessellate (`vector/Tessellator`, cached per outline, keyed by its vertex bits and emptied whole at 1024 entries) into `addTriangles` | no |
-| arc or ring with partial fill | one quad in a new SDF mode, `data2 = (innerR, outerR, sweep / 2, mode)`, the start angle folded into the quad's local coordinates (turned so the arc's middle lies along +x), next to text and shadow in `uber.frag` | yes: one render-mode constant and about twenty lines of GLSL; a 64-segment fan (`drawCircle` today) facets at HUD radii |
+| arc or ring with partial fill | one quad in a new SDF mode, `data2 = (innerR, outerR, sweep / 2, mode)`, the start angle folded into the quad's local coordinates (turned so the arc's middle lies along +x), next to text and shadow in `base.frag` | yes: one render-mode constant and about twenty lines of GLSL; a 64-segment fan (`drawCircle` today) facets at HUD radii |
 | line with width, polyline | `drawLine` is already a rotated quad; `drawPolyline({points, width, color, cap, join, closed})` is an SDF box per segment plus a disk per joint and round cap, dual-deck-builder's shape; joins round or miter (exact up to a right-angle turn, round past it), caps butt, round or square | no |
 | silhouette stroke, rim light | `drawPolygon` with `style.border`: a closed stroke with miter joins, its outer edge the border's width outside the outline and its inner edge a pixel inside, under the fill's aliased edge; a flat wedge carries it into a notch sharper than a right angle | no |
 | clip by silhouette, hold-fill | the fill rises, so it is the polygon under a rect clip, which the fast per-vertex path already does; the stencil path clip stays unbuilt | no |
 | transform stack for wrap ghosts | exists: `PushTransform`, baked at add time; draw an entity up to four times | no |
 | fixed-aspect viewport with letterboxing | a scale-and-translate transform plus a rect clip pushed at frame start; the backend viewport stays full | no |
-| bloom, additive glow | `RenderTarget` + additive blend + `drawImage(texture, rect)` as a plain-sample render mode; the blur is a second pipeline, the first after uber, Quick Run or later | `drawImage` yes; the blur later |
+| bloom, additive glow | `RenderTarget` + additive blend + `drawImage(texture, rect)` as a plain-sample render mode; the blur is a second pipeline, the first after the base shader, its source built in at build time as the base shader's is (`createPipeline` takes text since the hooks), Quick Run or later | `drawImage` yes; the blur later |
 
 Particles stay game-side: a pool over `drawTriangles` or `drawCircle` with
 `blend = Additive`, batched by the sort key; an engine pool when a second game wants one.
 
 ## Sequencing
 
-Four PRs in salal, each followed by a tag worldsim pins; worldsim changes only
-where its callers move, and PR 1 presumes worldsim already consumes `v0.1.0`.
+Four PRs in salal, each followed by a tag worldsim pins, and the hooks after them;
+worldsim changes only where its callers move, and PR 1 presumes worldsim already
+consumes `v0.1.0`.
 Behaviour is identical through PR 2. After PR 3 what is drawn is identical to
 rounding, but a target holds premultiplied colour: a draw over transparent reads
 back alpha `a` where it read `a * a`, and `clear` stores its colour premultiplied.
@@ -296,22 +301,25 @@ back alpha `a` where it read `a * a`, and `clear` stores its colour premultiplie
 |---|---|---|---|
 | 1. GL off the public surface (minor bump, `v0.2.0`) | `BatchRenderer.{h,cpp}`, `InstanceData.h`, `Primitives.{h,cpp}`, `FontRenderer.{h,cpp}`, `CoordinateSystem.{h,cpp,test.cpp}`, `RenderToTexture.h`, `TileTextureAtlas.h`, `TileAtlasBuilder.h`, `GPUTimer.{h,cpp}`, new `Handle.h`, the handle-to-name registry with `backend::gl::name()` in new `backend/gl/GLNames.h` (the only file under `backend/` until PR 2), `Primitives::clear` (no callers migrated), the four GL test fixtures, `CMakeLists.txt` (`OpenGL::GL` and `GLEW::GLEW` PRIVATE on `salal_renderer`, `glfw` off it, since nothing in the library touches GLFW once `CoordinateSystem` is fed its sizes; the GL test fixtures link all three), the layering check gaining "no GL, GLES, OpenGL, GLFW or glad header reachable from a public renderer header", public meaning every header under `libs/renderer` outside `gl/`, `shader/` and `backend/`, which is how `gl/` and `shader/` stay where they are until PR 2 moves them. About 25 files | about 20 files: the dozen in the table above, the `render(ctx, InstancingUniforms&, stats)` signatures across the entity renderers, `GrassScene`'s release, `libs/engine/CMakeLists.txt` linking OpenGL, GLEW and glfw PUBLIC (the apps' clear pairs and `GrassScene`'s 20 GL calls reach GL through `engine`) | `salal_renderer_tests` (CoordinateSystem now headless); worldsim full Windows build and ctest; ui-sandbox `text_shapes`, `sdf_minimal`, `svg`, `button`, `grass` and the game scene through the dev server, screenshots identical |
 | 2. Textures through `GLTexture`, `RenderTarget` (`v0.3.0`) | `FontRenderer.cpp:289-299` (the one raw `glGenTextures` left in the renderer) via `createTexture`, `RenderToTexture.*` becomes `RenderTarget`, `TileTextureAtlas` on the texture table, the registry becomes the table (`backend/gl/GLTextures.h`, entries owned, `name()` kept), the stack of bound targets in `backend/gl/GLTargets.h` (the backbuffer at the bottom, its size refreshed by `Primitives::setViewport` while no target is open: the coordinate system's framebuffer size when one is set, else the size given), new public `Texture.h` (`TextureFormat`, `TextureDesc`), `Primitives` gains `createTexture`, `updateTexture`, `destroyTexture`, `readBackbuffer`; `gl/*.h`, `Shader.h`, `ShaderLoader.h`, `ShaderPreprocessor.h` move to `backend/gl/`, the layering check exempts `backend/` alone | `AssetRenderer.cpp` (drops its `glClear` and `glReadPixels`), `DebugServer.cpp` screenshot (optional), the include paths in `ChunkRenderer.h:16-19`, `BakedChunkRenderer.h:10-11`, `PlanetRenderer.cpp:7` | `RenderTarget` test (clear, read back); `asset-cli` output PNG identical; `FontRenderer` test |
-| 3. Blend in the sort key, premultiplied alpha, new primitives (`v0.4.0`) | `BatchRenderer` (`DrawGroup.blend`, the run walk out of `flush` into GL-free `plan()`, split on texture and GL blend state, `addArc`, `addImageQuad`, `addStrokePieces`), `uber.frag` (premultiplied output in every branch, the `data2.w` flag, arc and image modes), the three blend-func sites on `ONE, ONE_MINUS_SRC_ALPHA`, `Primitives::clear` premultiplying its colour, `Primitives` (`BlendMode`, `LineCap`, `LineJoin`, `PolygonArgs`, `PolylineArgs`, `ArcArgs`, `ImageArgs`, `blend` on the existing Args and `drawGlyphs`), new `primitives/Stroke.{h,cpp}`, `PolygonStyle` in foundation, and `Tessellator`'s convex fast path no longer taking a pentagram; headless tests of the sort and split, the mode table, arcs and strokes, and GL tests reading premultiplied output back from a `RenderTarget` | no caller moves, since every new parameter defaults to `Alpha`; four new ui-sandbox scenes, `polygon`, `arc`, `polyline` and `blend`; `AssetRenderer` un-premultiplies its readback for straight-alpha PNGs | sandbox scenes for polygon, arc, polyline and blend; existing scenes diffed by hand against PR 2's shots, within rounding, no baseline committed |
-| 4. The backend interface (`v0.5.0`) | `backend/Backend.h` (the interface, `UberVertex` and `InstancedMeshVertex`, `DrawUniforms` with every std140 offset asserted), `backend/SlotTable.h`, `backend/NullBackend.{h,cpp}`, `backend/gl/GLBackend.{h,cpp}` absorbing PR 2's `GLTextures.{h,cpp}` (the table and `name()`), the GL halves of `BatchRenderer.cpp`, `RenderTarget.cpp` and `GPUTimer.cpp`, and `glewInit`; `GLTargets.{h,cpp}` gone, the stack of begun targets in `RenderTarget.cpp`; new `shaders/includes/uniforms.glsl`, the block both stages include; `Primitives::init(std::unique_ptr<backend::Backend>)` and `Primitives::invalidateState`; `TileTextureAtlas` and `FontRenderer` through `Primitives::createTexture`; the layering check exempting `backend/gl/` alone | `AppLauncher.cpp`, `asset-cli` and `AssetRenderer.test.cpp` hand `Primitives::init` a `GLBackend::create()` and drop their `glewInit`; `ChunkRenderer.cpp` includes `backend/gl/GLBackend.h` for `name()`; no `invalidateState` calls | renderer tests headless against the null backend (z sort, blend split, atlas split, clip bounds, instanced and baked uniforms, all through `flush`); GL tests of the block's offsets against the linked program and of 1,024 instanced draws twice round the uniform ring; sandbox and game screenshots and asset-cli PNGs against `v0.4.0` |
+| 3. Blend in the sort key, premultiplied alpha, new primitives (`v0.4.0`) | `BatchRenderer` (`DrawGroup.blend`, the run walk out of `flush` into GL-free `plan()`, split on texture and GL blend state, `addArc`, `addImageQuad`, `addStrokePieces`), `base.frag` (premultiplied output in every branch, the `data2.w` flag, arc and image modes), the three blend-func sites on `ONE, ONE_MINUS_SRC_ALPHA`, `Primitives::clear` premultiplying its colour, `Primitives` (`BlendMode`, `LineCap`, `LineJoin`, `PolygonArgs`, `PolylineArgs`, `ArcArgs`, `ImageArgs`, `blend` on the existing Args and `drawGlyphs`), new `primitives/Stroke.{h,cpp}`, `PolygonStyle` in foundation, and `Tessellator`'s convex fast path no longer taking a pentagram; headless tests of the sort and split, the mode table, arcs and strokes, and GL tests reading premultiplied output back from a `RenderTarget` | no caller moves, since every new parameter defaults to `Alpha`; four new ui-sandbox scenes, `polygon`, `arc`, `polyline` and `blend`; `AssetRenderer` un-premultiplies its readback for straight-alpha PNGs | sandbox scenes for polygon, arc, polyline and blend; existing scenes diffed by hand against PR 2's shots, within rounding, no baseline committed |
+| 4. The backend interface (`v0.5.0`) | `backend/Backend.h` (the interface, `BatchVertex` and `InstancedMeshVertex`, `DrawUniforms` with every std140 offset asserted), `backend/SlotTable.h`, `backend/NullBackend.{h,cpp}`, `backend/gl/GLBackend.{h,cpp}` absorbing PR 2's `GLTextures.{h,cpp}` (the table and `name()`), the GL halves of `BatchRenderer.cpp`, `RenderTarget.cpp` and `GPUTimer.cpp`, and `glewInit`; `GLTargets.{h,cpp}` gone, the stack of begun targets in `RenderTarget.cpp`; new `shaders/includes/uniforms.glsl`, the block both stages include; `Primitives::init(std::unique_ptr<backend::Backend>)` and `Primitives::invalidateState`; `TileTextureAtlas` and `FontRenderer` through `Primitives::createTexture`; the layering check exempting `backend/gl/` alone | `AppLauncher.cpp`, `asset-cli` and `AssetRenderer.test.cpp` hand `Primitives::init` a `GLBackend::create()` and drop their `glewInit`; `ChunkRenderer.cpp` includes `backend/gl/GLBackend.h` for `name()`; no `invalidateState` calls | renderer tests headless against the null backend (z sort, blend split, atlas split, clip bounds, instanced and baked uniforms, all through `flush`); GL tests of the block's offsets against the linked program and of 1,024 instanced draws twice round the uniform ring; sandbox and game screenshots and asset-cli PNGs against `v0.4.0` |
+| 5. Shader hooks (`v0.6.0`) | the base shader renamed from its old name (`base.vert`, `base.frag`, `BatchVertex`, `VertexLayout::Batched`); `cmake/SalalBaseShader.cmake` (`salal_base_shader()`) and `cmake/SalalGlslang.cmake`, the tool in `assembler/`, `glslang[tools]` as a host dependency; `#include "hooks.glsl"` in `base.vert` and the two hook points in `instancing.glsl`; `createPipeline` from source text, `ShaderSource::hookBlocks`, `Backend::setHookUniforms` and a uniform ring per binding point, each hook block's size and member offsets checked at link; `Primitives::init` taking the source, `Primitives::setHookUniforms`; the grass deform's six uniforms, its setter and its shader branch gone, `DrawUniforms` 176 bytes; no shader staging | the grass deform as a hook in `libs/engine/world/rendering/hooks/`, its block's struct checked member by member against the generated `HookUniformMember` constants, `salal_base_shader(engine ...)`; the three `Primitives::init` callers pass `base_shader::source()`; asset-cli's shader check and the test's shader-locating helper, and asset-cli's and asset-manager's shader mirrors, gone; asset-cli links `engine` | the assembler headless (order, refusals, empty folder, the generated header); hook writes through the null backend in order with draws; a test hook drawn on GL, on and off; sandbox, game and asset-cli output against `v0.5.0`, with the deform on |
 
 ## Questions, decided
 
 1. Premultiplied alpha in PR 3: yes (2026-10-26). The alternative keeps
    additive as a run split and leaves bloom compositing wrong.
-2. `BakedChunkRenderer` draws its own VAOs with the uber program in mode 2; the
+2. `BakedChunkRenderer` draws its own VAOs with the base shader in mode 2; the
    `beginBakedPass`/`endBakedPass` pair, shipped in PR 1, stays until a
    renderer-owned world mesh API exists (2026-10-26), which would turn 29 game
    GL calls into API.
 3. `backend/gl/` stays includable by consumers (2026-10-26): an explicit opt-in
    path outside the layering check, dropped the day a second backend exists.
    `gl/` and `shader/` move there in PR 2.
-4. The groundcover and cursor uniforms stay in the uber shader for now
-   (2026-10-26); their move to a game shader is filed separately.
+4. Worldsim's grass deform and its cursor uniforms moved out of the base
+   shader into a worldsim hook (2026-10-26). The base shader takes hooks,
+   assembled into it at build time ([shader-hooks.md](shader-hooks.md)), so the
+   GPU still sees one program and the game's code lives in the game's repo.
 
 The handle type is settled, not open: a distinct tagged `Handle<Tag>`, since
 nothing in `renderer` uses `ResourceHandle` or `ResourceManager` outside their

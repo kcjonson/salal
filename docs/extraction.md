@@ -608,17 +608,18 @@ first so each import is a pure move. State as of 2026-10-26:
 7. The GL-boundary PRs, salal, after step 6 so worldsim pins a tag before the
    API moves underneath it: four PRs, tagged `v0.2.0` through `v0.5.0` with a
    worldsim pin after each, sequenced in
-   [renderer-boundary.md](renderer-boundary.md). PRs 1 to 4 are in; the
-   groundcover and cursor uniforms moving to a game shader is the follow-up.
+   [renderer-boundary.md](renderer-boundary.md). PRs 1 to 4 are in, and the
+   base shader's build-time hooks after them took worldsim's grass deform out
+   of the renderer ([shader-hooks.md](shader-hooks.md)).
 
 Settled while scoping, beyond the import method and fonts under "What the repo
 looks like":
 
-- The renderer ships four shader files, `uber.vert`, `uber.frag`,
-  `includes/instancing.glsl` and `includes/uniforms.glsl` (since PR 4), staged
-  to `${CMAKE_BINARY_DIR}/shaders` (the top-level build directory, even when
-  salal is a subproject). The tile pass is the game's, which is why it moves
-  first.
+- The renderer ships four shader files, `base.vert`, `base.frag`,
+  `includes/instancing.glsl` and `includes/uniforms.glsl` (since PR 4), which
+  `salal_base_shader()` assembles with a consumer's hooks and compiles into it
+  at build time; nothing is staged ([shader-hooks.md](shader-hooks.md)). The
+  tile pass is the game's, which is why it moves first.
 - `DEVELOPMENT_BUILD` stays a PUBLIC per-config definition on
   `salal_foundation`, because `Log.h` compiles the debug levels out without it.
   The rename to `SALAL_DEVELOPMENT_BUILD` comes before a third consumer.

@@ -1,4 +1,4 @@
-// What the uber program writes, drawn through Primitives into a RenderTarget
+// What the base shader writes, drawn through Primitives into a RenderTarget
 // against a hidden GL 3.3 core context and read back; skipped where no context
 // can be made (headless CI). Output is premultiplied: a colour c at coverage a
 // over transparent stores (c * a, a), and an additive draw adds c * a and leaves
@@ -6,6 +6,7 @@
 
 #include "primitives/Primitives.h"
 
+#include "BaseShader.h"
 #include "backend/gl/GLBackend.h"
 #include "resources/RenderTarget.h"
 #include "vector/Types.h"
@@ -50,7 +51,7 @@ namespace Renderer {
 				glfwTerminate();
 				GTEST_SKIP() << "GLEW initialization failed";
 			}
-			Primitives::init(std::move(gl));
+			Primitives::init(std::move(gl), base_shader::source());
 			glViewport(0, 0, kSize, kSize);
 			Primitives::setCoordinateSystem(nullptr);
 			Primitives::setViewport(kSize, kSize);

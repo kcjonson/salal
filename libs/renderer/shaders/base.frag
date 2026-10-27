@@ -1,6 +1,6 @@
 #version 330 core
 
-// Uber Shader - Unified fragment shader for shapes and text
+// Base shader - unified fragment shader for shapes and text
 // Combines primitive.frag (SDF shapes) and msdf_text.frag (MSDF text)
 // (Ground tiles render in a dedicated pass: tile.vert/tile.frag)
 //
@@ -64,7 +64,7 @@ float screenPxRange(float pixelRange) {
 // data2.w carries the mode and the additive flag (BatchRenderer.h has the same
 // table): shapes store their border position 0..2, plus 4 when additive; the
 // negative modes below are 10 lower when additive. Instanced and baked draws
-// (-2, set by uber.vert) are never additive. Compares keep half-unit margins.
+// (-2, set by base.vert) are never additive. Compares keep half-unit margins.
 const float kRenderModeText = -1.0;      // MSDF text rendering
 const float kRenderModeInstanced = -2.0; // Simple solid color (instanced entities)
 const float kRenderModeShadow = -3.0;    // Box-shadow / glow (SDF soft falloff)

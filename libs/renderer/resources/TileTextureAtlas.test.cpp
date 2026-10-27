@@ -1,5 +1,6 @@
 #include "resources/TileTextureAtlas.h"
 
+#include "BaseShader.h"
 #include "backend/NullBackend.h"
 #include "backend/gl/GLBackend.h"
 #include "primitives/Primitives.h"
@@ -57,7 +58,7 @@ class TileTextureAtlasTest : public ::testing::Test {
 			glfwTerminate();
 			GTEST_SKIP() << "GLEW initialization failed";
 		}
-		Primitives::init(std::move(gl));
+		Primitives::init(std::move(gl), base_shader::source());
 	}
 
 	void TearDown() override {
@@ -74,7 +75,7 @@ class TileTextureAtlasTest : public ::testing::Test {
 TEST(TileTextureAtlasNullTest, UploadsGoToTheBackendAndTheTextureGoesWithTheAtlas) {
 	auto						owned = std::make_unique<backend::NullBackend>();
 	const backend::NullBackend& gpu = *owned;
-	Primitives::init(std::move(owned));
+	Primitives::init(std::move(owned), base_shader::source());
 	{
 		TileTextureAtlas atlas(64);
 		ASSERT_TRUE(atlas.texture().isValid());

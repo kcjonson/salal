@@ -4,6 +4,8 @@
 // Primitives, name() answers without one.
 
 #include "backend/gl/GLBackend.h"
+#include "BaseShader.h"
+#include "generated/OffsetHookShader.h"
 #include "primitives/Primitives.h"
 
 #include <GL/glew.h>
@@ -15,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -51,7 +54,7 @@ namespace Renderer::backend::gl {
 				GTEST_SKIP() << "GLEW initialization failed";
 			}
 			gpu = created.get();
-			Primitives::init(std::move(created));
+			Primitives::init(std::move(created), base_shader::source());
 		}
 
 		void TearDown() override {
@@ -257,22 +260,22 @@ namespace Renderer::backend::gl {
 	}
 
 	TEST_F(GLBackendTest, TheUniformBlockMatchesDrawUniforms) {
-		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"});
-		ASSERT_TRUE(pipeline.isValid()) << "the uber shaders are mirrored beside the test executable";
+		const PipelineHandle pipeline = gpu->createPipeline(base_shader::source());
+		ASSERT_TRUE(pipeline.isValid());
 		const GLuint program = gpu->programName(pipeline);
 		const GLuint block = glGetUniformBlockIndex(program, kDrawUniformsBlock);
 		ASSERT_NE(block, GL_INVALID_INDEX);
 
 		GLint size = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
-		EXPECT_GE(size, static_cast<GLint>(offsetof(DrawUniforms, cursorStrength) + sizeof(float)));
+		EXPECT_GE(size, static_cast<GLint>(offsetof(DrawUniforms, instanced) + sizeof(int32_t)));
 		EXPECT_LE(size, static_cast<GLint>(sizeof(DrawUniforms)));
 		GLint binding = -1;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_BINDING, &binding);
 		EXPECT_EQ(binding, static_cast<GLint>(GLBackend::kUniformBinding));
 		GLint members = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS, &members);
-		EXPECT_EQ(members, 16);
+		EXPECT_EQ(members, 10);
 
 		// Every member where std140 puts it, which is where the C++ struct has it.
 		const std::pair<const char*, size_t> offsets[] = {
@@ -280,18 +283,12 @@ namespace Renderer::backend::gl {
 			{"u_transform", offsetof(DrawUniforms, transform)},
 			{"u_cameraPosition", offsetof(DrawUniforms, cameraPosition)},
 			{"u_viewportSize", offsetof(DrawUniforms, viewportSize)},
-			{"u_cursorWorld", offsetof(DrawUniforms, cursorWorld)},
 			{"u_cameraZoom", offsetof(DrawUniforms, cameraZoom)},
 			{"u_pixelsPerMeter", offsetof(DrawUniforms, pixelsPerMeter)},
 			{"u_bakedAlpha", offsetof(DrawUniforms, bakedAlpha)},
 			{"u_viewportHeight", offsetof(DrawUniforms, viewportHeight)},
 			{"u_pixelRatio", offsetof(DrawUniforms, pixelRatio)},
 			{"u_instanced", offsetof(DrawUniforms, instanced)},
-			{"u_groundcoverMode", offsetof(DrawUniforms, groundcoverMode)},
-			{"u_groundcoverOpenness", offsetof(DrawUniforms, groundcoverOpenness)},
-			{"u_groundcoverReach", offsetof(DrawUniforms, groundcoverReach)},
-			{"u_cursorRadius", offsetof(DrawUniforms, cursorRadius)},
-			{"u_cursorStrength", offsetof(DrawUniforms, cursorStrength)},
 		};
 		for (const auto& [member, offset] : offsets) {
 			GLuint index = GL_INVALID_INDEX;
@@ -351,8 +348,134 @@ namespace Renderer::backend::gl {
 		glDeleteBuffers(1, &foreign);
 	}
 
+	// What binding point `binding` holds: its buffer and the range's start and size.
+	struct UniformRange {
+		GLint	buffer = 0;
+		GLint64 start = -1;
+		GLint64 size = 0;
+	};
+
+	UniformRange uniformRange(GLuint binding) {
+		UniformRange range;
+		glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, binding, &range.buffer);
+		glGetInteger64i_v(GL_UNIFORM_BUFFER_START, binding, &range.start);
+		glGetInteger64i_v(GL_UNIFORM_BUFFER_SIZE, binding, &range.size);
+		return range;
+	}
+
+	std::array<float, 4> uniformContents(const UniformRange& range) {
+		std::array<float, 4> contents = {9.0F, 9.0F, 9.0F, 9.0F};
+		glBindBuffer(GL_UNIFORM_BUFFER, static_cast<GLuint>(range.buffer));
+		glGetBufferSubData(GL_UNIFORM_BUFFER, static_cast<GLintptr>(range.start), sizeof(contents), contents.data());
+		return contents;
+	}
+
+	TEST_F(GLBackendTest, AHookBlockIsOnItsBindingPointAndStartsZeroed) {
+		const PipelineHandle pipeline = gpu->createPipeline(offset_hook_shader::source());
+		ASSERT_TRUE(pipeline.isValid());
+		const GLuint program = gpu->programName(pipeline);
+		const GLuint block = glGetUniformBlockIndex(program, offset_hook_shader::kOffset.block);
+		ASSERT_NE(block, GL_INVALID_INDEX);
+		GLint binding = -1;
+		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_BINDING, &binding);
+		EXPECT_EQ(binding, 1);
+
+		const UniformRange zeroed = uniformRange(1);
+		ASSERT_NE(zeroed.buffer, 0);
+		EXPECT_EQ(zeroed.size, 16);
+		EXPECT_EQ(uniformContents(zeroed), (std::array<float, 4>{}));
+
+		const std::array<float, 4> values = {1.0F, 2.0F, 3.0F, 4.0F};
+		gpu->setHookUniforms(1, std::as_bytes(std::span(values)));
+		const UniformRange written = uniformRange(1);
+		EXPECT_NE(written.start, zeroed.start); // the next slot, so a draw in flight keeps the zeros
+		EXPECT_EQ(uniformContents(written), values);
+		EXPECT_EQ(uniformContents(zeroed), (std::array<float, 4>{}));
+		gpu->destroyPipeline(pipeline);
+	}
+
+	TEST_F(GLBackendTest, AHookBlockOfAnotherSizeOrLayoutFailsThePipeline) {
+		HookUniformBlock wrong = offset_hook_shader::kOffset;
+		ShaderSource	 source = offset_hook_shader::source();
+		source.hookBlocks = {&wrong, 1};
+		wrong.size = 32;
+		EXPECT_FALSE(gpu->createPipeline(source).isValid());
+		wrong = offset_hook_shader::kOffset;
+		wrong.binding = GLBackend::kUniformBinding;
+		EXPECT_FALSE(gpu->createPipeline(source).isValid());
+
+		// A member where the program doesn't have it.
+		std::array<HookUniformMember, 2> moved = {offset_hook_shader::kOffsetLocal, offset_hook_shader::kOffsetWorld};
+		moved[1].offset = 4;
+		wrong = offset_hook_shader::kOffset;
+		wrong.members = moved;
+		EXPECT_FALSE(gpu->createPipeline(source).isValid());
+		EXPECT_EQ(uniformRange(1).buffer, 0); // no ring made for a pipeline that failed
+	}
+
+	TEST_F(GLBackendTest, APipelineThatFailsOnALaterBlockMakesNoRingForAnEarlierOne) {
+		HookUniformBlock second = offset_hook_shader::kOffset;
+		second.binding = 2;
+		second.size = 32;
+		const std::array<HookUniformBlock, 2> blocks = {offset_hook_shader::kOffset, second};
+		ShaderSource						  source = offset_hook_shader::source();
+		source.hookBlocks = blocks;
+		EXPECT_FALSE(gpu->createPipeline(source).isValid());
+		EXPECT_EQ(uniformRange(1).buffer, 0);
+		EXPECT_EQ(uniformRange(2).buffer, 0);
+	}
+
+	TEST_F(GLBackendTest, AnInactiveHookBlockIsSkippedAndItsWritesDropped) {
+		// What a driver reports for a block whose reads it folded away: no such block.
+		HookUniformBlock inactive = offset_hook_shader::kOffset;
+		inactive.block = "NoSuchUniforms";
+		inactive.binding = 3;
+		ShaderSource source = offset_hook_shader::source();
+		source.hookBlocks = {&inactive, 1};
+		const PipelineHandle pipeline = gpu->createPipeline(source);
+		ASSERT_TRUE(pipeline.isValid());
+		EXPECT_EQ(uniformRange(3).buffer, 0);
+		const std::array<float, 4> values = {1.0F, 2.0F, 3.0F, 4.0F};
+		gpu->setHookUniforms(3, std::as_bytes(std::span(values)));
+		EXPECT_EQ(uniformRange(3).buffer, 0);
+		EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+		gpu->destroyPipeline(pipeline);
+	}
+
+	TEST_F(GLBackendTest, HookUniformsForAnUndeclaredPointOrOfAnotherSizeAreIgnored) {
+		const PipelineHandle pipeline = gpu->createPipeline(offset_hook_shader::source());
+		ASSERT_TRUE(pipeline.isValid());
+		const UniformRange		   before = uniformRange(1);
+		const std::array<float, 4> values = {1.0F, 2.0F, 3.0F, 4.0F};
+		const auto				   bytes = std::as_bytes(std::span(values));
+		gpu->setHookUniforms(1, bytes.first(8));
+		gpu->setHookUniforms(5, bytes);
+		EXPECT_EQ(uniformRange(1).start, before.start);
+		EXPECT_EQ(uniformRange(5).buffer, 0);
+		EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+		gpu->destroyPipeline(pipeline);
+	}
+
+	TEST_F(GLBackendTest, InvalidateStateRebindsTheHookBlocks) {
+		const PipelineHandle pipeline = gpu->createPipeline(offset_hook_shader::source());
+		ASSERT_TRUE(pipeline.isValid());
+		const UniformRange ring = uniformRange(1);
+
+		GLuint foreign = 0;
+		glGenBuffers(1, &foreign);
+		glBindBuffer(GL_UNIFORM_BUFFER, foreign);
+		glBufferData(GL_UNIFORM_BUFFER, 256, nullptr, GL_STATIC_DRAW);
+		glBindBufferBase(GL_UNIFORM_BUFFER, 1, foreign);
+		gpu->invalidateState();
+
+		EXPECT_EQ(uniformRange(1).buffer, ring.buffer);
+		EXPECT_EQ(uniformRange(1).start, ring.start);
+		glDeleteBuffers(1, &foreign);
+		gpu->destroyPipeline(pipeline);
+	}
+
 	TEST_F(GLBackendTest, ForeignDrawsWithNoPipelineBindNoProgram) {
-		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"});
+		const PipelineHandle pipeline = gpu->createPipeline(base_shader::source());
 		ASSERT_TRUE(pipeline.isValid());
 		glUseProgram(gpu->programName(pipeline)); // whatever a game's pass left bound
 		gpu->beginForeignDraws({}, BlendState::Alpha);
@@ -364,25 +487,25 @@ namespace Renderer::backend::gl {
 	}
 
 	TEST_F(GLBackendTest, ADrawBindsEverythingItUsesAndLeavesOnlyItsProgram) {
-		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"});
+		const PipelineHandle pipeline = gpu->createPipeline(base_shader::source());
 		ASSERT_TRUE(pipeline.isValid());
 		// A stream buffer made empty grows to its first write.
 		const BufferHandle	 vertices = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
 		const BufferHandle	 indices = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
-		const GeometryHandle geometry = gpu->createGeometry({.layout = VertexLayout::Uber, .vertices = vertices, .indices = indices});
+		const GeometryHandle geometry = gpu->createGeometry({.layout = VertexLayout::Batched, .vertices = vertices, .indices = indices});
 		ASSERT_TRUE(geometry.isValid());
 
 		// Two flat red triangles over a 4 x 4 target, drawn as two calls, the second from index 3.
-		const Foundation::Vec4			red(1.0F, 0.0F, 0.0F, 1.0F);
-		const Foundation::Vec4			flat(0.0F, 0.0F, 0.0F, 1.0F); // a zero-size shape: the triangle itself
-		const Foundation::Vec4			none(0.0F);
-		const std::array<UberVertex, 4> quad = {{
+		const Foundation::Vec4			 red(1.0F, 0.0F, 0.0F, 1.0F);
+		const Foundation::Vec4			 flat(0.0F, 0.0F, 0.0F, 1.0F); // a zero-size shape: the triangle itself
+		const Foundation::Vec4			 none(0.0F);
+		const std::array<BatchVertex, 4> quad = {{
 			{{0.0F, 0.0F}, {0.0F, 0.0F}, red, none, flat, none},
 			{{4.0F, 0.0F}, {0.0F, 0.0F}, red, none, flat, none},
 			{{4.0F, 4.0F}, {0.0F, 0.0F}, red, none, flat, none},
 			{{0.0F, 4.0F}, {0.0F, 0.0F}, red, none, flat, none},
 		}};
-		const std::array<uint32_t, 6>	triangles = {0, 1, 2, 0, 2, 3};
+		const std::array<uint32_t, 6>	 triangles = {0, 1, 2, 0, 2, 3};
 		gpu->updateBuffer(vertices, 0, sizeof(quad), quad.data());
 		gpu->updateBuffer(indices, 0, sizeof(triangles), triangles.data());
 

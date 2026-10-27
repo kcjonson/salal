@@ -1,6 +1,6 @@
 #pragma once
 
-// Uber Batch Renderer - Unified rendering for shapes and text.
+// Batch Renderer - Unified rendering for shapes and text.
 //
 // This is the internal batching implementation used by the Primitives API.
 // It accumulates draw commands for both shapes (SDF) and text (MSDF) and
@@ -8,7 +8,7 @@
 //
 // Also provides GPU instancing for efficient rendering of many identical meshes.
 //
-// It sits in front of the backend seam: it builds UberVertex data, the draw runs
+// It sits in front of the backend seam: it builds BatchVertex data, the draw runs
 // and the uniforms as plain data, and a backend::Backend uploads and draws them.
 
 #include "Handle.h"
@@ -31,15 +31,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// Forward declaration
 	class CoordinateSystem;
 
-	// UberVertex, the batch's vertex, is in backend/Backend.h: the backend uploads it.
+	// BatchVertex, the batch's vertex, is in backend/Backend.h: the backend uploads it.
 	//
-	// data2.w holds the render mode and the additive flag together; uber.frag
+	// data2.w holds the render mode and the additive flag together; base.frag
 	// decodes the same table with half-unit margins.
 	//
 	//   mode              alpha        additive
 	//   shape             0, 1, 2      4, 5, 6     border position inside, center, outside
 	//   text              -1           -11
-	//   instanced, baked  -2           -           written by uber.vert, never additive
+	//   instanced, baked  -2           -           written by base.vert, never additive
 	//   shadow            -3           -13
 	//   arc               -4           -14
 	//   image             -5           -15
@@ -60,7 +60,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	// The GPU blend state a mode draws in. Output is premultiplied and blended
 	// (ONE, ONE_MINUS_SRC_ALPHA); Additive is that state with the output alpha
-	// zeroed in uber.frag, so it shares Alpha's state and never splits a run.
+	// zeroed in base.frag, so it shares Alpha's state and never splits a run.
 	constexpr backend::BlendState blendState(Primitives::BlendMode /*mode*/) {
 		return backend::BlendState::Alpha;
 	}
@@ -85,9 +85,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// Batch accumulator - collects geometry before GPU upload
 	class BatchRenderer {
 	  public:
-		// Makes its pipeline (the uber shaders), its stream buffers and their geometry
-		// on `renderBackend`, which must outlive it; destroys them again on destruction.
-		explicit BatchRenderer(backend::Backend& renderBackend);
+		// Makes its pipeline (the base shader, from `baseShader`), its stream buffers and
+		// their geometry on `renderBackend`, which must outlive it; destroys them again on
+		// destruction.
+		BatchRenderer(backend::Backend& renderBackend, const backend::ShaderSource& baseShader);
 		~BatchRenderer();
 
 		BatchRenderer(const BatchRenderer&) = delete;
@@ -252,7 +253,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		RenderStats getStats() const;
 
 		// The vertices added since the last flush, in the order added.
-		std::span<const UberVertex> getPendingVertices() const { return vertices; }
+		std::span<const BatchVertex> getPendingVertices() const { return vertices; }
 
 		// --- GPU Instancing (World-Space) ---
 
@@ -284,14 +285,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float					   pixelsPerMeter
 		);
 
-		/// The groundcover deform and cursor uniforms (instancing.glsl), read by the
-		/// instanced path while `params.enabled`.
-		void setGroundcover(const Primitives::GroundcoverParams& params);
-
 		/// u_bakedAlpha, the alpha the instanced and baked paths multiply in.
 		void setBakedAlpha(float alpha);
 
-		/// Bind the uber pipeline in its baked world-space mode (u_instanced = 2) with
+		/// Bind the base shader's pipeline in its baked world-space mode (u_instanced = 2) with
 		/// the camera uniforms and the projection from the setViewport() size, so a
 		/// caller can draw its own world-space VAOs under it until endBakedPass().
 		void beginBakedPass(const Primitives::WorldCamera& camera);
@@ -299,8 +296,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	  private:
 		// Vertex data (CPU-side accumulation)
-		std::vector<UberVertex> vertices;
-		std::vector<uint32_t>	indices;
+		std::vector<BatchVertex> vertices;
+		std::vector<uint32_t>	 indices;
 
 		// Per-vertex texture tag, parallel to `vertices`. Invalid = no texture
 		// requirement (shapes, arcs); valid = the MSDF atlas a text vertex or the
@@ -347,8 +344,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		GeometryHandle	  geometry;
 
 		// The uniforms as the last draw read them. Each draw path sets the fields it
-		// uses and submits the whole block, so the others (the groundcover deform,
-		// u_bakedAlpha) carry over between draws as GL uniforms did.
+		// uses and submits the whole block, so the others (u_bakedAlpha) carry over
+		// between draws as GL uniforms did.
 		backend::DrawUniforms uniforms;
 
 		// flush()'s draw calls, reused.

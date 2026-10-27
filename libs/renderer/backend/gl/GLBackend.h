@@ -17,7 +17,9 @@
 #include "backend/gl/GLVertexArray.h"
 #include "backend/gl/Shader.h"
 #include <GL/glew.h>
+#include <cstddef>
 #include <memory>
+#include <vector>
 
 namespace Renderer::backend::gl {
 
@@ -60,6 +62,7 @@ namespace Renderer::backend::gl {
 		void		   destroyPipeline(PipelineHandle pipeline) override;
 
 		void setUniforms(const DrawUniforms& uniforms) override;
+		void setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) override;
 		void draw(std::span<const DrawCall> calls) override;
 		void beginForeignDraws(PipelineHandle pipeline, BlendState blend) override;
 		void endForeignDraws() override;
@@ -75,8 +78,8 @@ namespace Renderer::backend::gl {
 		[[nodiscard]] GLuint textureName(TextureHandle texture) const;
 		[[nodiscard]] GLuint programName(PipelineHandle pipeline) const;
 
-		// The binding point the DrawUniforms block reads, and how many setUniforms()
-		// calls the ring holds before it is orphaned.
+		// The binding point the DrawUniforms block reads (the hooks' blocks read theirs,
+		// 1 up), and how many writes a binding point's ring holds before it is orphaned.
 		static constexpr GLuint kUniformBinding = 0;
 		static constexpr int	kUniformSlots = 512;
 
@@ -102,11 +105,31 @@ namespace Renderer::backend::gl {
 
 		struct GeometrySlot {
 			GLVertexArray vertexArray;
-			VertexLayout  layout = VertexLayout::Uber;
+			VertexLayout  layout = VertexLayout::Batched;
 		};
 
-		void   applyFixedState();
-		GLuint framebuffer(RenderTargetHandle target) const;
+		// setUniforms() and setHookUniforms() write slot after slot of one buffer per
+		// binding point, and orphan it (new storage, the old kept until the draws reading
+		// it finish) when it runs out. The last values written, and their slot, which a
+		// repeat of them binds again.
+		struct UniformRing {
+			GLuint				   binding = 0;
+			GLsizeiptr			   size = 0;   // bytes a write takes
+			GLsizeiptr			   stride = 0; // size rounded up to GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT
+			GLBuffer			   buffer;
+			int					   slot = 0;
+			std::vector<std::byte> last;
+			GLintptr			   lastOffset = -1;
+		};
+
+		void		 applyFixedState();
+		GLuint		 framebuffer(RenderTargetHandle target) const;
+		UniformRing	 makeRing(GLuint binding, GLsizeiptr size) const;
+		static void	 write(UniformRing& ring, const void* data);
+		static void	 bind(const UniformRing& ring);
+		UniformRing* hookRing(GLuint binding);
+		bool		 bindHookBlocks(GLuint program, const ShaderSource& source);
+		bool		 hookBlockMatches(GLuint program, GLuint index, const HookUniformBlock& hook) const;
 
 		SlotTable<TextureHandle, TextureSlot>	  textures;
 		SlotTable<RenderTargetHandle, TargetSlot> targets;
@@ -115,14 +138,10 @@ namespace Renderer::backend::gl {
 		SlotTable<PipelineHandle, Shader>		  pipelines;
 		SlotTable<QueryHandle, GLQuery>			  queries;
 
-		// setUniforms() writes slot after slot of one buffer, and orphans it (new
-		// storage, the old kept until the draws reading it finish) when it runs out.
-		// The last values written, and their slot, which a repeat of them binds again.
-		GLBuffer	 uniformRing;
-		GLsizeiptr	 uniformStride = 0;
-		int			 uniformSlot = 0;
-		DrawUniforms lastUniforms;
-		GLintptr	 lastUniformOffset = -1;
+		GLint					 uniformAlignment = 256;
+		UniformRing				 drawRing;			   // DrawUniforms, on kUniformBinding
+		std::vector<UniformRing> hookRings;			   // one per hook block binding point, made by createPipeline()
+		std::vector<GLuint>		 inactiveHookBindings; // points whose block a pipeline had inactive; writes there are dropped
 
 		RenderTargetHandle boundTarget;
 		int				   windowWidth = 0;

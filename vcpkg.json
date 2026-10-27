@@ -11,7 +11,12 @@
     "nanosvg",
     "cpp-httplib",
     "gtest",
-    "benchmark"
+    "benchmark",
+    {
+      "name": "glslang",
+      "host": true,
+      "features": ["tools"]
+    }
   ],
   "builtin-baseline": "bfc6984dcbe4a165741aa95411cb5e77d9c88068",
   "overrides": [

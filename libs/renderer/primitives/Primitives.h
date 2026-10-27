@@ -29,6 +29,7 @@
 #include <numbers>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace renderer {
@@ -46,11 +47,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Start the renderer on `backend`, which it owns from here until shutdown():
 		// backend::gl::GLBackend::create() on the GL context the platform made, or a
-		// backend::NullBackend for tests that run without a GPU. Every call before
-		// init() or after shutdown() does nothing.
-		void init(std::unique_ptr<backend::Backend> backend);
-		// init(nullptr), every v0.4.0 call, would otherwise compile and leave the renderer off.
-		void init(std::nullptr_t) = delete;
+		// backend::NullBackend for tests that run without a GPU. It draws with
+		// `baseShader`, the base shader salal_base_shader() assembled for the consumer
+		// and its hooks (the generated <namespace>::source(), docs/shader-hooks.md),
+		// which needs to outlive only this call. Every call before init() or after
+		// shutdown() does nothing.
+		void init(std::unique_ptr<backend::Backend> backend, const backend::ShaderSource& baseShader);
 		void shutdown();
 
 		// Set the coordinate system (must be called after Init)
@@ -415,34 +417,31 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float			 pixelsPerMeter = 1.0F;
 		};
 
-		// The groundcover deform (instancing.glsl): clumps rest at `openness` of
-		// full size and open and bend away within `cursorRadius` of `cursorWorld`.
-		// Off by default; a no-op for ordinary instanced entities.
-		struct GroundcoverParams {
-			bool			 enabled = false;
-			float			 openness = 1.0F;
-			float			 reach = 0.0F;
-			Foundation::Vec2 cursorWorld{0.0F, 0.0F};
-			float			 cursorRadius = 0.0F;
-			float			 cursorStrength = 0.0F;
-		};
-
 		// Upload a tessellated mesh once for drawInstanced(); the handle releases the
 		// GPU buffers when destroyed or passed to releaseInstancedMesh().
 		InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 		void				releaseInstancedMesh(InstancedMeshHandle& handle);
 
 		// Draw `count` instances of an uploaded mesh immediately (not batched), with
-		// the per-instance transforms applied on the GPU under `camera`.
+		// the per-instance transforms applied on the GPU under `camera` and the base
+		// shader's hooks run on every vertex (setHookUniforms below).
 		void drawInstanced(const InstancedMeshHandle& handle, const InstanceData* instances, uint32_t count, const WorldCamera& camera);
-
-		// Groundcover and cursor uniforms for subsequent instanced draws.
-		void setGroundcover(const GroundcoverParams& params);
 
 		// Alpha multiplied into instanced and baked draws (u_bakedAlpha); 1 is opaque.
 		void setBakedAlpha(float alpha);
 
-		// Bracket a caller's own world-space mesh draws: the uber program in its baked
+		// Fill a hook's uniform block (docs/shader-hooks.md) for the instanced draws
+		// issued from here on; a draw already issued keeps the values it was given.
+		// `bytes` is the block's std140 contents, the block's size exactly: a C++
+		// struct laid out like the GLSL, through std::as_bytes. `block` is the constant
+		// the generated header has for it, `hook` the hook's name (its file name before
+		// .vert.glsl). A block the base shader init() was given does not have, or the
+		// wrong size, is logged and ignored. Every block starts zeroed, which a hook
+		// takes as off.
+		void setHookUniforms(const backend::HookUniformBlock& block, std::span<const std::byte> bytes);
+		void setHookUniforms(std::string_view hook, std::span<const std::byte> bytes);
+
+		// Bracket a caller's own world-space mesh draws: the base shader in its baked
 		// mode with `camera` and the projection from the setViewport() size, blending
 		// on and depth and culling off, as the batch itself draws. Flush pending
 		// batched geometry first if draw order matters. setBakedAlpha() may be called

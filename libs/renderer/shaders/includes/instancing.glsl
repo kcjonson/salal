@@ -1,4 +1,4 @@
-// instancing.glsl - GPU Instancing support for uber shader
+// instancing.glsl - GPU Instancing support for the base shader
 //
 // Provides per-instance data attributes and world-to-screen transformation
 // for efficient rendering of many instances of the same mesh.
@@ -12,10 +12,12 @@
 layout(location = 6) in vec4 a_instanceData1;
 layout(location = 7) in vec4 a_instanceData2;
 
-// The camera, viewport and groundcover uniforms it reads are in the DrawUniforms
-// block (uniforms.glsl), which uber.vert includes first.
+// The camera and viewport uniforms it reads are in the DrawUniforms block
+// (uniforms.glsl), and the hook chain is in hooks.glsl; base.vert includes both first.
 
-/// Transform a local mesh vertex to screen space using instance data.
+/// Transform a local mesh vertex to screen space using instance data, running the
+/// hook chain (docs/shader-hooks.md) in mesh space before the instance transform and in
+/// world space after it.
 /// @param localPos Vertex position in local mesh space (usually centered around origin)
 /// @return Screen-space position
 vec2 instanceToScreen(vec2 localPos) {
@@ -24,18 +26,7 @@ vec2 instanceToScreen(vec2 localPos) {
     float rotation = a_instanceData1.z;
     float scale = a_instanceData1.w;
 
-    vec2  lp = localPos;
-    float reachFrac = 0.0; // 0 at the clump base, 1 at the outer tips
-    float infl = 0.0;      // cursor influence, 0 far → 1 at center
-
-    if (u_groundcoverMode == 1) {
-        reachFrac = clamp(length(localPos) / max(u_groundcoverReach, 0.0001), 0.0, 1.0);
-        float dC = distance(worldPos, u_cursorWorld);
-        infl = 1.0 - smoothstep(0.0, max(u_cursorRadius, 0.0001), dC);
-        // Compact at rest, full size where the cursor reveals it.
-        float openness = mix(u_groundcoverOpenness, 1.0, infl);
-        lp *= openness;
-    }
+    vec2 lp = applyInstanceLocalHooks(localPos, worldPos);
 
     // Apply rotation around origin
     float cosR = cos(rotation);
@@ -47,14 +38,7 @@ vec2 instanceToScreen(vec2 localPos) {
 
     // Apply scale and translate to world position
     vec2 worldVertex = rotated * scale + worldPos;
-
-    if (u_groundcoverMode == 1 && infl > 0.0) {
-        // Bend away from the cursor: outer tips move most, the rooted base not at all.
-        vec2  away = worldVertex - u_cursorWorld;
-        float d = length(away);
-        vec2  pushDir = d > 0.0001 ? away / d : vec2(0.0, -1.0);
-        worldVertex += pushDir * (infl * reachFrac * u_cursorStrength);
-    }
+    worldVertex = applyInstanceWorldHooks(worldVertex, localPos, worldPos);
 
     // Transform world → screen
     // Screen center is viewport center, camera position is world center

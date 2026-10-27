@@ -18,12 +18,12 @@
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
-	// The batched vertex (VertexLayout::Uber), attributes 0 to 5 of uber.vert:
+	// The batched vertex (VertexLayout::Batched), attributes 0 to 5 of base.vert:
 	//   0 position (vec2), 1 texCoord (vec2): UV for text and images, rect-local for
 	//   shapes, arc-local for arcs; 2 color (vec4); 3 data1 (vec4): borderData for
 	//   shapes, blur for shadows; 4 data2 (vec4): per-mode parameters, the render mode
 	//   in w; 5 clipBounds (vec4): (minX, minY, maxX, maxY), or zero for no clip.
-	struct UberVertex {
+	struct BatchVertex {
 		Foundation::Vec2 position;	 // Screen-space position
 		Foundation::Vec2 texCoord;	 // UV for text and images, rectLocalPos for shapes
 		Foundation::Vec4 color;		 // Fill color RGBA, straight alpha
@@ -33,7 +33,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 									 // arc: (innerR, outerR, sweep / 2, w); image: (0, 0, 0, w)
 		Foundation::Vec4 clipBounds; // Clip rect (minX, minY, maxX, maxY), or (0,0,0,0) for no clipping
 	};
-	static_assert(sizeof(UberVertex) == 80, "UberVertex is the 80-byte stride of the Uber layout");
+	static_assert(sizeof(BatchVertex) == 80, "BatchVertex is the 80-byte stride of the Batched layout");
 
 	// An instanced mesh vertex (VertexLayout::InstancedMesh), attributes 0 and 2; the
 	// per-instance InstanceData (primitives/InstanceData.h) supplies 6 and 7.
@@ -46,10 +46,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 namespace Renderer::backend {
 
-	// A geometry's vertex format, which fixes its index type: Uber is UberVertex with
+	// A geometry's vertex format, which fixes its index type: Batched is BatchVertex with
 	// uint32 indices; InstancedMesh is InstancedMeshVertex with uint16 indices, plus
 	// an InstanceData per instance.
-	enum class VertexLayout : uint8_t { Uber, InstancedMesh };
+	enum class VertexLayout : uint8_t { Batched, InstancedMesh };
 
 	// How a buffer is written after it is made. Static: never. Dynamic: in place, the
 	// write ordered after every draw already submitted, which still reads the old
@@ -63,15 +63,42 @@ namespace Renderer::backend {
 	// BatchRenderer.h), so mixing the two never splits a draw.
 	enum class BlendState : uint8_t { Alpha };
 
-	// A pipeline's shader files under shaders/, which the backend loads and compiles.
+	// A member of a hook's uniform block, as the generated header names it: its name as GL
+	// names it ("Block.member" in a block with an instance name), its GLSL type, its std140
+	// offset, and its size in bytes (an array's elements at their std140 stride). A C++
+	// struct mirroring the block static_asserts each member's offsetof and sizeof against these.
+	struct HookUniformMember {
+		const char* name = nullptr;
+		const char* type = nullptr;
+		uint32_t	offset = 0;
+		uint32_t	size = 0;
+	};
+
+	// A hook's uniform block in an assembled base shader (docs/shader-hooks.md), as the
+	// header salal_base_shader() generates names it: the hook (its file name before
+	// .vert.glsl), the block's name in the GLSL, the binding point the build gave it (1
+	// up; 0 is DrawUniforms'), its std140 size in bytes, padded to 16, and its members in
+	// offset order.
+	struct HookUniformBlock {
+		const char*						   hook = nullptr;
+		const char*						   block = nullptr;
+		uint32_t						   binding = 0;
+		uint32_t						   size = 0;
+		std::span<const HookUniformMember> members;
+	};
+
+	// A pipeline's GLSL source, one text per stage, and the hooks' uniform blocks its
+	// vertex stage declares. The base shader's is the generated <namespace>::source()
+	// of salal_base_shader().
 	struct ShaderSource {
-		const char* vertex = nullptr;
-		const char* fragment = nullptr;
+		const char*						  vertex = nullptr;
+		const char*						  fragment = nullptr;
+		std::span<const HookUniformBlock> hookBlocks;
 	};
 
 	// Buffers to draw from in `layout`; `instances` only for InstancedMesh.
 	struct GeometryDesc {
-		VertexLayout layout = VertexLayout::Uber;
+		VertexLayout layout = VertexLayout::Batched;
 		BufferHandle vertices;
 		BufferHandle indices;
 		BufferHandle instances;
@@ -94,7 +121,7 @@ namespace Renderer::backend {
 	constexpr const char* kDrawUniformsBlock = "DrawUniforms";
 
 	// The per-draw uniforms: the std140 block DrawUniforms in
-	// shaders/includes/uniforms.glsl, member for member, padded to the block's 208
+	// shaders/includes/uniforms.glsl, member for member, padded to the block's 176
 	// bytes. In this order std140 puts no padding between members (mat4 on 16 bytes,
 	// vec2 on 8, scalars on 4); the offsets are asserted below and against the linked
 	// program in GLBackend.test.cpp. Change the two together.
@@ -103,37 +130,25 @@ namespace Renderer::backend {
 		Foundation::Mat4 transform{1.0F};
 		Foundation::Vec2 cameraPosition{0.0F, 0.0F}; // world position at the viewport's centre
 		Foundation::Vec2 viewportSize{0.0F, 0.0F};	 // logical pixels, for the world-space modes
-		Foundation::Vec2 cursorWorld{0.0F, 0.0F};	 // groundcover interaction centre
 		float			 cameraZoom = 0.0F;
 		float			 pixelsPerMeter = 0.0F;
 		float			 bakedAlpha = 1.0F;		// multiplies instanced and baked draws
 		float			 viewportHeight = 0.0F; // framebuffer pixels, for the clip test's y flip
 		float			 pixelRatio = 0.0F;		// framebuffer pixels per logical pixel
 		int32_t			 instanced = 0;			// 0 batched, 1 instanced, 2 baked world space
-		int32_t			 groundcoverMode = 0;	// 1 applies the groundcover deform
-		float			 groundcoverOpenness = 0.0F;
-		float			 groundcoverReach = 0.0F;
-		float			 cursorRadius = 0.0F;
-		float			 cursorStrength = 0.0F;
-		float			 padding[3] = {}; // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+		float			 padding[2] = {};		// NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 	};
 	static_assert(offsetof(DrawUniforms, projection) == 0);
 	static_assert(offsetof(DrawUniforms, transform) == 64);
 	static_assert(offsetof(DrawUniforms, cameraPosition) == 128);
 	static_assert(offsetof(DrawUniforms, viewportSize) == 136);
-	static_assert(offsetof(DrawUniforms, cursorWorld) == 144);
-	static_assert(offsetof(DrawUniforms, cameraZoom) == 152);
-	static_assert(offsetof(DrawUniforms, pixelsPerMeter) == 156);
-	static_assert(offsetof(DrawUniforms, bakedAlpha) == 160);
-	static_assert(offsetof(DrawUniforms, viewportHeight) == 164);
-	static_assert(offsetof(DrawUniforms, pixelRatio) == 168);
-	static_assert(offsetof(DrawUniforms, instanced) == 172);
-	static_assert(offsetof(DrawUniforms, groundcoverMode) == 176);
-	static_assert(offsetof(DrawUniforms, groundcoverOpenness) == 180);
-	static_assert(offsetof(DrawUniforms, groundcoverReach) == 184);
-	static_assert(offsetof(DrawUniforms, cursorRadius) == 188);
-	static_assert(offsetof(DrawUniforms, cursorStrength) == 192);
-	static_assert(sizeof(DrawUniforms) == 208);
+	static_assert(offsetof(DrawUniforms, cameraZoom) == 144);
+	static_assert(offsetof(DrawUniforms, pixelsPerMeter) == 148);
+	static_assert(offsetof(DrawUniforms, bakedAlpha) == 152);
+	static_assert(offsetof(DrawUniforms, viewportHeight) == 156);
+	static_assert(offsetof(DrawUniforms, pixelRatio) == 160);
+	static_assert(offsetof(DrawUniforms, instanced) == 164);
+	static_assert(sizeof(DrawUniforms) == 176);
 
 	// One per GPU context. Every handle it returns is invalid when the object could
 	// not be made (logged), and every call taking a stale or invalid handle does
@@ -144,8 +159,9 @@ namespace Renderer::backend {
 	// texture, blend) are made by each draw() and assumed to survive nothing outside
 	// it, because a game's own GPU code runs between the renderer's submissions. The
 	// one exception is the uniforms: setUniforms() binds them to uniform binding point
-	// 0, which is the renderer's, and draws read them there, so a game's GL that binds
-	// a uniform buffer to point 0 calls invalidateState() before the renderer draws.
+	// 0 and setHookUniforms() the hooks' blocks to points 1 up, which are the
+	// renderer's, and draws read them there, so a game's GL that binds a uniform buffer
+	// to one of those points calls invalidateState() before the renderer draws.
 	class Backend {
 	  public:
 		Backend() = default;
@@ -168,8 +184,8 @@ namespace Renderer::backend {
 		// Clear the bound target's colour to `color` exactly (the caller premultiplies).
 		virtual void clear(const Foundation::Color& color) = 0;
 
-		// GPU code outside the renderer changed the fixed state or uniform binding point
-		// 0; set both again.
+		// GPU code outside the renderer changed the fixed state or a uniform binding point
+		// the renderer's blocks read; set both again.
 		virtual void invalidateState() = 0;
 
 		// --- Textures ---
@@ -207,8 +223,13 @@ namespace Renderer::backend {
 
 		// --- Pipelines and drawing ---
 
-		// The program from `source`, its DrawUniforms block bound to the buffer
-		// setUniforms() writes and u_atlas to unit 0. Uber is the only one.
+		// The program compiled and linked from `source`'s text: its DrawUniforms block
+		// bound to the buffer setUniforms() writes, each hook block to its binding point
+		// (zeroed until the first setHookUniforms() there), and u_atlas to unit 0. A hook
+		// block the linked program has inactive is logged and skipped, and writes to its
+		// point are ignored. Invalid, logged, when the program does not build or a block's
+		// size or a member's offset is not what the C++ side has; then it makes nothing for
+		// its hook blocks. The base shader is the only one.
 		virtual PipelineHandle createPipeline(const ShaderSource& source) = 0;
 		virtual void		   destroyPipeline(PipelineHandle pipeline) = 0;
 
@@ -217,14 +238,21 @@ namespace Renderer::backend {
 		// repeat of the last values reuses theirs.
 		virtual void setUniforms(const DrawUniforms& uniforms) = 0;
 
+		// A hook block's contents for every draw from here on, until the next call for
+		// the same binding point, as setUniforms() is for DrawUniforms: a draw already
+		// submitted keeps its own. `bytes` is the block's std140 contents, its size
+		// exactly; a binding point no pipeline declared, or another size, is logged and
+		// ignored.
+		virtual void setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) = 0;
+
 		// One submission, in order: bindings change only where consecutive calls
 		// differ, and nothing bound is left behind but the pipeline and the uniforms on
-		// point 0 (and, on GL, the generic buffer bindings its writes used).
+		// their points (and, on GL, the generic buffer bindings its writes used).
 		virtual void draw(std::span<const DrawCall> calls) = 0;
 
 		// Bind `pipeline` in `blend` for draws the caller issues itself, from its own
 		// vertex arrays, until endForeignDraws(): worldsim's baked chunk meshes under
-		// the uber program (docs/renderer-boundary.md, question 2). setUniforms()
+		// the base shader (docs/renderer-boundary.md, question 2). setUniforms()
 		// between those draws applies from the next one.
 		virtual void beginForeignDraws(PipelineHandle pipeline, BlendState blend) = 0;
 		virtual void endForeignDraws() = 0;

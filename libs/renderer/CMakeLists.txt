@@ -65,39 +65,23 @@ target_link_libraries(salal_renderer
 )
 set_target_properties(salal_renderer PROPERTIES FOLDER salal)
 
-# Shader staging. Shader.cpp resolves "shaders/<file>" through findResource, which looks
-# beside the executable first; consumers mirror ${CMAKE_BINARY_DIR}/shaders next to each
-# exe. CMAKE_BINARY_DIR is the top-level build tree even when salal is a subproject.
-file(GLOB_RECURSE SALAL_RENDERER_SHADER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*")
-set(SALAL_RENDERER_SHADERS_STAMP "${CMAKE_BINARY_DIR}/shaders/.salal_renderer_shaders_copied")
-add_custom_command(
-    OUTPUT ${SALAL_RENDERER_SHADERS_STAMP}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/shaders
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/shaders ${CMAKE_BINARY_DIR}/shaders
-    COMMAND ${CMAKE_COMMAND} -E touch ${SALAL_RENDERER_SHADERS_STAMP}
-    DEPENDS ${SALAL_RENDERER_SHADER_SOURCES}
-    COMMENT "Staging salal renderer shaders into ${CMAKE_BINARY_DIR}/shaders"
-    VERBATIM
-)
-add_custom_target(salal_renderer_shaders ALL DEPENDS ${SALAL_RENDERER_SHADERS_STAMP})
-add_dependencies(salal_renderer salal_renderer_shaders)
-set_target_properties(salal_renderer_shaders PROPERTIES FOLDER salal)
+# The base shader's build step, which salal_base_shader() (cmake/SalalBaseShader.cmake) runs
+# for each consumer: a host tool that splices the consumer's hooks into shaders/base.vert and
+# embeds the result as C++, so nothing in shaders/ is read at run time. The library is the
+# tool's logic, which the tests run directly. Built whenever the renderer is.
+add_library(salal_shader_assembly STATIC assembler/BaseShaderAssembler.cpp)
+target_compile_features(salal_shader_assembly PUBLIC cxx_std_20)
+target_include_directories(salal_shader_assembly PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
+add_executable(salal_shader_assembler assembler/Main.cpp)
+target_link_libraries(salal_shader_assembler PRIVATE salal_shader_assembly)
+set_target_properties(salal_shader_assembly salal_shader_assembler PROPERTIES FOLDER salal)
 
 salal_add_tests(renderer)
 if(TARGET salal_renderer_tests)
-    target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw)
-    # The fixtures that draw through Primitives load the uber shaders from beside the exe,
-    # copied when a shader changes (one stamp per configuration).
-    set(SALAL_RENDERER_TESTS_SHADERS_STAMP "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/salal_renderer_tests_shaders.stamp")
-    add_custom_command(
-        OUTPUT ${SALAL_RENDERER_TESTS_SHADERS_STAMP}
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/shaders $<TARGET_FILE_DIR:salal_renderer_tests>/shaders
-        COMMAND ${CMAKE_COMMAND} -E touch ${SALAL_RENDERER_TESTS_SHADERS_STAMP}
-        DEPENDS ${SALAL_RENDERER_SHADER_SOURCES}
-        COMMENT "Mirroring shaders beside salal_renderer_tests"
-        VERBATIM
-    )
-    add_custom_target(salal_renderer_tests_shaders DEPENDS ${SALAL_RENDERER_TESTS_SHADERS_STAMP})
-    add_dependencies(salal_renderer_tests salal_renderer_tests_shaders)
-    set_target_properties(salal_renderer_tests_shaders PROPERTIES FOLDER salal/tests)
+    target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw salal_shader_assembly)
+    # The base shader as a consumer with no hooks gets it, for every fixture, and again
+    # with the test hook in tests/hooks/, which ShaderHooks.test.cpp draws with (its HEADER in a
+    # folder, as a consumer may put it).
+    salal_base_shader(salal_renderer_tests)
+    salal_base_shader(salal_renderer_tests HOOKS tests/hooks NAMESPACE offset_hook_shader HEADER generated/OffsetHookShader.h)
 endif()

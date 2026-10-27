@@ -2,15 +2,20 @@
 // backend: the buffers it uploads, the draw calls it submits and the uniforms they
 // read. Headless; no GL anywhere.
 
+#include "BaseShader.h"
 #include "backend/NullBackend.h"
+#include "generated/OffsetHookShader.h"
 #include "primitives/BatchRenderer.h"
 #include "primitives/Primitives.h"
 #include "vector/Types.h"
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace Renderer {
@@ -25,7 +30,7 @@ namespace Renderer {
 		void SetUp() override {
 			auto owned = std::make_unique<backend::NullBackend>();
 			gpu = owned.get();
-			Primitives::init(std::move(owned));
+			Primitives::init(std::move(owned), base_shader::source());
 			Primitives::setCoordinateSystem(nullptr);
 			Primitives::setViewport(kWidth, kHeight);
 			gpu->clearRecord();
@@ -42,8 +47,8 @@ namespace Renderer {
 		}
 
 		// What the draw's geometry holds now: the last flush's upload.
-		std::vector<UberVertex> vertices(const backend::NullBackend::RecordedDraw& draw) const {
-			return contents<UberVertex>(gpu->geometry(draw.call.geometry)->vertices);
+		std::vector<BatchVertex> vertices(const backend::NullBackend::RecordedDraw& draw) const {
+			return contents<BatchVertex>(gpu->geometry(draw.call.geometry)->vertices);
 		}
 		std::vector<uint32_t> indices(const backend::NullBackend::RecordedDraw& draw) const {
 			return contents<uint32_t>(gpu->geometry(draw.call.geometry)->indices);
@@ -81,9 +86,10 @@ namespace Renderer {
 		ASSERT_EQ(gpu->draws().size(), 1U);
 		const PipelineHandle pipeline = gpu->draws()[0].call.pipeline;
 		ASSERT_NE(gpu->pipeline(pipeline), nullptr);
-		EXPECT_EQ(gpu->pipeline(pipeline)->first, "uber.vert");
-		EXPECT_EQ(gpu->pipeline(pipeline)->second, "uber.frag");
-		EXPECT_EQ(gpu->geometry(gpu->draws()[0].call.geometry)->layout, backend::VertexLayout::Uber);
+		EXPECT_EQ(gpu->pipeline(pipeline)->vertex, base_shader::source().vertex);
+		EXPECT_EQ(gpu->pipeline(pipeline)->fragment, base_shader::source().fragment);
+		EXPECT_TRUE(gpu->pipeline(pipeline)->hookBlocks.empty());
+		EXPECT_EQ(gpu->geometry(gpu->draws()[0].call.geometry)->layout, backend::VertexLayout::Batched);
 	}
 
 	TEST_F(FlushTest, AnEmptyFlushSubmitsNothing) {
@@ -113,7 +119,7 @@ namespace Renderer {
 		EXPECT_EQ(emitted[0], 4U);
 		EXPECT_EQ(emitted[6], 8U);
 		EXPECT_EQ(emitted[12], 0U);
-		const std::vector<UberVertex> uploaded = vertices(gpu->draws()[0]);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
 		ASSERT_EQ(uploaded.size(), 12U);
 		EXPECT_EQ(uploaded[4].position.x, 20.0F);
 	}
@@ -130,7 +136,7 @@ namespace Renderer {
 		EXPECT_EQ(gpu->draws()[0].call.blend, backend::BlendState::Alpha);
 		EXPECT_EQ(gpu->draws()[0].call.indexCount, 24U);
 		// The mode rides on the vertices instead.
-		const std::vector<UberVertex> uploaded = vertices(gpu->draws()[0]);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
 		ASSERT_EQ(uploaded.size(), 16U);
 		EXPECT_EQ(uploaded[0].data2.w, 1.0F);
 		EXPECT_EQ(uploaded[4].data2.w, 5.0F);
@@ -182,7 +188,7 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<UberVertex> uploaded = vertices(gpu->draws()[0]);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
 		ASSERT_EQ(uploaded.size(), 12U);
 		for (int i = 0; i < 4; ++i) {
 			EXPECT_EQ(uploaded[i].clipBounds, Foundation::Vec4(10.0F, 20.0F, 110.0F, 70.0F));
@@ -210,7 +216,7 @@ namespace Renderer {
 		EXPECT_EQ(gpu->draws()[0].submission, 0);
 		EXPECT_EQ(gpu->draws()[1].submission, 1);
 		EXPECT_EQ(gpu->draws()[1].call.indexCount, 6U);
-		const std::vector<UberVertex> uploaded = vertices(gpu->draws()[1]);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[1]);
 		ASSERT_EQ(uploaded.size(), 4U); // the stream buffer holds the second flush only
 		EXPECT_EQ(uploaded[0].position.x, 40.0F);
 		EXPECT_EQ(gpu->uniformWrites().size(), 2U);
@@ -227,7 +233,6 @@ namespace Renderer {
 			EXPECT_EQ(gpu->live().buffers, before.buffers + 3);
 			EXPECT_EQ(gpu->live().geometries, before.geometries + 1);
 
-			Primitives::setGroundcover({.enabled = true, .openness = 0.5F, .reach = 2.0F, .cursorRadius = 3.0F});
 			const InstanceData instances[2] = {
 				InstanceData({1.0F, 2.0F}, 0.0F, 1.0F, Foundation::Vec4(1.0F)),
 				InstanceData({3.0F, 4.0F}, 0.5F, 2.0F, Foundation::Vec4(0.5F))
@@ -255,9 +260,6 @@ namespace Renderer {
 			EXPECT_EQ(draw.uniforms.cameraZoom, 2.0F);
 			EXPECT_EQ(draw.uniforms.pixelsPerMeter, 16.0F);
 			EXPECT_EQ(draw.uniforms.viewportSize, Foundation::Vec2(static_cast<float>(kWidth), static_cast<float>(kHeight)));
-			EXPECT_EQ(draw.uniforms.groundcoverMode, 1);
-			EXPECT_EQ(draw.uniforms.groundcoverOpenness, 0.5F);
-			EXPECT_EQ(draw.uniforms.cursorRadius, 3.0F);
 			EXPECT_EQ(draw.uniforms.bakedAlpha, 1.0F);
 		}
 		EXPECT_EQ(gpu->live().buffers, before.buffers);
@@ -314,8 +316,96 @@ namespace Renderer {
 		EXPECT_EQ(pixels[0], 0);
 	}
 
+	// The same through the base shader with the test hook, tests/hooks/offset.vert.glsl.
+	class FlushHookTest : public ::testing::Test {
+	  protected:
+		void SetUp() override {
+			auto owned = std::make_unique<backend::NullBackend>();
+			gpu = owned.get();
+			Primitives::init(std::move(owned), offset_hook_shader::source());
+			Primitives::setCoordinateSystem(nullptr);
+			Primitives::setViewport(32, 32);
+			gpu->clearRecord();
+
+			renderer::TessellatedMesh triangle;
+			triangle.vertices = {{0.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, 1.0F}};
+			triangle.indices = {0, 1, 2};
+			mesh = Primitives::uploadInstancedMesh(triangle, 1);
+		}
+
+		void TearDown() override {
+			mesh = InstancedMeshHandle();
+			Primitives::shutdown();
+		}
+
+		void drawTriangle() const {
+			const InstanceData instance({1.0F, 2.0F}, 0.0F, 1.0F, Foundation::Vec4(1.0F));
+			Primitives::drawInstanced(mesh, &instance, 1, {});
+		}
+
+		static std::vector<std::byte> bytes(const std::array<float, 4>& values) {
+			const std::span<const std::byte> raw = std::as_bytes(std::span(values));
+			return {raw.begin(), raw.end()};
+		}
+
+		static std::vector<std::byte> bytes(std::span<const std::byte> raw) { return {raw.begin(), raw.end()}; }
+
+		backend::NullBackend* gpu = nullptr;
+		InstancedMeshHandle	  mesh;
+	};
+
+	TEST_F(FlushHookTest, ThePipelineDeclaresTheHooksBlock) {
+		Primitives::drawRect({.bounds = {0.0F, 0.0F, 4.0F, 4.0F}, .style = {.fill = Foundation::Color::red()}});
+		Primitives::flush();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const backend::NullBackend::PipelineRecord* pipeline = gpu->pipeline(gpu->draws()[0].call.pipeline);
+		ASSERT_NE(pipeline, nullptr);
+		EXPECT_EQ(pipeline->vertex, offset_hook_shader::source().vertex);
+		ASSERT_EQ(pipeline->hookBlocks.size(), 1U);
+		EXPECT_STREQ(pipeline->hookBlocks[0].hook, "offset");
+		EXPECT_STREQ(pipeline->hookBlocks[0].block, "OffsetUniforms");
+		EXPECT_EQ(pipeline->hookBlocks[0].binding, 1U);
+		EXPECT_EQ(pipeline->hookBlocks[0].size, 16U);
+	}
+
+	TEST_F(FlushHookTest, HookUniformsReachTheBackendInOrderWithTheDraws) {
+		const std::array<float, 4> first = {1.0F, 2.0F, 3.0F, 4.0F};
+		const std::array<float, 4> second = {5.0F, 6.0F, 7.0F, 8.0F};
+
+		drawTriangle(); // the block as it starts: nothing written
+		Primitives::setHookUniforms(offset_hook_shader::kOffset, std::as_bytes(std::span(first)));
+		drawTriangle();
+		Primitives::setHookUniforms("offset", std::as_bytes(std::span(second)));
+		drawTriangle();
+
+		ASSERT_EQ(gpu->draws().size(), 3U);
+		EXPECT_TRUE(gpu->draws()[0].hookBlock(1).empty());
+		EXPECT_EQ(bytes(gpu->draws()[1].hookBlock(1)), bytes(first));
+		EXPECT_EQ(bytes(gpu->draws()[2].hookBlock(1)), bytes(second));
+		ASSERT_EQ(gpu->hookUniformWrites().size(), 2U);
+		EXPECT_EQ(gpu->hookUniformWrites()[0].binding, 1U);
+		EXPECT_EQ(gpu->hookUniformWrites()[1].bytes, bytes(second));
+	}
+
+	TEST_F(FlushHookTest, AnUnknownHookOrBlockOrTheWrongSizeWritesNothing) {
+		const std::array<float, 4>		 values = {1.0F, 2.0F, 3.0F, 4.0F};
+		const std::span<const std::byte> all = std::as_bytes(std::span(values));
+		Primitives::setHookUniforms(offset_hook_shader::kOffset, all.first(8));
+		Primitives::setHookUniforms("offsets", all);
+		Primitives::setHookUniforms({.hook = "offset", .block = "OffsetUniforms", .binding = 2, .size = 16}, all);
+		EXPECT_TRUE(gpu->hookUniformWrites().empty());
+
+		Primitives::shutdown();
+		Primitives::setHookUniforms(offset_hook_shader::kOffset, all); // after shutdown: nothing to write to
+		auto				  owned = std::make_unique<backend::NullBackend>();
+		backend::NullBackend* other = owned.get();
+		Primitives::init(std::move(owned), base_shader::source());
+		Primitives::setHookUniforms(offset_hook_shader::kOffset, all); // a base shader without the hook
+		EXPECT_TRUE(other->hookUniformWrites().empty());
+	}
+
 	TEST(FlushNoBackendTest, InitWithoutABackendLeavesTheRendererOff) {
-		Primitives::init(std::unique_ptr<backend::Backend>{});
+		Primitives::init(std::unique_ptr<backend::Backend>{}, base_shader::source());
 		Primitives::beginFrame();
 		Primitives::drawRect({.bounds = {0.0F, 0.0F, 1.0F, 1.0F}});
 		Primitives::endFrame();
@@ -326,7 +416,7 @@ namespace Renderer {
 	TEST(BatchRendererLifetimeTest, ItsObjectsGoWithIt) {
 		backend::NullBackend gpu;
 		{
-			BatchRenderer batch(gpu);
+			BatchRenderer batch(gpu, base_shader::source());
 			EXPECT_EQ(gpu.live().pipelines, 1U);
 			EXPECT_EQ(gpu.live().buffers, 2U);
 			EXPECT_EQ(gpu.live().geometries, 1U);

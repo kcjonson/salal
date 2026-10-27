@@ -1,4 +1,4 @@
-// Uber Batch Renderer implementation.
+// Batch Renderer implementation.
 // Accumulates 2D geometry (shapes + text) and renders in optimized batches.
 
 #include "primitives/BatchRenderer.h"
@@ -26,7 +26,7 @@ namespace Renderer {
 		constexpr float kTwoPi = 2.0F * std::numbers::pi_v<float>;
 
 		// The stream buffers' first size; the backend grows them as a flush needs.
-		constexpr size_t kInitialVertexBytes = 4096 * sizeof(UberVertex);
+		constexpr size_t kInitialVertexBytes = 4096 * sizeof(BatchVertex);
 		constexpr size_t kInitialIndexBytes = 6144 * sizeof(uint32_t);
 	} // namespace
 
@@ -60,16 +60,16 @@ namespace Renderer {
 		return *this;
 	}
 
-	BatchRenderer::BatchRenderer(backend::Backend& renderBackend)
+	BatchRenderer::BatchRenderer(backend::Backend& renderBackend, const backend::ShaderSource& baseShader)
 		: gpu(renderBackend),
-		  pipeline(renderBackend.createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"})),
+		  pipeline(renderBackend.createPipeline(baseShader)),
 		  vertexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialVertexBytes, nullptr)),
 		  indexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialIndexBytes, nullptr)),
 		  geometry(
-			  renderBackend.createGeometry({.layout = backend::VertexLayout::Uber, .vertices = vertexBuffer, .indices = indexBuffer})
+			  renderBackend.createGeometry({.layout = backend::VertexLayout::Batched, .vertices = vertexBuffer, .indices = indexBuffer})
 		  ) {
 		if (!pipeline.isValid()) {
-			std::cerr << "Failed to load uber shaders!" << std::endl;
+			std::cerr << "Failed to load the base shader!" << std::endl;
 		}
 		// Reserve space for vertices to minimize allocations
 		vertices.reserve(10000);
@@ -708,7 +708,7 @@ namespace Renderer {
 		const DrawPlan drawPlan = plan();
 
 		// The whole batch, every flush: the stream buffers start over
-		gpu.updateBuffer(vertexBuffer, 0, vertices.size() * sizeof(UberVertex), vertices.data());
+		gpu.updateBuffer(vertexBuffer, 0, vertices.size() * sizeof(BatchVertex), vertices.data());
 		gpu.updateBuffer(indexBuffer, 0, drawPlan.indices.size_bytes(), drawPlan.indices.data());
 
 		// Create projection matrix
@@ -844,9 +844,9 @@ namespace Renderer {
 	// --- GPU Instancing Methods ---
 
 	// Maximum allowed instances to prevent excessive GPU memory allocation.
-	// Groundcover (dense grass) needs hundreds of thousands per instanced mesh, so
-	// this is sized for that; the instance buffer is only as large as the requested
-	// maxInstances (e.g. 250k blades = 8MB), not this cap.
+	// A dense field of small instances needs hundreds of thousands per mesh, so this
+	// is sized for that; the instance buffer is only as large as the requested
+	// maxInstances (e.g. 250k instances = 8MB), not this cap.
 	constexpr uint32_t kMaxAllowedInstances = 2000000;
 
 	InstancedMeshHandle BatchRenderer::uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances) {
@@ -975,16 +975,6 @@ namespace Renderer {
 			remaining -= batchSize;
 			offset += batchSize;
 		}
-	}
-
-	void BatchRenderer::setGroundcover(const Primitives::GroundcoverParams& params) {
-		// Read by the next instanced draw's uniforms
-		uniforms.groundcoverMode = params.enabled ? 1 : 0;
-		uniforms.groundcoverOpenness = params.openness;
-		uniforms.groundcoverReach = params.reach;
-		uniforms.cursorWorld = params.cursorWorld;
-		uniforms.cursorRadius = params.cursorRadius;
-		uniforms.cursorStrength = params.cursorStrength;
 	}
 
 	void BatchRenderer::setBakedAlpha(float alpha) {

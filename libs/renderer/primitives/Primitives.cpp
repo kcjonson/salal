@@ -22,7 +22,7 @@
 #include <utils/Log.h>
 #include <vector>
 
-// Text rendering is implemented via the unified uber shader in BatchRenderer.
+// Text rendering is implemented via the base shader in BatchRenderer.
 // Text shapes call BatchRenderer::addTextQuad() directly to batch text with shapes.
 
 namespace Renderer::Primitives {
@@ -71,9 +71,17 @@ namespace Renderer::Primitives {
 	constexpr size_t									   kPolygonCacheCapacity = 1024;
 	static std::unordered_map<uint64_t, PolygonCacheEntry> g_polygonCache;
 
+	// The hook blocks of the base shader init() was given, by hook name.
+	struct HookBlockEntry {
+		std::string hook;
+		uint32_t	binding = 0;
+		uint32_t	size = 0;
+	};
+	static std::vector<HookBlockEntry> g_hookBlocks;
+
 	// --- Initialization ---
 
-	void init(std::unique_ptr<backend::Backend> backend) {
+	void init(std::unique_ptr<backend::Backend> backend, const backend::ShaderSource& baseShader) {
 		if (backend == nullptr) {
 			LOG_ERROR(Renderer, "Primitives::init: no backend; the renderer stays off");
 			return;
@@ -81,7 +89,11 @@ namespace Renderer::Primitives {
 		g_batchRenderer.reset();
 		g_backend = std::move(backend);
 		g_backend->setWindowSize(g_backbufferWidth, g_backbufferHeight);
-		g_batchRenderer = std::make_unique<BatchRenderer>(*g_backend);
+		g_batchRenderer = std::make_unique<BatchRenderer>(*g_backend, baseShader);
+		g_hookBlocks.clear();
+		for (const backend::HookUniformBlock& block : baseShader.hookBlocks) {
+			g_hookBlocks.push_back({.hook = block.hook != nullptr ? block.hook : "", .binding = block.binding, .size = block.size});
+		}
 		g_batchRenderer->setCoordinateSystem(g_coordinateSystem);
 
 		// Initialize identity transform
@@ -93,6 +105,7 @@ namespace Renderer::Primitives {
 		g_backend.reset();
 		g_coordinateSystem = nullptr;
 		g_polygonCache.clear();
+		g_hookBlocks.clear();
 	}
 
 	void setCoordinateSystem(CoordinateSystem* coordSystem) {
@@ -201,7 +214,7 @@ namespace Renderer::Primitives {
 
 	void endFrame() {
 		// Flush all batched geometry (shapes + text) in a single draw call
-		// The uber shader handles both SDF shapes and MSDF text
+		// The base shader handles both SDF shapes and MSDF text
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->endFrame();
 		}
@@ -643,16 +656,42 @@ namespace Renderer::Primitives {
 		}
 	}
 
-	void setGroundcover(const GroundcoverParams& params) {
-		if (g_batchRenderer != nullptr) {
-			g_batchRenderer->setGroundcover(params);
-		}
-	}
-
 	void setBakedAlpha(float alpha) {
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->setBakedAlpha(alpha);
 		}
+	}
+
+	void setHookUniforms(std::string_view hook, std::span<const std::byte> bytes) {
+		if (g_backend == nullptr) {
+			return;
+		}
+		const auto entry =
+			std::find_if(g_hookBlocks.begin(), g_hookBlocks.end(), [hook](const HookBlockEntry& block) { return block.hook == hook; });
+		if (entry == g_hookBlocks.end() || bytes.size() != entry->size) {
+			LOG_ERROR(
+				Renderer,
+				"setHookUniforms: the base shader has no %u-byte block for hook %.*s",
+				static_cast<unsigned>(bytes.size()),
+				static_cast<int>(hook.size()),
+				hook.data()
+			);
+			return;
+		}
+		// Straight to the backend: only instanced draws run the hooks, and they are not
+		// batched, so every draw issued after this reads it and none before.
+		g_backend->setHookUniforms(entry->binding, bytes);
+	}
+
+	void setHookUniforms(const backend::HookUniformBlock& block, std::span<const std::byte> bytes) {
+		const std::string_view hook = block.hook != nullptr ? block.hook : "";
+		const auto			   entry =
+			std::find_if(g_hookBlocks.begin(), g_hookBlocks.end(), [hook](const HookBlockEntry& known) { return known.hook == hook; });
+		if (g_backend != nullptr && (entry == g_hookBlocks.end() || entry->binding != block.binding || entry->size != block.size)) {
+			LOG_ERROR(Renderer, "setHookUniforms: hook %.*s's block is not the base shader's", static_cast<int>(hook.size()), hook.data());
+			return;
+		}
+		setHookUniforms(hook, bytes);
 	}
 
 	void beginBakedPass(const WorldCamera& camera) {

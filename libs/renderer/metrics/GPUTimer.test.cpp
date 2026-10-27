@@ -2,6 +2,7 @@
 
 #include "metrics/GPUTimer.h"
 
+#include "BaseShader.h"
 #include "backend/NullBackend.h"
 #include "primitives/Primitives.h"
 
@@ -14,7 +15,7 @@ namespace Renderer {
 	TEST(GPUTimerTest, SpansWriteTimestampPairsAndTheQueriesGoWithTheTimer) {
 		auto				  owned = std::make_unique<backend::NullBackend>();
 		backend::NullBackend& gpu = *owned;
-		Primitives::init(std::move(owned));
+		Primitives::init(std::move(owned), base_shader::source());
 		const size_t before = gpu.live().queries;
 		{
 			GPUTimer timer;
