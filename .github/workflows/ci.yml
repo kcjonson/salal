@@ -64,7 +64,8 @@ jobs:
       with:
         key: ${{ matrix.os }}
 
-    # Ninja needs cl.exe on PATH; the preset selects cl explicitly.
+    # Ninja needs cl.exe on PATH; the preset's CC/CXX=cl picks it over the
+    # other compilers on the runner's PATH.
     - name: Set up MSVC environment
       if: runner.os == 'Windows'
       uses: ilammy/msvc-dev-cmd@v1

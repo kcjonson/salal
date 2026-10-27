@@ -207,8 +207,20 @@ cmake --build --preset windows
 ctest --test-dir build -C Debug
 ```
 
-The `windows` preset names `cl` bare, so run configure from a Visual Studio
-developer shell (or after `vcvars64.bat`), where it resolves.
+Configure and build from a shell with the MSVC environment: `cl` on PATH plus
+`INCLUDE` and `LIB`. Worldsim's `scripts/setup-msvc-env.ps1` persists those to
+the User environment, so any new shell has them. A Visual Studio developer shell
+(or `vcvars64.bat`) works too, but it repoints `VCPKG_ROOT` at the VS-bundled
+vcpkg, so set it back to your own checkout before the first configure; that
+configure binds the toolchain, and fixing `VCPKG_ROOT` later won't rebind it
+without `--fresh`.
+
+The `windows` preset picks MSVC by setting `CC` and `CXX` to `cl` in its
+environment, which CMake reads only on a build dir's first configure, so later
+`cmake --preset windows` runs keep the cache. A `build/` first configured with
+the wrong compiler or vcpkg, or one an older preset broke (it deleted the cache
+and `find_package` has failed since), needs one `cmake --fresh --preset windows`,
+or delete `build/`.
 
 `foundation` and `renderer` are worldsim's code, imported as plain copies. `ui`
 and `app` are placeholders until later phases move their code in: one
