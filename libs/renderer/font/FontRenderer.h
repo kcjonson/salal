@@ -63,8 +63,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 *
 		 * A second call destroys the atlases the first made, so a handle from
 		 * getAtlasTexture goes stale: a game that handed one to Primitives::setFontAtlas
-		 * hands over the new one. Not mid-frame: glyphs already batched would sample
-		 * destroyed textures.
+		 * hands over the new one. So does every GlyphQuad laid out before it, which
+		 * carries its atlas and now draws nothing: lay the text out again. Not
+		 * mid-frame: glyphs already batched would sample destroyed textures.
 		 * @param sources One atlas per family; no family twice, and not FontFamily::Default
 		 * @param defaultFamily The family FontFamily::Default stands for; one of the sources
 		 * @return false, with nothing loaded, when the sources are empty or break the rules
@@ -111,7 +112,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			glm::vec2	  uvMax;	 // Texture coordinate top-right
 			glm::vec4	  color;	 // RGBA color
 			glm::vec2	  runOrigin; // Pen origin of the run at the baseline (shared per run, for pixel snapping)
-			TextureHandle atlas;	 // The atlas the UVs index; invalid samples the one Primitives::setFontAtlas set
+			TextureHandle atlas;	 // The atlas the UVs index, stale after another Initialize; invalid samples setFontAtlas's
 		};
 
 		/**

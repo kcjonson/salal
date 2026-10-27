@@ -476,6 +476,28 @@ namespace Renderer {
 		EXPECT_EQ(atlasTextures(), 0U);
 	}
 
+	TEST_F(FontRendererInitializeTest, TextLaidOutAgainAfterASecondInitializeCarriesTheNewAtlas) {
+		// The same family from the same file, so the glyph-quad cache key is the same both times: only
+		// clearing the cache keeps the old atlas, destroyed by now, out of the new quads.
+		const FontAtlasSource body = folder.write(kBody, "body");
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{body}, kBody));
+		std::vector<FontRenderer::GlyphQuad> before;
+		fontRenderer->generateGlyphQuads("Hello", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), before, kBody);
+		ASSERT_FALSE(before.empty());
+		const TextureHandle first = fontRenderer->getAtlasTexture(kBody);
+		EXPECT_EQ(before.front().atlas, first);
+
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{body}, kBody));
+		const TextureHandle second = fontRenderer->getAtlasTexture(kBody);
+		ASSERT_NE(second, first);
+		std::vector<FontRenderer::GlyphQuad> after;
+		fontRenderer->generateGlyphQuads("Hello", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), after, kBody);
+		ASSERT_EQ(after.size(), before.size());
+		for (const FontRenderer::GlyphQuad& quad : after) {
+			EXPECT_EQ(quad.atlas, second);
+		}
+	}
+
 	// --- Room around each glyph in its cell ---
 
 	TEST_F(FontRendererInitializeTest, ARoomyAtlasHasNoCrampedGlyphs) {
