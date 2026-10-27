@@ -7,7 +7,8 @@
 # include path, declares <name>::source() (default base_shader), what Primitives::init takes, and
 # a HookUniformBlock constant for each hook's uniform block. With no HOOKS the hook chain is empty.
 # A shader error, a hook that breaks the contract, or anything in <dir> that is not a hook fails
-# the build. <target> links salal::renderer, whose backend/Backend.h the header includes.
+# the build. <target> links salal::renderer, whose backend/Backend.h the header includes. The step
+# is the target <target>_<name>, which <target> waits for.
 #
 # Needs glslangValidator: the vcpkg port glslang with its tools feature, as a host dependency.
 function(salal_base_shader target)
@@ -59,6 +60,11 @@ function(salal_base_shader target)
         COMMENT "Assembling the base shader for ${target} (${arg_NAMESPACE})"
         VERBATIM
     )
+    # Its own target, the command's one owner under every generator, and one that builds alone
+    # (CI's clang-tidy needs the header and nothing else).
+    add_custom_target(${target}_${arg_NAMESPACE} DEPENDS "${header}" "${source}")
+    set_target_properties(${target}_${arg_NAMESPACE} PROPERTIES FOLDER salal)
+    add_dependencies(${target} ${target}_${arg_NAMESPACE})
     target_sources(${target} PRIVATE "${source}")
     target_include_directories(${target} PUBLIC "$<BUILD_INTERFACE:${dir}/include>")
 endfunction()

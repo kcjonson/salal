@@ -48,6 +48,10 @@ repo's `specboard.md`.
 - **[docs/renderer-boundary.md](docs/renderer-boundary.md)** is the renderer
   backend-boundary design: the GL leaks the public surface had, the target
   handles and declarations, the backend seam, and the PR sequence that lands it.
+- **[docs/shader-hooks.md](docs/shader-hooks.md)** is the base shader's hook
+  contract: how a game adds vertex code to the one program at build time
+  (`salal_base_shader()`), the hook points, uniform blocks, and what fails the
+  build.
 
 For how the first consumer intends to use this engine, see `tech-stack.md` in
 `../asteroids-roguelike/docs/`. Its layer diagram, PRNG choice and primitive
@@ -84,8 +88,9 @@ off ui's link list (decision D, settled 2026-10-26).
 Phase 1 landed (2026-10-26): `foundation` and `renderer` are imported, `v0.1.0`
 is tagged, and worldsim consumes this repo. The renderer boundary PRs are under
 way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PRs 1
-to 4 are in (`v0.2.0` to `v0.5.0`), and moving the groundcover and cursor
-uniforms out of the base shader into a game shader is the follow-up. Phase 2
+to 4 are in (`v0.2.0` to `v0.5.0`), and after them the base shader takes hooks
+assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which took
+worldsim's grass deform out of the renderer and into a worldsim hook. Phase 2
 carves `app` out of `libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
@@ -215,9 +220,10 @@ follow-up. Blame and history for imported code live in worldsim;
 `git remote add worldsim ../worldsim && git fetch worldsim` makes
 `git blame worldsim/main -- libs/<lib>/<file>` work from here.
 
-The renderer stages its shaders into `build/shaders/` (the top-level build tree,
-even as a subproject), which consumers mirror next to each executable, and it
-ships no fonts: `FontRenderer::Initialize` looks for
+The renderer's base shader is assembled and compiled into each consumer at build
+time by `salal_base_shader()` ([docs/shader-hooks.md](docs/shader-hooks.md)),
+with the consumer's hooks, so no shader files sit beside an executable; it ships
+no fonts: `FontRenderer::Initialize` looks for
 `fonts/<Family>-SDF.{png,json}` beside the executable, worldsim supplies them,
 and an API that takes atlas sources is a phase 2 item.
 
@@ -236,10 +242,12 @@ off as a subproject) switch off what it doesn't link. CI
 checks clang-format 21.
 
 Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
-`nanosvg`, `cpp-httplib`, `gtest`, `benchmark`. Worldsim's `pugixml`, `lua` and
-`sol2` serve its `assets` target, `msdfgen` its font-atlas tool, and all four
-stay behind. An audio library is proposed and not decided (worldsim has none;
-`miniaudio` is the recommendation).
+`nanosvg`, `cpp-httplib`, `gtest`, `benchmark`, and `glslang` with its `tools`
+feature as a host dependency, whose `glslangValidator` checks the base shader at
+build time (a FetchContent consumer adds it to its own manifest). Worldsim's
+`pugixml`, `lua` and `sol2` serve its `assets` target, `msdfgen` its font-atlas
+tool, and all four stay behind. An audio library is proposed and not decided
+(worldsim has none; `miniaudio` is the recommendation).
 
 ## Testing
 
