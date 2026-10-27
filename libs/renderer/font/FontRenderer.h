@@ -118,7 +118,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		};
 
 		/**
-		 * Result of text wrapping operation (cached for performance)
+		 * Result of text wrapping operation (cached for performance). It keeps the
+		 * family it was measured in, which generateWrappedGlyphQuads lays it out in.
 		 */
 		struct WrappedTextResult {
 			std::vector<std::string> lines;		  // Each line of wrapped text
@@ -126,6 +127,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float					 totalWidth;  // Max line width (for alignment)
 			float					 totalHeight; // Sum of line heights
 			float					 lineHeight;  // Height per line in pixels
+			FontFamily				 family;	  // The family the lines were measured in, as resolved (the one they draw with)
 		};
 
 		/**
@@ -173,26 +175,24 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		measureTextWithWrapping(const std::string& text, float scale, float maxWidth, FontFamily family = FontFamily::Default) const;
 
 		/**
-		 * Generate glyph quads for wrapped/multi-line text
-		 * @param lines Pre-wrapped lines (from wrapText)
+		 * Generate glyph quads for wrapped/multi-line text, in the family and at the
+		 * line height it was wrapped with
+		 * @param wrapped The lines from wrapText, with their family and line height
 		 * @param position Top-left position of the text block
-		 * @param scale Scaling factor
+		 * @param scale Scaling factor (the one the text was wrapped at)
 		 * @param color Text color (RGBA 0-1 range)
-		 * @param lineHeight Height per line in pixels
 		 * @param hAlign Horizontal alignment per line
 		 * @param containerWidth Container width for alignment (0 = use line width)
 		 * @param outQuads Output vector to append generated quads to
 		 */
 		void generateWrappedGlyphQuads(
-			const std::vector<std::string>& lines,
-			const glm::vec2&				position,
-			float							scale,
-			const glm::vec4&				color,
-			float							lineHeight,
-			Foundation::HorizontalAlign		hAlign,
-			float							containerWidth,
-			std::vector<GlyphQuad>&			outQuads,
-			FontFamily						family = FontFamily::Default
+			const WrappedTextResult&	wrapped,
+			const glm::vec2&			position,
+			float						scale,
+			const glm::vec4&			color,
+			Foundation::HorizontalAlign hAlign,
+			float						containerWidth,
+			std::vector<GlyphQuad>&		outQuads
 		) const;
 
 		/**

@@ -468,6 +468,37 @@ namespace Renderer {
 		}
 	}
 
+	TEST_F(FontRendererInitializeTest, WrappedTextLaysOutInTheFamilyItWasWrappedIn) {
+		// Mono's advances are wider and its lines taller than body's, the default.
+		ASSERT_TRUE(fontRenderer->Initialize(
+			std::array{folder.write(kBody, "body"), folder.write(kMono, "mono", {.lineHeight = 1.5F, .advanceScale = 1.4F})}, kBody
+		));
+		const std::string text = "wrap these words";
+		EXPECT_EQ(fontRenderer->wrapText(text, 1.0F, 100.0F).family, kBody);
+		const FontRenderer::WrappedTextResult& wrapped = fontRenderer->wrapText(text, 1.0F, 100.0F, kMono);
+		ASSERT_GE(wrapped.lines.size(), 2U);
+		EXPECT_EQ(wrapped.family, kMono);
+		EXPECT_FLOAT_EQ(wrapped.lineHeight, 1.5F * 16.0F);
+
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateWrappedGlyphQuads(
+			wrapped, glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), Foundation::HorizontalAlign::Left, 0.0F, quads
+		);
+
+		// Each line as generateGlyphQuads lays it out in mono, a mono line below the one before.
+		std::vector<FontRenderer::GlyphQuad> expected;
+		for (size_t i = 0; i < wrapped.lines.size(); ++i) {
+			const glm::vec2 lineOrigin(0.0F, static_cast<float>(i) * wrapped.lineHeight);
+			fontRenderer->generateGlyphQuads(wrapped.lines[i], lineOrigin, 1.0F, glm::vec4(1.0F), expected, kMono);
+		}
+		ASSERT_EQ(quads.size(), expected.size());
+		const TextureHandle mono = fontRenderer->getAtlasTexture(kMono);
+		for (size_t i = 0; i < quads.size(); ++i) {
+			EXPECT_EQ(quads[i].atlas, mono) << "glyph " << i;
+			EXPECT_EQ(quads[i].position, expected[i].position) << "glyph " << i;
+		}
+	}
+
 	TEST_F(FontRendererInitializeTest, TheDefaultIsTheCallersChoice) {
 		const std::array sources{
 			folder.write(kBody, "body"),

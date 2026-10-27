@@ -513,6 +513,7 @@ namespace Renderer {
 
 		// Cache miss - compute wrapped text
 		WrappedTextResult result;
+		result.family = key.family;
 
 		constexpr float BASE_FONT_SIZE = 16.0F;
 		float			fontSize = BASE_FONT_SIZE * scale;
@@ -642,21 +643,18 @@ namespace Renderer {
 	}
 
 	void FontRenderer::generateWrappedGlyphQuads(
-		const std::vector<std::string>& lines,
-		const glm::vec2&				position,
-		float							scale,
-		const glm::vec4&				color,
-		float							lineHeight,
-		Foundation::HorizontalAlign		hAlign,
-		float							containerWidth,
-		std::vector<GlyphQuad>&			outQuads,
-		FontFamily						family
+		const WrappedTextResult&	wrapped,
+		const glm::vec2&			position,
+		float						scale,
+		const glm::vec4&			color,
+		Foundation::HorizontalAlign hAlign,
+		float						containerWidth,
+		std::vector<GlyphQuad>&		outQuads
 	) const {
-		float currentY = position.y;
+		const FontFamily family = wrapped.family;
+		float			 currentY = position.y;
 
-		for (size_t lineIdx = 0; lineIdx < lines.size(); ++lineIdx) {
-			const std::string& line = lines[lineIdx];
-
+		for (const std::string& line : wrapped.lines) {
 			// Calculate X offset for alignment
 			float lineX = position.x;
 			if (containerWidth > 0.0F && !line.empty()) {
@@ -680,7 +678,7 @@ namespace Renderer {
 				generateGlyphQuads(line, glm::vec2(lineX, currentY), scale, color, outQuads, family);
 			}
 
-			currentY += lineHeight;
+			currentY += wrapped.lineHeight;
 		}
 	}
 
