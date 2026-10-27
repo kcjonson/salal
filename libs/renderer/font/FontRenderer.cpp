@@ -3,8 +3,8 @@
 #include "font/FontRenderer.h"
 #include "primitives/Primitives.h"
 #include "utils/Log.h"
-#include "utils/ResourcePath.h"
-#include <cstdlib>
+#include <algorithm>
+#include <array>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -13,15 +13,6 @@
 namespace Renderer {
 
 	namespace {
-		// Atlas file basenames per FontFamily, indexed by static_cast<int>(family).
-		// Order must match the FontFamily enum in primitives/FontFamily.h.
-		constexpr const char* kAtlasBaseNames[kFontFamilyCount] = {
-			"Roboto-SDF",		// FontFamily::Roboto
-			"ChakraPetch-SDF",	// FontFamily::ChakraPetch
-			"Barlow-SDF",		// FontFamily::Barlow
-			"JetBrainsMono-SDF" // FontFamily::JetBrainsMono
-		};
-
 		// The single advance iteration shared by MeasureText and generateGlyphQuads,
 		// so measured width always equals rendered width (alignment depends on it).
 		// Resolves each char with '?' fallback, invokes fn(glyph, penX) at the
@@ -50,60 +41,90 @@ namespace Renderer {
 	FontRenderer::FontRenderer() = default;
 
 	FontRenderer::~FontRenderer() {
-		// Clean up every loaded atlas texture
-		for (Atlas& atlas : atlases) {
-			Primitives::destroyTexture(atlas.texture);
-			atlas.texture = {};
-		}
+		release();
 	}
 
-	bool FontRenderer::Initialize() {
+	bool FontRenderer::Initialize(std::span<const FontAtlasSource> sources, FontFamily defaultFamily) {
 		LOG_INFO(UI, "Initializing FontRenderer...");
+		release();
 
-		// Load every font family's atlas. Roboto (index 0) is the default used by
-		// all existing callers, so a missing/broken Roboto atlas is fatal. The
-		// other families are best-effort: warn and continue so Roboto still works.
-		for (int i = 0; i < kFontFamilyCount; ++i) {
-			const std::string pngName = std::string("fonts/") + kAtlasBaseNames[i] + ".png";
-			const std::string jsonName = std::string("fonts/") + kAtlasBaseNames[i] + ".json";
-
-			// Resolve paths using resource finder (handles invalid cwd from IDEs)
-			std::string pngPath = Foundation::findResourceString(pngName);
-			std::string jsonPath = Foundation::findResourceString(jsonName);
-
-			const bool isDefault = (i == static_cast<int>(FontFamily::Roboto));
-
-			if (pngPath.empty() || jsonPath.empty()) {
-				if (isDefault) {
-					LOG_ERROR(UI, "FATAL ERROR: default SDF atlas files not found (%s)", kAtlasBaseNames[i]);
-					std::exit(1);
-				}
-				LOG_WARNING(UI, "SDF atlas '%s' not found, skipping (font family unavailable)", kAtlasBaseNames[i]);
-				continue;
+		// The sources are checked whole before anything loads.
+		if (sources.empty()) {
+			LOG_ERROR(UI, "FontRenderer: no font atlases given");
+			return false;
+		}
+		std::array<bool, 256> given{}; // one per FontFamily value
+		size_t				  slots = 0;
+		for (const FontAtlasSource& source : sources) {
+			const auto id = static_cast<size_t>(source.family);
+			if (source.family == FontFamily::Default) {
+				LOG_ERROR(
+					UI, "FontRenderer: FontFamily::Default stands for the default family, it is not one (%s)", source.pngPath.c_str()
+				);
+				return false;
 			}
+			if (given[id]) {
+				LOG_ERROR(UI, "FontRenderer: font family %zu given twice (%s)", id, source.pngPath.c_str());
+				return false;
+			}
+			given[id] = true;
+			slots = std::max(slots, id + 1);
+		}
+		if (!given[static_cast<size_t>(defaultFamily)]) {
+			LOG_ERROR(UI, "FontRenderer: the default font family %d is not among the atlases given", static_cast<int>(defaultFamily));
+			return false;
+		}
 
-			if (!LoadSDFAtlas(atlases[i], pngPath, jsonPath)) {
-				if (isDefault) {
-					LOG_ERROR(UI, "FATAL ERROR: failed to load default SDF atlas (%s)", kAtlasBaseNames[i]);
-					std::exit(1);
-				}
-				LOG_WARNING(UI, "Failed to load SDF atlas '%s', skipping (font family unavailable)", kAtlasBaseNames[i]);
-				continue;
+		// Every family loads the same way: one that fails is logged and skipped, and draws
+		// with the default.
+		atlases.resize(slots);
+		for (const FontAtlasSource& source : sources) {
+			Atlas& atlas = atlases[static_cast<size_t>(source.family)];
+			if (!LoadSDFAtlas(atlas, source.pngPath, source.jsonPath)) {
+				atlas = Atlas{};
+				LOG_WARNING(
+					UI,
+					"Font family %d unavailable, skipping (atlas %s and %s did not load)",
+					static_cast<int>(source.family),
+					source.pngPath.c_str(),
+					source.jsonPath.c_str()
+				);
 			}
 		}
+
+		// Without the default there is nothing to fall back to: fail, holding nothing.
+		if (!atlases[static_cast<size_t>(defaultFamily)].loaded) {
+			LOG_ERROR(UI, "FontRenderer: the default font family %d did not load", static_cast<int>(defaultFamily));
+			release();
+			return false;
+		}
+		fallbackFamily = defaultFamily;
 
 		LOG_INFO(UI, "FontRenderer initialization complete (SDF atlas mode)");
 		return true;
 	}
 
-	const FontRenderer::Atlas& FontRenderer::atlasFor(FontFamily family) const {
-		const Atlas& requested = atlases[static_cast<int>(family)];
-		if (requested.loaded) {
-			return requested;
+	void FontRenderer::release() {
+		for (Atlas& atlas : atlases) {
+			Primitives::destroyTexture(atlas.texture);
 		}
-		// Requested family failed to load; fall back to Roboto, which is guaranteed
-		// loaded (Initialize exits otherwise).
-		return atlases[static_cast<int>(FontFamily::Roboto)];
+		atlases.clear();
+		fallbackFamily = FontFamily::Default;
+		glyphQuadCache.clear();
+		wrappedTextCache.clear();
+	}
+
+	const FontRenderer::Atlas& FontRenderer::atlasFor(FontFamily family) const {
+		const auto requested = static_cast<size_t>(family);
+		if (requested < atlases.size() && atlases[requested].loaded) {
+			return atlases[requested];
+		}
+		const auto fallback = static_cast<size_t>(fallbackFamily);
+		if (fallback < atlases.size()) {
+			return atlases[fallback];
+		}
+		static const Atlas kNoAtlas;
+		return kNoAtlas;
 	}
 
 	glm::vec2 FontRenderer::MeasureText(const std::string& text, float scale, FontFamily family, float letterSpacing) const {

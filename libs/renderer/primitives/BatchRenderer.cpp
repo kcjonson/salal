@@ -522,7 +522,8 @@ namespace Renderer {
 	) {
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		// Resolve the atlas this glyph samples. An invalid handle means "use the
-		// default atlas" (Roboto, set via setFontAtlas), so existing callers are unchanged.
+		// default atlas" (the game's default family's, set via setFontAtlas), so
+		// existing callers are unchanged.
 		const TextureHandle resolvedAtlas = atlas.isValid() ? atlas : defaultFontAtlas;
 
 		uint32_t baseIndex = static_cast<uint32_t>(vertices.size());

@@ -167,9 +167,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   device pixel grid and every glyph shifted by the same delta, keeping
 		//   glyph edges stable without disturbing advances/kerning.
 		// atlas: MSDF atlas this glyph samples from. An invalid handle selects the
-		//   default atlas set via setFontAtlas() (Roboto). A frame may mix multiple
-		//   atlases; flush() splits draws by atlas so each glyph samples the right
-		//   texture.
+		//   default atlas set via setFontAtlas(), the game's default family's. A
+		//   frame may mix multiple atlases; flush() splits draws by atlas so each
+		//   glyph samples the right texture.
 		void addTextQuad(
 			const Foundation::Vec2&	 position,
 			const Foundation::Vec2&	 size,

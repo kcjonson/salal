@@ -78,8 +78,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//
 		// Example:
 		//   auto fontRenderer = std::make_unique<Renderer::FontRenderer>();
-		//   fontRenderer->Initialize();
-		//   Renderer::Primitives::setFontRenderer(fontRenderer.get());
+		//   if (fontRenderer->Initialize(atlasSources, kBodyFont)) {
+		//       Renderer::Primitives::setFontRenderer(fontRenderer.get());
+		//   }
 		void setFontRenderer(FontRenderer* fontRenderer);
 
 		// Get the current font renderer instance.
@@ -361,7 +362,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::Vec2  position;											 // Top-left position
 			float			  scale = 1.0F;										 // Text scale (1.0F = 16px base size)
 			Foundation::Color color = Foundation::Color(1.0F, 1.0F, 1.0F, 1.0F); // RGBA
-			FontFamily		  font = FontFamily::Roboto;						 // Atlas to render with (default Roboto)
+			FontFamily		  font = FontFamily::Default;						 // Atlas to render with (the game's default)
 			// CSS text-shadow: when shadowColor.a > 0, the string is drawn once at
 			// position+shadowOffset in shadowColor (behind), then normally.
 			Foundation::Color shadowColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F);
@@ -401,7 +402,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void drawGlyphs(
 			const FontRenderer::GlyphQuad* quads,
 			size_t						   count,
-			FontFamily					   family = FontFamily::Roboto,
+			FontFamily					   family = FontFamily::Default,
 			float						   zIndex = 0.0F,
 			BlendMode					   blend = BlendMode::Alpha
 		);

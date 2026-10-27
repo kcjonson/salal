@@ -6,12 +6,12 @@
 #include "Handle.h"
 #include "graphics/PrimitiveStyles.h"
 #include "primitives/FontFamily.h"
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <glm/glm.hpp>
 #include <map>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -31,6 +31,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		constexpr bool kEnableGlyphQuadCache = true;
 	} // namespace FontRendererConfig
 
+	/**
+	 * One atlas for FontRenderer::Initialize: the family the game loads it as, and the
+	 * MSDF atlas's PNG and JSON metadata, as paths the renderer opens as given.
+	 */
+	struct FontAtlasSource {
+		FontFamily	family;
+		std::string pngPath;
+		std::string jsonPath;
+	};
+
 	class FontRenderer {
 	  public:
 		FontRenderer();
@@ -45,39 +55,44 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		FontRenderer& operator=(FontRenderer&&) = default;
 
 		/**
-		 * Initialize the font renderer. Needs Primitives::init() first: the atlases
-		 * are textures on the renderer's backend, and before it the default
-		 * (Roboto) atlas cannot load, which is fatal.
-		 * @return true if initialization was successful
+		 * Load the game's font atlases, replacing any an earlier call loaded. Needs
+		 * Primitives::init() first: the atlases are textures on the renderer's backend.
+		 *
+		 * The sources load in order. One that fails to load is logged and skipped, and
+		 * its family draws with the default, as does any family not given.
+		 * @param sources One atlas per family; no family twice, and not FontFamily::Default
+		 * @param defaultFamily The family FontFamily::Default stands for; one of the sources
+		 * @return false, with nothing loaded, when the sources are empty or break the rules
+		 *         above, or when the default family's atlas fails to load
 		 */
-		bool Initialize();
+		bool Initialize(std::span<const FontAtlasSource> sources, FontFamily defaultFamily);
 
 		/**
 		 * Calculate the dimensions of a text string with the given scale
 		 * @param text The text to measure
 		 * @param scale Scaling factor (default 1.0F)
-		 * @param family Font family to measure with (default Roboto)
+		 * @param family Font family to measure with (default: the game's default family)
 		 * @param letterSpacing Extra px between glyphs (CSS letter-spacing); 0 = none
 		 * @return Width and height of the text in pixels
 		 */
 		glm::vec2
-		MeasureText(const std::string& text, float scale = 1.0F, FontFamily family = FontFamily::Roboto, float letterSpacing = 0.0F) const;
+		MeasureText(const std::string& text, float scale = 1.0F, FontFamily family = FontFamily::Default, float letterSpacing = 0.0F) const;
 
 		/**
 		 * Get the maximum glyph height scaled by the given factor
 		 * @param scale Scaling factor for the font size (1.0F = original size)
-		 * @param family Font family to query (default Roboto)
+		 * @param family Font family to query (default: the game's default family)
 		 * @return Height of the tallest glyph in the font at the given scale
 		 */
-		float getMaxGlyphHeight(float scale = 1.0F, FontFamily family = FontFamily::Roboto) const;
+		float getMaxGlyphHeight(float scale = 1.0F, FontFamily family = FontFamily::Default) const;
 
 		/**
 		 * Get the font's ascent (distance from baseline to top) scaled by the given factor
 		 * @param scale Scaling factor for the font size (1.0F = original size)
-		 * @param family Font family to query (default Roboto)
+		 * @param family Font family to query (default: the game's default family)
 		 * @return Font ascent at the given scale
 		 */
-		float getAscent(float scale = 1.0F, FontFamily family = FontFamily::Roboto) const;
+		float getAscent(float scale = 1.0F, FontFamily family = FontFamily::Default) const;
 
 		/**
 		 * Glyph quad data for batched text rendering
@@ -117,7 +132,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float					scale,
 			const glm::vec4&		color,
 			std::vector<GlyphQuad>& outQuads,
-			FontFamily				family = FontFamily::Roboto,
+			FontFamily				family = FontFamily::Default,
 			float					letterSpacing = 0.0F
 		) const;
 
@@ -128,22 +143,22 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * @param text The text to wrap
 		 * @param scale Scaling factor (fontSize / 16.0)
 		 * @param maxWidth Maximum line width in pixels (0 = no wrapping, single line)
-		 * @param family Font family used for glyph metrics (default Roboto)
+		 * @param family Font family used for glyph metrics (default: the game's default family)
 		 * @return Cached reference to wrapped result (lines, dimensions)
 		 */
 		const WrappedTextResult&
-		wrapText(const std::string& text, float scale, float maxWidth, FontFamily family = FontFamily::Roboto) const;
+		wrapText(const std::string& text, float scale, float maxWidth, FontFamily family = FontFamily::Default) const;
 
 		/**
 		 * Measure text with optional wrapping
 		 * @param text The text to measure
 		 * @param scale Scaling factor
 		 * @param maxWidth Maximum line width (0 = no wrapping, returns single-line size)
-		 * @param family Font family used for glyph metrics (default Roboto)
+		 * @param family Font family used for glyph metrics (default: the game's default family)
 		 * @return Width and height of the text block in pixels
 		 */
 		glm::vec2
-		measureTextWithWrapping(const std::string& text, float scale, float maxWidth, FontFamily family = FontFamily::Roboto) const;
+		measureTextWithWrapping(const std::string& text, float scale, float maxWidth, FontFamily family = FontFamily::Default) const;
 
 		/**
 		 * Generate glyph quads for wrapped/multi-line text
@@ -165,15 +180,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::HorizontalAlign		hAlign,
 			float							containerWidth,
 			std::vector<GlyphQuad>&			outQuads,
-			FontFamily						family = FontFamily::Roboto
+			FontFamily						family = FontFamily::Default
 		) const;
 
 		/**
 		 * Get the atlas texture of a font family (for batching)
-		 * @param family Font family whose atlas texture to return (default Roboto)
+		 * @param family Font family whose atlas texture to return (default: the game's default family)
 		 * @return The atlas texture; invalid if the renderer never loaded
 		 */
-		TextureHandle getAtlasTexture(FontFamily family = FontFamily::Roboto) const;
+		TextureHandle getAtlasTexture(FontFamily family = FontFamily::Default) const;
 
 		/**
 		 * Update the internal frame counter for cache LRU tracking
@@ -221,7 +236,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		/**
 		 * A single loaded font: its glyphs, atlas metadata, atlas texture, and the
-		 * font metrics derived from them. One Atlas per FontFamily.
+		 * font metrics derived from them. One Atlas per loaded family.
 		 */
 		struct Atlas {
 			std::map<char, SDFGlyph> glyphs;						// Map of SDF glyphs
@@ -242,10 +257,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		bool LoadSDFAtlas(Atlas& atlas, const std::string& pngPath, const std::string& jsonPath);
 
 		/**
-		 * Resolve a family to its atlas, falling back to Roboto if the requested
-		 * family failed to load. Roboto is always present (fatal if it isn't).
+		 * Resolve a family to its atlas. FontFamily::Default, and a family that is not
+		 * loaded, resolve to the default family's, which is loaded whenever Initialize
+		 * succeeded; before that, or after it failed, to an empty atlas.
 		 */
 		const Atlas& atlasFor(FontFamily family) const;
+
+		// Destroy every atlas texture and forget the atlases, the default and both caches.
+		void release();
 
 		/**
 		 * Cache key for glyph quad caching (family + text + scale + letterSpacing)
@@ -283,8 +302,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			uint64_t			   lastAccessFrame;
 		};
 
-		// One atlas per FontFamily, indexed by static_cast<int>(family).
-		std::array<Atlas, kFontFamilyCount> atlases;
+		// Indexed by family id, up to the highest the sources named; a slot no source
+		// filled, or whose atlas failed to load, stays unloaded.
+		std::vector<Atlas> atlases;
+
+		// The family Initialize was given as the default (FontFamily::Default until then).
+		FontFamily fallbackFamily = FontFamily::Default;
 
 		// Glyph quad cache (mutable for const GenerateGlyphQuads)
 		mutable std::unordered_map<CacheKey, CacheEntry, CacheKeyHash> glyphQuadCache;
