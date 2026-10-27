@@ -1,4 +1,4 @@
-// uniforms.glsl - The per-draw uniforms, one std140 block for uber.vert and uber.frag
+// uniforms.glsl - The per-draw uniforms, one std140 block for base.vert and base.frag
 //
 // The backend writes the whole block for every draw (setUniforms). It is
 // backend::DrawUniforms in backend/Backend.h member for member, which asserts the

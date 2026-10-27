@@ -614,7 +614,7 @@ first so each import is a pure move. State as of 2026-10-26:
 Settled while scoping, beyond the import method and fonts under "What the repo
 looks like":
 
-- The renderer ships four shader files, `uber.vert`, `uber.frag`,
+- The renderer ships four shader files, `base.vert`, `base.frag`,
   `includes/instancing.glsl` and `includes/uniforms.glsl` (since PR 4), staged
   to `${CMAKE_BINARY_DIR}/shaders` (the top-level build directory, even when
   salal is a subproject). The tile pass is the game's, which is why it moves

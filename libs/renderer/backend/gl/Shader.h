@@ -25,8 +25,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		/**
 		 * Load and compile shaders from files
 		 * Files are loaded from the shaders/ directory relative to the executable
-		 * @param vertexPath Vertex shader filename (e.g., "uber.vert")
-		 * @param fragmentPath Fragment shader filename (e.g., "uber.frag")
+		 * @param vertexPath Vertex shader filename (e.g., "base.vert")
+		 * @param fragmentPath Fragment shader filename (e.g., "base.frag")
 		 * @return true if shaders were loaded and linked successfully
 		 */
 		bool LoadFromFile(const char* vertexPath, const char* fragmentPath);

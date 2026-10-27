@@ -257,8 +257,8 @@ namespace Renderer::backend::gl {
 	}
 
 	TEST_F(GLBackendTest, TheUniformBlockMatchesDrawUniforms) {
-		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"});
-		ASSERT_TRUE(pipeline.isValid()) << "the uber shaders are mirrored beside the test executable";
+		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "base.vert", .fragment = "base.frag"});
+		ASSERT_TRUE(pipeline.isValid()) << "the base shader is mirrored beside the test executable";
 		const GLuint program = gpu->programName(pipeline);
 		const GLuint block = glGetUniformBlockIndex(program, kDrawUniformsBlock);
 		ASSERT_NE(block, GL_INVALID_INDEX);
@@ -352,7 +352,7 @@ namespace Renderer::backend::gl {
 	}
 
 	TEST_F(GLBackendTest, ForeignDrawsWithNoPipelineBindNoProgram) {
-		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"});
+		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "base.vert", .fragment = "base.frag"});
 		ASSERT_TRUE(pipeline.isValid());
 		glUseProgram(gpu->programName(pipeline)); // whatever a game's pass left bound
 		gpu->beginForeignDraws({}, BlendState::Alpha);
@@ -364,25 +364,25 @@ namespace Renderer::backend::gl {
 	}
 
 	TEST_F(GLBackendTest, ADrawBindsEverythingItUsesAndLeavesOnlyItsProgram) {
-		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"});
+		const PipelineHandle pipeline = gpu->createPipeline({.vertex = "base.vert", .fragment = "base.frag"});
 		ASSERT_TRUE(pipeline.isValid());
 		// A stream buffer made empty grows to its first write.
 		const BufferHandle	 vertices = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
 		const BufferHandle	 indices = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
-		const GeometryHandle geometry = gpu->createGeometry({.layout = VertexLayout::Uber, .vertices = vertices, .indices = indices});
+		const GeometryHandle geometry = gpu->createGeometry({.layout = VertexLayout::Batched, .vertices = vertices, .indices = indices});
 		ASSERT_TRUE(geometry.isValid());
 
 		// Two flat red triangles over a 4 x 4 target, drawn as two calls, the second from index 3.
-		const Foundation::Vec4			red(1.0F, 0.0F, 0.0F, 1.0F);
-		const Foundation::Vec4			flat(0.0F, 0.0F, 0.0F, 1.0F); // a zero-size shape: the triangle itself
-		const Foundation::Vec4			none(0.0F);
-		const std::array<UberVertex, 4> quad = {{
+		const Foundation::Vec4			 red(1.0F, 0.0F, 0.0F, 1.0F);
+		const Foundation::Vec4			 flat(0.0F, 0.0F, 0.0F, 1.0F); // a zero-size shape: the triangle itself
+		const Foundation::Vec4			 none(0.0F);
+		const std::array<BatchVertex, 4> quad = {{
 			{{0.0F, 0.0F}, {0.0F, 0.0F}, red, none, flat, none},
 			{{4.0F, 0.0F}, {0.0F, 0.0F}, red, none, flat, none},
 			{{4.0F, 4.0F}, {0.0F, 0.0F}, red, none, flat, none},
 			{{0.0F, 4.0F}, {0.0F, 0.0F}, red, none, flat, none},
 		}};
-		const std::array<uint32_t, 6>	triangles = {0, 1, 2, 0, 2, 3};
+		const std::array<uint32_t, 6>	 triangles = {0, 1, 2, 0, 2, 3};
 		gpu->updateBuffer(vertices, 0, sizeof(quad), quad.data());
 		gpu->updateBuffer(indices, 0, sizeof(triangles), triangles.data());
 

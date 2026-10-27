@@ -31,13 +31,13 @@ namespace {
 } // namespace
 
 // ============================================================================
-// UberVertex Structure Tests
+// BatchVertex Structure Tests
 // ============================================================================
 
-TEST(UberVertexTest, SizeIsReasonable) {
+TEST(BatchVertexTest, SizeIsReasonable) {
 	// position (8) + texCoord (8) + color (16) + data1 (16) + data2 (16) + clipBounds (16) = 80
 	// However, Foundation types may vary - verify it's reasonable
-	static_assert(sizeof(UberVertex) <= 96, "UberVertex should be <= 96 bytes");
+	static_assert(sizeof(BatchVertex) <= 96, "BatchVertex should be <= 96 bytes");
 }
 
 // ============================================================================
@@ -77,7 +77,7 @@ TEST(RenderModeTest, EveryAddWritesItsModeAndBlend) {
 	const StrokePiece piece{.center = {0.0F, 0.0F}, .halfLength = 2.0F, .halfWidth = 1.0F};
 	batch.addStroke({&piece, 1}, {}, Foundation::Color::white(), 0.0F, BlendMode::Additive);
 
-	const std::span<const UberVertex> vertices = batch.getPendingVertices();
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 4U + 4U + 4U + 3U + 4U + 4U + 4U);
 	EXPECT_EQ(vertices[0].data2.w, 5.0F);	 // rect, center border position + 4
 	EXPECT_EQ(vertices[4].data2.w, -11.0F);	 // text
@@ -210,7 +210,7 @@ TEST(BatchArcTest, LocalCoordinatesTurnTheArcsMiddleOntoPlusX) {
 	const float			 quarter = std::numbers::pi_v<float> * 0.5F;
 	batch.addArc({.center = {100.0F, 50.0F}, .innerRadius = 10.0F, .outerRadius = 20.0F, .startAngle = 0.0F, .sweep = quarter});
 
-	const std::span<const UberVertex> vertices = batch.getPendingVertices();
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 4U);
 	EXPECT_NEAR(vertices[0].data2.x, 10.0F, kTolerance);
 	EXPECT_NEAR(vertices[0].data2.y, 20.0F, kTolerance);
@@ -232,7 +232,7 @@ TEST(BatchArcTest, NegativeSweepRunsBackFromTheStart) {
 	// From 180 degrees back to 90: the middle is at 135, the bottom-left corner.
 	batch.addArc({.center = {0.0F, 0.0F}, .outerRadius = 10.0F, .startAngle = pi, .sweep = -pi * 0.5F});
 
-	const std::span<const UberVertex> vertices = batch.getPendingVertices();
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 4U);
 	EXPECT_NEAR(vertices[0].data2.z, pi * 0.25F, kTolerance);
 	EXPECT_NEAR(vertices[3].texCoord.x, 11.0F * std::numbers::sqrt2_v<float>, kTolerance);
@@ -266,7 +266,7 @@ TEST(BatchStrokeTest, PiecesAreOrientedBoxesAndTrianglesFlatInOneGroup) {
 	batch.addStroke(pieces, wedge, Foundation::Color::white(), 3.0F);
 	addRect(batch); // z 0 sorts ahead of the whole stroke
 
-	const std::span<const UberVertex> vertices = batch.getPendingVertices();
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 8U + 3U + 4U);
 	// Along the axis (down the screen) by halfLength + 1, across it by halfWidth + 1.
 	EXPECT_NEAR(vertices[0].position.x, 13.0F, kTolerance);

@@ -442,7 +442,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Alpha multiplied into instanced and baked draws (u_bakedAlpha); 1 is opaque.
 		void setBakedAlpha(float alpha);
 
-		// Bracket a caller's own world-space mesh draws: the uber program in its baked
+		// Bracket a caller's own world-space mesh draws: the base shader in its baked
 		// mode with `camera` and the projection from the setViewport() size, blending
 		// on and depth and culling off, as the batch itself draws. Flush pending
 		// batched geometry first if draw order matters. setBakedAlpha() may be called

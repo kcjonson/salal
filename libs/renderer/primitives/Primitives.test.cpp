@@ -1,4 +1,4 @@
-// What the uber program writes, drawn through Primitives into a RenderTarget
+// What the base shader writes, drawn through Primitives into a RenderTarget
 // against a hidden GL 3.3 core context and read back; skipped where no context
 // can be made (headless CI). Output is premultiplied: a colour c at coverage a
 // over transparent stores (c * a, a), and an additive draw adds c * a and leaves

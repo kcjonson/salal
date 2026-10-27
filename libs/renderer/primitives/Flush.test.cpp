@@ -42,8 +42,8 @@ namespace Renderer {
 		}
 
 		// What the draw's geometry holds now: the last flush's upload.
-		std::vector<UberVertex> vertices(const backend::NullBackend::RecordedDraw& draw) const {
-			return contents<UberVertex>(gpu->geometry(draw.call.geometry)->vertices);
+		std::vector<BatchVertex> vertices(const backend::NullBackend::RecordedDraw& draw) const {
+			return contents<BatchVertex>(gpu->geometry(draw.call.geometry)->vertices);
 		}
 		std::vector<uint32_t> indices(const backend::NullBackend::RecordedDraw& draw) const {
 			return contents<uint32_t>(gpu->geometry(draw.call.geometry)->indices);
@@ -81,9 +81,9 @@ namespace Renderer {
 		ASSERT_EQ(gpu->draws().size(), 1U);
 		const PipelineHandle pipeline = gpu->draws()[0].call.pipeline;
 		ASSERT_NE(gpu->pipeline(pipeline), nullptr);
-		EXPECT_EQ(gpu->pipeline(pipeline)->first, "uber.vert");
-		EXPECT_EQ(gpu->pipeline(pipeline)->second, "uber.frag");
-		EXPECT_EQ(gpu->geometry(gpu->draws()[0].call.geometry)->layout, backend::VertexLayout::Uber);
+		EXPECT_EQ(gpu->pipeline(pipeline)->first, "base.vert");
+		EXPECT_EQ(gpu->pipeline(pipeline)->second, "base.frag");
+		EXPECT_EQ(gpu->geometry(gpu->draws()[0].call.geometry)->layout, backend::VertexLayout::Batched);
 	}
 
 	TEST_F(FlushTest, AnEmptyFlushSubmitsNothing) {
@@ -113,7 +113,7 @@ namespace Renderer {
 		EXPECT_EQ(emitted[0], 4U);
 		EXPECT_EQ(emitted[6], 8U);
 		EXPECT_EQ(emitted[12], 0U);
-		const std::vector<UberVertex> uploaded = vertices(gpu->draws()[0]);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
 		ASSERT_EQ(uploaded.size(), 12U);
 		EXPECT_EQ(uploaded[4].position.x, 20.0F);
 	}
@@ -130,7 +130,7 @@ namespace Renderer {
 		EXPECT_EQ(gpu->draws()[0].call.blend, backend::BlendState::Alpha);
 		EXPECT_EQ(gpu->draws()[0].call.indexCount, 24U);
 		// The mode rides on the vertices instead.
-		const std::vector<UberVertex> uploaded = vertices(gpu->draws()[0]);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
 		ASSERT_EQ(uploaded.size(), 16U);
 		EXPECT_EQ(uploaded[0].data2.w, 1.0F);
 		EXPECT_EQ(uploaded[4].data2.w, 5.0F);
@@ -182,7 +182,7 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<UberVertex> uploaded = vertices(gpu->draws()[0]);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
 		ASSERT_EQ(uploaded.size(), 12U);
 		for (int i = 0; i < 4; ++i) {
 			EXPECT_EQ(uploaded[i].clipBounds, Foundation::Vec4(10.0F, 20.0F, 110.0F, 70.0F));
@@ -210,7 +210,7 @@ namespace Renderer {
 		EXPECT_EQ(gpu->draws()[0].submission, 0);
 		EXPECT_EQ(gpu->draws()[1].submission, 1);
 		EXPECT_EQ(gpu->draws()[1].call.indexCount, 6U);
-		const std::vector<UberVertex> uploaded = vertices(gpu->draws()[1]);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[1]);
 		ASSERT_EQ(uploaded.size(), 4U); // the stream buffer holds the second flush only
 		EXPECT_EQ(uploaded[0].position.x, 40.0F);
 		EXPECT_EQ(gpu->uniformWrites().size(), 2U);

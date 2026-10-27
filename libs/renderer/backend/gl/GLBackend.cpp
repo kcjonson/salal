@@ -364,14 +364,14 @@ namespace Renderer::backend::gl {
 		vertexArray.bind();
 		glBindBuffer(GL_ARRAY_BUFFER, vertices->buffer);
 		switch (desc.layout) {
-			case VertexLayout::Uber:
+			case VertexLayout::Batched:
 				// Locations 6 and 7 are the instanced layout's
-				floatAttribute(0, 2, sizeof(UberVertex), offsetof(UberVertex, position));
-				floatAttribute(1, 2, sizeof(UberVertex), offsetof(UberVertex, texCoord));
-				floatAttribute(2, 4, sizeof(UberVertex), offsetof(UberVertex, color));
-				floatAttribute(3, 4, sizeof(UberVertex), offsetof(UberVertex, data1));
-				floatAttribute(4, 4, sizeof(UberVertex), offsetof(UberVertex, data2));
-				floatAttribute(5, 4, sizeof(UberVertex), offsetof(UberVertex, clipBounds));
+				floatAttribute(0, 2, sizeof(BatchVertex), offsetof(BatchVertex, position));
+				floatAttribute(1, 2, sizeof(BatchVertex), offsetof(BatchVertex, texCoord));
+				floatAttribute(2, 4, sizeof(BatchVertex), offsetof(BatchVertex, color));
+				floatAttribute(3, 4, sizeof(BatchVertex), offsetof(BatchVertex, data1));
+				floatAttribute(4, 4, sizeof(BatchVertex), offsetof(BatchVertex, data2));
+				floatAttribute(5, 4, sizeof(BatchVertex), offsetof(BatchVertex, clipBounds));
 				break;
 			case VertexLayout::InstancedMesh:
 				// Locations 1, 3, 4 and 5 stay disabled and read GL's default (0, 0, 0, 1);
@@ -492,7 +492,7 @@ namespace Renderer::backend::gl {
 				glBindTexture(GL_TEXTURE_2D, textureName(call.texture));
 				texture = call.texture;
 			}
-			const bool		wide = geometry->layout == VertexLayout::Uber;
+			const bool		wide = geometry->layout == VertexLayout::Batched;
 			const GLenum	type = wide ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
 			const uintptr_t offset = static_cast<uintptr_t>(call.indexOffset) * (wide ? sizeof(uint32_t) : sizeof(uint16_t));
 			const auto*		indices = reinterpret_cast<const void*>(offset); // NOLINT(performance-no-int-to-ptr)

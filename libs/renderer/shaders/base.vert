@@ -1,6 +1,6 @@
 #version 330 core
 
-// Uber Shader - Unified vertex shader for shapes, text, and instanced entities
+// Base shader - unified vertex shader for shapes, text, and instanced entities
 // Combines primitive.vert, msdf_text.vert, and GPU instancing functionality
 //
 // Three rendering modes (controlled by u_instanced uniform):
@@ -27,7 +27,7 @@ out vec4 v_data1;
 out vec4 v_data2;
 out vec4 v_clipBounds;
 
-// Render mode constant for instanced entities (matches uber.frag)
+// Render mode constant for instanced entities (matches base.frag)
 // Stored in v_data2.w to signal fragment shader to use simple solid color output
 const float kRenderModeInstanced = -2.0;
 

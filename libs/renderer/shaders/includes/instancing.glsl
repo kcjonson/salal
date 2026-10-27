@@ -1,4 +1,4 @@
-// instancing.glsl - GPU Instancing support for uber shader
+// instancing.glsl - GPU Instancing support for the base shader
 //
 // Provides per-instance data attributes and world-to-screen transformation
 // for efficient rendering of many instances of the same mesh.
@@ -13,7 +13,7 @@ layout(location = 6) in vec4 a_instanceData1;
 layout(location = 7) in vec4 a_instanceData2;
 
 // The camera, viewport and groundcover uniforms it reads are in the DrawUniforms
-// block (uniforms.glsl), which uber.vert includes first.
+// block (uniforms.glsl), which base.vert includes first.
 
 /// Transform a local mesh vertex to screen space using instance data.
 /// @param localPos Vertex position in local mesh space (usually centered around origin)

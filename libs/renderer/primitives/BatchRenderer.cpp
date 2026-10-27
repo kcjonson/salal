@@ -1,4 +1,4 @@
-// Uber Batch Renderer implementation.
+// Batch Renderer implementation.
 // Accumulates 2D geometry (shapes + text) and renders in optimized batches.
 
 #include "primitives/BatchRenderer.h"
@@ -26,7 +26,7 @@ namespace Renderer {
 		constexpr float kTwoPi = 2.0F * std::numbers::pi_v<float>;
 
 		// The stream buffers' first size; the backend grows them as a flush needs.
-		constexpr size_t kInitialVertexBytes = 4096 * sizeof(UberVertex);
+		constexpr size_t kInitialVertexBytes = 4096 * sizeof(BatchVertex);
 		constexpr size_t kInitialIndexBytes = 6144 * sizeof(uint32_t);
 	} // namespace
 
@@ -62,14 +62,14 @@ namespace Renderer {
 
 	BatchRenderer::BatchRenderer(backend::Backend& renderBackend)
 		: gpu(renderBackend),
-		  pipeline(renderBackend.createPipeline({.vertex = "uber.vert", .fragment = "uber.frag"})),
+		  pipeline(renderBackend.createPipeline({.vertex = "base.vert", .fragment = "base.frag"})),
 		  vertexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialVertexBytes, nullptr)),
 		  indexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialIndexBytes, nullptr)),
 		  geometry(
-			  renderBackend.createGeometry({.layout = backend::VertexLayout::Uber, .vertices = vertexBuffer, .indices = indexBuffer})
+			  renderBackend.createGeometry({.layout = backend::VertexLayout::Batched, .vertices = vertexBuffer, .indices = indexBuffer})
 		  ) {
 		if (!pipeline.isValid()) {
-			std::cerr << "Failed to load uber shaders!" << std::endl;
+			std::cerr << "Failed to load the base shader!" << std::endl;
 		}
 		// Reserve space for vertices to minimize allocations
 		vertices.reserve(10000);
@@ -708,7 +708,7 @@ namespace Renderer {
 		const DrawPlan drawPlan = plan();
 
 		// The whole batch, every flush: the stream buffers start over
-		gpu.updateBuffer(vertexBuffer, 0, vertices.size() * sizeof(UberVertex), vertices.data());
+		gpu.updateBuffer(vertexBuffer, 0, vertices.size() * sizeof(BatchVertex), vertices.data());
 		gpu.updateBuffer(indexBuffer, 0, drawPlan.indices.size_bytes(), drawPlan.indices.data());
 
 		// Create projection matrix

@@ -85,7 +85,7 @@ Phase 1 landed (2026-10-26): `foundation` and `renderer` are imported, `v0.1.0`
 is tagged, and worldsim consumes this repo. The renderer boundary PRs are under
 way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PRs 1
 to 4 are in (`v0.2.0` to `v0.5.0`), and moving the groundcover and cursor
-uniforms out of the uber shader into a game shader is the follow-up. Phase 2
+uniforms out of the base shader into a game shader is the follow-up. Phase 2
 carves `app` out of `libs/engine`; `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 

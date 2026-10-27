@@ -86,7 +86,7 @@ set_target_properties(salal_renderer_shaders PROPERTIES FOLDER salal)
 salal_add_tests(renderer)
 if(TARGET salal_renderer_tests)
     target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw)
-    # The fixtures that draw through Primitives load the uber shaders from beside the exe,
+    # The fixtures that draw through Primitives load the base shader from beside the exe,
     # copied when a shader changes (one stamp per configuration).
     set(SALAL_RENDERER_TESTS_SHADERS_STAMP "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/salal_renderer_tests_shaders.stamp")
     add_custom_command(

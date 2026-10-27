@@ -22,7 +22,7 @@
 #include <utils/Log.h>
 #include <vector>
 
-// Text rendering is implemented via the unified uber shader in BatchRenderer.
+// Text rendering is implemented via the base shader in BatchRenderer.
 // Text shapes call BatchRenderer::addTextQuad() directly to batch text with shapes.
 
 namespace Renderer::Primitives {
@@ -201,7 +201,7 @@ namespace Renderer::Primitives {
 
 	void endFrame() {
 		// Flush all batched geometry (shapes + text) in a single draw call
-		// The uber shader handles both SDF shapes and MSDF text
+		// The base shader handles both SDF shapes and MSDF text
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->endFrame();
 		}

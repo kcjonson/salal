@@ -422,10 +422,10 @@ the nearest relayout boundary. Style is a closed CSS-named property set with
 per-state sub-objects and tokens generated from `theme/tokens.json`. Draw API:
 drawRect (fill, radius, border with position inside/center/outside, shadow),
 drawCircle, drawLine, drawPolyline, drawPolygon, drawImage (nine-slice),
-drawText, measureText; one uber shader with packed 104-byte instances and
-per-draw clip as data, no scissor, premultiplied alpha. This differs from
-architecture.md's Layer/Component/Shapes trio and from worldsim; which model
-`ui` follows is part of decision C.
+drawText, measureText; one shader program for every primitive, with packed
+104-byte instances and per-draw clip as data, no scissor, premultiplied alpha.
+This differs from architecture.md's Layer/Component/Shapes trio and from
+worldsim; which model `ui` follows is part of decision C.
 
 What it does not have, so the engine design cannot lean on it: no gamepad, no
 HTTP transport, no screenshot, no fixed-step loop (variable-step rAF, delta

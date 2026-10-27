@@ -18,12 +18,12 @@
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
-	// The batched vertex (VertexLayout::Uber), attributes 0 to 5 of uber.vert:
+	// The batched vertex (VertexLayout::Batched), attributes 0 to 5 of base.vert:
 	//   0 position (vec2), 1 texCoord (vec2): UV for text and images, rect-local for
 	//   shapes, arc-local for arcs; 2 color (vec4); 3 data1 (vec4): borderData for
 	//   shapes, blur for shadows; 4 data2 (vec4): per-mode parameters, the render mode
 	//   in w; 5 clipBounds (vec4): (minX, minY, maxX, maxY), or zero for no clip.
-	struct UberVertex {
+	struct BatchVertex {
 		Foundation::Vec2 position;	 // Screen-space position
 		Foundation::Vec2 texCoord;	 // UV for text and images, rectLocalPos for shapes
 		Foundation::Vec4 color;		 // Fill color RGBA, straight alpha
@@ -33,7 +33,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 									 // arc: (innerR, outerR, sweep / 2, w); image: (0, 0, 0, w)
 		Foundation::Vec4 clipBounds; // Clip rect (minX, minY, maxX, maxY), or (0,0,0,0) for no clipping
 	};
-	static_assert(sizeof(UberVertex) == 80, "UberVertex is the 80-byte stride of the Uber layout");
+	static_assert(sizeof(BatchVertex) == 80, "BatchVertex is the 80-byte stride of the Batched layout");
 
 	// An instanced mesh vertex (VertexLayout::InstancedMesh), attributes 0 and 2; the
 	// per-instance InstanceData (primitives/InstanceData.h) supplies 6 and 7.
@@ -46,10 +46,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 namespace Renderer::backend {
 
-	// A geometry's vertex format, which fixes its index type: Uber is UberVertex with
+	// A geometry's vertex format, which fixes its index type: Batched is BatchVertex with
 	// uint32 indices; InstancedMesh is InstancedMeshVertex with uint16 indices, plus
 	// an InstanceData per instance.
-	enum class VertexLayout : uint8_t { Uber, InstancedMesh };
+	enum class VertexLayout : uint8_t { Batched, InstancedMesh };
 
 	// How a buffer is written after it is made. Static: never. Dynamic: in place, the
 	// write ordered after every draw already submitted, which still reads the old
@@ -71,7 +71,7 @@ namespace Renderer::backend {
 
 	// Buffers to draw from in `layout`; `instances` only for InstancedMesh.
 	struct GeometryDesc {
-		VertexLayout layout = VertexLayout::Uber;
+		VertexLayout layout = VertexLayout::Batched;
 		BufferHandle vertices;
 		BufferHandle indices;
 		BufferHandle instances;
@@ -208,7 +208,7 @@ namespace Renderer::backend {
 		// --- Pipelines and drawing ---
 
 		// The program from `source`, its DrawUniforms block bound to the buffer
-		// setUniforms() writes and u_atlas to unit 0. Uber is the only one.
+		// setUniforms() writes and u_atlas to unit 0. The base shader is the only one.
 		virtual PipelineHandle createPipeline(const ShaderSource& source) = 0;
 		virtual void		   destroyPipeline(PipelineHandle pipeline) = 0;
 
@@ -224,7 +224,7 @@ namespace Renderer::backend {
 
 		// Bind `pipeline` in `blend` for draws the caller issues itself, from its own
 		// vertex arrays, until endForeignDraws(): worldsim's baked chunk meshes under
-		// the uber program (docs/renderer-boundary.md, question 2). setUniforms()
+		// the base shader (docs/renderer-boundary.md, question 2). setUniforms()
 		// between those draws applies from the next one.
 		virtual void beginForeignDraws(PipelineHandle pipeline, BlendState blend) = 0;
 		virtual void endForeignDraws() = 0;

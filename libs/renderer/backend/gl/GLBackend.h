@@ -102,7 +102,7 @@ namespace Renderer::backend::gl {
 
 		struct GeometrySlot {
 			GLVertexArray vertexArray;
-			VertexLayout  layout = VertexLayout::Uber;
+			VertexLayout  layout = VertexLayout::Batched;
 		};
 
 		void   applyFixedState();
