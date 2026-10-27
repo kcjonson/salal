@@ -279,7 +279,7 @@ inherit them.
 | 8 | Monorepo and "copy worldsim" language predates salal; "worldsim's OpenGL engine" | `tech-stack.md:3-4, :23, :39-57, :266-281`; `docs/README.md:18` | rewrite against salal |
 | 9 | Input placed in `engine` (salal's `app`, above ui and renderer), so a sim consuming a snapshot type defined there would break the dependency rule | `tech-stack.md:153` | decision D, settled 2026-10-26: input types in `foundation/input/`, poller in `app`; sim consumes a game-owned action POD built from foundation's `ActionMap` |
 | 10 | `DrawRect`/`DrawText`/`DrawCircle` PascalCase | `tech-stack.md:66`; salal README | functions are camelCase: `drawRect` |
-| 11 | PRNG listed under foundation but sequenced in phase 2 "carve out app" | architecture.md; extraction.md | the fork API lands in foundation during phase 2; no conflict once stated |
+| 11 | PRNG listed under foundation but sequenced in phase 2 "carve out app" | architecture.md; extraction.md | the fork API is in foundation, landed ahead of phase 2 as `random/Rng.h` (decision A); no conflict |
 
 Checked and not conflicts: nothing assumes a loop owning main; screens and
 scenes are reconciled; 120 Hz as a consumer choice matches; no physics,

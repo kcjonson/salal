@@ -90,8 +90,10 @@ is tagged, and worldsim consumes this repo. The renderer boundary PRs are under
 way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PRs 1
 to 4 are in (`v0.2.0` to `v0.5.0`), and after them the base shader takes hooks
 assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which took
-worldsim's grass deform out of the renderer and into a worldsim hook. Phase 2
-carves `app` out of `libs/engine`; `ui` is extracted last.
+worldsim's grass deform out of the renderer and into a worldsim hook.
+`foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
+ported bit for bit (decision A). Phase 2 carves `app` out of `libs/engine`;
+`ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -273,12 +275,14 @@ No tests on feel, and no screenshot baselines or pixel comparisons.
 Don't guess at these; ask. The live list, each with a recommendation and the
 phase that needs the answer, is
 [docs/open-decisions.md](docs/open-decisions.md), mirrored as items on the
-board: the engine PRNG, audio, adopting dual-deck-builder's UI spec, the
-ECS core, the `ui` storage model, vector/SVG conventions, multi-device focus,
-and the dual-deck-builder golden corpus.
+board: audio, adopting dual-deck-builder's UI spec, the `ui` storage model,
+vector/SVG conventions, multi-device focus, and the dual-deck-builder golden
+corpus.
 
 Resolved since the first version of this file: work is tracked in Specboard
 (see above). Input types in `foundation/input/`, poller in `app`, settled
-2026-10-26 (decision D). The "engine-extraction.md" item is dropped; that file
+2026-10-26 (decision D). The engine's game PRNG is dual-deck-builder's `Rng`,
+in `foundation/random/Rng.h`, with Pcg32 and SplitMix64 kept for worldgen, and
+the ECS core stays in worldsim, both settled 2026-10-26 (decisions A and E). The "engine-extraction.md" item is dropped; that file
 never existed in worldsim, and the plan is
 [docs/extraction.md](docs/extraction.md).

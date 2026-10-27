@@ -375,8 +375,8 @@ Generic and header-only: `ecs/EntityID.h` (30), `ComponentPool.h` (139,
 sparse set), `Registry.h` (158), `View.h` (96), `ISystem.h` (36), `World.h`
 (220), `ECS.h` umbrella. 689 lines, namespace `ecs`, std-only includes.
 Everything else under ecs/ is worldsim. 31 files in apps/world-sim include the
-core headers. Engine-grade and optional; whether salal wants an ECS at all is
-a product call (open decision E, recommendation: leave it).
+core headers. Engine-grade and optional, and it stays in worldsim (decision E,
+settled 2026-10-26).
 
 ### PRNG
 
@@ -392,8 +392,11 @@ generator and no named-stream forking like DDB's `fork('run', n)`; forking is
 by hand as `Pcg32(deriveSeed(seed, id))`. `std::mt19937` is still used
 outside worldgen: in engine `IAssetGenerator.h`, `PlacementExecutor`,
 `ActionSystem.h`, `AIDecisionSystem.h`; in apps GameScene, PlacementSystem,
-PartySelectScene, and ui-sandbox Grass and VectorPerf. What is missing is the
-fork API and the discipline; open decision A.
+PartySelectScene, and ui-sandbox Grass and VectorPerf. What was missing was
+the fork API and the discipline. Decision A (settled 2026-10-26) put
+dual-deck-builder's `Rng`, with its named-stream `fork`, beside these in
+salal's `foundation/random/Rng.h`; Pcg32 and SplitMix64 stay as they are for
+worldgen.
 
 ### The sandbox harness
 
@@ -465,10 +468,10 @@ DebugServer, LockFreeRingBuffer and PngEncoder are now in engine, so phase 2
 moves them from engine into app. PerformanceMetrics is in renderer because
 `MetricsCollector` returns it from its public API.
 
-Optional: the ECS core, 7 headers, 689 lines.
+Not in the slice: the ECS core, 7 headers, 689 lines, which stays in worldsim
+(decision E).
 
-Totals: about 2.9k core, 5.0k with the dev server, metrics and resource path,
-5.7k with the ECS core. One test file exists for the whole slice
+Totals: about 2.9k core, 5.0k with the dev server, metrics and resource path. One test file exists for the whole slice
 (InputManager.test.cpp); Application, SceneManager and AppLauncher have none.
 
 ## Net-new for salal
@@ -483,7 +486,8 @@ None of this exists in worldsim in any form:
   needs one; today worldsim's `findResourceString` path search is enough
 - a compile flag for the dev server, with game-registrable endpoints and pad
   and axis injection
-- a named-stream PRNG fork API (decision A)
+- a named-stream PRNG fork API (decision A; landed ahead of phase 2 as
+  `foundation/random/Rng.h`)
 - a scene stack with typed payloads and return-to-caller
   ([consumer-requirements.md](consumer-requirements.md) has what asteroids
   needs)

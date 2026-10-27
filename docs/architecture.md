@@ -200,15 +200,17 @@ This buys replays, bug reports reproducible from a seed and an input log,
 differential testing between implementations, and a path to netplay that does
 not require rewriting the core.
 
-No engine PRNG exists yet, and which one it will be is decision A in
-[open-decisions.md](open-decisions.md). Worldsim has
-`foundation/random/Pcg32.h` and `SplitMix64.h` with `deriveSeed(seed,
-streamId)`, deterministic and cross-platform, but no named-stream `fork`.
-Dual-deck-builder has sfc32 with a MurmurHash3-based `fork(name, attempt)` and
-language-neutral golden vectors (`src/renderer/game/core/Rng.ts`). They are
-different generators, and bit-identical differential testing against the
-TypeScript sim needs the latter. The recommendation is both: dual-deck-builder's
-as the engine's game PRNG, worldsim's kept as it is for worldgen.
+The engine's game PRNG is `Rng` in `foundation/random/Rng.h` (decision A in
+[open-decisions.md](open-decisions.md), settled 2026-10-26): dual-deck-builder's
+sfc32 with a MurmurHash3-based `fork(name, attempt)`, bit-identical to its
+`src/renderer/game/core/Rng.ts` at `RNG_VERSION` 1, whose golden vectors run as
+gtests on every CI platform. A stream is its uint32 seed, and `fork` derives a
+child stream from the parent's seed, a name and an attempt without reading or
+advancing the parent. `Rng` has no unseeded constructor and no copy; root seeds
+come from `freshSeed()`, which has its own header so a sim never includes it.
+Bit-identical differential testing against the TypeScript sim needs this
+generator. Worldsim's `Pcg32.h` and `SplitMix64.h`, with `deriveSeed(seed,
+streamId)`, stay beside it as they are for worldgen.
 
 Dual-deck-builder's TypeScript sim core is written to this bar, and its spec
 requires identical JSON output in Node and the browser from the same config and
