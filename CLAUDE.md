@@ -241,7 +241,8 @@ no fonts: a game hands `FontRenderer::Initialize` its atlases, each a PNG and
 JSON path under a `FontFamily` id the game defines, and names its default
 family; a bad set comes back as `false`, never a process exit, and a glyph
 whose atlas cell is too small for what its quad samples is a warning at load.
-Glyph quads carry their atlas, so `drawGlyphs` takes no family.
+Glyph quads carry their atlas and its range, so `drawGlyphs` takes no family,
+and wrapped text carries the family it was wrapped in.
 
 Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
 The deterministic math and hash noise are header-inline polynomials; Clang fuses

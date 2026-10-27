@@ -97,7 +97,7 @@ namespace Primitives {
 	void invalidateState(); // PR 4: a foreign GL pass that leaves depth test, culling or scissor on, or binds uniform point 0, says so; the renderer never queries state (dual-deck-builder R2.15)
 	void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height); // PR 2: the screenshot route
 	struct WorldCamera { Vec2 position; float zoom = 1.0F; float pixelsPerMeter = 1.0F; }; // from here down: what replaces getBatchRenderer() and getShaderProgram()
-	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, float zIndex = 0.0F); // colour and atlas from each quad; this sketch took a family too, until a caller drew one family's quads with another's atlas (v0.9.0)
+	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, float zIndex = 0.0F, BlendMode blend = BlendMode::Alpha); // colour, atlas and the atlas's distance range from each quad; this sketch took a family too, until a caller drew one family's quads with another's atlas (v0.9.0), and PR 3 added the blend
 	InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 	void releaseInstancedMesh(InstancedMeshHandle&);
 	void drawInstanced(const InstancedMeshHandle&, const InstanceData* instances, uint32_t count, const WorldCamera&);
@@ -116,7 +116,7 @@ texture table and makes the entries owned, which keeps PR 1 to headers and handl
 
 | caller | today | becomes |
 |---|---|---|
-| `Shapes.cpp:90,222`; `TextInput.cpp:553,583,678,710`; `SdfMinimalScene.cpp:36,97` | `getBatchRenderer()->addTextQuad` per glyph | `Primitives::drawGlyphs`; `ui` stops including `BatchRenderer.h`. `TextInput` passes no family: it shapes with `fontUi` (Barlow, `theme/Variants.h:21`) but samples atlas 0 today, a separate worldsim fix. Since `v0.9.0` each quad carries its atlas and no caller names one |
+| `Shapes.cpp:90,222`; `TextInput.cpp:553,583,678,710`; `SdfMinimalScene.cpp:36,97` | `getBatchRenderer()->addTextQuad` per glyph | `Primitives::drawGlyphs`; `ui` stops including `BatchRenderer.h`. `TextInput` passes no family: it shapes with `fontUi` (Barlow, `theme/Variants.h:21`) but samples atlas 0 today, a separate worldsim fix. That fix (worldsim#310) passes `fontUi` to its two `drawGlyphs` calls; since `v0.9.0` each quad carries its atlas, `drawGlyphs` takes no family, and TextInput drops `fontUi` from those calls on adopting it |
 | `InstancedEntityRenderer.cpp:13,30,86`; the grass renderer's `:18,66`; `GrassScene.cpp:122,151` | `getBatchRenderer()->uploadInstancedMesh`, `releaseInstancedMesh` | `Primitives::uploadInstancedMesh`; release through the handle's destructor or `releaseInstancedMesh` |
 | `InstancedEntityRenderer.cpp:121`; the grass renderer's `:182`; `GrassScene.cpp:209` | `drawInstanced(handle, data, n, pos, zoom, ppm)` | `Primitives::drawInstanced(handle, data, n, WorldCamera)` |
 | the grass renderer's `:145-161,187-193`; `GrassScene.cpp:194-201,212-213` | `getShaderProgram()` + `glUniform*` | a setter for the grass deform (since a hook's block, `setHookUniforms`, decision 4), `setBakedAlpha`; `InstancingUniforms.h` deleted or kept as a GL-free carrier, that PR's call |
