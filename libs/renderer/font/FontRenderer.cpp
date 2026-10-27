@@ -58,9 +58,7 @@ namespace Renderer {
 		for (const FontAtlasSource& source : sources) {
 			const auto id = static_cast<size_t>(source.family);
 			if (source.family == FontFamily::Default) {
-				LOG_ERROR(
-					UI, "FontRenderer: FontFamily::Default stands for the default family, it is not one (%s)", source.pngPath.c_str()
-				);
+				LOG_ERROR(UI, "FontRenderer: FontFamily::Default given as a family: %s", source.pngPath.c_str());
 				return false;
 			}
 			if (given[id]) {
@@ -75,23 +73,20 @@ namespace Renderer {
 			return false;
 		}
 
-		// Every family loads the same way: one that fails is logged and skipped, and draws
-		// with the default.
+		// In order. A family that fails is logged and skipped, and draws with the default;
+		// the default failing ends it, holding nothing, as there is nothing to fall back to.
+		// LoadSDFAtlas's error names the file; two paths would outrun the log line.
 		atlases.resize(slots);
 		for (const FontAtlasSource& source : sources) {
-			Atlas& atlas = atlases[static_cast<size_t>(source.family)];
-			if (!LoadSDFAtlas(atlas, source.pngPath, source.jsonPath)) {
-				atlas = Atlas{};
-				// The error before this names the file; two paths would outrun the log line.
-				LOG_WARNING(UI, "Font family %d unavailable, skipping: it draws with the default", static_cast<int>(source.family));
+			if (LoadSDFAtlas(atlases[static_cast<size_t>(source.family)], source.pngPath, source.jsonPath)) {
+				continue;
 			}
-		}
-
-		// Without the default there is nothing to fall back to: fail, holding nothing.
-		if (!atlases[static_cast<size_t>(defaultFamily)].loaded) {
-			LOG_ERROR(UI, "FontRenderer: the default font family %d did not load", static_cast<int>(defaultFamily));
-			release();
-			return false;
+			if (source.family == defaultFamily) {
+				LOG_ERROR(UI, "FontRenderer: the default font family %d did not load", static_cast<int>(defaultFamily));
+				release();
+				return false;
+			}
+			LOG_WARNING(UI, "Font family %d unavailable, skipping: it draws with the default", static_cast<int>(source.family));
 		}
 		fallbackFamily = defaultFamily;
 
@@ -109,14 +104,15 @@ namespace Renderer {
 		wrappedTextCache.clear();
 	}
 
-	const FontRenderer::Atlas& FontRenderer::atlasFor(FontFamily family) const {
+	FontFamily FontRenderer::resolve(FontFamily family) const {
 		const auto requested = static_cast<size_t>(family);
-		if (requested < atlases.size() && atlases[requested].loaded) {
-			return atlases[requested];
-		}
-		const auto fallback = static_cast<size_t>(fallbackFamily);
-		if (fallback < atlases.size()) {
-			return atlases[fallback];
+		return requested < atlases.size() && atlases[requested].loaded ? family : fallbackFamily;
+	}
+
+	const FontRenderer::Atlas& FontRenderer::atlasFor(FontFamily family) const {
+		const auto resolved = static_cast<size_t>(resolve(family));
+		if (resolved < atlases.size()) {
+			return atlases[resolved];
 		}
 		static const Atlas kNoAtlas;
 		return kNoAtlas;
@@ -163,7 +159,7 @@ namespace Renderer {
 		try {
 			jsonFile >> json;
 		} catch (const std::exception& e) {
-			LOG_ERROR(UI, "Failed to parse SDF metadata JSON: %s", e.what());
+			LOG_ERROR(UI, "Failed to parse SDF metadata JSON %s: %s", jsonPath.c_str(), e.what());
 			return false;
 		}
 
@@ -172,7 +168,7 @@ namespace Renderer {
 		// Parse atlas metadata with error handling
 		try {
 			if (!json.contains("atlas") || !json.contains("metrics") || !json.contains("glyphs")) {
-				LOG_ERROR(UI, "SDF metadata JSON missing required fields (atlas, metrics, or glyphs)");
+				LOG_ERROR(UI, "SDF metadata JSON missing atlas, metrics or glyphs: %s", jsonPath.c_str());
 				return false;
 			}
 
@@ -198,7 +194,7 @@ namespace Renderer {
 			atlasMetadata.descender = json["metrics"]["descender"].get<float>();
 			atlasMetadata.lineHeight = json["metrics"]["lineHeight"].get<float>();
 		} catch (const std::exception& e) {
-			LOG_ERROR(UI, "Failed to parse SDF atlas metadata: %s", e.what());
+			LOG_ERROR(UI, "Failed to parse SDF atlas metadata %s: %s", jsonPath.c_str(), e.what());
 			return false;
 		}
 
@@ -264,7 +260,7 @@ namespace Renderer {
 				sdfGlyphs[c] = glyph;
 			}
 		} catch (const std::exception& e) {
-			LOG_ERROR(UI, "Failed to parse SDF glyphs: %s", e.what());
+			LOG_ERROR(UI, "Failed to parse SDF glyphs %s: %s", jsonPath.c_str(), e.what());
 			return false;
 		}
 
@@ -332,7 +328,8 @@ namespace Renderer {
 		FontFamily				family,
 		float					letterSpacing
 	) const {
-		const Atlas&					atlas = atlasFor(family);
+		const FontFamily				resolved = resolve(family);
+		const Atlas&					atlas = atlasFor(resolved);
 		const std::map<char, SDFGlyph>& sdfGlyphs = atlas.glyphs;
 
 		// IMPORTANT: fontSize should be the REQUESTED rendering size, not atlas glyph size!
@@ -351,7 +348,7 @@ namespace Renderer {
 
 		// Try cache lookup if enabled
 		if (FontRendererConfig::kEnableGlyphQuadCache) {
-			CacheKey key{family, text, scale, letterSpacing};
+			CacheKey key{resolved, text, scale, letterSpacing};
 			auto	 it = glyphQuadCache.find(key);
 
 			if (it != glyphQuadCache.end()) {
@@ -441,7 +438,7 @@ namespace Renderer {
 				entry.quads.push_back(outQuads[i]);
 			}
 
-			CacheKey key{family, text, scale, letterSpacing};
+			CacheKey key{resolved, text, scale, letterSpacing};
 			glyphQuadCache[key] = std::move(entry);
 
 			// Now adjust positions in outQuads for the caller
@@ -461,7 +458,7 @@ namespace Renderer {
 	const FontRenderer::WrappedTextResult&
 	FontRenderer::wrapText(const std::string& text, float scale, float maxWidth, FontFamily family) const {
 		// Check cache first
-		WrapCacheKey key{family, text, scale, maxWidth};
+		WrapCacheKey key{resolve(family), text, scale, maxWidth};
 		auto		 cacheIt = wrappedTextCache.find(key);
 		if (cacheIt != wrappedTextCache.end()) {
 			cacheIt->second.lastAccessFrame = currentFrame;

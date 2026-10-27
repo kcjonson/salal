@@ -50,9 +50,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		FontRenderer(const FontRenderer&) = delete;
 		FontRenderer& operator=(const FontRenderer&) = delete;
 
-		// Default move constructor and assignment operator
-		FontRenderer(FontRenderer&&) = default;
-		FontRenderer& operator=(FontRenderer&&) = default;
+		// Not movable either: a renderer owns its atlas textures, and nothing moves one.
+		FontRenderer(FontRenderer&&) = delete;
+		FontRenderer& operator=(FontRenderer&&) = delete;
 
 		/**
 		 * Load the game's font atlases, replacing any an earlier call loaded. Needs
@@ -60,12 +60,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 *
 		 * The sources load in order. One that fails to load is logged and skipped, and
 		 * its family draws with the default, as does any family not given.
+		 *
+		 * A second call destroys the atlases the first made, so a handle from
+		 * getAtlasTexture goes stale: a game that handed one to Primitives::setFontAtlas
+		 * hands over the new one. Not mid-frame: glyphs already batched would sample
+		 * destroyed textures.
 		 * @param sources One atlas per family; no family twice, and not FontFamily::Default
 		 * @param defaultFamily The family FontFamily::Default stands for; one of the sources
 		 * @return false, with nothing loaded, when the sources are empty or break the rules
 		 *         above, or when the default family's atlas fails to load
 		 */
-		bool Initialize(std::span<const FontAtlasSource> sources, FontFamily defaultFamily);
+		[[nodiscard]] bool Initialize(std::span<const FontAtlasSource> sources, FontFamily defaultFamily);
 
 		/**
 		 * Calculate the dimensions of a text string with the given scale
@@ -186,7 +191,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		/**
 		 * Get the atlas texture of a font family (for batching)
 		 * @param family Font family whose atlas texture to return (default: the game's default family)
-		 * @return The atlas texture; invalid if the renderer never loaded
+		 * @return The atlas texture; invalid unless the last Initialize succeeded
 		 */
 		TextureHandle getAtlasTexture(FontFamily family = FontFamily::Default) const;
 
@@ -255,6 +260,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * @return true if atlas was loaded successfully
 		 */
 		bool LoadSDFAtlas(Atlas& atlas, const std::string& pngPath, const std::string& jsonPath);
+
+		/**
+		 * The family a request draws with: itself when it is loaded, otherwise the
+		 * default (FontFamily::Default before Initialize succeeds). Both caches key on it,
+		 * so every way of naming one atlas shares their entries.
+		 */
+		FontFamily resolve(FontFamily family) const;
 
 		/**
 		 * Resolve a family to its atlas. FontFamily::Default, and a family that is not

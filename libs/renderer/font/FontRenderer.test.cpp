@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -93,7 +94,8 @@ namespace Renderer {
 			AtlasFolder()
 				: path(
 					  std::filesystem::temp_directory_path() /
-					  ("salal-font-atlases-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))
+					  ("salal-font-atlases-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
+					   std::to_string(std::random_device{}()))
 				  ) {
 				std::filesystem::create_directories(path);
 			}
@@ -126,6 +128,7 @@ namespace Renderer {
 				nullBackend = owned.get();
 				Primitives::init(std::move(owned), base_shader::source());
 				texturesBefore = nullBackend->live().textures;
+				texturesMadeBefore = nullBackend->texturesMade();
 				fontRenderer = std::make_unique<FontRenderer>();
 			}
 
@@ -137,9 +140,13 @@ namespace Renderer {
 			// Atlas textures the font renderer holds.
 			size_t atlasTextures() const { return nullBackend->live().textures - texturesBefore; }
 
+			// Atlas textures it has made since the test began, released or not.
+			int atlasTexturesMade() const { return nullBackend->texturesMade() - texturesMadeBefore; }
+
 			AtlasFolder					  folder;
 			backend::NullBackend*		  nullBackend = nullptr;
 			size_t						  texturesBefore = 0;
+			int							  texturesMadeBefore = 0;
 			std::unique_ptr<FontRenderer> fontRenderer;
 		};
 
@@ -264,12 +271,14 @@ namespace Renderer {
 	TEST_F(FontRendererInitializeTest, NoSourcesFail) {
 		EXPECT_FALSE(fontRenderer->Initialize({}, kBody));
 		expectNothingLoaded();
+		EXPECT_EQ(atlasTexturesMade(), 0);
 	}
 
 	TEST_F(FontRendererInitializeTest, AFamilyGivenTwiceFailsBeforeAnythingLoads) {
 		const std::array sources{folder.write(kBody, "body"), folder.write(kMono, "mono"), folder.write(kBody, "body-again")};
 		EXPECT_FALSE(fontRenderer->Initialize(sources, kBody));
 		expectNothingLoaded();
+		EXPECT_EQ(atlasTexturesMade(), 0);
 	}
 
 	TEST_F(FontRendererInitializeTest, TheDefaultMustBeOneOfTheSources) {
@@ -278,12 +287,14 @@ namespace Renderer {
 		expectNothingLoaded();
 		EXPECT_FALSE(fontRenderer->Initialize(sources, FontFamily::Default));
 		expectNothingLoaded();
+		EXPECT_EQ(atlasTexturesMade(), 0);
 	}
 
 	TEST_F(FontRendererInitializeTest, FontFamilyDefaultIsNotAFamilyToLoad) {
 		const std::array sources{folder.write(kBody, "body"), folder.write(FontFamily::Default, "default")};
 		EXPECT_FALSE(fontRenderer->Initialize(sources, kBody));
 		expectNothingLoaded();
+		EXPECT_EQ(atlasTexturesMade(), 0);
 	}
 
 	TEST_F(FontRendererInitializeTest, ADefaultThatDoesNotLoadFailsAndReleasesTheRest) {
@@ -298,10 +309,22 @@ namespace Renderer {
 		};
 		for (const FontAtlasSource& source : broken) {
 			// The default loads last, after mono has made its texture.
+			const int madeBefore = atlasTexturesMade();
 			EXPECT_FALSE(fontRenderer->Initialize(std::array{mono, source}, kBody)) << source.pngPath << " " << source.jsonPath;
+			EXPECT_EQ(atlasTexturesMade() - madeBefore, 1);
 			expectNothingLoaded();
 			EXPECT_FALSE(fontRenderer->getAtlasTexture(kMono).isValid());
 		}
+	}
+
+	TEST_F(FontRendererInitializeTest, ADefaultThatDoesNotLoadStopsTheLoading) {
+		const std::array sources{
+			FontAtlasSource{.family = kBody, .pngPath = folder.file("absent.png"), .jsonPath = folder.file("absent.json")},
+			folder.write(kMono, "mono"),
+		};
+		EXPECT_FALSE(fontRenderer->Initialize(sources, kBody));
+		EXPECT_EQ(atlasTexturesMade(), 0); // mono, after the default, never loads
+		expectNothingLoaded();
 	}
 
 	TEST_F(FontRendererInitializeTest, AFamilyThatDoesNotLoadDrawsWithTheDefault) {
@@ -318,6 +341,22 @@ namespace Renderer {
 		EXPECT_EQ(fontRenderer->getAtlasTexture(FontFamily{7}), body); // never given
 		EXPECT_EQ(fontRenderer->getAtlasTexture(), body);
 		EXPECT_EQ(fontRenderer->MeasureText("Hello", 1.0F, kMono), fontRenderer->MeasureText("Hello", 1.0F, kBody));
+	}
+
+	TEST_F(FontRendererInitializeTest, EveryNameForOneAtlasSharesItsCacheEntries) {
+		const std::array sources{
+			folder.write(kBody, "body"),
+			FontAtlasSource{.family = kMono, .pngPath = folder.file("absent.png"), .jsonPath = folder.file("absent.json")},
+		};
+		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody));
+
+		// The default, the default by id, a family that did not load and one never given.
+		for (const FontFamily family : {FontFamily::Default, kBody, kMono, FontFamily{9}}) {
+			std::vector<FontRenderer::GlyphQuad> quads;
+			fontRenderer->generateGlyphQuads("Hello", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, family);
+			EXPECT_EQ(quads.size(), 5U);
+		}
+		EXPECT_EQ(fontRenderer->getGlyphQuadCacheSize(), 1U);
 	}
 
 	TEST_F(FontRendererInitializeTest, TheDefaultIsTheCallersChoice) {
