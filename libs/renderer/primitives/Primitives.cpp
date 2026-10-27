@@ -656,12 +656,6 @@ namespace Renderer::Primitives {
 		}
 	}
 
-	void setGroundcover(const GroundcoverParams& params) {
-		if (g_batchRenderer != nullptr) {
-			g_batchRenderer->setGroundcover(params);
-		}
-	}
-
 	void setBakedAlpha(float alpha) {
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->setBakedAlpha(alpha);

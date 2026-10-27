@@ -53,18 +53,12 @@ namespace Renderer::backend::gl {
 			{"u_transform", offsetof(DrawUniforms, transform)},
 			{"u_cameraPosition", offsetof(DrawUniforms, cameraPosition)},
 			{"u_viewportSize", offsetof(DrawUniforms, viewportSize)},
-			{"u_cursorWorld", offsetof(DrawUniforms, cursorWorld)},
 			{"u_cameraZoom", offsetof(DrawUniforms, cameraZoom)},
 			{"u_pixelsPerMeter", offsetof(DrawUniforms, pixelsPerMeter)},
 			{"u_bakedAlpha", offsetof(DrawUniforms, bakedAlpha)},
 			{"u_viewportHeight", offsetof(DrawUniforms, viewportHeight)},
 			{"u_pixelRatio", offsetof(DrawUniforms, pixelRatio)},
 			{"u_instanced", offsetof(DrawUniforms, instanced)},
-			{"u_groundcoverMode", offsetof(DrawUniforms, groundcoverMode)},
-			{"u_groundcoverOpenness", offsetof(DrawUniforms, groundcoverOpenness)},
-			{"u_groundcoverReach", offsetof(DrawUniforms, groundcoverReach)},
-			{"u_cursorRadius", offsetof(DrawUniforms, cursorRadius)},
-			{"u_cursorStrength", offsetof(DrawUniforms, cursorStrength)},
 		};
 
 		// Whether the linked program's block holds every member where kBlockMembers says, logging the first that does not.
@@ -406,11 +400,11 @@ namespace Renderer::backend::gl {
 			return {};
 		}
 		// The block's size between its last member's end and the struct's padded size, and
-		// every member where the struct has it: a shader reordered within 208 bytes would
+		// every member where the struct has it: a shader reordered within 176 bytes would
 		// otherwise link and draw garbage, wherever no GL test runs.
 		GLint blockSize = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
-		constexpr size_t kBlockEnd = offsetof(DrawUniforms, cursorStrength) + sizeof(float);
+		constexpr size_t kBlockEnd = offsetof(DrawUniforms, instanced) + sizeof(int32_t);
 		if (blockSize < static_cast<GLint>(kBlockEnd) || static_cast<size_t>(blockSize) > sizeof(DrawUniforms)) {
 			LOG_ERROR(
 				Renderer, "createPipeline: %s is %d bytes in the shaders, %zu in C++", kDrawUniformsBlock, blockSize, sizeof(DrawUniforms)

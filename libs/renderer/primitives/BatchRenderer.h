@@ -285,10 +285,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float					   pixelsPerMeter
 		);
 
-		/// The groundcover deform and cursor uniforms (instancing.glsl), read by the
-		/// instanced path while `params.enabled`.
-		void setGroundcover(const Primitives::GroundcoverParams& params);
-
 		/// u_bakedAlpha, the alpha the instanced and baked paths multiply in.
 		void setBakedAlpha(float alpha);
 
@@ -348,8 +344,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		GeometryHandle	  geometry;
 
 		// The uniforms as the last draw read them. Each draw path sets the fields it
-		// uses and submits the whole block, so the others (the groundcover deform,
-		// u_bakedAlpha) carry over between draws as GL uniforms did.
+		// uses and submits the whole block, so the others (u_bakedAlpha) carry over
+		// between draws as GL uniforms did.
 		backend::DrawUniforms uniforms;
 
 		// flush()'s draw calls, reused.

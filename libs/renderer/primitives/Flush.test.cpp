@@ -233,7 +233,6 @@ namespace Renderer {
 			EXPECT_EQ(gpu->live().buffers, before.buffers + 3);
 			EXPECT_EQ(gpu->live().geometries, before.geometries + 1);
 
-			Primitives::setGroundcover({.enabled = true, .openness = 0.5F, .reach = 2.0F, .cursorRadius = 3.0F});
 			const InstanceData instances[2] = {
 				InstanceData({1.0F, 2.0F}, 0.0F, 1.0F, Foundation::Vec4(1.0F)),
 				InstanceData({3.0F, 4.0F}, 0.5F, 2.0F, Foundation::Vec4(0.5F))
@@ -261,9 +260,6 @@ namespace Renderer {
 			EXPECT_EQ(draw.uniforms.cameraZoom, 2.0F);
 			EXPECT_EQ(draw.uniforms.pixelsPerMeter, 16.0F);
 			EXPECT_EQ(draw.uniforms.viewportSize, Foundation::Vec2(static_cast<float>(kWidth), static_cast<float>(kHeight)));
-			EXPECT_EQ(draw.uniforms.groundcoverMode, 1);
-			EXPECT_EQ(draw.uniforms.groundcoverOpenness, 0.5F);
-			EXPECT_EQ(draw.uniforms.cursorRadius, 3.0F);
 			EXPECT_EQ(draw.uniforms.bakedAlpha, 1.0F);
 		}
 		EXPECT_EQ(gpu->live().buffers, before.buffers);

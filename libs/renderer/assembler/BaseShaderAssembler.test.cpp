@@ -321,7 +321,7 @@ namespace Renderer::assembler {
 	}
 
 	TEST(ConstantNameTest, HookNamesBecomeKConstants) {
-		EXPECT_EQ(constantName("groundcover"), "kGroundcover");
+		EXPECT_EQ(constantName("offset"), "kOffset");
 		EXPECT_EQ(constantName("wind_sway"), "kWindSway");
 		EXPECT_EQ(constantName("_x2"), "kX2");
 	}

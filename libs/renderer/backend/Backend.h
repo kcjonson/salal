@@ -108,7 +108,7 @@ namespace Renderer::backend {
 	constexpr const char* kDrawUniformsBlock = "DrawUniforms";
 
 	// The per-draw uniforms: the std140 block DrawUniforms in
-	// shaders/includes/uniforms.glsl, member for member, padded to the block's 208
+	// shaders/includes/uniforms.glsl, member for member, padded to the block's 176
 	// bytes. In this order std140 puts no padding between members (mat4 on 16 bytes,
 	// vec2 on 8, scalars on 4); the offsets are asserted below and against the linked
 	// program in GLBackend.test.cpp. Change the two together.
@@ -117,37 +117,25 @@ namespace Renderer::backend {
 		Foundation::Mat4 transform{1.0F};
 		Foundation::Vec2 cameraPosition{0.0F, 0.0F}; // world position at the viewport's centre
 		Foundation::Vec2 viewportSize{0.0F, 0.0F};	 // logical pixels, for the world-space modes
-		Foundation::Vec2 cursorWorld{0.0F, 0.0F};	 // groundcover interaction centre
 		float			 cameraZoom = 0.0F;
 		float			 pixelsPerMeter = 0.0F;
 		float			 bakedAlpha = 1.0F;		// multiplies instanced and baked draws
 		float			 viewportHeight = 0.0F; // framebuffer pixels, for the clip test's y flip
 		float			 pixelRatio = 0.0F;		// framebuffer pixels per logical pixel
 		int32_t			 instanced = 0;			// 0 batched, 1 instanced, 2 baked world space
-		int32_t			 groundcoverMode = 0;	// 1 applies the groundcover deform
-		float			 groundcoverOpenness = 0.0F;
-		float			 groundcoverReach = 0.0F;
-		float			 cursorRadius = 0.0F;
-		float			 cursorStrength = 0.0F;
-		float			 padding[3] = {}; // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+		float			 padding[2] = {};		// NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 	};
 	static_assert(offsetof(DrawUniforms, projection) == 0);
 	static_assert(offsetof(DrawUniforms, transform) == 64);
 	static_assert(offsetof(DrawUniforms, cameraPosition) == 128);
 	static_assert(offsetof(DrawUniforms, viewportSize) == 136);
-	static_assert(offsetof(DrawUniforms, cursorWorld) == 144);
-	static_assert(offsetof(DrawUniforms, cameraZoom) == 152);
-	static_assert(offsetof(DrawUniforms, pixelsPerMeter) == 156);
-	static_assert(offsetof(DrawUniforms, bakedAlpha) == 160);
-	static_assert(offsetof(DrawUniforms, viewportHeight) == 164);
-	static_assert(offsetof(DrawUniforms, pixelRatio) == 168);
-	static_assert(offsetof(DrawUniforms, instanced) == 172);
-	static_assert(offsetof(DrawUniforms, groundcoverMode) == 176);
-	static_assert(offsetof(DrawUniforms, groundcoverOpenness) == 180);
-	static_assert(offsetof(DrawUniforms, groundcoverReach) == 184);
-	static_assert(offsetof(DrawUniforms, cursorRadius) == 188);
-	static_assert(offsetof(DrawUniforms, cursorStrength) == 192);
-	static_assert(sizeof(DrawUniforms) == 208);
+	static_assert(offsetof(DrawUniforms, cameraZoom) == 144);
+	static_assert(offsetof(DrawUniforms, pixelsPerMeter) == 148);
+	static_assert(offsetof(DrawUniforms, bakedAlpha) == 152);
+	static_assert(offsetof(DrawUniforms, viewportHeight) == 156);
+	static_assert(offsetof(DrawUniforms, pixelRatio) == 160);
+	static_assert(offsetof(DrawUniforms, instanced) == 164);
+	static_assert(sizeof(DrawUniforms) == 176);
 
 	// One per GPU context. Every handle it returns is invalid when the object could
 	// not be made (logged), and every call taking a stale or invalid handle does

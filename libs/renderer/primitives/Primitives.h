@@ -417,29 +417,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float			 pixelsPerMeter = 1.0F;
 		};
 
-		// The groundcover deform (instancing.glsl): clumps rest at `openness` of
-		// full size and open and bend away within `cursorRadius` of `cursorWorld`.
-		// Off by default; a no-op for ordinary instanced entities.
-		struct GroundcoverParams {
-			bool			 enabled = false;
-			float			 openness = 1.0F;
-			float			 reach = 0.0F;
-			Foundation::Vec2 cursorWorld{0.0F, 0.0F};
-			float			 cursorRadius = 0.0F;
-			float			 cursorStrength = 0.0F;
-		};
-
 		// Upload a tessellated mesh once for drawInstanced(); the handle releases the
 		// GPU buffers when destroyed or passed to releaseInstancedMesh().
 		InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 		void				releaseInstancedMesh(InstancedMeshHandle& handle);
 
 		// Draw `count` instances of an uploaded mesh immediately (not batched), with
-		// the per-instance transforms applied on the GPU under `camera`.
+		// the per-instance transforms applied on the GPU under `camera` and the base
+		// shader's hooks run on every vertex (setHookUniforms below).
 		void drawInstanced(const InstancedMeshHandle& handle, const InstanceData* instances, uint32_t count, const WorldCamera& camera);
-
-		// Groundcover and cursor uniforms for subsequent instanced draws.
-		void setGroundcover(const GroundcoverParams& params);
 
 		// Alpha multiplied into instanced and baked draws (u_bakedAlpha); 1 is opaque.
 		void setBakedAlpha(float alpha);

@@ -73,7 +73,7 @@ namespace Renderer::assembler {
 	// Each uniform block's size in bytes from glslangValidator's reflection report (`-q`), unpadded.
 	std::map<std::string, uint32_t> reflectedBlockSizes(const std::string& reflection);
 
-	// The generated code's C++ name for a hook's block: "groundcover" is kGroundcover, "wind_sway" kWindSway.
+	// The generated code's C++ name for a hook's block: "offset" is kOffset, "wind_sway" kWindSway.
 	std::string constantName(const std::string& hookName);
 
 	struct EmbedArgs {

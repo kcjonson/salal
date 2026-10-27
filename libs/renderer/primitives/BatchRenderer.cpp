@@ -844,9 +844,9 @@ namespace Renderer {
 	// --- GPU Instancing Methods ---
 
 	// Maximum allowed instances to prevent excessive GPU memory allocation.
-	// Groundcover (dense grass) needs hundreds of thousands per instanced mesh, so
-	// this is sized for that; the instance buffer is only as large as the requested
-	// maxInstances (e.g. 250k blades = 8MB), not this cap.
+	// A dense field of small instances needs hundreds of thousands per mesh, so this
+	// is sized for that; the instance buffer is only as large as the requested
+	// maxInstances (e.g. 250k instances = 8MB), not this cap.
 	constexpr uint32_t kMaxAllowedInstances = 2000000;
 
 	InstancedMeshHandle BatchRenderer::uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances) {
@@ -975,16 +975,6 @@ namespace Renderer {
 			remaining -= batchSize;
 			offset += batchSize;
 		}
-	}
-
-	void BatchRenderer::setGroundcover(const Primitives::GroundcoverParams& params) {
-		// Read by the next instanced draw's uniforms
-		uniforms.groundcoverMode = params.enabled ? 1 : 0;
-		uniforms.groundcoverOpenness = params.openness;
-		uniforms.groundcoverReach = params.reach;
-		uniforms.cursorWorld = params.cursorWorld;
-		uniforms.cursorRadius = params.cursorRadius;
-		uniforms.cursorStrength = params.cursorStrength;
 	}
 
 	void BatchRenderer::setBakedAlpha(float alpha) {

@@ -268,14 +268,14 @@ namespace Renderer::backend::gl {
 
 		GLint size = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
-		EXPECT_GE(size, static_cast<GLint>(offsetof(DrawUniforms, cursorStrength) + sizeof(float)));
+		EXPECT_GE(size, static_cast<GLint>(offsetof(DrawUniforms, instanced) + sizeof(int32_t)));
 		EXPECT_LE(size, static_cast<GLint>(sizeof(DrawUniforms)));
 		GLint binding = -1;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_BINDING, &binding);
 		EXPECT_EQ(binding, static_cast<GLint>(GLBackend::kUniformBinding));
 		GLint members = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS, &members);
-		EXPECT_EQ(members, 16);
+		EXPECT_EQ(members, 10);
 
 		// Every member where std140 puts it, which is where the C++ struct has it.
 		const std::pair<const char*, size_t> offsets[] = {
@@ -283,18 +283,12 @@ namespace Renderer::backend::gl {
 			{"u_transform", offsetof(DrawUniforms, transform)},
 			{"u_cameraPosition", offsetof(DrawUniforms, cameraPosition)},
 			{"u_viewportSize", offsetof(DrawUniforms, viewportSize)},
-			{"u_cursorWorld", offsetof(DrawUniforms, cursorWorld)},
 			{"u_cameraZoom", offsetof(DrawUniforms, cameraZoom)},
 			{"u_pixelsPerMeter", offsetof(DrawUniforms, pixelsPerMeter)},
 			{"u_bakedAlpha", offsetof(DrawUniforms, bakedAlpha)},
 			{"u_viewportHeight", offsetof(DrawUniforms, viewportHeight)},
 			{"u_pixelRatio", offsetof(DrawUniforms, pixelRatio)},
 			{"u_instanced", offsetof(DrawUniforms, instanced)},
-			{"u_groundcoverMode", offsetof(DrawUniforms, groundcoverMode)},
-			{"u_groundcoverOpenness", offsetof(DrawUniforms, groundcoverOpenness)},
-			{"u_groundcoverReach", offsetof(DrawUniforms, groundcoverReach)},
-			{"u_cursorRadius", offsetof(DrawUniforms, cursorRadius)},
-			{"u_cursorStrength", offsetof(DrawUniforms, cursorStrength)},
 		};
 		for (const auto& [member, offset] : offsets) {
 			GLuint index = GL_INVALID_INDEX;
