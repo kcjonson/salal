@@ -5,6 +5,7 @@
 // These structures define the per-instance data uploaded to the GPU
 // for instanced rendering of entities.
 
+#include "Handle.h"
 #include "graphics/Color.h"
 #include "math/Types.h"
 #include <cstdint>
@@ -46,8 +47,9 @@ namespace Renderer {
 	static_assert(alignof(InstanceData) == 16, "InstanceData must be 16-byte aligned for GPU upload");
 
 	/// A mesh uploaded for instanced drawing, from Primitives::uploadInstancedMesh().
-	/// Move-only; the destructor releases the GPU buffers (so does
-	/// Primitives::releaseInstancedMesh(), which also leaves the handle invalid).
+	/// Move-only; the destructor releases its buffers and geometry on the backend
+	/// (so does Primitives::releaseInstancedMesh(), which also leaves the handle
+	/// invalid). After Primitives::shutdown() there is nothing left to release.
 	class InstancedMeshHandle {
 	  public:
 		InstancedMeshHandle() = default;
@@ -60,26 +62,19 @@ namespace Renderer {
 		InstancedMeshHandle& operator=(InstancedMeshHandle&& other) noexcept;
 
 		/// Check if this handle is valid (has GPU resources)
-		[[nodiscard]] bool isValid() const { return vao != 0; }
+		[[nodiscard]] bool isValid() const { return geometry.isValid(); }
 
 	  private:
 		friend class BatchRenderer;
 
-		// GL object names; the renderer's GL side owns the calls that create and delete them.
-		uint32_t vao = 0;		   // VAO with mesh + instance attributes configured
-		uint32_t meshVBO = 0;	   // Vertex buffer for mesh data (static)
-		uint32_t meshIBO = 0;	   // Index buffer for mesh triangles
-		uint32_t instanceVBO = 0;  // Instance data buffer (per-instance, divisor=1)
-		uint32_t indexCount = 0;   // Number of indices in mesh
-		uint32_t vertexCount = 0;  // Number of vertices in mesh (for stats)
-		uint32_t maxInstances = 0; // Capacity of instance buffer
-	};
-
-	/// Vertex format for instanced meshes (simpler than UberVertex)
-	/// Only position and color needed - the uber shader handles the rest
-	struct InstancedMeshVertex {
-		Foundation::Vec2  position; // Local mesh position (will be transformed by instance data)
-		Foundation::Color color;	// Vertex color (will be multiplied by instance color tint)
+		// The backend's objects; BatchRenderer makes and releases them.
+		GeometryHandle geometry;		 // the mesh and instance buffers in the InstancedMesh layout
+		BufferHandle   vertices;		 // InstancedMeshVertex, static
+		BufferHandle   indices;			 // uint16 triangles, static
+		BufferHandle   instances;		 // InstanceData, rewritten per draw
+		uint32_t	   indexCount = 0;	 // Number of indices in mesh
+		uint32_t	   vertexCount = 0;	 // Number of vertices in mesh (for stats)
+		uint32_t	   maxInstances = 0; // Capacity of instance buffer
 	};
 
 } // namespace Renderer

@@ -16,12 +16,9 @@ layout(location = 3) in vec4 a_data1;      // borderData for shapes, unused for 
 layout(location = 4) in vec4 a_data2;      // shapeParams for shapes, (pixelRange, 0, 0, renderMode) for text
 layout(location = 5) in vec4 a_clipBounds; // Clip rect (minX, minY, maxX, maxY) or (0,0,0,0) for no clip
 
-// Include instancing support (attributes 6-7, uniforms, helper functions)
+// The per-draw uniform block, then instancing support (attributes 6-7, helper functions)
+#include "includes/uniforms.glsl"
 #include "includes/instancing.glsl"
-
-// Standard uniforms (used by non-instanced path)
-uniform mat4 u_projection;
-uniform mat4 u_transform;
 
 // Outputs to fragment shader
 out vec2 v_texCoord;

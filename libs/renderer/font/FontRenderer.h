@@ -45,7 +45,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		FontRenderer& operator=(FontRenderer&&) = default;
 
 		/**
-		 * Initialize the font renderer
+		 * Initialize the font renderer. Needs Primitives::init() first: the atlases
+		 * are textures on the renderer's backend, and before it the default
+		 * (Roboto) atlas cannot load, which is fatal.
 		 * @return true if initialization was successful
 		 */
 		bool Initialize();

@@ -1,11 +1,13 @@
-// RenderTarget against a hidden GL 3.3 core context; skipped where none can be
-// made (headless CI). The GL queries here are the test's, checking what the
-// renderer's own target stack bound; the renderer never asks.
+// RenderTarget on the null backend, headless, and against a hidden GL 3.3 core
+// context, skipped where none can be made (headless CI). The GL queries here are
+// the test's, checking what the renderer's own target stack bound; the renderer
+// never asks.
 
 #include "resources/RenderTarget.h"
 
 #include "CoordinateSystem/CoordinateSystem.h"
-#include "backend/gl/GLTextures.h"
+#include "backend/NullBackend.h"
+#include "backend/gl/GLBackend.h"
 #include "primitives/Primitives.h"
 
 #include <GL/glew.h>
@@ -14,10 +16,128 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
 
 namespace Renderer {
+
+	// --- On the null backend, headless: the target stack and what reaches the backend ---
+
+	class RenderTargetNullTest : public ::testing::Test {
+	  protected:
+		void SetUp() override {
+			auto owned = std::make_unique<backend::NullBackend>();
+			gpu = owned.get();
+			Primitives::init(std::move(owned));
+			Primitives::setCoordinateSystem(nullptr);
+			Primitives::setViewport(32, 32);
+			gpu->clearRecord();
+		}
+
+		void TearDown() override { Primitives::shutdown(); }
+
+		backend::NullBackend* gpu = nullptr;
+	};
+
+	TEST_F(RenderTargetNullTest, CreateMakesATextureAndATargetThatGoWithIt) {
+		const backend::NullBackend::Counts before = gpu->live();
+		{
+			RenderTarget target = RenderTarget::create(8, 4, TextureFormat::Rgba16F);
+			ASSERT_TRUE(target.isValid());
+			ASSERT_NE(gpu->texture(target.texture()), nullptr);
+			EXPECT_EQ(gpu->texture(target.texture())->width, 8);
+			EXPECT_EQ(gpu->texture(target.texture())->height, 4);
+			EXPECT_EQ(gpu->texture(target.texture())->format, TextureFormat::Rgba16F);
+			EXPECT_EQ(gpu->live().textures, before.textures + 1);
+			EXPECT_EQ(gpu->live().targets, before.targets + 1);
+		}
+		EXPECT_EQ(gpu->live().textures, before.textures);
+		EXPECT_EQ(gpu->live().targets, before.targets);
+	}
+
+	TEST_F(RenderTargetNullTest, BeginAndEndBindFromTheStack) {
+		RenderTarget outer = RenderTarget::create(8, 8);
+		RenderTarget inner = RenderTarget::create(2, 2);
+		outer.begin();
+		inner.begin();
+		inner.end();
+		outer.end();
+		ASSERT_EQ(gpu->targetsBound().size(), 4U);
+		const RenderTargetHandle outerHandle = gpu->targetsBound()[0];
+		EXPECT_TRUE(outerHandle.isValid());
+		EXPECT_NE(gpu->targetsBound()[1], outerHandle);
+		EXPECT_EQ(gpu->targetsBound()[2], outerHandle);
+		EXPECT_FALSE(gpu->targetsBound()[3].isValid()); // the window
+	}
+
+	TEST_F(RenderTargetNullTest, MisnestedEndIsRefusedAndTheWindowSizeWaits) {
+		RenderTarget outer = RenderTarget::create(8, 8);
+		RenderTarget inner = RenderTarget::create(2, 2);
+		outer.begin();
+		inner.begin();
+		outer.end(); // refused: inner is still open
+		EXPECT_EQ(gpu->targetsBound().size(), 2U);
+		EXPECT_TRUE(RenderTarget::anyBegun());
+
+		// A begun target keeps the window's recorded size where it was.
+		Primitives::setViewport(16, 16);
+		EXPECT_EQ(gpu->windowWidth(), 32);
+
+		inner.end();
+		outer.end();
+		EXPECT_FALSE(RenderTarget::anyBegun());
+		ASSERT_EQ(gpu->targetsBound().size(), 4U);
+		EXPECT_FALSE(gpu->targetsBound()[3].isValid());
+		Primitives::setViewport(16, 16);
+		EXPECT_EQ(gpu->windowWidth(), 16);
+	}
+
+	TEST_F(RenderTargetNullTest, ClearPremultipliesAndReadPixelsReachesTheBackend) {
+		RenderTarget target = RenderTarget::create(2, 2);
+		target.begin();
+		Primitives::clear(Foundation::Color(1.0F, 0.5F, 0.0F, 0.5F));
+		target.end();
+		ASSERT_EQ(gpu->clears().size(), 1U);
+		EXPECT_EQ(gpu->clears()[0].r, 0.5F);
+		EXPECT_EQ(gpu->clears()[0].g, 0.25F);
+		EXPECT_EQ(gpu->clears()[0].a, 0.5F);
+
+		std::vector<uint8_t> pixels(2 * 2 * 4, 7);
+		target.readPixels(pixels);
+		EXPECT_EQ(pixels, std::vector<uint8_t>(2 * 2 * 4, 0)); // the null backend reads zeros
+		std::vector<uint8_t> tooShort(3, 7);
+		target.readPixels(tooShort);
+		EXPECT_EQ(tooShort, std::vector<uint8_t>(3, 7));
+	}
+
+	TEST(RenderTargetNoBackendTest, ATargetKeptAcrossReinitLeavesTheNextSessionsTexturesAlone) {
+		// A target made in one session and destroyed in the next, after the next has
+		// made a texture in the same slot (a font atlas, say).
+		Primitives::init(std::make_unique<backend::NullBackend>());
+		RenderTarget kept = RenderTarget::create(4, 4);
+		ASSERT_TRUE(kept.isValid());
+		Primitives::shutdown();
+
+		auto				  owned = std::make_unique<backend::NullBackend>();
+		backend::NullBackend& next = *owned;
+		Primitives::init(std::move(owned));
+		const TextureHandle atlas = Primitives::createTexture({.width = 8, .height = 8});
+		ASSERT_TRUE(atlas.isValid());
+		EXPECT_NE(atlas, kept.texture());
+		kept = RenderTarget(); // releases its stale handles through the new backend
+		ASSERT_NE(next.texture(atlas), nullptr);
+		EXPECT_EQ(next.texture(atlas)->width, 8);
+		EXPECT_EQ(next.live().textures, 1U);
+		Primitives::shutdown();
+	}
+
+	TEST(RenderTargetNoBackendTest, CreateBeforeInitIsInvalid) {
+		const RenderTarget target = RenderTarget::create(4, 4);
+		EXPECT_FALSE(target.isValid());
+	}
+
+	// --- Against the GL backend ---
 
 	class RenderTargetTest : public ::testing::Test {
 	  protected:
@@ -36,13 +156,15 @@ namespace Renderer {
 				GTEST_SKIP() << "Could not create GLFW window (no OpenGL context available)";
 			}
 			glfwMakeContextCurrent(window);
-			glewExperimental = GL_TRUE;
-			if (glewInit() != GLEW_OK) {
+			// The GL backend initialises GLEW on this context
+			std::unique_ptr<backend::gl::GLBackend> gl = backend::gl::GLBackend::create();
+			if (gl == nullptr) {
 				glfwDestroyWindow(window);
 				window = nullptr;
 				glfwTerminate();
 				GTEST_SKIP() << "GLEW initialization failed";
 			}
+			Primitives::init(std::move(gl));
 			// What the platform layer does: the window's viewport, told to the renderer.
 			glViewport(0, 0, 32, 32);
 			Primitives::setViewport(32, 32);
@@ -50,6 +172,7 @@ namespace Renderer {
 
 		void TearDown() override {
 			if (window != nullptr) {
+				Primitives::shutdown();
 				glfwDestroyWindow(window);
 				glfwTerminate();
 			}

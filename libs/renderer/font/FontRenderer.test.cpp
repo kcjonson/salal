@@ -7,14 +7,14 @@
 // copy's, which proves measured width == rendered pen advance, including the
 // '?' fallback for characters missing from the atlas.
 //
-// Requires a real GL context (atlas textures are uploaded on load) and the
-// fonts/ resources; skips gracefully when either is unavailable (headless CI).
+// Headless: the atlas textures go to the null backend. Requires the fonts/
+// resources beside the executable and skips without them.
 
 #include "font/FontRenderer.h"
+#include "backend/NullBackend.h"
+#include "primitives/Primitives.h"
 #include "utils/ResourcePath.h"
 
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -26,40 +26,17 @@ namespace Renderer {
 	class FontRendererTest : public ::testing::Test {
 	  protected:
 		void SetUp() override {
-			if (glfwInit() != GLFW_TRUE) {
-				GTEST_SKIP() << "GLFW initialization failed (no display available)";
-			}
-			glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-			glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-			glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-			window = glfwCreateWindow(32, 32, "font-test", nullptr, nullptr);
-			if (window == nullptr) {
-				glfwTerminate();
-				GTEST_SKIP() << "Could not create GLFW window (no OpenGL context available)";
-			}
-			glfwMakeContextCurrent(window);
-			glewExperimental = GL_TRUE;
-			if (glewInit() != GLEW_OK) {
-				glfwDestroyWindow(window);
-				window = nullptr;
-				glfwTerminate();
-				GTEST_SKIP() << "GLEW initialization failed";
-			}
 			if (Foundation::findResourceString("fonts/Roboto-SDF.json").empty()) {
 				GTEST_SKIP() << "Font atlas resources not found (run from the repo root)";
 			}
+			Primitives::init(std::make_unique<backend::NullBackend>());
 			fontRenderer = std::make_unique<FontRenderer>();
 			ASSERT_TRUE(fontRenderer->Initialize());
 		}
 
 		void TearDown() override {
-			fontRenderer.reset(); // Destroy GL textures while the context is current
-			if (window != nullptr) {
-				glfwDestroyWindow(window);
-				glfwTerminate();
-			}
+			fontRenderer.reset(); // Destroy its textures while the backend is there
+			Primitives::shutdown();
 		}
 
 		std::vector<FontRenderer::GlyphQuad> quadsFor(const std::string& text, float scale, float letterSpacing) const {
@@ -68,7 +45,6 @@ namespace Renderer {
 			return quads;
 		}
 
-		GLFWwindow*					  window = nullptr;
 		std::unique_ptr<FontRenderer> fontRenderer;
 	};
 

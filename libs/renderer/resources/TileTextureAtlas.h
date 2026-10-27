@@ -14,7 +14,8 @@ namespace Renderer {
 	};
 
 	// Simple shelf-packed 2D RGBA8 texture atlas for tile patterns. The texture
-	// lives in the renderer's table and goes with the atlas.
+	// lives in the renderer's table and goes with the atlas. Needs Primitives::init()
+	// first; before it the atlas has no texture and size 0.
 	class TileTextureAtlas {
 	  public:
 		explicit TileTextureAtlas(int atlasSize = 4096);

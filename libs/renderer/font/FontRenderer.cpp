@@ -1,7 +1,7 @@
 // Font rendering implementation using MSDF (Multi-channel Signed Distance Field) atlas
 
 #include "font/FontRenderer.h"
-#include "backend/gl/GLTextures.h"
+#include "primitives/Primitives.h"
 #include "utils/Log.h"
 #include "utils/ResourcePath.h"
 #include <cstdlib>
@@ -52,7 +52,7 @@ namespace Renderer {
 	FontRenderer::~FontRenderer() {
 		// Clean up every loaded atlas texture
 		for (Atlas& atlas : atlases) {
-			backend::gl::destroyTexture(atlas.texture);
+			Primitives::destroyTexture(atlas.texture);
 			atlas.texture = {};
 		}
 	}
@@ -285,8 +285,8 @@ namespace Renderer {
 		LOG_INFO(UI, "Loaded atlas texture: %dx%d, %d channels", width, height, channels);
 
 		// RGB8, linear, clamped: the SDF is sampled bilinearly and decoded in the shader.
-		backend::gl::destroyTexture(atlas.texture);
-		atlas.texture = backend::gl::createTexture(
+		Primitives::destroyTexture(atlas.texture);
+		atlas.texture = Primitives::createTexture(
 			{.width = width, .height = height, .format = TextureFormat::Rgb8, .linear = true, .pixels = imageData.get()}
 		);
 		if (!atlas.texture.isValid()) {
