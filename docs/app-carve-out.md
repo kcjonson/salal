@@ -471,8 +471,9 @@ moves them from engine into app. PerformanceMetrics is in renderer because
 Not in the slice: the ECS core, 7 headers, 689 lines, which stays in worldsim
 (decision E).
 
-Totals: about 2.9k core, 5.0k with the dev server, metrics and resource path. One test file exists for the whole slice
-(InputManager.test.cpp); Application, SceneManager and AppLauncher have none.
+Totals: about 2.9k core, 5.0k with the dev server, metrics and resource path.
+One test file exists for the whole slice (InputManager.test.cpp);
+Application, SceneManager and AppLauncher have none.
 
 ## Net-new for salal
 

@@ -52,6 +52,10 @@ otherwise normative. It is decision B: the recommendation is an engine library
 beside `renderer` over miniaudio, scheduled after `app`, but neither the
 library nor its placement is settled.
 
+There is no ECS library: decision E in [open-decisions.md](open-decisions.md),
+settled 2026-10-26, leaves worldsim's ECS core in worldsim, since no other
+consumer wants one.
+
 The backend boundary in the `renderer` row has a settled direction and a
 design; decision G in [open-decisions.md](open-decisions.md) is settled
 (2026-10-26) and [renderer-boundary.md](renderer-boundary.md) holds the design
@@ -207,9 +211,12 @@ sfc32 with a MurmurHash3-based `fork(name, attempt)`, bit-identical to its
 gtests on every CI platform. A stream is its uint32 seed, and `fork` derives a
 child stream from the parent's seed, a name and an attempt without reading or
 advancing the parent. `Rng` has no unseeded constructor and no copy; root seeds
-come from `freshSeed()`, which has its own header so a sim never includes it.
-Bit-identical differential testing against the TypeScript sim needs this
-generator. Worldsim's `Pcg32.h` and `SplitMix64.h`, with `deriveSeed(seed,
+come from `freshSeed()`, in its own header so a sim can leave it out.
+Dual-deck-builder's own sim doesn't yet: a fight given no stream roots one from
+`freshSeed()` (`Battle.ts:331`), and so does the AI evaluator given no seed
+(`AIEvaluator.ts:77`), so its port has to make those streams required
+parameters. Bit-identical differential testing against the TypeScript sim needs
+this generator. Worldsim's `Pcg32.h` and `SplitMix64.h`, with `deriveSeed(seed,
 streamId)`, stay beside it as they are for worldgen.
 
 Dual-deck-builder's TypeScript sim core is written to this bar, and its spec

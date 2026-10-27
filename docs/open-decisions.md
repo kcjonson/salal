@@ -67,16 +67,18 @@ what `Rng.ts` draws at `RNG_VERSION` 1 (`kRngVersion`): `nextUInt32`,
 `nextDouble` (the TypeScript's `float`), `nextInt` (its `int`), `pick`,
 `shuffle` and `weighted`, with the same draw counts, and `fork(name,
 attempt)`, which hashes a UTF-8 name as the UTF-16 code units the TypeScript
-hashes. A stream is its uint32 seed. There is no default constructor and no
-copy, since a copy would save a stream mid-sequence, which `Rng.ts` can't do
-either; `freshSeed()` mints a root seed from `std::random_device` in its own
-header, `FreshSeed.h`, so a sim can leave it out. The argument checks are
-asserts, as elsewhere in foundation, and reject what `Rng.ts` throws on where
-the types don't already. `Rng.test.cpp` ports every golden vector and
-behaviour test in `Rng.test.ts` that applies to C++, and a differential run
-against the TypeScript (32 seeds of 10,000 draws, 1,000 forks with ASCII,
-non-ASCII, astral and empty names, and 40 programs mixing every draw method)
-matched it byte for byte under MSVC and GCC.
+hashes. It adds `nextFloat`, which `Rng.ts` has no counterpart for. A stream
+is its uint32 seed. There is no default constructor and no copy, since a copy
+would save a stream mid-sequence, which `Rng.ts` can't do either;
+`freshSeed()` mints a root seed from `std::random_device` in its own header,
+`FreshSeed.h`, so a sim can leave it out. The argument checks reject what
+`Rng.ts` throws on where the types don't already: those that would otherwise
+be undefined behaviour (an empty or over-wide range) abort in every build, and
+the rest are asserts, as elsewhere in foundation. `Rng.test.cpp` ports every
+golden vector and behaviour test in `Rng.test.ts` that applies to C++, and a
+differential run against the TypeScript (32 seeds of 10,000 draws, 1,000 forks
+with ASCII, non-ASCII, astral and empty names, and 40 programs mixing every
+draw method) matched it byte for byte under MSVC and GCC.
 
 Needed by. Settled, so no longer a gate. It was needed by phase 2 (the
 asteroids prototype draws from it) and before Job B starts.

@@ -81,9 +81,12 @@ of worldsim's code" (`tech-stack.md:110`).
   cosmetic or VFX stream that must not perturb sim.
 - The Arena contract takes `arenaSeed` (`screens.md:135`). Headless tests run
   a seeded sortie N ticks and assert invariants (`tech-stack.md:213-216`).
-- Inferred: PRNG state serializable; the fork hash explicitly specified (not
-  `std::hash`); cross-platform replay needs deterministic float behaviour (no
-  FMA contraction, careful trig).
+- Inferred: streams rebuilt across a save or a replay; the fork hash
+  explicitly specified (not `std::hash`); cross-platform replay needs
+  deterministic float behaviour (no FMA contraction, careful trig). `Rng`
+  never saves a stream's state mid-sequence, by design: a save holds seeds
+  and the fork names and counters that rebuild each stream (dual-deck-builder's
+  pattern), which covers replays from a seed plus the input log.
 
 ### Audio
 

@@ -283,6 +283,6 @@ Resolved since the first version of this file: work is tracked in Specboard
 (see above). Input types in `foundation/input/`, poller in `app`, settled
 2026-10-26 (decision D). The engine's game PRNG is dual-deck-builder's `Rng`,
 in `foundation/random/Rng.h`, with Pcg32 and SplitMix64 kept for worldgen, and
-the ECS core stays in worldsim, both settled 2026-10-26 (decisions A and E). The "engine-extraction.md" item is dropped; that file
-never existed in worldsim, and the plan is
-[docs/extraction.md](docs/extraction.md).
+the ECS core stays in worldsim, both settled 2026-10-26 (decisions A and E).
+The "engine-extraction.md" item is dropped; that file never existed in
+worldsim, and the plan is [docs/extraction.md](docs/extraction.md).
