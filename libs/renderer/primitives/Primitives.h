@@ -94,9 +94,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Set the default font atlas for text rendering.
 		//
-		// This configures the batch with the MSDF font atlas that text quads sample
-		// when no family is given. Must be called after init() and before rendering
-		// any text.
+		// This configures the batch with the MSDF font atlas, and its distance range,
+		// that a glyph quad without an atlas of its own samples. FontRenderer's quads
+		// carry theirs, so this serves quads a caller builds by hand. Must be called
+		// after init() and before rendering any text.
 		//
 		// Parameters:
 		//   - atlas: the MSDF font atlas, from FontRenderer::getAtlasTexture()
@@ -397,15 +398,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void drawText(const TextArgs& args);
 
 		// Batch glyph quads a caller laid out itself (FontRenderer::generateGlyphQuads
-		// and friends), each in its own colour, sampling the family's atlas. Text is
+		// and friends), each in its own colour, sampling the atlas it carries at that
+		// atlas's distance range, so one call can hold several families. Text is
 		// interleaved with shapes in submission order.
-		void drawGlyphs(
-			const FontRenderer::GlyphQuad* quads,
-			size_t						   count,
-			FontFamily					   family = FontFamily::Default,
-			float						   zIndex = 0.0F,
-			BlendMode					   blend = BlendMode::Alpha
-		);
+		void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, float zIndex = 0.0F, BlendMode blend = BlendMode::Alpha);
 
 		// --- World-Space Instancing ---
 

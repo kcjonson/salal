@@ -11,6 +11,14 @@
 // refuses, that a refusal leaves nothing loaded, and what a family that is not
 // loaded draws with.
 //
+// A glyph quad's UVs index one family's atlas, so each quad carries that atlas and
+// drawGlyphs samples it: there is no second place to name a family, and so no way
+// to draw one family's quads with another's atlas.
+//
+// A quad reads its atlas past the glyph's bounds, and the atlas generator has to
+// leave that much room in each glyph's cell; loading checks it, and crampedGlyphs
+// says what it found.
+//
 // The atlases are synthetic, in the JSON layout worldsim's generate_sdf_atlas
 // writes: printable ASCII as boxes on a 16 x 6 grid of 32 px cells, each glyph
 // with an advance of its own, and a one-texel PNG. These tests read metrics, not
@@ -20,16 +28,22 @@
 #include "BaseShader.h"
 #include "backend/NullBackend.h"
 #include "primitives/Primitives.h"
+#include "utils/Log.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <random>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Renderer {
@@ -47,10 +61,26 @@ namespace Renderer {
 			0xea, 0xeb, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 		};
 
+		// Texels between a glyph and each edge of its cell.
+		struct Room {
+			float left = 4.0F;
+			float bottom = 4.0F;
+			float right = 4.0F;
+			float top = 4.0F;
+		};
+
+		constexpr Room roomAround(float texels) {
+			return {.left = texels, .bottom = texels, .right = texels, .top = texels};
+		}
+
 		struct AtlasMetrics {
-			float ascender = 0.9F;
-			float lineHeight = 1.2F;
-			float advanceScale = 1.0F; // Every advance, and the glyph boxes with them
+			float				 ascender = 0.9F;
+			float				 lineHeight = 1.2F;
+			float				 advanceScale = 1.0F;  // Every advance, and the glyph boxes with them
+			float				 distanceRange = 4.0F; // Texels
+			std::map<char, Room> room;				   // Where not 4 texels on every side
+			std::string			 cellless;			   // Glyphs whose "atlas" gives no cell rect
+			std::string			 oddCells;			   // Glyphs whose cell has fields that aren't numbers
 		};
 
 		std::string number(float value) {
@@ -59,7 +89,8 @@ namespace Renderer {
 
 		// Space has no geometry; every other glyph is a box in its own cell.
 		std::string atlasJson(const AtlasMetrics& metrics) {
-			std::string json = R"({"atlas":{"type":"msdf","distanceRange":4,"size":32,"width":512,"height":192},)";
+			std::string json =
+				R"({"atlas":{"type":"msdf","distanceRange":)" + number(metrics.distanceRange) + R"(,"size":32,"width":512,"height":192},)";
 			json += R"("metrics":{"emSize":1,"ascender":)" + number(metrics.ascender) + R"(,"descender":-0.25,"lineHeight":)" +
 					number(metrics.lineHeight) + R"(},"glyphs":{)";
 			for (int c = ' '; c <= '~'; ++c) {
@@ -75,11 +106,20 @@ namespace Renderer {
 				} else {
 					const float col = static_cast<float>(cell % 16);
 					const float row = static_cast<float>(cell / 16);
-					json += R"("atlas":{"x":)" + number(col / 16.0F) + R"(,"y":)" + number(row / 6.0F) + R"(,"width":0.0625,"height":)" +
-							number(1.0F / 6.0F) + "},";
-					json += R"("atlasBounds":{"left":)" + number((col * 32.0F + 4.0F) / 512.0F) + R"(,"bottom":)" +
-							number((row * 32.0F + 4.0F) / 192.0F) + R"(,"right":)" + number((col * 32.0F + 28.0F) / 512.0F) + R"(,"top":)" +
-							number((row * 32.0F + 28.0F) / 192.0F) + "},";
+					const auto	room = metrics.room.find(static_cast<char>(c));
+					const Room	inset = room != metrics.room.end() ? room->second : Room{};
+					if (metrics.cellless.find(static_cast<char>(c)) != std::string::npos) {
+						json += R"("atlas":{},)";
+					} else if (metrics.oddCells.find(static_cast<char>(c)) != std::string::npos) {
+						json += R"("atlas":{"x":null,"y":0,"width":"wide","height":0.0625},)";
+					} else {
+						json += R"("atlas":{"x":)" + number(col / 16.0F) + R"(,"y":)" + number(row / 6.0F) +
+								R"(,"width":0.0625,"height":)" + number(1.0F / 6.0F) + "},";
+					}
+					json += R"("atlasBounds":{"left":)" + number((col * 32.0F + inset.left) / 512.0F) + R"(,"bottom":)" +
+							number((row * 32.0F + inset.bottom) / 192.0F) + R"(,"right":)" +
+							number((col * 32.0F + 32.0F - inset.right) / 512.0F) + R"(,"top":)" +
+							number((row * 32.0F + 32.0F - inset.top) / 192.0F) + "},";
 					json += R"("plane":{"left":0.05,"bottom":-0.1,"right":)" + number(advance - 0.05F) + R"(,"top":0.7},)";
 				}
 				json += R"("advance":)" + number(advance) + "}";
@@ -359,6 +399,119 @@ namespace Renderer {
 		EXPECT_EQ(fontRenderer->getGlyphQuadCacheSize(), 1U);
 	}
 
+	// --- Glyph quads and the atlas they sample ---
+
+	TEST_F(FontRendererInitializeTest, GlyphQuadsCarryTheAtlasTheirFamilyLaidThemOutIn) {
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body"), folder.write(kMono, "mono")}, kBody));
+		const TextureHandle body = fontRenderer->getAtlasTexture(kBody);
+		const TextureHandle mono = fontRenderer->getAtlasTexture(kMono);
+		ASSERT_NE(body, mono);
+
+		// The second pass comes from the glyph-quad cache. A family never given lays out in the default's atlas.
+		for (int pass = 0; pass < 2; ++pass) {
+			for (const auto& [family, atlas] :
+				 {std::pair{kMono, mono}, std::pair{kBody, body}, std::pair{FontFamily::Default, body}, std::pair{FontFamily{9}, body}}) {
+				std::vector<FontRenderer::GlyphQuad> quads;
+				fontRenderer->generateGlyphQuads("Hello", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, family);
+				ASSERT_EQ(quads.size(), 5U);
+				for (const FontRenderer::GlyphQuad& quad : quads) {
+					EXPECT_EQ(quad.atlas, atlas) << "family " << static_cast<int>(family) << " pass " << pass;
+				}
+			}
+		}
+	}
+
+	TEST_F(FontRendererInitializeTest, OneDrawGlyphsCallSamplesEachQuadsOwnAtlas) {
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body"), folder.write(kMono, "mono")}, kBody));
+		const TextureHandle body = fontRenderer->getAtlasTexture(kBody);
+		const TextureHandle mono = fontRenderer->getAtlasTexture(kMono);
+		Primitives::setFontAtlas(body);
+
+		// Two families in one call: nothing to name but the quads.
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateGlyphQuads("Mono", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, kMono);
+		fontRenderer->generateGlyphQuads("Body", glm::vec2(0.0F, 20.0F), 1.0F, glm::vec4(1.0F), quads, kBody);
+		ASSERT_EQ(quads.size(), 8U);
+
+		Primitives::setViewport(320, 200);
+		Primitives::beginFrame();
+		Primitives::drawGlyphs(quads.data(), quads.size());
+		Primitives::endFrame();
+
+		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
+		ASSERT_EQ(draws.size(), 2U);
+		EXPECT_EQ(draws[0].call.texture, mono);
+		EXPECT_EQ(draws[0].call.indexCount, 24U); // four glyphs of six indices
+		EXPECT_EQ(draws[1].call.texture, body);
+		EXPECT_EQ(draws[1].call.indexCount, 24U);
+	}
+
+	TEST_F(FontRendererInitializeTest, EachQuadDrawsAtItsOwnAtlassDistanceRange) {
+		// Body at a range of 4, mono at 2, and setFontAtlas's 6 for a quad with no atlas.
+		ASSERT_TRUE(
+			fontRenderer->Initialize(std::array{folder.write(kBody, "body"), folder.write(kMono, "mono", {.distanceRange = 2.0F})}, kBody)
+		);
+		Primitives::setFontAtlas(fontRenderer->getAtlasTexture(kBody), 6.0F);
+
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateGlyphQuads("Mo", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, kMono);
+		fontRenderer->generateGlyphQuads("Bo", glm::vec2(0.0F, 20.0F), 1.0F, glm::vec4(1.0F), quads, kBody);
+		ASSERT_EQ(quads.size(), 4U);
+		EXPECT_EQ(quads[0].pixelRange, 2.0F);
+		EXPECT_EQ(quads[2].pixelRange, 4.0F);
+		FontRenderer::GlyphQuad handBuilt = quads.back();
+		handBuilt.atlas = {};
+		quads.push_back(handBuilt);
+
+		Primitives::setViewport(320, 200);
+		Primitives::beginFrame();
+		Primitives::drawGlyphs(quads.data(), quads.size());
+		Primitives::endFrame();
+
+		// One upload; its vertices run in submission order, four per quad.
+		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
+		ASSERT_FALSE(draws.empty());
+		const std::span<const uint8_t> bytes = nullBackend->bufferContents(nullBackend->geometry(draws[0].call.geometry)->vertices);
+		std::vector<BatchVertex>	   vertices(bytes.size() / sizeof(BatchVertex));
+		std::memcpy(vertices.data(), bytes.data(), vertices.size() * sizeof(BatchVertex));
+		ASSERT_EQ(vertices.size(), 20U);
+		const float expected[] = {2.0F, 2.0F, 4.0F, 4.0F, 6.0F};
+		for (size_t i = 0; i < vertices.size(); ++i) {
+			EXPECT_EQ(vertices[i].data2.x, expected[i / 4]) << "vertex " << i;
+		}
+	}
+
+	TEST_F(FontRendererInitializeTest, WrappedTextLaysOutInTheFamilyItWasWrappedIn) {
+		// Mono's advances are wider and its lines taller than body's, the default.
+		ASSERT_TRUE(fontRenderer->Initialize(
+			std::array{folder.write(kBody, "body"), folder.write(kMono, "mono", {.lineHeight = 1.5F, .advanceScale = 1.4F})}, kBody
+		));
+		const std::string text = "wrap these words";
+		EXPECT_EQ(fontRenderer->wrapText(text, 1.0F, 100.0F).family, kBody);
+		const FontRenderer::WrappedTextResult& wrapped = fontRenderer->wrapText(text, 1.0F, 100.0F, kMono);
+		ASSERT_GE(wrapped.lines.size(), 2U);
+		EXPECT_EQ(wrapped.family, kMono);
+		EXPECT_FLOAT_EQ(wrapped.lineHeight, 1.5F * 16.0F);
+
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateWrappedGlyphQuads(
+			wrapped, glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), Foundation::HorizontalAlign::Left, 0.0F, quads
+		);
+
+		// Each line as generateGlyphQuads lays it out in mono, a mono line below the one before.
+		std::vector<FontRenderer::GlyphQuad> expected;
+		for (size_t i = 0; i < wrapped.lines.size(); ++i) {
+			const glm::vec2 lineOrigin(0.0F, static_cast<float>(i) * wrapped.lineHeight);
+			fontRenderer->generateGlyphQuads(wrapped.lines[i], lineOrigin, 1.0F, glm::vec4(1.0F), expected, kMono);
+		}
+		ASSERT_EQ(quads.size(), expected.size());
+		const TextureHandle mono = fontRenderer->getAtlasTexture(kMono);
+		for (size_t i = 0; i < quads.size(); ++i) {
+			EXPECT_EQ(quads[i].atlas, mono) << "glyph " << i;
+			EXPECT_EQ(quads[i].position, expected[i].position) << "glyph " << i;
+		}
+	}
+
 	TEST_F(FontRendererInitializeTest, TheDefaultIsTheCallersChoice) {
 		const std::array sources{
 			folder.write(kBody, "body"),
@@ -405,5 +558,111 @@ namespace Renderer {
 		fontRenderer.reset();
 		EXPECT_EQ(atlasTextures(), 0U);
 	}
+
+	TEST_F(FontRendererInitializeTest, TextLaidOutAgainAfterASecondInitializeCarriesTheNewAtlas) {
+		// The same family from the same file, so the glyph-quad cache key is the same both times: only
+		// clearing the cache keeps the old atlas, destroyed by now, out of the new quads.
+		const FontAtlasSource body = folder.write(kBody, "body");
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{body}, kBody));
+		std::vector<FontRenderer::GlyphQuad> before;
+		fontRenderer->generateGlyphQuads("Hello", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), before, kBody);
+		ASSERT_FALSE(before.empty());
+		const TextureHandle first = fontRenderer->getAtlasTexture(kBody);
+		EXPECT_EQ(before.front().atlas, first);
+
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{body}, kBody));
+		const TextureHandle second = fontRenderer->getAtlasTexture(kBody);
+		ASSERT_NE(second, first);
+		std::vector<FontRenderer::GlyphQuad> after;
+		fontRenderer->generateGlyphQuads("Hello", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), after, kBody);
+		ASSERT_EQ(after.size(), before.size());
+		for (const FontRenderer::GlyphQuad& quad : after) {
+			EXPECT_EQ(quad.atlas, second);
+		}
+	}
+
+	// --- Room around each glyph in its cell ---
+
+	TEST_F(FontRendererInitializeTest, ARoomyAtlasHasNoCrampedGlyphs) {
+		// Four texels around every glyph, and a quad reads 2 + 0.5 past it at a distance range of 4.
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body")}, kBody));
+		EXPECT_EQ(fontRenderer->crampedGlyphs(), "");
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "");
+	}
+
+	TEST_F(FontRendererInitializeTest, AGlyphWithLessRoomThanItsQuadReadsIsCramped) {
+		// The reach is half the distance range plus half a texel: 2.5 texels at a range of 4, and 1.5
+		// at a range of 2. Each of '(', ')', '[' and ']' is short on one edge only: the top (as a tall
+		// glyph is), the bottom, the left and the right. '{' has exactly the reach, and '|' reads
+		// 0.003 texels past its cell, inside the tolerance for the JSON's rounding.
+		const std::map<char, Room> room{
+			{'(', {.top = 1.0F}},
+			{')', {.bottom = 1.0F}},
+			{'[', {.left = 2.4F}},
+			{']', {.right = 2.4F}},
+			{'{', roomAround(2.5F)},
+			{'|', roomAround(2.497F)},
+			{'}', roomAround(3.0F)},
+		};
+		const std::array sources{
+			folder.write(kBody, "body", {.room = room}),
+			folder.write(kMono, "mono", {.distanceRange = 2.0F, .room = room}),
+		};
+		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody)); // warned about, still loaded
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "()[]");
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kMono), "()");
+
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateGlyphQuads("()", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, kBody);
+		EXPECT_EQ(quads.size(), 2U);
+	}
+
+	TEST_F(FontRendererInitializeTest, AGlyphWithoutACellIsNotChecked) {
+		// ')' and ']' are as cramped as '(', but ')' has no cell and ']' a cell of null and a string,
+		// nothing to be cramped in. The atlas still loads, and both still draw.
+		const AtlasMetrics atlas{
+			.room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}, {']', roomAround(1.0F)}}, .cellless = ")", .oddCells = "]"
+		};
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body", atlas)}, kBody));
+		EXPECT_EQ(fontRenderer->crampedGlyphs(), "(");
+
+		std::vector<FontRenderer::GlyphQuad> quads;
+		fontRenderer->generateGlyphQuads(")]", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads);
+		EXPECT_EQ(quads.size(), 2U);
+	}
+
+#ifdef DEVELOPMENT_BUILD
+	TEST_F(FontRendererInitializeTest, LoadingWarnsOncePerCrampedAtlasNamingItsGlyphs) {
+		struct Captured {
+			std::vector<std::string> warnings;
+		} captured;
+		// Declared after captured, so the sink is cleared before captured goes, however the test ends.
+		struct SinkReset {
+			~SinkReset() { foundation::Logger::setSink(nullptr, nullptr); }
+		} reset;
+		foundation::Logger::setSink(
+			[](void* context, const foundation::LogRecord& record) {
+				if (record.category == foundation::LogCategory::UI && record.level == foundation::LogLevel::Warning) {
+					static_cast<Captured*>(context)->warnings.emplace_back(record.message);
+				}
+			},
+			&captured
+		);
+
+		// Two cramped atlases and a roomy one between them.
+		constexpr FontFamily kDisplay{5};
+		const std::array	 sources{
+			folder.write(kBody, "body", {.room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}}}),
+			folder.write(kMono, "mono"),
+			folder.write(kDisplay, "display", {.room = {{'[', roomAround(1.0F)}}}),
+		};
+		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody));
+		ASSERT_EQ(captured.warnings.size(), 2U);
+		EXPECT_TRUE(captured.warnings[0].starts_with("SDF atlas body.json: ")) << captured.warnings[0];
+		EXPECT_TRUE(captured.warnings[0].ends_with(": ()")) << captured.warnings[0];
+		EXPECT_TRUE(captured.warnings[1].starts_with("SDF atlas display.json: ")) << captured.warnings[1];
+		EXPECT_TRUE(captured.warnings[1].ends_with(": [")) << captured.warnings[1];
+	}
+#endif
 
 } // namespace Renderer

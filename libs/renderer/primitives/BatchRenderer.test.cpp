@@ -21,7 +21,7 @@ namespace {
 
 	void addGlyph(BatchRenderer& batch, TextureHandle atlas, BlendMode blend = BlendMode::Alpha, float zIndex = 0.0F) {
 		batch.addTextQuad(
-			{0.0F, 0.0F}, {8.0F, 8.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {0.0F, 8.0F}, atlas, zIndex, blend
+			{0.0F, 0.0F}, {8.0F, 8.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {0.0F, 8.0F}, atlas, 4.0F, zIndex, blend
 		);
 	}
 

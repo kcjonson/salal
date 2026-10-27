@@ -63,8 +63,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 *
 		 * A second call destroys the atlases the first made, so a handle from
 		 * getAtlasTexture goes stale: a game that handed one to Primitives::setFontAtlas
-		 * hands over the new one. Not mid-frame: glyphs already batched would sample
-		 * destroyed textures.
+		 * hands over the new one. So does every GlyphQuad laid out before it, which
+		 * carries its atlas and now draws nothing: lay the text out again. Not
+		 * mid-frame: glyphs already batched would sample destroyed textures.
 		 * @param sources One atlas per family; no family twice, and not FontFamily::Default
 		 * @param defaultFamily The family FontFamily::Default stands for; one of the sources
 		 * @return false, with nothing loaded, when the sources are empty or break the rules
@@ -100,19 +101,25 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		float getAscent(float scale = 1.0F, FontFamily family = FontFamily::Default) const;
 
 		/**
-		 * Glyph quad data for batched text rendering
+		 * Glyph quad data for batched text rendering. The UVs index one family's
+		 * atlas, and the quad carries that atlas and its distance range, so
+		 * Primitives::drawGlyphs samples the texture the UVs were laid out in and
+		 * draws its edges at that texture's range.
 		 */
 		struct GlyphQuad {
-			glm::vec2 position;	 // Top-left position of the quad
-			glm::vec2 size;		 // Width and height of the quad
-			glm::vec2 uvMin;	 // Texture coordinate bottom-left
-			glm::vec2 uvMax;	 // Texture coordinate top-right
-			glm::vec4 color;	 // RGBA color
-			glm::vec2 runOrigin; // Pen origin of the run at the baseline (shared per run, for pixel snapping)
+			glm::vec2	  position;			 // Top-left position of the quad
+			glm::vec2	  size;				 // Width and height of the quad
+			glm::vec2	  uvMin;			 // Texture coordinate bottom-left
+			glm::vec2	  uvMax;			 // Texture coordinate top-right
+			glm::vec4	  color;			 // RGBA color
+			glm::vec2	  runOrigin;		 // Pen origin of the run at the baseline (shared per run, for pixel snapping)
+			TextureHandle atlas;			 // The atlas the UVs index, stale after another Initialize; invalid samples setFontAtlas's
+			float		  pixelRange = 0.0F; // The atlas's distance range in texels; with an invalid atlas, setFontAtlas's range instead
 		};
 
 		/**
-		 * Result of text wrapping operation (cached for performance)
+		 * Result of text wrapping operation (cached for performance). It keeps the
+		 * family it was measured in, which generateWrappedGlyphQuads lays it out in.
 		 */
 		struct WrappedTextResult {
 			std::vector<std::string> lines;		  // Each line of wrapped text
@@ -120,6 +127,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float					 totalWidth;  // Max line width (for alignment)
 			float					 totalHeight; // Sum of line heights
 			float					 lineHeight;  // Height per line in pixels
+			FontFamily				 family;	  // The family the lines were measured in, as resolved (the one they draw with)
 		};
 
 		/**
@@ -129,6 +137,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * @param scale Scaling factor for the text size (1.0F = 16px base size)
 		 * @param color RGBA color of the text (0-1 range)
 		 * @param outQuads Output vector to append generated quads to
+		 * @param family Font family to lay the text out in; each quad carries its atlas
 		 * @param letterSpacing Extra px between glyphs (CSS letter-spacing); 0 = none
 		 */
 		void generateGlyphQuads(
@@ -166,26 +175,24 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		measureTextWithWrapping(const std::string& text, float scale, float maxWidth, FontFamily family = FontFamily::Default) const;
 
 		/**
-		 * Generate glyph quads for wrapped/multi-line text
-		 * @param lines Pre-wrapped lines (from wrapText)
+		 * Generate glyph quads for wrapped/multi-line text, in the family and at the
+		 * line height it was wrapped with
+		 * @param wrapped The lines from wrapText, with their family and line height
 		 * @param position Top-left position of the text block
-		 * @param scale Scaling factor
+		 * @param scale Scaling factor (the one the text was wrapped at)
 		 * @param color Text color (RGBA 0-1 range)
-		 * @param lineHeight Height per line in pixels
 		 * @param hAlign Horizontal alignment per line
 		 * @param containerWidth Container width for alignment (0 = use line width)
 		 * @param outQuads Output vector to append generated quads to
 		 */
 		void generateWrappedGlyphQuads(
-			const std::vector<std::string>& lines,
-			const glm::vec2&				position,
-			float							scale,
-			const glm::vec4&				color,
-			float							lineHeight,
-			Foundation::HorizontalAlign		hAlign,
-			float							containerWidth,
-			std::vector<GlyphQuad>&			outQuads,
-			FontFamily						family = FontFamily::Default
+			const WrappedTextResult&	wrapped,
+			const glm::vec2&			position,
+			float						scale,
+			const glm::vec4&			color,
+			Foundation::HorizontalAlign hAlign,
+			float						containerWidth,
+			std::vector<GlyphQuad>&		outQuads
 		) const;
 
 		/**
@@ -194,6 +201,18 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * @return The atlas texture; invalid unless the last Initialize succeeded
 		 */
 		TextureHandle getAtlasTexture(FontFamily family = FontFamily::Default) const;
+
+		/**
+		 * The glyphs of the atlas this family draws with (the default's, for a family
+		 * that isn't loaded) whose sampled area leaves their atlas cell. A quad reads
+		 * its atlas out to half the distance range past the glyph's atlasBounds, plus
+		 * half a texel of bilinear footprint; where that crosses the cell the atlas
+		 * JSON gives the glyph, it draws slivers of its neighbours. Loading warns
+		 * about them; a glyph whose JSON gives no cell of four numbers is not checked.
+		 * @param family Font family whose atlas to check (default: the game's default family)
+		 * @return The offending glyphs in character order; empty when none, or nothing is loaded
+		 */
+		std::string crampedGlyphs(FontFamily family = FontFamily::Default) const;
 
 		/**
 		 * Update the internal frame counter for cache LRU tracking
@@ -221,8 +240,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			glm::vec2 atlasBoundsMax; // Top-right UV of actual glyph content
 			glm::vec2 planeBoundsMin; // Glyph bounds min (in em units)
 			glm::vec2 planeBoundsMax; // Glyph bounds max (in em units)
+			glm::vec2 cellMin;		  // Bottom-left UV of the atlas cell the glyph was given
+			glm::vec2 cellMax;		  // Top-right UV of that cell
 			float	  advance;		  // Horizontal advance (in em units)
 			bool	  hasGeometry;	  // False for whitespace characters
+			bool	  hasCell;		  // False when the JSON gives no cell of four numbers
 		};
 
 		/**
@@ -260,6 +282,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * @return true if atlas was loaded successfully
 		 */
 		bool LoadSDFAtlas(Atlas& atlas, const std::string& pngPath, const std::string& jsonPath);
+
+		// The glyphs of `atlas` whose sampled area leaves their cell (see crampedGlyphs).
+		static std::string findCrampedGlyphs(const Atlas& atlas);
 
 		/**
 		 * The family a request draws with: itself when it is loaded, otherwise the

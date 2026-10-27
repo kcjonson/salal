@@ -517,14 +517,16 @@ namespace Renderer {
 		const Foundation::Color& color,
 		const Foundation::Vec2&	 runOrigin,
 		TextureHandle			 atlas,
+		float					 pixelRange,
 		float					 zIndex,
 		Primitives::BlendMode	 blend
 	) {
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
-		// Resolve the atlas this glyph samples. An invalid handle means "use the
-		// default atlas" (the game's default family's, set via setFontAtlas), so
-		// existing callers are unchanged.
+		// Resolve the atlas this glyph samples, and its range. An invalid handle
+		// means the default atlas (the game's default family's, set via setFontAtlas)
+		// at the default's range.
 		const TextureHandle resolvedAtlas = atlas.isValid() ? atlas : defaultFontAtlas;
+		const float			resolvedPixelRange = atlas.isValid() ? pixelRange : fontPixelRange;
 
 		uint32_t baseIndex = static_cast<uint32_t>(vertices.size());
 
@@ -534,7 +536,7 @@ namespace Renderer {
 		// data1 = unused (0,0,0,0)
 		// data2 = (pixelRange, 0, 0, -1) where -1 signals text rendering mode
 		Foundation::Vec4 zeroVec4(0.0F, 0.0F, 0.0F, 0.0F);
-		Foundation::Vec4 textParams(fontPixelRange, 0.0F, 0.0F, renderMode(kRenderModeText, blend));
+		Foundation::Vec4 textParams(resolvedPixelRange, 0.0F, 0.0F, renderMode(kRenderModeText, blend));
 
 		// Under identity/translate-only transforms, snap the RUN origin (not the
 		// glyph) to the device pixel grid: every glyph of a run computes the same

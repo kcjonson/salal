@@ -5,6 +5,7 @@
 #include "utils/Log.h"
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -35,6 +36,19 @@ namespace Renderer {
 				}
 			}
 			return penX;
+		}
+
+		// How far generateGlyphQuads grows each quad past its glyph's atlasBounds, in
+		// texels: the half of the distance range that holds the edge's falloff.
+		float quadPadTexels(float distanceRange) {
+			return distanceRange * 0.5F;
+		}
+
+		// How far past a glyph's atlasBounds its quad reads the atlas, in texels: the
+		// quad's padding, plus half a texel of bilinear footprint at the quad's edge.
+		float sampleReachTexels(float distanceRange) {
+			constexpr float kBilinearFootprintTexels = 0.5F;
+			return quadPadTexels(distanceRange) + kBilinearFootprintTexels;
 		}
 	} // namespace
 
@@ -234,7 +248,9 @@ namespace Renderer {
 				// requires atlasBounds (actual glyph content within the cell,
 				// https://github.com/Chlumsky/msdf-atlas-gen/issues/2) and plane
 				// bounds; sampling the full cell instead would bleed neighboring
-				// glyphs, so incomplete glyphs are kept advance-only.
+				// glyphs, so incomplete glyphs are kept advance-only. Where "atlas" is
+				// the glyph's cell (x, y, width, height), findCrampedGlyphs checks the
+				// glyph's sampled area against it.
 				if (glyphJson.contains("atlas") && !glyphJson["atlas"].is_null()) {
 					const bool hasAtlasBounds = glyphJson.contains("atlasBounds") && !glyphJson["atlasBounds"].is_null();
 					const bool hasPlaneBounds = glyphJson.contains("plane") && !glyphJson["plane"].is_null();
@@ -248,6 +264,17 @@ namespace Renderer {
 						glyph.planeBoundsMin.y = glyphJson["plane"]["bottom"].get<float>();
 						glyph.planeBoundsMax.x = glyphJson["plane"]["right"].get<float>();
 						glyph.planeBoundsMax.y = glyphJson["plane"]["top"].get<float>();
+
+						// A cell that isn't four numbers is not checked; it doesn't fail the atlas.
+						const auto& cell = glyphJson["atlas"];
+						glyph.hasCell =
+							cell.is_object() && std::ranges::all_of(std::array{"x", "y", "width", "height"}, [&](const char* field) {
+								return cell.contains(field) && cell[field].is_number();
+							});
+						if (glyph.hasCell) {
+							glyph.cellMin = glm::vec2(cell["x"].get<float>(), cell["y"].get<float>());
+							glyph.cellMax = glyph.cellMin + glm::vec2(cell["width"].get<float>(), cell["height"].get<float>());
+						}
 					} else {
 						missingAtlasBounds += hasAtlasBounds ? 0 : 1;
 						missingPlaneBounds += hasPlaneBounds ? 0 : 1;
@@ -314,6 +341,19 @@ namespace Renderer {
 		atlas.scaledAscender = atlasMetadata.ascender * BASE_FONT_SIZE;
 		atlas.maxGlyphHeightUnscaled = atlasMetadata.lineHeight;
 		atlas.loaded = true;
+
+		const std::string cramped = findCrampedGlyphs(atlas);
+		if (!cramped.empty()) {
+			// The file name, not the path, and the glyphs last: the logger stops at 256 characters.
+			LOG_WARNING(
+				UI,
+				"SDF atlas %s: glyphs read past their cells, which need %.1f texels of room around the glyph, and draw slivers of their "
+				"neighbours: %s",
+				std::filesystem::path(jsonPath).filename().string().c_str(),
+				sampleReachTexels(atlasMetadata.distanceRange),
+				cramped.c_str()
+			);
+		}
 
 		LOG_INFO(UI, "SDF atlas loaded successfully");
 		return true;
@@ -385,9 +425,13 @@ namespace Renderer {
 		// the top AA row vanishes, shearing glyph tops flat and clipping the trailing
 		// glyph. Grow each quad by the valid half-range (not the full range, whose
 		// faint tail shows as edge lines on large text) in geometry and matching UV.
-		// The atlas gutter is far wider than the half-range, so no neighbour bleed.
+		// Bilinear filtering then reads half a texel past the quad's UV edge, so the
+		// quad samples distanceRange/2 + 0.5 texels past atlasBounds
+		// (sampleReachTexels). The atlas generator (worldsim's tools/generate_sdf_atlas)
+		// has to leave that much room around each glyph inside its cell, or the glyph
+		// draws slivers of its neighbours; loading warns about any that lack it.
 		const float glyphSizeTexels = atlas.metadata.glyphSize > 0 ? static_cast<float>(atlas.metadata.glyphSize) : 32.0F;
-		const float halfRangeTexels = atlas.metadata.distanceRange * 0.5F;
+		const float halfRangeTexels = quadPadTexels(atlas.metadata.distanceRange);
 		const float padPx = (halfRangeTexels / glyphSizeTexels) * fontSize;
 		const float padU = atlas.metadata.atlasWidth > 0 ? halfRangeTexels / static_cast<float>(atlas.metadata.atlasWidth) : 0.0F;
 		const float padV = atlas.metadata.atlasHeight > 0 ? halfRangeTexels / static_cast<float>(atlas.metadata.atlasHeight) : 0.0F;
@@ -412,6 +456,8 @@ namespace Renderer {
 			quad.uvMin = glm::clamp(glm::vec2(glyph.atlasBoundsMin.x - padU, glyph.atlasBoundsMin.y - padV), 0.0F, 1.0F);
 			quad.uvMax = glm::clamp(glm::vec2(glyph.atlasBoundsMax.x + padU, glyph.atlasBoundsMax.y + padV), 0.0F, 1.0F);
 			quad.color = color;
+			quad.atlas = atlas.texture;
+			quad.pixelRange = atlas.metadata.distanceRange;
 
 			outQuads.push_back(quad);
 		});
@@ -467,6 +513,7 @@ namespace Renderer {
 
 		// Cache miss - compute wrapped text
 		WrappedTextResult result;
+		result.family = key.family;
 
 		constexpr float BASE_FONT_SIZE = 16.0F;
 		float			fontSize = BASE_FONT_SIZE * scale;
@@ -596,21 +643,18 @@ namespace Renderer {
 	}
 
 	void FontRenderer::generateWrappedGlyphQuads(
-		const std::vector<std::string>& lines,
-		const glm::vec2&				position,
-		float							scale,
-		const glm::vec4&				color,
-		float							lineHeight,
-		Foundation::HorizontalAlign		hAlign,
-		float							containerWidth,
-		std::vector<GlyphQuad>&			outQuads,
-		FontFamily						family
+		const WrappedTextResult&	wrapped,
+		const glm::vec2&			position,
+		float						scale,
+		const glm::vec4&			color,
+		Foundation::HorizontalAlign hAlign,
+		float						containerWidth,
+		std::vector<GlyphQuad>&		outQuads
 	) const {
-		float currentY = position.y;
+		const FontFamily family = wrapped.family;
+		float			 currentY = position.y;
 
-		for (size_t lineIdx = 0; lineIdx < lines.size(); ++lineIdx) {
-			const std::string& line = lines[lineIdx];
-
+		for (const std::string& line : wrapped.lines) {
 			// Calculate X offset for alignment
 			float lineX = position.x;
 			if (containerWidth > 0.0F && !line.empty()) {
@@ -634,12 +678,39 @@ namespace Renderer {
 				generateGlyphQuads(line, glm::vec2(lineX, currentY), scale, color, outQuads, family);
 			}
 
-			currentY += lineHeight;
+			currentY += wrapped.lineHeight;
 		}
 	}
 
 	TextureHandle FontRenderer::getAtlasTexture(FontFamily family) const {
 		return atlasFor(family).texture;
+	}
+
+	std::string FontRenderer::crampedGlyphs(FontFamily family) const {
+		return findCrampedGlyphs(atlasFor(family));
+	}
+
+	std::string FontRenderer::findCrampedGlyphs(const Atlas& atlas) {
+		// In texels. The tolerance absorbs the rounding of the JSON's normalized
+		// coordinates, far under a texel; a glyph whose reach ends on its cell's edge fits.
+		constexpr float kToleranceTexels = 0.01F;
+		const glm::vec2 atlasSize(static_cast<float>(atlas.metadata.atlasWidth), static_cast<float>(atlas.metadata.atlasHeight));
+		const float		reach = sampleReachTexels(atlas.metadata.distanceRange);
+
+		std::string cramped;
+		for (const auto& [c, glyph] : atlas.glyphs) {
+			if (!glyph.hasGeometry || !glyph.hasCell) {
+				continue;
+			}
+			const glm::vec2 readMin = glyph.atlasBoundsMin * atlasSize - reach;
+			const glm::vec2 readMax = glyph.atlasBoundsMax * atlasSize + reach;
+			const glm::vec2 cellMin = glyph.cellMin * atlasSize - kToleranceTexels;
+			const glm::vec2 cellMax = glyph.cellMax * atlasSize + kToleranceTexels;
+			if (readMin.x < cellMin.x || readMin.y < cellMin.y || readMax.x > cellMax.x || readMax.y > cellMax.y) {
+				cramped += c;
+			}
+		}
+		return cramped;
 	}
 
 	void FontRenderer::updateFrame() {
