@@ -64,6 +64,7 @@ namespace Renderer {
 			float					  distanceRange = 4.0F; // Texels
 			std::map<char, glm::vec2> room;		// Texels between a glyph and its cell's sides (x) and its top and bottom (y), where not 4
 			std::string				  cellless; // Glyphs whose "atlas" gives no cell rect
+			std::string				  oddCells; // Glyphs whose cell has fields that aren't numbers
 		};
 
 		std::string number(float value) {
@@ -93,6 +94,8 @@ namespace Renderer {
 					const glm::vec2 inset = room != metrics.room.end() ? room->second : glm::vec2(4.0F);
 					if (metrics.cellless.find(static_cast<char>(c)) != std::string::npos) {
 						json += R"("atlas":{},)";
+					} else if (metrics.oddCells.find(static_cast<char>(c)) != std::string::npos) {
+						json += R"("atlas":{"x":null,"y":0,"width":"wide","height":0.0625},)";
 					} else {
 						json += R"("atlas":{"x":)" + number(col / 16.0F) + R"(,"y":)" + number(row / 6.0F) +
 								R"(,"width":0.0625,"height":)" + number(1.0F / 6.0F) + "},";
@@ -501,14 +504,17 @@ namespace Renderer {
 	}
 
 	TEST_F(FontRendererInitializeTest, AGlyphWithoutACellIsNotChecked) {
-		// ')' is as cramped as '(', but its atlas entry gives no cell to be cramped in. It still draws.
-		const AtlasMetrics atlas{.room = {{'(', glm::vec2(1.0F)}, {')', glm::vec2(1.0F)}}, .cellless = ")"};
+		// ')' and ']' are as cramped as '(', but ')' has no cell and ']' a cell of null and a string,
+		// nothing to be cramped in. The atlas still loads, and both still draw.
+		const AtlasMetrics atlas{
+			.room = {{'(', glm::vec2(1.0F)}, {')', glm::vec2(1.0F)}, {']', glm::vec2(1.0F)}}, .cellless = ")", .oddCells = "]"
+		};
 		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body", atlas)}, kBody));
 		EXPECT_EQ(fontRenderer->crampedGlyphs(), "(");
 
 		std::vector<FontRenderer::GlyphQuad> quads;
-		fontRenderer->generateGlyphQuads(")", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads);
-		EXPECT_EQ(quads.size(), 1U);
+		fontRenderer->generateGlyphQuads(")]", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads);
+		EXPECT_EQ(quads.size(), 2U);
 	}
 
 } // namespace Renderer

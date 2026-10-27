@@ -265,9 +265,12 @@ namespace Renderer {
 						glyph.planeBoundsMax.x = glyphJson["plane"]["right"].get<float>();
 						glyph.planeBoundsMax.y = glyphJson["plane"]["top"].get<float>();
 
+						// A cell that isn't four numbers is not checked; it doesn't fail the atlas.
 						const auto& cell = glyphJson["atlas"];
-						glyph.hasCell = cell.is_object() && cell.contains("x") && cell.contains("y") && cell.contains("width") &&
-										cell.contains("height");
+						glyph.hasCell =
+							cell.is_object() && std::ranges::all_of(std::array{"x", "y", "width", "height"}, [&](const char* field) {
+								return cell.contains(field) && cell[field].is_number();
+							});
 						if (glyph.hasCell) {
 							glyph.cellMin = glm::vec2(cell["x"].get<float>(), cell["y"].get<float>());
 							glyph.cellMax = glyph.cellMin + glm::vec2(cell["width"].get<float>(), cell["height"].get<float>());

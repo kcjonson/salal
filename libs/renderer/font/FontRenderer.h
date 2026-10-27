@@ -204,7 +204,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * out to half the distance range past the glyph's atlasBounds, plus half a texel
 		 * of bilinear footprint; where that crosses the cell the atlas JSON gives the
 		 * glyph, it draws slivers of its neighbours. Loading warns about them; a glyph
-		 * whose JSON gives no cell is not checked.
+		 * whose JSON gives no cell of four numbers is not checked.
 		 * @param family Font family whose atlas to check (default: the game's default family)
 		 * @return The offending glyphs in character order; empty when none, or nothing is loaded
 		 */
@@ -240,7 +240,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			glm::vec2 cellMax;		  // Top-right UV of that cell
 			float	  advance;		  // Horizontal advance (in em units)
 			bool	  hasGeometry;	  // False for whitespace characters
-			bool	  hasCell;		  // False when the JSON gives no cell rect
+			bool	  hasCell;		  // False when the JSON gives no cell of four numbers
 		};
 
 		/**
