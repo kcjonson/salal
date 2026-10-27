@@ -3,16 +3,20 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
 #include <map>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 // A port of dual-deck-builder's src/renderer/game/core/Rng.test.ts. The golden values are
@@ -144,6 +148,30 @@ namespace {
 	template <typename Bound>
 	concept NextIntTakes = requires(Rng& rng, Bound bound) { rng.nextInt(bound, bound); };
 
+	// Templated on the Rng so the literal stays a literal and the checks happen at substitution.
+	template <typename R>
+	concept ForkTakesLiteralZero = requires(const R& rng) { rng.fork(0); };
+
+	template <typename R>
+	concept ForkTakesNullptr = requires(const R& rng) { rng.fork(nullptr); };
+
+	template <typename R>
+	concept ForkTakesNull = requires(const R& rng) { rng.fork(NULL); };
+
+	template <typename R>
+	concept ForkTakesNullptrAndAnAttempt = requires(const R& rng) { rng.fork(nullptr, 1U); };
+
+	template <typename Range>
+	concept ShuffleTakes = requires(Rng& rng, Range&& range) { rng.shuffle(std::forward<Range>(range)); };
+
+	// Claims more than 2^32 items over four real ones, so shuffle has to refuse it before touching any.
+	struct OversizedRange {
+		std::array<int, 4>*			items;
+		[[nodiscard]] int*			begin() const { return items->data(); }
+		[[nodiscard]] int*			end() const { return items->data() + items->size(); }
+		[[nodiscard]] static size_t size() { return static_cast<size_t>((uint64_t{1} << 32) + 1); }
+	};
+
 	const std::vector<WeightedEntry<std::string_view>> kStops{
 		{.value = "raider", .weight = 3},
 		{.value = "checkpoint", .weight = 2},
@@ -238,6 +266,19 @@ TEST(RngTests, ReducesIntegerSeedsModulo2To32) {
 		EXPECT_EQ(rng.seed(), reduced) << seed;
 		EXPECT_EQ(take(rng), take(Rng(reduced))) << seed;
 	}
+}
+
+TEST(RngTests, TakesSeedsOfEveryIntegerWidth) {
+	EXPECT_EQ(Rng(int8_t{-1}).seed(), kUInt32Max);
+	EXPECT_EQ(Rng(uint8_t{255}).seed(), 255U);
+	EXPECT_EQ(Rng(int16_t{-2}).seed(), kUInt32Max - 1);
+	EXPECT_EQ(Rng(uint16_t{65535}).seed(), 65535U);
+	EXPECT_EQ(Rng(std::numeric_limits<int32_t>::min()).seed(), 0x80000000U);
+	EXPECT_EQ(Rng(static_cast<uint64_t>(kTwo32) + 7).seed(), 7U);
+	EXPECT_EQ(Rng(-kTwo32 - 1).seed(), kUInt32Max);
+	EXPECT_EQ(Rng(1L).seed(), 1U);
+	EXPECT_EQ(Rng(1ULL).seed(), 1U);
+	EXPECT_EQ(take(Rng(int8_t{-1}), 4), take(Rng(kUInt32Max), 4));
 }
 
 TEST(RngTests, TakesOnlyIntegerSeeds) {
@@ -364,6 +405,8 @@ TEST(RngForkTests, TakesAnyValidUtf8Name) {
 	// Rng.ts also gives the lone surrogates U+D800 and U+DC00 streams apart from U+FFFD's. Valid
 	// UTF-8 can't hold a lone surrogate, so their encodings are rejected here
 	// (RngDeathTest.ForkRejectsANameThatIsNotValidUtf8), and U+FFFD is pinned as an ordinary name.
+	// Without asserts, bad bytes hash as the surrogates U+DC80 to U+DCFF
+	// (RngReleaseTests.HashesBytesThatAreNotUtf8AsTheLoneSurrogatesRngTsWouldSee).
 }
 
 TEST(RngForkTests, GivesEveryCampaignSeedItsOwnStageStream) {
@@ -386,6 +429,18 @@ TEST(RngForkTests, DerivesTheChildFromTheSeedWhateverTheParentsState) {
 	EXPECT_EQ(take(parent.fork("terrain", 2)), take(Rng(0).fork("terrain", 2)));
 }
 
+TEST(RngForkTests, TakesAttemptsOfEveryIntegerWidth) {
+	const Rng root(kSeed);
+	EXPECT_EQ(root.fork("terrain", int8_t{1}).seed(), 0xb60805a9U);
+	EXPECT_EQ(root.fork("terrain", uint8_t{1}).seed(), 0xb60805a9U);
+	EXPECT_EQ(root.fork("terrain", int16_t{1}).seed(), 0xb60805a9U);
+	EXPECT_EQ(root.fork("terrain", uint16_t{1}).seed(), 0xb60805a9U);
+	EXPECT_EQ(root.fork("terrain", 1L).seed(), 0xb60805a9U);
+	EXPECT_EQ(root.fork("terrain", 1ULL).seed(), 0xb60805a9U);
+	EXPECT_EQ(root.fork("terrain", int64_t{kUInt32Max}).seed(), 0x855371eeU);
+	EXPECT_EQ(root.fork("terrain", uint64_t{kUInt32Max}).seed(), 0x855371eeU);
+}
+
 TEST(RngForkTests, TakesOnlyIntegerAttemptsAndStringNames) {
 	// Rng.ts rejects 1.5, NaN and Infinity at run time; here a floating-point attempt doesn't
 	// compile. Its -1 and 2^32 are RngDeathTest.ForkRejectsAnAttemptOutsideUInt32.
@@ -398,21 +453,44 @@ TEST(RngForkTests, TakesOnlyIntegerAttemptsAndStringNames) {
 	// Rng.ts rejects an explicit undefined so a roll count missing from a save can't quietly
 	// become 0; a std::optional count doesn't compile.
 	static_assert(!ForkTakesAttempt<std::optional<uint32_t>>);
-	// Rng.ts rejects the names 5, 7, null, undefined and ['terrain'] at run time. A nullptr
-	// name compiles, as std::string_view's constructor takes one until C++23.
+	// Rng.ts rejects the names 5, 7, null, undefined and ['terrain'] at run time. Here a number
+	// doesn't compile, and neither does a null pointer constant, which std::string_view's
+	// const char* constructor would otherwise take: fork(0) reads as an attempt with the name left
+	// out, and would crash.
 	static_assert(ForkTakesName<std::string>);
 	static_assert(ForkTakesName<const char*>);
 	static_assert(!ForkTakesName<int>);
 	static_assert(!ForkTakesName<std::vector<std::string>>);
+	static_assert(!ForkTakesLiteralZero<Rng>);
+	static_assert(!ForkTakesNullptr<Rng>);
+	static_assert(!ForkTakesNull<Rng>);
+	static_assert(!ForkTakesNullptrAndAnAttempt<Rng>);
 }
 
 // ============================================================================
-// nextDouble
+// nextDouble and nextFloat
 // ============================================================================
 
 TEST(RngTests, NextDoubleSpansZeroToOneAndNeverReachesOne) {
 	EXPECT_EQ(scripted({0}).rng.nextDouble(), 0.0);
 	EXPECT_EQ(scripted({kUInt32Max}).rng.nextDouble(), 1.0 - std::ldexp(1.0, -32));
+}
+
+TEST(RngTests, NextFloatTakesTheTop24BitsOfOneDraw) {
+	Rng rng(kSeed);
+	EXPECT_EQ(rng.nextFloat(), static_cast<float>(0xbdd943ed >> 8) / 16777216.0F);
+	EXPECT_EQ(rng.nextUInt32(), 0x34fa9b12U);
+}
+
+TEST(RngTests, NextFloatSpansZeroToOneAndNeverReachesOne) {
+	EXPECT_EQ(scripted({0}).rng.nextFloat(), 0.0F);
+	Scripted	top = scripted({kUInt32Max});
+	const float highest = top.rng.nextFloat();
+	EXPECT_EQ(highest, 1.0F - std::ldexp(1.0F, -24));
+	EXPECT_LT(highest, 1.0F);
+	EXPECT_EQ(top.rng.nextUInt32(), top.after);
+	// Why nextFloat exists: rounding the top draw's double to float gives 1.
+	EXPECT_EQ(static_cast<float>(scripted({kUInt32Max}).rng.nextDouble()), 1.0F);
 }
 
 // ============================================================================
@@ -487,12 +565,35 @@ TEST(RngIntTests, ReturnsMinPlusTheRawDrawOverAFull2To32SpanOneDrawEach) {
 
 TEST(RngIntTests, TakesOnlyIntegerBounds) {
 	// Rng.ts rejects a fractional bound, NaN, Infinity and a string bound at run time; here none
-	// compiles. Its range errors are RngDeathTest.NextIntRejectsBadBounds.
+	// compiles. Its range errors are RngCheckDeathTest.NextIntRejectsARangeOfNoneOrMoreThan2To32Values
+	// and RngDeathTest.NextIntRejectsUnsafeBounds.
 	static_assert(NextIntTakes<int>);
 	static_assert(NextIntTakes<int64_t>);
 	static_assert(!NextIntTakes<double>);
 	static_assert(!NextIntTakes<bool>);
 	static_assert(!NextIntTakes<const char*>);
+}
+
+TEST(RngIntTests, DrawsAtEveryIntegerWidthAsInt64Does) {
+	const auto drawsLikeInt64 = [](auto min, auto max) {
+		Rng typed(kSeed);
+		Rng wide(kSeed);
+		for (int roll = 0; roll < 200; ++roll) {
+			const auto value = typed.nextInt(min, max);
+			static_assert(std::is_same_v<std::remove_const_t<decltype(value)>, decltype(min)>);
+			ASSERT_EQ(static_cast<int64_t>(value), wide.nextInt(static_cast<int64_t>(min), static_cast<int64_t>(max)));
+		}
+	};
+	drawsLikeInt64(std::numeric_limits<int8_t>::min(), std::numeric_limits<int8_t>::max());
+	drawsLikeInt64(uint8_t{0}, std::numeric_limits<uint8_t>::max());
+	drawsLikeInt64(std::numeric_limits<int16_t>::min(), std::numeric_limits<int16_t>::max());
+	drawsLikeInt64(uint16_t{0}, std::numeric_limits<uint16_t>::max());
+	drawsLikeInt64(std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max());
+	drawsLikeInt64(uint32_t{0}, kUInt32Max);
+	drawsLikeInt64(-5L, 5L);
+	drawsLikeInt64(0UL, 5UL);
+	drawsLikeInt64(static_cast<uint64_t>(kMaxSafeInteger - kUInt32Max), static_cast<uint64_t>(kMaxSafeInteger));
+	drawsLikeInt64(kMinSafeInteger, kMinSafeInteger + 3);
 }
 
 // ============================================================================
@@ -507,6 +608,27 @@ TEST(RngPickTests, ReturnsEveryItemOverEnoughDrawsAndOnlyThose) {
 		seen.insert(rng.pick(items));
 	}
 	EXPECT_EQ(seen, (std::set<std::string_view>{"find", "raider", "wreck"}));
+}
+
+TEST(RngPickTests, ReturnsAReferenceIntoARangeThatOutlivesTheCallAndACopyOutOfATemporary) {
+	static_assert(std::is_same_v<decltype(std::declval<Rng&>().pick(std::declval<std::vector<std::string>&>())), std::string&>);
+	static_assert(std::is_same_v<decltype(std::declval<Rng&>().pick(std::declval<const std::vector<std::string>&>())), const std::string&>);
+	static_assert(std::is_same_v<decltype(std::declval<Rng&>().pick(std::declval<std::span<std::string>>())), std::string&>);
+	static_assert(std::is_same_v<decltype(std::declval<Rng&>().pick(std::declval<std::vector<std::string>>())), std::string>);
+
+	// Long enough that a dangling string would read freed heap, not a small-string buffer.
+	const auto names = [] {
+		return std::vector<std::string>{std::string(40, 'a'), std::string(40, 'b'), std::string(40, 'c')};
+	};
+	std::vector<std::string> kept = names();
+	Rng						 fromLvalue(kSeed);
+	std::string&			 picked = fromLvalue.pick(kept);
+	EXPECT_GE(&picked, kept.data());
+	EXPECT_LT(&picked, kept.data() + kept.size());
+	// DDB's rng.pick(pool.filter(...)) shape: the copy outlives the temporary range.
+	Rng				   fromTemporary(kSeed);
+	const std::string& copied = fromTemporary.pick(names());
+	EXPECT_EQ(copied, picked);
 }
 
 // ============================================================================
@@ -533,6 +655,21 @@ TEST(RngShuffleTests, LeavesEmptyAndSingleItemRangesAlone) {
 	EXPECT_EQ(only, (std::vector<std::string>{"only"}));
 }
 
+TEST(RngShuffleTests, TakesALiveRangeOrAViewButNotATemporaryThatOwnsItsItems) {
+	static_assert(ShuffleTakes<std::vector<int>&>);
+	static_assert(ShuffleTakes<std::span<int>>);
+	static_assert(!ShuffleTakes<std::vector<int>>);
+	static_assert(!ShuffleTakes<std::string>);
+	static_assert(!ShuffleTakes<const std::vector<int>&>);
+	// A view shuffles what it views and nothing else.
+	std::array<int, 10> cards{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+	Rng(kSeed).shuffle(std::span(cards).first(5));
+	std::array<int, 10> head = cards;
+	std::sort(head.begin(), head.begin() + 5);
+	EXPECT_EQ(head, (std::array<int, 10>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}));
+	EXPECT_NE(cards, head);
+}
+
 // ============================================================================
 // weighted
 // ============================================================================
@@ -551,6 +688,29 @@ TEST(RngWeightedTests, NeverChoosesAZeroWeight) {
 		seen.insert(rng.weighted(entries));
 	}
 	EXPECT_EQ(seen, (std::set<std::string_view>{"a", "b"}));
+}
+
+TEST(RngWeightedTests, ReturnsTheValueByValueSoAViewThatBuildsEntriesIsSafe) {
+	struct Row {
+		std::string name;
+		double		weight;
+	};
+	// Long names, so a dangling string would read freed heap, not a small-string buffer.
+	const std::vector<Row> rows{{std::string(40, 'a'), 3}, {std::string(40, 'b'), 2}, {std::string(40, 'c'), 0}, {std::string(40, 'd'), 1}};
+	const auto			   view =
+		rows | std::views::transform([](const Row& row) { return WeightedEntry<std::string>{.value = row.name, .weight = row.weight}; });
+	std::vector<WeightedEntry<std::string>> stored;
+	for (const Row& row : rows) {
+		stored.push_back({.value = row.name, .weight = row.weight});
+	}
+	static_assert(std::is_same_v<decltype(std::declval<Rng&>().weighted(view)), std::string>);
+	static_assert(std::is_same_v<decltype(std::declval<Rng&>().weighted(stored)), std::string>);
+	Rng throughView(kSeed);
+	Rng throughVector(kSeed);
+	for (int draw = 0; draw < 50; ++draw) {
+		const std::string chosen = throughView.weighted(view);
+		ASSERT_EQ(chosen, throughVector.weighted(stored));
+	}
 }
 
 TEST(RngWeightedTests, SkipsZeroWeightsAtTheLowestAndHighestDrawsEvenWhenTheTotalIsSubnormal) {
@@ -748,8 +908,40 @@ TEST(RngDistributionTests, KeepsAForkUncorrelatedWithItsParentAndItsSiblings) {
 // Rejected arguments
 // ============================================================================
 
-// Rng.ts throws a RangeError for each of these. Rng asserts, so they die in a build with asserts
-// and can't be checked without them.
+// Rng.ts throws a RangeError for each of these. Those that would be undefined behaviour in C++
+// fail in every build (RngCheckDeathTest); the rest assert, so they die only with asserts on
+// (RngDeathTest), and RngReleaseTests covers what a name that isn't UTF-8 does without them.
+
+TEST(RngCheckDeathTest, NextIntRejectsARangeOfNoneOrMoreThan2To32Values) {
+	Rng rng(kSeed);
+	EXPECT_DEATH(rng.nextInt(3, 2), "Rng::nextInt: .*must hold");
+	EXPECT_DEATH(rng.nextInt(int8_t{5}, int8_t{4}), "Rng::nextInt: .*must hold");
+	EXPECT_DEATH(rng.nextInt(int64_t{0}, kTwo32), "Rng::nextInt: .*must hold");
+	EXPECT_DEATH(rng.nextInt(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()), "Rng::nextInt: .*must hold");
+	EXPECT_DEATH(rng.nextInt(uint64_t{0}, std::numeric_limits<uint64_t>::max()), "Rng::nextInt: .*must hold");
+	// Reversed and more than 2^64 - 2^32 wide, so the span wraps back to 2.
+	EXPECT_DEATH(rng.nextInt(std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::min()), "Rng::nextInt: .*must hold");
+}
+
+TEST(RngCheckDeathTest, PickRejectsAnEmptyRange) {
+	Rng									rng(kSeed);
+	const std::vector<std::string_view> none;
+	EXPECT_DEATH(rng.pick(none), "Rng::pick");
+	EXPECT_DEATH(rng.pick(std::vector<std::string>{}), "Rng::pick");
+}
+
+TEST(RngCheckDeathTest, ShuffleRejectsARangeOfMoreThan2To32Items) {
+	Rng				   rng(kSeed);
+	std::array<int, 4> items{0, 1, 2, 3};
+	OversizedRange	   oversized{.items = &items};
+	EXPECT_DEATH(rng.shuffle(oversized), "Rng::shuffle");
+}
+
+TEST(RngCheckDeathTest, WeightedRejectsAnEmptyRange) {
+	Rng rng(kSeed);
+	EXPECT_DEATH(rng.weighted(std::vector<WeightedEntry<std::string_view>>{}), "Rng::weighted: no entries");
+}
+
 class RngDeathTest : public testing::Test {
   protected:
 	void SetUp() override {
@@ -768,14 +960,18 @@ TEST_F(RngDeathTest, ForkRejectsAnAttemptOutsideUInt32) {
 TEST_F(RngDeathTest, ForkRejectsANameThatIsNotValidUtf8) {
 	const Rng root(kSeed);
 	// U+D800 and U+DC00 encoded as if they were code points, a lone continuation byte, overlong
-	// forms of '/', a sequence cut short, a code point past U+10FFFF, and a byte UTF-8 never uses.
+	// forms of '/' and of U+FFFF, a sequence cut short, bad trail bytes after the second, a code
+	// point past U+10FFFF, and a byte UTF-8 never uses.
 	for (const std::string_view name : {
 			 std::string_view("\xED\xA0\x80"),
 			 std::string_view("\xED\xB0\x80"),
 			 std::string_view("stop:\x80"),
 			 std::string_view("\xC0\xAF"),
 			 std::string_view("\xE0\x80\xAF"),
+			 std::string_view("\xF0\x8F\xBF\xBF"),
 			 std::string_view("\xE4\xB8"),
+			 std::string_view("\xE4\xB8\x41"),
+			 std::string_view("\xF0\x9F\x41\x97"),
 			 std::string_view("\xF4\x90\x80\x80"),
 			 std::string_view("\xFF"),
 		 }) {
@@ -783,31 +979,41 @@ TEST_F(RngDeathTest, ForkRejectsANameThatIsNotValidUtf8) {
 	}
 }
 
-TEST_F(RngDeathTest, NextIntRejectsBadBounds) {
+TEST_F(RngDeathTest, NextIntRejectsUnsafeBounds) {
 	Rng rng(kSeed);
-	EXPECT_DEATH(rng.nextInt(3, 2), "Rng::nextInt");
-	EXPECT_DEATH(rng.nextInt(kTwo53, kTwo53 + 2), "Rng::nextInt");		// unsafe bounds with a small span
-	EXPECT_DEATH(rng.nextInt(-kTwo53, -kTwo53 + 2), "Rng::nextInt");	// an unsafe min
-	EXPECT_DEATH(rng.nextInt(kMaxSafeInteger, kTwo53), "Rng::nextInt"); // an unsafe max
-	EXPECT_DEATH(rng.nextInt(int64_t{0}, kTwo32), "spans more than");	// a span over 2^32
-}
-
-TEST_F(RngDeathTest, PickRejectsAnEmptyRange) {
-	Rng									rng(kSeed);
-	const std::vector<std::string_view> none;
-	EXPECT_DEATH(rng.pick(none), "Rng::pick");
+	EXPECT_DEATH(rng.nextInt(kTwo53, kTwo53 + 2), "must be safe integers");		 // unsafe bounds with a small span
+	EXPECT_DEATH(rng.nextInt(-kTwo53, -kTwo53 + 2), "must be safe integers");	 // an unsafe min
+	EXPECT_DEATH(rng.nextInt(kMaxSafeInteger, kTwo53), "must be safe integers"); // an unsafe max
 }
 
 TEST_F(RngDeathTest, WeightedRejectsBadWeights) {
 	using Entries = std::vector<WeightedEntry<std::string_view>>;
 	Rng			 rng(kSeed);
 	const double infinity = std::numeric_limits<double>::infinity();
-	EXPECT_DEATH(rng.weighted(Entries{}), "Rng::weighted");
 	EXPECT_DEATH(rng.weighted(Entries{{.value = "a", .weight = 0}, {.value = "b", .weight = 0}}), "Rng::weighted");
 	EXPECT_DEATH(rng.weighted(Entries{{.value = "a", .weight = 2}, {.value = "b", .weight = -1}}), "Rng::weighted");
 	EXPECT_DEATH(rng.weighted(Entries{{.value = "a", .weight = std::nan("")}}), "Rng::weighted");
 	EXPECT_DEATH(rng.weighted(Entries{{.value = "a", .weight = infinity}}), "Rng::weighted");
 	EXPECT_DEATH(rng.weighted(Entries{{.value = "a", .weight = 1e308}, {.value = "b", .weight = 1e308}}), "Rng::weighted");
+}
+
+TEST(RngReleaseTests, HashesBytesThatAreNotUtf8AsTheLoneSurrogatesRngTsWouldSee) {
+#ifdef NDEBUG
+	// Each bad byte is the code unit 0xDC00 + byte; the seeds are what Rng.ts gives the JS strings
+	// holding those surrogates, so these names keep a counterpart there and stay apart.
+	const Rng root(kSeed);
+	// std::string, so a hex escape can't run into the character after it.
+	EXPECT_EQ(root.fork(std::string("stop:\xFF") + "1").seed(), 0xa2551403U); // 'stop:\udcff1'
+	EXPECT_EQ(root.fork(std::string("stop:\xFF") + "2").seed(), 0xf2092048U); // 'stop:\udcff2'
+	EXPECT_EQ(root.fork("stop:\xC0\xAF").seed(), 0xe3a32555U);				  // 'stop:\udcc0\udcaf'
+	EXPECT_EQ(root.fork("stop:").seed(), 0x99b81480U);						  // 'stop:'
+	EXPECT_EQ(root.fork("\xED\xA0\x80").seed(), 0xead6ce80U);				  // '\udced\udca0\udc80'
+	EXPECT_EQ(root.fork(std::string("\xE4\xB8") + "A").seed(), 0x95f579fcU);  // '\udce4\udcb8A'
+	EXPECT_EQ(root.fork("\xF0\x9F\x9A", 2).seed(), 0xa1099d44U);			  // '\udcf0\udc9f\udc9a'
+	EXPECT_EQ(root.fork("\xF0\x8F\xBF\xBF").seed(), 0x90091993U);			  // '\udcf0\udc8f\udcbf\udcbf'
+#else
+	GTEST_SKIP() << "with asserts on, a name that isn't valid UTF-8 dies (RngDeathTest)";
+#endif
 }
 
 // ============================================================================

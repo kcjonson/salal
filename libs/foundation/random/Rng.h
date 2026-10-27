@@ -6,27 +6,40 @@
 // child streams from fork(name, attempt). Worldgen keeps Pcg32 and SplitMix64.
 //
 // The core is integer math, nextDouble scales by a power of two, and weighted uses only IEEE
-// addition and one multiply, so nothing depends on the platform or the optimisation level.
-// Golden tests pin the algorithm, the fork hash and each method's draw count, the same values
-// Rng.test.ts pins; changing any of them moves every seed in both implementations and needs a
-// kRngVersion bump in both. The design record is dual-deck-builder's
+// addition and one multiply, so nothing depends on the compiler or the optimisation level.
+// That assumes denormals aren't flushed to zero (FTZ or DAZ on x64, FPCR.FZ on arm64): with
+// them on, weighted reads a subnormal weight or total as zero where Rng.ts doesn't. salal sets
+// neither. Golden tests pin the algorithm, the fork hash and each method's draw count, the same
+// values Rng.test.ts pins; changing any of them moves every seed in both implementations and
+// needs a kRngVersion bump in both. The design record is dual-deck-builder's
 // docs/AI_TECHNICAL_DECISIONS/seeded-prng.md.
 //
 // A stream is its uint32 seed. There is no default constructor, so nothing gets an unseeded
 // stream by accident (freshSeed() in FreshSeed.h mints a root seed), and no copy: a copy
 // would replay the stream from wherever it had reached, which is saving a stream mid-sequence,
-// and the TypeScript has no way to do that either. Pass an Rng by reference.
+// and the TypeScript has no way to do that either. Pass an Rng by reference. A move hands the
+// stream over but leaves the source drawing the same numbers, so never draw from a moved-from
+// Rng.
 //
-// Bad arguments assert, as elsewhere in foundation, so the checks compile out with NDEBUG.
-// They reject what Rng.ts throws on, where the types don't already: a seed, an attempt or a
-// bound has to be an integer type (not bool or a character type), a name a std::string_view,
-// a weight a double.
+// Rng doesn't model UniformRandomBitGenerator, on purpose: std::shuffle and the <random>
+// distributions are implementation-defined, so libstdc++, libc++ and the MSVC STL would draw
+// different results from one stream. Use Rng's own methods.
+//
+// Bad arguments are rejected in two ways. Those that would be undefined behaviour (a range
+// with no values or more than 2^32, an empty pick or weighted) fail in every build, printing
+// the message and aborting. Those where Rng.ts would throw but C++ has a defined result (an
+// unsafe-integer bound, an attempt past 2^32 - 1, a name that isn't UTF-8, a weight that
+// isn't finite and >= 0) assert, as elsewhere in foundation, so NDEBUG compiles them out.
+// What Rng.ts rejects by type doesn't compile: a seed, an attempt or a bound has to be an
+// integer type (not bool or a character type), a name a std::string_view, a weight a double.
 
 #include <bit>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <iterator>
 #include <limits>
 #include <ranges>
@@ -53,16 +66,30 @@ namespace foundation {
 							 !std::same_as<T, char8_t> && !std::same_as<T, char16_t> && !std::same_as<T, char32_t>;
 
 		template <typename Entry>
-		inline constexpr bool kIsWeightedEntry = false;
+		struct WeightedEntryValue {};
 		template <typename T>
-		inline constexpr bool kIsWeightedEntry<WeightedEntry<T>> = true;
+		struct WeightedEntryValue<WeightedEntry<T>> {
+			using Type = T;
+		};
+
+		template <typename Range>
+		concept WeightedRange =
+			std::ranges::forward_range<Range> && requires { typename WeightedEntryValue<std::ranges::range_value_t<Range>>::Type; };
+
+		// The checks that guard undefined behaviour. Always on, and the same on every platform.
+		[[noreturn]] inline void rngCheckFailed(const char* message) {
+			std::fprintf(stderr, "%s\n", message);
+			std::abort();
+		}
 
 	} // namespace detail
 
 	class Rng {
 	  public:
 		// Any integer, reduced modulo 2^32 as ECMAScript's ToUint32 reduces Rng.ts's seed, so -1 is
-		// 0xffffffff. Rng.ts also coerces fractional, NaN and infinite seeds; here they don't compile.
+		// 0xffffffff. Only seeds within +-(2^53 - 1) have a Rng.ts counterpart: no JS number holds
+		// one past that exactly, so ToUint32 sees it rounded. Rng.ts also coerces fractional, NaN and
+		// infinite seeds; here they don't compile.
 		template <detail::RngInteger Seed>
 		explicit constexpr Rng(Seed seed)
 			: Rng(static_cast<uint32_t>(seed), seededState(static_cast<uint32_t>(seed))) {}
@@ -82,12 +109,18 @@ namespace foundation {
 		//
 		// The name is UTF-8 and must be valid; it hashes as the UTF-16 code units Rng.ts hashes, so
 		// any name gives the stream the same name gives there. A JS string can also hold a lone
-		// surrogate, which valid UTF-8 can't, so those names have no counterpart here.
+		// surrogate, which valid UTF-8 can't. With NDEBUG a byte that isn't part of valid UTF-8
+		// hashes as the lone surrogate 0xDC00 + byte (Python's surrogateescape), so such names stay
+		// apart and match the JS string holding those surrogates.
 		template <detail::RngInteger Attempt = uint32_t>
 		[[nodiscard]] constexpr Rng fork(std::string_view name, Attempt attempt = 0) const {
 			assert(std::in_range<uint32_t>(attempt) && "Rng::fork: attempt must be an integer from 0 to 2^32 - 1");
 			return Rng(forkSeed(streamSeed, name, static_cast<uint32_t>(attempt)));
 		}
+
+		// A literal 0 or NULL would otherwise reach std::string_view's const char* constructor.
+		template <typename... Rest>
+		Rng fork(std::nullptr_t, Rest...) const = delete;
 
 		// The next raw draw. One sfc32 step.
 		constexpr uint32_t nextUInt32() { return step(state); }
@@ -96,53 +129,70 @@ namespace foundation {
 		// Pcg32::nextDouble's two.
 		constexpr double nextDouble() { return static_cast<double>(nextUInt32()) / static_cast<double>(kUInt32Count); }
 
+		// A float in [0, 1), a multiple of 2^-24 from the draw's top 24 bits. One draw. Rng.ts has no
+		// counterpart; rounding nextDouble() to float would give 1.0F for the top 128 draws.
+		constexpr float nextFloat() { return static_cast<float>(nextUInt32() >> 8) * 0x1p-24F; }
+
 		// An integer in [min, max], both ends inclusive, with no modulo bias (Rng.ts's int()). The
 		// bounds are within +-(2^53 - 1), JavaScript's safe integers, and span at most 2^32 values.
 		// One draw, or more on a rejection, which happens with probability below span / 2^32.
 		template <detail::RngInteger Integer>
 		constexpr Integer nextInt(Integer min, Integer max) {
+			// In uint64_t, where wrapping is defined: min > max or the full 64-bit range gives a span of
+			// 0. The explicit min <= max also catches a reversed range more than 2^64 - 2^32 wide,
+			// which wraps back to a small span.
+			const uint64_t span = static_cast<uint64_t>(max) - static_cast<uint64_t>(min) + 1;
+			check(std::cmp_less_equal(min, max) && span - 1 < kUInt32Count, "Rng::nextInt: [min, max] must hold 1 to 2^32 values");
 			assert(
 				std::cmp_greater_equal(min, -kMaxSafeInteger) && std::cmp_less_equal(max, kMaxSafeInteger) &&
-				std::cmp_less_equal(min, max) && "Rng::nextInt: bounds must be safe integers with min <= max"
+				"Rng::nextInt: bounds must be safe integers"
 			);
-			const auto low = static_cast<int64_t>(min);
-			const auto span = static_cast<uint64_t>(static_cast<int64_t>(max) - low) + 1;
-			assert(span <= kUInt32Count && "Rng::nextInt: [min, max] spans more than 2^32 values");
-			return static_cast<Integer>(low + below(span));
+			return static_cast<Integer>(static_cast<uint64_t>(min) + below(span));
 		}
 
-		// A uniformly chosen item, drawing as nextInt(0, size - 1) does. Asserts on an empty range.
+		// A uniformly chosen item, drawing as nextInt(0, size - 1) does. A reference into the range,
+		// or a copy when the range is a temporary that owns its items. Fails on an empty range.
 		template <typename Range>
-			requires std::ranges::random_access_range<const Range> && std::ranges::sized_range<const Range>
-		constexpr std::ranges::range_reference_t<const Range> pick(const Range& items) {
+			requires std::ranges::random_access_range<Range> && std::ranges::sized_range<Range>
+		constexpr decltype(auto) pick(Range&& items) {
 			const auto count = static_cast<uint64_t>(std::ranges::size(items));
-			assert(count > 0 && "Rng::pick: no items to pick from");
-			return std::ranges::begin(items)[static_cast<std::ranges::range_difference_t<const Range>>(below(count))];
+			check(count - 1 < kUInt32Count, "Rng::pick: the range must hold 1 to 2^32 items");
+			const auto item = std::ranges::begin(items) + static_cast<std::ranges::range_difference_t<Range>>(below(count));
+			if constexpr (std::ranges::borrowed_range<Range>) {
+				return *item;
+			} else {
+				return std::ranges::range_value_t<Range>(std::ranges::iter_move(item));
+			}
 		}
 
 		// Shuffles in place, Fisher-Yates from the last index down, drawing as nextInt(0, index) for
-		// each index above 0. A caller that needs the original order shuffles a copy.
+		// each index above 0. A caller that needs the original order shuffles a copy. A temporary
+		// that owns its items doesn't compile, since the shuffle would be thrown away with it.
 		template <typename Range>
-			requires std::ranges::random_access_range<Range> && std::ranges::sized_range<Range> &&
+			requires std::ranges::random_access_range<Range> && std::ranges::sized_range<Range> && std::ranges::borrowed_range<Range> &&
 					 std::permutable<std::ranges::iterator_t<Range>>
 		constexpr void shuffle(Range&& items) {
 			using Difference = std::ranges::range_difference_t<Range>;
+			const auto size = static_cast<uint64_t>(std::ranges::size(items));
+			check(size <= kUInt32Count, "Rng::shuffle: the range must hold at most 2^32 items");
 			const auto first = std::ranges::begin(items);
-			for (auto count = static_cast<uint64_t>(std::ranges::size(items)); count > 1; --count) {
+			for (auto count = size; count > 1; --count) {
 				const uint32_t other = below(count);
 				std::ranges::iter_swap(first + static_cast<Difference>(count - 1), first + static_cast<Difference>(other));
 			}
 		}
 
-		// A value chosen with probability weight / total weight. One draw. Asserts on an empty range,
-		// a weight that isn't finite and >= 0, or a total that is zero or overflows.
-		template <typename Range>
-			requires std::ranges::forward_range<const Range> && detail::kIsWeightedEntry<std::ranges::range_value_t<const Range>>
-		constexpr const auto& weighted(const Range& entries) {
+		// The value of an entry chosen with probability weight / total weight, by value as Rng.ts
+		// returns it. One draw. Fails on an empty range; asserts on a weight that isn't finite and
+		// >= 0, or a total that is zero or overflows.
+		template <detail::WeightedRange Range>
+		constexpr typename detail::WeightedEntryValue<std::ranges::range_value_t<Range>>::Type weighted(Range&& entries) {
 			const auto first = std::ranges::begin(entries);
-			auto	   lastPositive = first;
-			double	   total = 0.0;
-			for (auto entry = first; entry != std::ranges::end(entries); ++entry) {
+			const auto last = std::ranges::end(entries);
+			check(first != last, "Rng::weighted: no entries to choose from");
+			auto   lastPositive = first;
+			double total = 0.0;
+			for (auto entry = first; entry != last; ++entry) {
 				const double weight = (*entry).weight;
 				assert(weight >= 0.0 && weight < kInfinity && "Rng::weighted: a weight must be a finite number >= 0");
 				total += weight;
@@ -190,6 +240,13 @@ namespace foundation {
 		constexpr Rng(uint32_t seed, State seeded)
 			: streamSeed(seed),
 			  state(seeded) {}
+
+		// Fails in every build: these guard undefined behaviour, not just parity with Rng.ts.
+		static constexpr void check(bool condition, const char* message) {
+			if (!condition) {
+				detail::rngCheckFailed(message);
+			}
+		}
 
 		static constexpr uint32_t step(State& words) {
 			const uint32_t result = words.a + words.b + words.counter;
@@ -293,7 +350,10 @@ namespace foundation {
 				const Utf8Sequence sequence = decodeUtf8(name, index);
 				assert(sequence.length != 0 && "Rng::fork: the name is not valid UTF-8");
 				if (sequence.length == 0) {
-					break;
+					hash = murmurBlock(hash, 0xDC00 + static_cast<uint8_t>(name[index]));
+					codeUnits += 1;
+					index += 1;
+					continue;
 				}
 				index += sequence.length;
 				if (sequence.codePoint < 0x10000) {
