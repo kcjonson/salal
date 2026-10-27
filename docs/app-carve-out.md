@@ -85,7 +85,7 @@ The only generic file with game dependencies.
 | :24, :211-217 | `"world/chunk/Chunk.h"`; Surface::Count, surfaceToString, Chunk::getSurfaceColor | game, transitively libs/world | builds a default tile atlas for terrain surfaces at startup (moved out, 2026-10-25/26) |
 | :16, :38, :213-221 | `<resources/TileAtlasBuilder.h>` | renderer | `TileAtlasBuilder.cpp:64` hardcodes `assets/tiles/surfaces/<name>/pattern.svg` (moved out, 2026-10-25/26) |
 | :231-264 | initializeAssetSystem | game paths | hardcodes `assets/shared/scripts` and `assets/recipes`; `AppConfig.h:46` defaults assetsRootPath to `assets/world` (moved out, 2026-10-25/26) |
-| :11, :37, :195-205 | `<font/FontRenderer.h>`; `ui::FontRenderer` owned as g_fontRenderer | ui | the app layer constructing a ui object and wiring it into Primitives (moved out of ui, 2026-10-25/26: now `Renderer::FontRenderer`) |
+| :11, :37, :195-205 | `<font/FontRenderer.h>`; `ui::FontRenderer` owned as g_fontRenderer | ui | the app layer constructing a ui object and wiring it into Primitives (moved out of ui, 2026-10-25/26: now `Renderer::FontRenderer`; since 2026-10-27 it takes the game's atlases, which the app passes in through `AppConfig::fontAtlases` and `defaultFont`, so the launcher names no fonts) |
 | :12, :52, :66-80 | `<input/InputEvent.h>`; UI::InputEvent::mouseMove/Down/Up/scroll | ui | injected-input dispatch from the dev server |
 | :7, :171-176 | CoordinateSystem (function-static instance) | renderer | |
 | :15, :113, :189-205, :221, :279, :284, :401, :470, :475 | Renderer::Primitives::* | renderer | |
@@ -185,7 +185,9 @@ remapSceneName, assetsRootPath, loadAssetsAsync. [worldsim#296](https://github.c
 `assetsRootPath` and `loadAssetsAsync` and added two hooks,
 `initializeResources(bool hasSceneArg)` and `shutdownResources()`; the app now
 brings the asset system up and down through them instead of the launcher
-doing it.
+doing it. Since 2026-10-27 it also carries `fontAtlases` and `defaultFont`, the
+game's font table, which the launcher resolves through `findResource` and hands
+to `FontRenderer::Initialize` ([worldsim#308](https://github.com/kcjonson/worldsim/pull/308)).
 
 Application (`application/Application.{h,cpp}`): the constructor takes
 `GLFWwindow*`, constructs InputManager, ClipboardManager and
