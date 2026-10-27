@@ -9,8 +9,10 @@ them is a new 62-line `application/FontAtlases.test.cpp`), dual-deck-builder @
 `afcd7b16` and asteroids-roguelike @ `176064c`.
 [app-carve-out.md](app-carve-out.md) is the map of worldsim's code this starts
 from, and [consumer-requirements.md](consumer-requirements.md) has what the
-three games ask for; this document cites them rather than repeating them. It is
-a proposal for review: the questions at the end are open until answered.
+three games ask for; this document cites them rather than repeating them.
+Reviewed and decided 2026-10-27; the decisions are listed at the end. All three
+games are pre-release, which is why small, listed behaviour changes in worldsim
+are acceptable.
 
 ## Goal and non-goals
 
@@ -26,9 +28,9 @@ Not in phase 2:
   focus manager, `UI::InputEvent`, `UI::IComponent`, the tree serialiser and
   the lint stay worldsim's, and worldsim keeps a bridge between them and `app`
   until phase 3.
-- Audio (phase 2b, decision B). Saves, profiles and leaderboards, which are
-  game data. Run-scoped state that outlives a scene, which the game owns and
-  hands to scenes through their arguments. Particles. Screen transitions
+- Audio (phase 2b, decision B). What a save, profile or leaderboard contains,
+  which is game data (the mechanics of storing one are `app`'s, under "Game
+  state and saves"). Particles. Screen transitions
   (dual-deck-builder's fade with input blocked, `ScreenManager.ts:144-173`),
   which a game draws as an overlay over the stack. A fixed-aspect virtual
   resolution with letterboxing, which is the game's over `onResize` and the
@@ -66,7 +68,7 @@ What changed since app-carve-out.md's survey, and matters here:
   world-sim answers `GET /api/state?what=scene` with it for six pre-game
   scenes (`apps/world-sim/scenes/shared/UiStateDrain.cpp:24-26`, since
   `e45d7247`). The route the comment names, `/api/scene/state`, never existed;
-  the one that uses it does. Question 1 has the replacement.
+  the one that uses it does. It stays, optional (decision 1).
 - No dev-server compile flag exists in either repo. A Release build serves the
   server; only the log sink and debug log levels drop out (`DEVELOPMENT_BUILD`).
 
@@ -81,7 +83,9 @@ main()                                  the game's
     Clock        seconds, monotonic; the platform's, or a ManualClock
     Input        events per frame, InputSnapshot per tick and per frame, devices, player slots
     SceneStack   typed push, pop, replace; overlays above it
+    context      one game-defined object every scene can reach
     Settings     the user settings file
+    Saves        slots, safe writes, versioned upgrades
     DevServer    development builds only
   the game's own resources, its scenes, the first scene
   app->run()                            native: while (tick()) pace();
@@ -168,8 +172,11 @@ public:
 	void setVsync(bool);
 	void setFullscreen(std::optional<int> monitor);
 	SceneStack& scenes();
+	template <typename T> void setContext(T&); // the game's state, set once before the first scene
+	template <typename T> T& context();        // checked against the type given to setContext
 	Input& input();
 	Settings& settings();
+	SaveStore& saves();
 	Clipboard& clipboard();
 	DevServer& devServer();   // always there; its calls do nothing when the server is compiled out or off
 	const Clock& clock() const;
@@ -227,7 +234,7 @@ public:
    a pause menu holds still. `beginFrame` moves here from before update
    (`AppLauncher.cpp:380`); nothing in worldsim draws from `update`.
 10. Dev server, post-render: screenshot readback, then tree, lint and state
-    providers. Before present (question 9).
+    providers. Before present (decision 9).
 11. `Platform::present()`.
 
 A scene's `requestExit` (world-sim's Quit) finishes the frame, and `tick()`
@@ -399,6 +406,7 @@ public:
 	virtual void render(float alpha) = 0;
 	virtual void onResize(const Renderer::Viewport&) {}
 	virtual bool opaque() const { return true; } // false: the scenes below keep rendering (a pause menu over the arena)
+	virtual std::string exportState() const { return {}; } // JSON for /api/state?what=scene; only the dev server calls it
 };
 
 struct NoArgs {}; struct NoResult {};
@@ -448,13 +456,19 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   untyped `data?: unknown` is what this replaces. Its screens that enter cold
   by loading the save when no campaign is handed in keep doing so with an
   optional field in their `Args`.
-- Run-scoped state (asteroids' ore and purchases across the wave shop round
-  trip, dual-deck-builder's live `Campaign`) is the game's, handed in through
-  `Args` by reference or `std::shared_ptr`. `app` keeps none.
+- State that outlives a scene (asteroids' ore and purchases across the wave
+  shop round trip, dual-deck-builder's live `Campaign`, world-sim's
+  `NewGameSetup`) lives in the game's context object (under "Game state and
+  saves"); `Args` carry what one navigation hands over.
 - Names are for the command line, the dev server and reload: a scene added by
   name has a factory with no arguments. A scene that needs arguments isn't
   reachable by name, and `reload` refuses it.
-- `exportState` goes from the interface (question 1).
+- `exportState` stays, optional. Scenes are the engine's and so is the dev
+  server, so every game gets scene state for debugging with no setup: the
+  server answers `/api/state?what=scene` with each stacked scene's name and
+  `exportState()`, top first. Nothing calls it in a build without the server;
+  a game that wants the overrides out of the binary too wraps them in
+  `#if SALAL_DEV_SERVER`.
 - Scenes get `onResize`; today only overlays are told (`SceneManager.cpp:231-235`).
 - Every scene call is wrapped and logged as today, including `handleEvent` and
   the first `onEnter`, which aren't today (`Application.cpp:164-195`,
@@ -496,8 +510,54 @@ std::filesystem::path userConfigDir(std::string_view organization, std::string_v
   Everything else is the game's.
 - `nlohmann::json` is in `app`'s public API, so `app` links it PUBLIC where
   the renderer keeps it private.
-- Saves are not settings. Campaign saves want envelopes, A/B slots and upgrade
-  chains (dual-deck-builder's are at schema version 13), which is game work.
+
+## Game state and saves
+
+State that outlives a scene is the game's, in one object the game defines and
+hands to the App once (`setContext`), which any scene reaches with
+`app.context<T>()`. It replaces the singletons and statics all three games use
+for this today (world-sim's `GameStartConfig`, `NewGameSetup` and
+`UserSettings`; dual-deck-builder's `GameSettings.shared` and
+`CampaignStore.shared`), and a test builds a fresh one. `app` never looks
+inside it.
+
+Saving writes some of that state to disk. What a save contains is the game's;
+storing one safely is the same for every game, so `app` does that, sharing the
+settings file's safe write and versioning:
+
+```cpp
+namespace app {
+struct SaveFormat {
+	int version;                                                     // the game's format version, not salal's
+	std::vector<std::function<bool(std::vector<std::byte>&)>> upgrades; // upgrades[i] takes version i+1 to i+2; the game writes each step
+};
+class SaveStore {
+public:
+	enum class LoadError { Missing, Corrupt, NewerThanBuild, UpgradeFailed };
+	bool write(std::string_view slot, std::span<const std::byte>);                   // temp file, then rename; the previous save kept as the backup
+	std::expected<std::vector<std::byte>, LoadError> read(std::string_view slot);     // runs every upgrade needed, in order, before returning
+	bool writeJson(std::string_view slot, const nlohmann::json&);                    // the same, for games that save JSON
+	std::expected<nlohmann::json, LoadError> readJson(std::string_view slot);
+	std::vector<SlotInfo> slots() const;                                              // name, version, time written
+	bool restoreBackup(std::string_view slot);
+	bool remove(std::string_view slot);
+};
+std::filesystem::path userDataDir(std::string_view organization, std::string_view application); // beside, not inside, the settings directory
+}
+```
+
+- Each save is an envelope: the game's format version, a write counter, and
+  the game's bytes. Bytes rather than JSON, so a game with large binary data
+  isn't forced through JSON; the JSON pair covers the rest.
+- On load the store runs the game's upgrade steps from the save's version to
+  the build's, in order, once, and keeps the pre-upgrade file as the backup
+  until the upgraded save is written. A save newer than the build isn't loaded
+  and isn't touched.
+- Dual-deck-builder built all of this by hand (A/B slots, a recovery copy, a
+  `{version, sequence, campaign}` envelope, upgrades from 8 to 12); asteroids
+  asks for Continue, profiles, leaderboards and "save migrations". The
+  deterministic games save seeds and fork names and counters, never a PRNG's
+  state mid-stream, which is content and so theirs.
 
 ## Resources
 
@@ -527,11 +587,13 @@ interface moves into salal's `ui` and `app` implements it directly.
 
 Compiled in where `SALAL_DEV_SERVER` is defined: Debug and RelWithDebInfo, the
 configurations that already define `DEVELOPMENT_BUILD`, when the CMake option
-`SALAL_WITH_DEV_SERVER` is on (the default). The definition is PUBLIC, so a
-game can `#if` on it, but needn't: `DevServer`'s API is always declared, and
-where the server is compiled out its methods are inline no-ops, so a game's
-registration code links in every configuration. A Release build links no
-`cpp-httplib` and opens no socket (question 4). It binds `127.0.0.1` only, as
+`SALAL_WITH_DEV_SERVER` is on (the default), and Release too only when
+`SALAL_DEV_SERVER_IN_RELEASE` is turned on, for a profiling session (off by
+default). The definition is PUBLIC, so a game can `#if` on it, but needn't:
+`DevServer`'s API is always declared, and where the server is compiled out its
+methods are inline no-ops, so a game's registration code links in every
+configuration. A shipping build links no `cpp-httplib` and opens no socket. It
+binds `127.0.0.1` only, as
 today, and starts after the window, so startup logs before it aren't streamed.
 A requested port that is busy fails `App::create`, logged, where today the
 server thread calls `std::exit(1)` (`DebugServer.cpp:1016`).
@@ -544,7 +606,7 @@ Routes:
 | `/api/ui/screenshot` | read before present |
 | `/api/input` | grows `char,<codepoint>`, `pad,<device>,<button>,down\|up`, `axis,<device>,<axis>,<value>`, `connect,vpad<n>`, `disconnect,vpad<n>`; injected events go through the accumulator, so injected keys reach the ui the way typed ones do (today they skip the focus manager, `InputManager.cpp:371-375`) |
 | `/api/control` | `exit`, `scene`, `pause`, `resume`, `reload`, `vsync` as today, plus `step&ticks=<n>`; games register further actions, which is how world-sim keeps `camera` for `scripts/perf-capture.ps1:23` and `docs/testing/README.md:132` |
-| `/api/state?what=` | answered by registered providers; 404 at once for an unregistered `what`, where today it is 503 after 2 s |
+| `/api/state?what=` | `scene` answered by the server itself from the stack's `exportState()`; anything else by registered providers, 404 at once for an unregistered `what`, where today it is 503 after 2 s |
 | `/api/dev/<verb>` | the game's registered routes; 404 for an unregistered verb, where today it is queued and answered with an ack |
 | `/api/health`, `/api/metrics`, `/stream/metrics`, `/stream/logs`, `/` | as today |
 
@@ -608,11 +670,11 @@ own dispatch.
 |---|---|
 | `AppLauncher::initialize/run/shutdown`, `AppConfig` (`libs/engine/application`) | each `Main.cpp`: `parseCommandLine`, the platform, `App::create`, its resources, its scenes, `run`, `shutdown`, its teardown |
 | `Application`'s `UI::FocusManager` and its key, char and mouse routing | the bridge above |
-| `IScene` (40 registered): `update(float)`, `render()`, `handleInput(UI::InputEvent&)`, `getUiRoots()`, `exportState()` | `app::Scene` through a worldsim `UiScene` base that keeps `handleInput` and `getUiRoots`; `exportState` becomes a worldsim interface the `"scene"` state provider queries |
-| `SceneManager::Get()`, 18 `sceneManager->switchTo` sites and `apps/ui-sandbox/Main.cpp:86` | `app.scenes().switchTo`, scenes added by name with their `SceneInfo` factories; the static handoffs (`GameStartConfig`, `GameWorldState`, `NewGameSetup`) can become `Args` later, not in this PR |
+| `IScene` (40 registered): `update(float)`, `render()`, `handleInput(UI::InputEvent&)`, `getUiRoots()`, `exportState()` | `app::Scene` through a worldsim `UiScene` base that keeps `handleInput` and `getUiRoots`; `exportState` stays an override, now optional |
+| `SceneManager::Get()`, 18 `sceneManager->switchTo` sites and `apps/ui-sandbox/Main.cpp:86` | `app.scenes().switchTo`, scenes added by name with their `SceneInfo` factories; the static handoffs (`GameStartConfig`, `GameWorldState`, `NewGameSetup`) and `UserSettings` can move to `Args` and the context object later, not in this PR |
 | `InputManager::Get()`, 10 sites | `app.input().frame()`, plus the bridge's scroll for GameScene |
 | `ClipboardManager` | `app::Clipboard` plus the `UI::IClipboard` adapter |
-| `DebugServer` and its drains: `UiStateDrain` in six scenes, ui-sandbox's overlay renderer, GameScene's dev verbs, camera and state | `app::DevServer` registrations: the tree, lint and scene providers once at startup per app (asset-manager gains them; it has no drain today), GameScene's verbs, `camera` control and state in its `onEnter` |
+| `DebugServer` and its drains: `UiStateDrain` in six scenes, ui-sandbox's overlay renderer, GameScene's dev verbs, camera and state | `app::DevServer` registrations: the tree and lint providers once at startup per app (asset-manager gains them; it has no drain today), GameScene's verbs, `camera` control and other state in its `onEnter`; `what=scene` needs nothing, the server answers it |
 | `NavigationMenu` and the two `glfwGetKey` scenes (`ClipScene.cpp:85-102`, `VectorPerfScene.cpp:52`) | an overlay taking `app.coordinateSystem()`; `app.input()` |
 | the `glClear` in the loop (`Application.cpp:240-241`) | `AppConfig::clearColor`; the 37 scene files that clear for themselves keep doing it until touched |
 | `libs/engine/graphics/PngEncoder` | salal's, in `renderer` |
@@ -624,8 +686,8 @@ What changes where a player or worldsim's tooling can see, owned:
 - Keys injected through `/api/input` reach the focus manager.
 - `/api/state` and `/api/dev` answer 404 at once for what nothing registered,
   instead of 503 after 2 s or a queued ack; asset-manager answers tree and lint.
-- A Release build has no dev server (question 4).
-- The screenshot is read before present (question 9).
+- A Release build has no dev server unless built for profiling (decision 4).
+- The screenshot is read before present (decision 9).
 - `/api/control?action=exit` signals completion after scenes exit and GL is
   torn down, not before.
 - Startup logs before the window aren't on `/stream/logs`.
@@ -638,58 +700,50 @@ slice would leave worldsim with two loops.
 | PR | salal | worldsim | verified by |
 |---|---|---|---|
 | 1. Input types (`v0.10.0`) | `foundation/input/`: `Key` completed to GLFW's token set, dense, with `Unknown` and `Count`; `MouseButton` typed; the gamepad enums, `DeviceId`, `InputEvent`, `ButtonState`, `InputSnapshot`, `InputAccumulator`, `Binding`, `ActionMap` | builds at the new tag, no change | headless tests: transitions inside one tick at 120 Hz under 60 Hz frames, two ticks in a frame, a frame with no tick, the two readers apart, axis thresholds, two keys to an axis, radial and per-axis deadzones, split keyboard as two maps |
-| 2. The frame and scenes (`v0.11.0`) | `Clock`, `ManualClock`, `Platform` with the GLFW and headless implementations, `App::create/tick/run/shutdown`, the accumulator and alpha, pause, focus freeze, `step`, `setDispatch`, `setVsync`, `SceneStack` with typed args and results, overlays, `parseCommandLine`, metrics sections, empty font atlases as no text, the `ResourcePath` fixes | none | headless tests of exact tick counts, the clamp and the cap, pause, step, a covered scene's frozen alpha, change order within a frame, push, `finish` with a move-only result, replace, reset, by-name switching, resize; the sandbox stub runs one scene on GLFW |
+| 2. The frame and scenes (`v0.11.0`) | `Clock`, `ManualClock`, `Platform` with the GLFW and headless implementations, `App::create/tick/run/shutdown`, the accumulator and alpha, pause, focus freeze, `step`, `setDispatch`, `setVsync`, `SceneStack` with typed args and results, overlays, the context object, `parseCommandLine`, metrics sections, empty font atlases as no text, the `ResourcePath` fixes | none | headless tests of exact tick counts, the clamp and the cap, pause, step, a covered scene's frozen alpha, change order within a frame, push, `finish` with a move-only result, replace, reset, by-name switching, resize, the context's type check; the sandbox stub runs one scene on GLFW |
 | 3. Devices (`v0.12.0`) | the GLFW device layer: keyboard, mouse, gamepads, hot-plug, slots and reconnects, key names, capture, `Clipboard` | none | headless tests through the accumulator; a pad and a hot-plug by hand |
-| 4. Dev server (`v0.13.0`) | from worldsim into `app`, behind the flag; registrations with handles, control actions, providers and the empty defaults; the new `/api/input` events; `step`; the fixes; `PngEncoder` into `renderer` | none | route tests against an `App` on the headless platform; a Release build links no httplib and opens no socket |
-| 5. Settings (`v0.14.0`) | `Settings`, `userConfigDir`, migration, `video.*` applied by `App`, `setFullscreen`, `ActionMap` bindings | none | tests: round trip, unknown keys kept, corrupt file moved aside, migration, a newer file |
-| 6. Sandbox (`v0.15.0`) | the harness: a scene picker drawn with `Primitives`, scene by name, the dev server, a committed atlas (question 8); the renderer-level scenes from worldsim's ui-sandbox (`sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, and `input_test` rewritten on snapshots, drag derived from them) | none | screenshots of each scene through the dev server, the picker's state through a registered provider |
+| 4. Dev server (`v0.13.0`) | from worldsim into `app`, behind the flags; registrations with handles, control actions, providers and the empty defaults, `what=scene` from the stack; the new `/api/input` events; `step`; the fixes; `PngEncoder` into `renderer` | none | route tests against an `App` on the headless platform; a Release build links no httplib and opens no socket, and one built with `SALAL_DEV_SERVER_IN_RELEASE` serves |
+| 5. Settings and saves (`v0.14.0`) | `Settings`, `userConfigDir`, migration, `video.*` applied by `App`, `setFullscreen`, `ActionMap` bindings; `SaveStore`, `userDataDir`, envelopes, backups, upgrade chains | none | tests: round trip, unknown keys kept, corrupt file moved aside, migration, a newer file; a save upgraded across three versions, a failed upgrade leaving the original, a newer save refused untouched, a crash between temp and rename |
+| 6. Sandbox (`v0.15.0`) | the harness: a scene picker drawn with `Primitives`, scene by name, the dev server, a committed atlas (decision 8); the renderer-level scenes from worldsim's ui-sandbox (`sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, and `input_test` rewritten on snapshots, drag derived from them) | none | screenshots of each scene through the dev server, the picker's state through a registered provider |
 | 7. Worldsim converts | pin | delete `libs/engine/{application,scene,input,clipboard,debug}`, `graphics/PngEncoder`, and its copies of the six scenes the sandbox took; the table above | every scene through the dev server, screenshots identical; scripted `/api/input` runs before and after: a click that switches scene, Tab and typing into a field, scrolling a list in the game ui (no zoom), input while paused, the camera action; asset-cli PNGs; ctest; the three ports |
 
 PR 5 depends on nothing after PR 2 and can go anywhere after it; PR 6 needs
 PRs 3 and 4. When this merges the board's items are retitled to match: the
-tick split loses its emscripten path, the byte-provider item becomes the
-`ResourcePath` fixes in PR 2, the sandbox item becomes PR 6's renderer-level
-scenes, and the epic's description drops MEMFS and the pure-UI scenes.
+tick split loses its emscripten path, the config loader becomes settings and
+saves, the byte-provider item becomes the `ResourcePath` fixes in PR 2, the
+sandbox item becomes PR 6's renderer-level scenes, and the epic's description
+drops MEMFS and the pure-UI scenes.
 
-## Questions for review
+## Decisions
 
-1. `exportState`: delete it from `app::Scene`, and have world-sim register a
-   `"scene"` state provider that asks its own scenes through a worldsim
-   interface. Recommended; the alternative keeps a dev-only method on every
-   scene of every game.
-2. "Config" is the user settings file, JSON, per-user directory, unknown keys
-   kept, versioned with the game's migration. Saves stay game-side.
-   Recommended.
-3. No byte-provider; fix `ResourcePath` instead. Recommended, since WebAssembly
-   is gone. The alternative is an interface with one implementation.
-4. The dev server compiles into Debug and RelWithDebInfo only, with no-op
-   stubs elsewhere, and a CMake option drops it everywhere. Recommended. The
-   cost: no server in a Release build to profile through, so profiling over
-   HTTP means RelWithDebInfo.
-5. Scene arguments and results typed at compile time, by-name switching only
-   for scenes with no arguments. Recommended over `std::any` payloads, which is
-   what dual-deck-builder's `unknown` turned into.
-6. Phase 2 `app` names no ui type: worldsim keeps its focus manager and
-   `UI::InputEvent` behind `setDispatch` and a `UiScene` base until phase 3.
-   Recommended; the alternative pulls the focus manager and `UI::InputEvent`
-   into salal ahead of the rest of ui.
-7. The clipboard is concrete in `app` with a worldsim adapter until phase 3.
-   Recommended, for the same reason.
+Reviewed with Kevin, 2026-10-27.
+
+1. `exportState` stays on `app::Scene`, optional, and the dev server answers
+   `/api/state?what=scene` from the stack. Scenes are the engine's, so scene
+   state for debugging is for every game; it never runs in a build without
+   the server.
+2. The config loader is the user settings file: JSON in the per-user config
+   directory, unknown keys kept, versioned with the game's migration.
+3. No byte-provider; `ResourcePath` is fixed instead. It comes back when a
+   game packs its assets.
+4. The dev server is compiled into Debug and RelWithDebInfo, out of Release,
+   with `SALAL_WITH_DEV_SERVER` to drop it everywhere and
+   `SALAL_DEV_SERVER_IN_RELEASE` to force it into a Release build for
+   profiling.
+5. Scene arguments and results are typed at compile time; scenes with no
+   arguments are reachable by name. State that outlives a scene lives in one
+   game-defined context object the App holds. Saves are `app`'s mechanics
+   (slots, safe writes, backups, versioned upgrade chains the game supplies)
+   over the game's bytes.
+6. Phase 2 `app` names no ui type; worldsim bridges its focus manager and
+   `UI::InputEvent` through `setDispatch` until phase 3. Less work overall
+   than moving the focus manager early, which decision C may replace.
+7. The clipboard is concrete in `app`, with a worldsim adapter until phase 3.
 8. The phase 2 sandbox has renderer-level scenes and a picker drawn with
-   `Primitives`; the harness's ui and the pure-UI scenes follow in phase 3.
-   This reverses the settled row "the ui-sandbox harness moves with the
-   pure-UI scenes", which this change amends. It needs a font atlas committed
-   to salal, which ships no fonts: one of worldsim's four, generated by
-   worldsim's tool and committed with its licence text beside it (worldsim
-   doesn't ship those texts yet). Recommended: JetBrains Mono, for the
-   debug-overlay use.
-9. The screenshot is read before present. Recommended: GL leaves the back
-   buffer's contents undefined after a swap, so today's readback works by the
-   driver's grace. It moves when in the frame the shot is taken, not what it
-   shows.
-10. The owned differences for worldsim, listed at the end of "What worldsim
-    keeps", are accepted as they are. Recommended; each is a fix or follows
-    from one.
-11. Pause freezes ticks and update for scenes and overlays; focus loss freezes
-    fixed ticks only. Recommended, since with the bridge it leaves worldsim
-    unchanged.
+   `Primitives`; the ui scenes and the harness's ui follow in phase 3. Its
+   font atlas is JetBrains Mono, generated by worldsim's tool and committed
+   with the font's licence text.
+9. The screenshot is read before present.
+10. The worldsim differences listed under "What worldsim keeps" are accepted.
+11. Pause freezes fixed ticks and update for scenes and overlays; focus loss
+    freezes fixed ticks only.

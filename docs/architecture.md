@@ -33,7 +33,7 @@ document is the one that is right.
 | `foundation` | math, platform abstraction, logging, memory arenas, resource handles, seeded PRNG, and the plain-data input types in `input/` (`Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`, the event structs, the accumulator behind the per-tick `InputSnapshot`, the `ActionMap`), none of which include GLFW | anything that knows about pixels; the HTTP dev server, which is `app`'s (worldsim has moved it out of foundation into `libs/engine/debug`, and it moves on in phase 2) |
 | `renderer` | GL abstraction (behind a backend boundary, with OpenGL 3.3 core as the first backend; the design is merged and its first two PRs are in; see [open-decisions.md](open-decisions.md) decision G), shaders, Primitives, BatchRenderer, vector/SVG, the font renderer and SDF text rendering (the game owns the fonts and atlases; the renderer will take atlas sources from the game, a phase 2 item), coordinate system, draw metrics | layout, interaction, widgets |
 | `ui` | Layer hierarchy, components, layout, focus, theme, text components and font theme tokens, text layout for widgets, animation, inspector | the window, the loop, game logic, the font renderer |
-| `app` | window, fixed-step loop, scenes, config, device input (GLFW callbacks, gamepads, hot-plug, device-to-player-slot claiming, key names for rebinding) feeding the per-tick snapshot, clipboard, dev server | anything drawable |
+| `app` | window, fixed-step loop, scenes and the game's context object, the settings file, save mechanics (slots, safe writes, versioned upgrades), device input (GLFW callbacks, gamepads, hot-plug, device-to-player-slot claiming, key names for rebinding) feeding the per-tick snapshot, clipboard, dev server | anything drawable |
 | `audio` (proposed) | a mixer with priority buses and ducking, looping voices with per-frame pitch, filter and gain, synchronized stems, one-shots with pitch, gain and pan; depends on `foundation` only | game-side sound design |
 
 Input types in `foundation` are settled: decision D in
@@ -176,7 +176,7 @@ Scene::render(alpha)        alpha into the current fixed step
 
 `tick()` reads time through a `Clock` the platform supplies, so a test drives
 it with a clock it advances and never sleeps; [app-api.md](app-api.md) has the
-frame step by step (a proposal under review).
+frame step by step.
 
 Fixed timestep with an accumulator, render interpolating between the last two
 states, accumulator clamped so one long frame cannot cascade into a death

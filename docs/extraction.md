@@ -296,7 +296,7 @@ salal/
                              device input (keyboard, mouse, gamepad),
                              dev server
   apps/
-    sandbox/                 the ui-sandbox harness and its pure-UI scenes
+    sandbox/                 the sandbox harness and its scenes
   tests/
   docs/
     architecture.md          the four-layer stack, normative
@@ -681,17 +681,20 @@ the consumers need from a frame owner and worldsim never built:
   owns the device layer. Worldsim has keyboard and mouse only.
 - The clipboard, behind the seam from phase 0.5.
 - A scene manager with a stack, overlays and typed payloads.
-  `IScene::exportState()` is deleted on the way; [app-api.md](app-api.md)
-  proposes how its one caller, world-sim's `/api/state?what=scene`, is served.
-- A config file loader. Net-new: worldsim's `AppConfig` is a struct, and its
-  only "config" is game XML under `assets/config/` parsed by game registries.
-- A byte-provider seam between asset lookup and file reads, only if a consumer
-  needs one; today worldsim's `findResourceString` path search is enough.
+  `IScene::exportState()` stays as an optional method the dev server reads.
+  Plus one game-defined context object the App holds, for state that
+  outlives a scene.
+- A user settings file and save mechanics (slots, safe writes, versioned
+  upgrades), both net-new: worldsim's `AppConfig` is a struct, and its only
+  "config" is game XML under `assets/config/` parsed by game registries.
+- No byte-provider: `ResourcePath` is fixed instead (Linux, game search
+  roots, no worldsim paths); a byte-provider comes back when a game packs its
+  assets.
 - The dev server, relocated from `libs/engine/debug`, behind a compile flag, with
   game-registrable endpoints, tick stepping and pad injection.
 - The PRNG fork API (decision A) in `foundation/random`: landed ahead of the
   phase as `Rng.h`.
-- The sandbox harness.
+- The sandbox harness with renderer-level scenes; its ui scenes come in phase 3.
 
 Job A of the migration lands here. Worldsim consumes. The asteroids feel
 prototype can start here.

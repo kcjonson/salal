@@ -124,8 +124,8 @@ The TileAtlasBuilder bootstrap (`:209-226`) and the asset-system init
 - `Scene.h:64-68` `exportState()` is pure virtual "for /api/scene/state", a
   route that never existed. It is not dead: world-sim answers
   `/api/state?what=scene` with it (`apps/world-sim/scenes/shared/UiStateDrain.cpp:24-26`).
-  Deleted during extraction; [app-api.md](app-api.md) (question 1) proposes
-  that its one use become a state provider the game registers.
+  It stays, optional, and the dev server reads it ([app-api.md](app-api.md),
+  decision 1).
 - `Overlay.h:3-5`, `:26`, `SceneManager.h:129`, `SceneManager.cpp:3` carry
   the same `UI::InputEvent` edge.
 
@@ -536,5 +536,5 @@ the order they were found.
     (`Application.cpp:240-241`); they belong to the scene or the renderer.
 11. `IScene::exportState()` (`Scene.h:64-68`) is a pure-virtual contract
     every scene implements for one caller, world-sim's `/api/state?what=scene`.
-    Deleted during extraction rather than carried; the proposal for that
-    caller is in [app-api.md](app-api.md), question 1.
+    It stays as an optional method the dev server reads
+    ([app-api.md](app-api.md), decision 1).
