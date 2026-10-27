@@ -5,7 +5,7 @@
 
 #include "backend/gl/GLBackend.h"
 #include "BaseShader.h"
-#include "OffsetHookShader.h"
+#include "generated/OffsetHookShader.h"
 #include "primitives/Primitives.h"
 
 #include <GL/glew.h>
@@ -394,19 +394,52 @@ namespace Renderer::backend::gl {
 		gpu->destroyPipeline(pipeline);
 	}
 
-	TEST_F(GLBackendTest, AHookBlockOfAnotherSizeOrNameFailsThePipeline) {
+	TEST_F(GLBackendTest, AHookBlockOfAnotherSizeOrLayoutFailsThePipeline) {
 		HookUniformBlock wrong = offset_hook_shader::kOffset;
 		ShaderSource	 source = offset_hook_shader::source();
 		source.hookBlocks = {&wrong, 1};
 		wrong.size = 32;
 		EXPECT_FALSE(gpu->createPipeline(source).isValid());
 		wrong = offset_hook_shader::kOffset;
-		wrong.block = "NoSuchUniforms";
-		EXPECT_FALSE(gpu->createPipeline(source).isValid());
-		wrong = offset_hook_shader::kOffset;
 		wrong.binding = GLBackend::kUniformBinding;
 		EXPECT_FALSE(gpu->createPipeline(source).isValid());
+
+		// A member where the program doesn't have it.
+		std::array<HookUniformMember, 2> moved = {offset_hook_shader::kOffsetLocal, offset_hook_shader::kOffsetWorld};
+		moved[1].offset = 4;
+		wrong = offset_hook_shader::kOffset;
+		wrong.members = moved;
+		EXPECT_FALSE(gpu->createPipeline(source).isValid());
 		EXPECT_EQ(uniformRange(1).buffer, 0); // no ring made for a pipeline that failed
+	}
+
+	TEST_F(GLBackendTest, APipelineThatFailsOnALaterBlockMakesNoRingForAnEarlierOne) {
+		HookUniformBlock second = offset_hook_shader::kOffset;
+		second.binding = 2;
+		second.size = 32;
+		const std::array<HookUniformBlock, 2> blocks = {offset_hook_shader::kOffset, second};
+		ShaderSource						  source = offset_hook_shader::source();
+		source.hookBlocks = blocks;
+		EXPECT_FALSE(gpu->createPipeline(source).isValid());
+		EXPECT_EQ(uniformRange(1).buffer, 0);
+		EXPECT_EQ(uniformRange(2).buffer, 0);
+	}
+
+	TEST_F(GLBackendTest, AnInactiveHookBlockIsSkippedAndItsWritesDropped) {
+		// What a driver reports for a block whose reads it folded away: no such block.
+		HookUniformBlock inactive = offset_hook_shader::kOffset;
+		inactive.block = "NoSuchUniforms";
+		inactive.binding = 3;
+		ShaderSource source = offset_hook_shader::source();
+		source.hookBlocks = {&inactive, 1};
+		const PipelineHandle pipeline = gpu->createPipeline(source);
+		ASSERT_TRUE(pipeline.isValid());
+		EXPECT_EQ(uniformRange(3).buffer, 0);
+		const std::array<float, 4> values = {1.0F, 2.0F, 3.0F, 4.0F};
+		gpu->setHookUniforms(3, std::as_bytes(std::span(values)));
+		EXPECT_EQ(uniformRange(3).buffer, 0);
+		EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+		gpu->destroyPipeline(pipeline);
 	}
 
 	TEST_F(GLBackendTest, HookUniformsForAnUndeclaredPointOrOfAnotherSizeAreIgnored) {

@@ -474,29 +474,84 @@ namespace Renderer::backend::gl {
 		return found != hookRings.end() ? &*found : nullptr;
 	}
 
+	bool GLBackend::hookBlockMatches(GLuint program, GLuint index, const HookUniformBlock& hook) const {
+		// The size the build generated is the driver's, padded to 16 as std140 pads the block,
+		// and each member sits where the build says; a member the driver reports inactive has
+		// no offset to check.
+		const char* hookName = hook.hook != nullptr ? hook.hook : "?";
+		GLint		size = 0;
+		glGetActiveUniformBlockiv(program, index, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
+		const GLint		   padded = (size + 15) / 16 * 16;
+		const UniformRing* ring = nullptr;
+		for (const UniformRing& existing : hookRings) {
+			ring = existing.binding == hook.binding ? &existing : ring;
+		}
+		if (padded != static_cast<GLint>(hook.size) || (ring != nullptr && ring->size != static_cast<GLsizeiptr>(hook.size))) {
+			LOG_ERROR(Renderer, "createPipeline: hook %s's block is %d bytes in the program, %u in C++", hookName, padded, hook.size);
+			return false;
+		}
+		for (const HookUniformMember& member : hook.members) {
+			GLuint memberIndex = GL_INVALID_INDEX;
+			glGetUniformIndices(program, 1, &member.name, &memberIndex);
+			if (memberIndex == GL_INVALID_INDEX) {
+				continue;
+			}
+			GLint offset = -1;
+			glGetActiveUniformsiv(program, 1, &memberIndex, GL_UNIFORM_OFFSET, &offset);
+			if (offset != static_cast<GLint>(member.offset)) {
+				LOG_ERROR(
+					Renderer,
+					"createPipeline: hook %s's %s is at %d in the program, %u in C++",
+					hookName,
+					member.name,
+					offset,
+					member.offset
+				);
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool GLBackend::bindHookBlocks(GLuint program, const ShaderSource& source) {
-		// Each block on its point, checked against the size the build generated: the
-		// driver's, padded to 16 as std140 pads the block and the generated size is. A
-		// point's ring is made, zeroed, the first time a pipeline declares it.
+		// Every block checked before any is bound or any ring made, so a pipeline that fails
+		// leaves nothing behind. A point's ring is made, zeroed, the first time a pipeline
+		// declares it. A block the driver has inactive (its only reads folded away, where
+		// glslang kept them) is skipped rather than failing every draw.
+		struct Active {
+			const HookUniformBlock* hook;
+			GLuint					index;
+		};
+		std::vector<Active> active;
 		for (const HookUniformBlock& hook : source.hookBlocks) {
-			const char*	 hookName = hook.hook != nullptr ? hook.hook : "?";
-			const GLuint index = hook.block != nullptr ? glGetUniformBlockIndex(program, hook.block) : GL_INVALID_INDEX;
-			if (index == GL_INVALID_INDEX || hook.binding == kUniformBinding) {
-				LOG_ERROR(Renderer, "createPipeline: hook %s's block is not in the program, or claims binding point 0", hookName);
+			const char* hookName = hook.hook != nullptr ? hook.hook : "?";
+			if (hook.binding == kUniformBinding || hook.block == nullptr) {
+				LOG_ERROR(Renderer, "createPipeline: hook %s's block has no name or claims binding point 0", hookName);
 				return false;
 			}
-			GLint size = 0;
-			glGetActiveUniformBlockiv(program, index, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
-			const GLint	 padded = (size + 15) / 16 * 16;
-			UniformRing* ring = hookRing(hook.binding);
-			if (padded != static_cast<GLint>(hook.size) || (ring != nullptr && ring->size != static_cast<GLsizeiptr>(hook.size))) {
-				LOG_ERROR(Renderer, "createPipeline: hook %s's block is %d bytes in the program, %u in C++", hookName, padded, hook.size);
+			const GLuint index = glGetUniformBlockIndex(program, hook.block);
+			if (index == GL_INVALID_INDEX) {
+				LOG_WARNING(
+					Renderer,
+					"createPipeline: hook %s's block %s is inactive in the linked program; writes to it are ignored",
+					hookName,
+					hook.block
+				);
+				if (std::find(inactiveHookBindings.begin(), inactiveHookBindings.end(), hook.binding) == inactiveHookBindings.end()) {
+					inactiveHookBindings.push_back(hook.binding);
+				}
+				continue;
+			}
+			if (!hookBlockMatches(program, index, hook)) {
 				return false;
 			}
-			glUniformBlockBinding(program, index, hook.binding);
-			if (ring == nullptr) {
-				hookRings.push_back(makeRing(hook.binding, hook.size));
-				const std::vector<std::byte> zeros(hook.size);
+			active.push_back({.hook = &hook, .index = index});
+		}
+		for (const Active& block : active) {
+			glUniformBlockBinding(program, block.index, block.hook->binding);
+			if (hookRing(block.hook->binding) == nullptr) {
+				hookRings.push_back(makeRing(block.hook->binding, block.hook->size));
+				const std::vector<std::byte> zeros(block.hook->size);
 				write(hookRings.back(), zeros.data());
 			}
 		}
@@ -509,6 +564,9 @@ namespace Renderer::backend::gl {
 
 	void GLBackend::setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) {
 		UniformRing* ring = hookRing(binding);
+		if (ring == nullptr && std::find(inactiveHookBindings.begin(), inactiveHookBindings.end(), binding) != inactiveHookBindings.end()) {
+			return; // the block is inactive; createPipeline() said so once
+		}
 		if (ring == nullptr || static_cast<GLsizeiptr>(bytes.size()) != ring->size) {
 			LOG_ERROR(
 				Renderer, "setHookUniforms: %zu bytes for binding point %u, which no pipeline declares that size for", bytes.size(), binding

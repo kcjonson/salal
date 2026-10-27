@@ -129,6 +129,7 @@ namespace Renderer::backend::gl {
 		static void	 bind(const UniformRing& ring);
 		UniformRing* hookRing(GLuint binding);
 		bool		 bindHookBlocks(GLuint program, const ShaderSource& source);
+		bool		 hookBlockMatches(GLuint program, GLuint index, const HookUniformBlock& hook) const;
 
 		SlotTable<TextureHandle, TextureSlot>	  textures;
 		SlotTable<RenderTargetHandle, TargetSlot> targets;
@@ -138,8 +139,9 @@ namespace Renderer::backend::gl {
 		SlotTable<QueryHandle, GLQuery>			  queries;
 
 		GLint					 uniformAlignment = 256;
-		UniformRing				 drawRing;	// DrawUniforms, on kUniformBinding
-		std::vector<UniformRing> hookRings; // one per hook block binding point, made by createPipeline()
+		UniformRing				 drawRing;			   // DrawUniforms, on kUniformBinding
+		std::vector<UniformRing> hookRings;			   // one per hook block binding point, made by createPipeline()
+		std::vector<GLuint>		 inactiveHookBindings; // points whose block a pipeline had inactive; writes there are dropped
 
 		RenderTargetHandle boundTarget;
 		int				   windowWidth = 0;

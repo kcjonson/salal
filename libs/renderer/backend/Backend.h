@@ -63,15 +63,28 @@ namespace Renderer::backend {
 	// BatchRenderer.h), so mixing the two never splits a draw.
 	enum class BlendState : uint8_t { Alpha };
 
+	// A member of a hook's uniform block, as the generated header names it: its name as GL
+	// names it ("Block.member" in a block with an instance name), its GLSL type, its std140
+	// offset, and its size in bytes (an array's elements at their std140 stride). A C++
+	// struct mirroring the block static_asserts each member's offsetof and sizeof against these.
+	struct HookUniformMember {
+		const char* name = nullptr;
+		const char* type = nullptr;
+		uint32_t	offset = 0;
+		uint32_t	size = 0;
+	};
+
 	// A hook's uniform block in an assembled base shader (docs/shader-hooks.md), as the
 	// header salal_base_shader() generates names it: the hook (its file name before
 	// .vert.glsl), the block's name in the GLSL, the binding point the build gave it (1
-	// up; 0 is DrawUniforms') and its std140 size in bytes, padded to 16.
+	// up; 0 is DrawUniforms'), its std140 size in bytes, padded to 16, and its members in
+	// offset order.
 	struct HookUniformBlock {
-		const char* hook = nullptr;
-		const char* block = nullptr;
-		uint32_t	binding = 0;
-		uint32_t	size = 0;
+		const char*						   hook = nullptr;
+		const char*						   block = nullptr;
+		uint32_t						   binding = 0;
+		uint32_t						   size = 0;
+		std::span<const HookUniformMember> members;
 	};
 
 	// A pipeline's GLSL source, one text per stage, and the hooks' uniform blocks its
@@ -212,9 +225,11 @@ namespace Renderer::backend {
 
 		// The program compiled and linked from `source`'s text: its DrawUniforms block
 		// bound to the buffer setUniforms() writes, each hook block to its binding point
-		// (zeroed until the first setHookUniforms() there), and u_atlas to unit 0.
-		// Invalid, logged, when the program does not build or a block is not the size the
-		// C++ side has. The base shader is the only one.
+		// (zeroed until the first setHookUniforms() there), and u_atlas to unit 0. A hook
+		// block the linked program has inactive is logged and skipped, and writes to its
+		// point are ignored. Invalid, logged, when the program does not build or a block's
+		// size or a member's offset is not what the C++ side has; then it makes nothing for
+		// its hook blocks. The base shader is the only one.
 		virtual PipelineHandle createPipeline(const ShaderSource& source) = 0;
 		virtual void		   destroyPipeline(PipelineHandle pipeline) = 0;
 

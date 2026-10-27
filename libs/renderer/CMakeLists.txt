@@ -80,7 +80,8 @@ salal_add_tests(renderer)
 if(TARGET salal_renderer_tests)
     target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw salal_shader_assembly)
     # The base shader as a consumer with no hooks gets it, for every fixture, and again
-    # with the test hook in tests/hooks/, which ShaderHooks.test.cpp draws with.
+    # with the test hook in tests/hooks/, which ShaderHooks.test.cpp draws with (its HEADER in a
+    # folder, as a consumer may put it).
     salal_base_shader(salal_renderer_tests)
-    salal_base_shader(salal_renderer_tests HOOKS tests/hooks NAMESPACE offset_hook_shader HEADER OffsetHookShader.h)
+    salal_base_shader(salal_renderer_tests HOOKS tests/hooks NAMESPACE offset_hook_shader HEADER generated/OffsetHookShader.h)
 endif()

@@ -49,12 +49,27 @@ namespace Renderer::assembler {
 		std::string error;
 	};
 
+	// A member of a uniform block as glslangValidator reflects it.
+	struct ReflectedMember {
+		std::string name;		// as GL names it: "Block.member" when the block has an instance name
+		std::string type;		// the GLSL type, "vec2", "vec4[3]" for an array; empty for a type the step doesn't know
+		uint32_t	offset = 0; // std140
+		uint32_t	size = 0;	// bytes, an array's elements at their std140 stride
+	};
+
+	struct ReflectedBlock {
+		uint32_t					 size = 0; // bytes, unpadded
+		std::vector<ReflectedMember> members;  // in offset order
+	};
+
 	// GL 3.3 core promises 12 uniform blocks per stage, and DrawUniforms is one of them.
 	constexpr size_t kMaxHookBlocks = 11;
 
 	// The hooks in `files`, sorted by file name, each checked: a `<name>.vert.glsl` with `<name>` a GLSL
-	// identifier, at least one hook point defined, and at most one uniform block, std140, which gets
-	// the next binding point. Files whose names start with a dot (editor and OS litter) are skipped.
+	// identifier that makes no reserved name, at least one hook point defined, no #version, #extension
+	// or binding qualifier, and at most one uniform block, std140 and not an array, which gets the next
+	// binding point. A leading UTF-8 byte-order mark is dropped, and entries whose names start with a
+	// dot (editor and OS litter) are skipped.
 	Hooks readHooks(std::vector<HookFile> files);
 
 	// What `#include "hooks.glsl"` in base.vert stands for: every hook's text in file-name order, then
@@ -67,27 +82,30 @@ namespace Renderer::assembler {
 
 	// `file` with every `#include "..."` replaced by the file it names, relative to the including file,
 	// each included once. `hooks` is what `#include "hooks.glsl"` becomes: base.vert must include it
-	// once, and with no `hooks` (base.frag) it must not appear. Line endings come out as \n.
+	// once, and with no `hooks` (base.frag) it must not appear. Line endings come out as \n, and a
+	// leading byte-order mark goes.
 	Assembled assemble(const std::filesystem::path& file, const ReadFile& readFile, const std::optional<std::string>& hooks);
 
-	// Each uniform block's size in bytes from glslangValidator's reflection report (`-q`), unpadded.
-	std::map<std::string, uint32_t> reflectedBlockSizes(const std::string& reflection);
+	// Each uniform block in glslangValidator's reflection report (`-q --reflect-all-block-variables`):
+	// its size and its members. Lines the step doesn't recognise are skipped.
+	std::map<std::string, ReflectedBlock> reflectBlocks(const std::string& reflection);
 
 	// The generated code's C++ name for a hook's block: "offset" is kOffset, "wind_sway" kWindSway.
 	std::string constantName(const std::string& hookName);
 
 	struct EmbedArgs {
-		std::string						nameSpace;
-		std::string						header; // the header's file name, which the source includes
-		std::string						vertex;
-		std::string						fragment;
-		std::vector<Hook>				hooks;
-		std::map<std::string, uint32_t> blockSizes; // reflectedBlockSizes() of the two stages linked
+		std::string							  nameSpace;
+		std::string							  header; // what the source's #include names, relative to the source
+		std::string							  vertex;
+		std::string							  fragment;
+		std::vector<Hook>					  hooks;
+		std::map<std::string, ReflectedBlock> blocks; // reflectBlocks() of the two stages linked
 	};
 
 	// The header and source that embed the assembled stages: `<nameSpace>::source()`, the
-	// backend::ShaderSource Primitives::init() takes, and a backend::HookUniformBlock constant per hook
-	// with a block, its size padded to 16 bytes as a std140 block is.
+	// backend::ShaderSource Primitives::init() takes, and per hook with a block a
+	// backend::HookUniformBlock constant, its size padded to 16 bytes as a std140 block is, with a
+	// backend::HookUniformMember constant per member (offset and size, for static_asserts).
 	Embedded embed(const EmbedArgs& args);
 
 } // namespace Renderer::assembler

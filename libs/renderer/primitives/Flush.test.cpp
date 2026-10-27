@@ -3,8 +3,8 @@
 // read. Headless; no GL anywhere.
 
 #include "BaseShader.h"
-#include "OffsetHookShader.h"
 #include "backend/NullBackend.h"
+#include "generated/OffsetHookShader.h"
 #include "primitives/BatchRenderer.h"
 #include "primitives/Primitives.h"
 #include "vector/Types.h"

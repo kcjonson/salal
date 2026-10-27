@@ -67,6 +67,12 @@ namespace Renderer {
 	}
 
 	bool Shader::loadFromSource(const char* vertexSource, const char* fragmentSource) {
+		// A program this shader already holds goes first, rather than leaking under the new one.
+		if (program != 0) {
+			glDeleteProgram(program);
+			program = 0;
+		}
+
 		// Compile shaders
 		GLuint vertex = 0;
 		GLuint fragment = 0;

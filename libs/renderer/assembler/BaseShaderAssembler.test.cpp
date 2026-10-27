@@ -76,7 +76,8 @@ namespace Renderer::assembler {
 	}
 
 	TEST(ReadHooksTest, ANameThatIsNotAGlslIdentifierFailsTheBuild) {
-		for (const char* name : {"2sway", "tall-sway", "gl_sway", "tall__sway"}) {
+		// sway_ and gl would make the reserved sway__instanceLocal and gl_instanceLocal
+		for (const char* name : {"2sway", "tall-sway", "gl_sway", "tall__sway", "sway_", "gl"}) {
 			HookFile file = hookFile(name);
 			EXPECT_NE(errorFor({file}).find("is not a GLSL identifier"), std::string::npos) << name;
 		}
@@ -125,6 +126,51 @@ namespace Renderer::assembler {
 		EXPECT_NE(errorFor({hookFile("sway", "Shared"), hookFile("tilt", "Shared")}).find("already declared"), std::string::npos);
 		// In a comment it is not a declaration.
 		EXPECT_TRUE(errorFor({{.fileName = "sway.vert.glsl", .text = "/* uniform float x; */\n" + points}}).empty());
+	}
+
+	TEST(ReadHooksTest, AHookBringsNoVersionExtensionOrBinding) {
+		const std::string points = "vec2 sway_instanceLocal(vec2 p, vec2 i) { return p; }\n";
+		EXPECT_NE(
+			errorFor(
+				{{.fileName = "sway.vert.glsl", .text = "#extension GL_ARB_shading_language_420pack : enable\n" + points}}
+			).find("sway.vert.glsl:1: #extension in a hook"),
+			std::string::npos
+		);
+		EXPECT_NE(
+			errorFor({{.fileName = "sway.vert.glsl", .text = "\n  #  version 410 core\n" + points}}).find("sway.vert.glsl:2: #version"),
+			std::string::npos
+		);
+		EXPECT_NE(
+			errorFor(
+				{{.fileName = "sway.vert.glsl", .text = "layout(std140, binding = 5) uniform SwayUniforms { float s; } sway;\n" + points}}
+			).find("gives a binding"),
+			std::string::npos
+		);
+		// In a comment it is neither.
+		EXPECT_TRUE(
+			errorFor({{.fileName = "sway.vert.glsl", .text = "// #extension GL_X : enable, layout(binding = 1)\n" + points}}).empty()
+		);
+	}
+
+	TEST(ReadHooksTest, AnArrayOfBlocksFailsTheBuild) {
+		const std::string points = "vec2 sway_instanceLocal(vec2 p, vec2 i) { return p; }\n";
+		EXPECT_NE(
+			errorFor(
+				{{.fileName = "sway.vert.glsl", .text = "layout(std140) uniform SwayUniforms { float s; } sway[2];\n" + points}}
+			).find("uniform block SwayUniforms is an array"),
+			std::string::npos
+		);
+		EXPECT_TRUE(errorFor(
+						{{.fileName = "sway.vert.glsl", .text = "layout(std140) uniform SwayUniforms { float s[2]; } sway;\n" + points}}
+		).empty());
+	}
+
+	TEST(ReadHooksTest, AByteOrderMarkIsDropped) {
+		HookFile file = hookFile("sway");
+		file.text = "\xEF\xBB\xBF" + file.text;
+		const Hooks read = readHooks({file});
+		ASSERT_TRUE(read.error.empty()) << read.error;
+		EXPECT_TRUE(read.hooks[0].text.starts_with("vec2 sway_instanceLocal"));
 	}
 
 	TEST(ReadHooksTest, NoMoreBlocksThanAStageHolds) {
@@ -178,7 +224,9 @@ namespace Renderer::assembler {
 		const ReadFile	read = reader({
 			 {"shaders/base.vert", "#version 330 core\r\n#include \"includes/a.glsl\"\r\n#include \"hooks.glsl\"\r\nvoid main() {}\r\n"},
 			 {"shaders/includes/a.glsl", "float a;\n  #  include \"b.glsl\"\n"},
-			 {"shaders/includes/b.glsl", "float b;"},
+			 {"shaders/includes/b.glsl",
+			  "\xEF\xBB\xBF"
+			   "float b;"}, // a byte-order mark goes
 		 });
 		const Assembled vertex = assemble("shaders/base.vert", read, std::string("float hooks;\n"));
 		ASSERT_TRUE(vertex.error.empty()) << vertex.error;
@@ -230,15 +278,42 @@ namespace Renderer::assembler {
 		);
 	}
 
-	TEST(ReflectionTest, EachBlocksSizeComesFromTheBlockSection) {
+	TEST(ReflectionTest, BlocksCarryTheirSizeAndMembersInOffsetOrder) {
+		// glslangValidator -q --reflect-all-block-variables, as it prints it, with a line it doesn't.
 		const std::string report =
-			"base.vert\nbase.frag\nUniform reflection:\nOffsetUniforms.world: offset 8, type 8b50, size 1, index 0, binding -1, stages "
-			"1\n\n"
-			"Uniform block reflection:\nOffsetUniforms: offset -1, type ffffffff, size 16, index 0, binding -1, stages 1, numMembers 2\n"
-			"DrawUniforms: offset -1, type ffffffff, size 196, index 1, binding -1, stages 17, numMembers 16\n\n"
+			"base.vert\nbase.frag\nUniform reflection:\n"
+			"OffsetUniforms.world: offset 8, type 8b50, size 1, index 0, binding -1, stages 1\n"
+			"OffsetUniforms.local: offset 0, type 8b50, size 1, index 0, binding -1, stages 1\n"
+			"TestUniforms.arr: offset 32, type 8b52, size 3, index 2, binding -1, stages 0, arrayStride 16, topLevelArrayStride 16\n"
+			"TestUniforms.farr: offset 80, type 1406, size 2, index 2, binding -1, stages 0, arrayStride 16, topLevelArrayStride 16\n"
+			"TestUniforms.odd: offset 112, type 8b65, size 1, index 2, binding -1, stages 0\n"
+			"u_projection: offset 0, type 8b5c, size 1, index 1, binding -1, stages 1\n"
+			"u_atlas: offset -1, type 8b5e, size 1, index -1, binding -1, stages 16\n\n"
+			"Uniform block reflection:\n"
+			"OffsetUniforms: offset -1, type ffffffff, size 16, index 0, binding -1, stages 1, numMembers 2\n"
+			"something glslang may print one day\n"
+			"DrawUniforms: offset -1, type ffffffff, size 168, index 1, binding -1, stages 17, numMembers 10\n"
+			"TestUniforms: offset -1, type ffffffff, size 136, index 2, binding -1, stages 1, numMembers 3\n\n"
 			"Buffer variable reflection:\n\nBuffer block reflection:\n";
-		const std::map<std::string, uint32_t> sizes = reflectedBlockSizes(report);
-		EXPECT_EQ(sizes, (std::map<std::string, uint32_t>{{"DrawUniforms", 196}, {"OffsetUniforms", 16}}));
+		const std::map<std::string, ReflectedBlock> blocks = reflectBlocks(report);
+		ASSERT_EQ(blocks.size(), 3U);
+		EXPECT_EQ(blocks.at("DrawUniforms").size, 168U);
+		EXPECT_EQ(blocks.at("DrawUniforms").members.size(), 1U);
+		const ReflectedBlock& offset = blocks.at("OffsetUniforms");
+		EXPECT_EQ(offset.size, 16U);
+		ASSERT_EQ(offset.members.size(), 2U);
+		EXPECT_EQ(offset.members[0].name, "OffsetUniforms.local");
+		EXPECT_EQ(offset.members[0].type, "vec2");
+		EXPECT_EQ(offset.members[0].offset, 0U);
+		EXPECT_EQ(offset.members[0].size, 8U);
+		EXPECT_EQ(offset.members[1].name, "OffsetUniforms.world");
+		const ReflectedBlock& test = blocks.at("TestUniforms");
+		ASSERT_EQ(test.members.size(), 3U);
+		EXPECT_EQ(test.members[0].type, "vec4[3]");
+		EXPECT_EQ(test.members[0].size, 48U);
+		EXPECT_EQ(test.members[1].type, "float[2]"); // std140 strides a float array at 16
+		EXPECT_EQ(test.members[1].size, 32U);
+		EXPECT_TRUE(test.members[2].type.empty()); // mat2x3, which the step doesn't handle
 	}
 
 	TEST(EmbedTest, TheHeaderCarriesEachBlocksBindingAndPaddedSize) {
@@ -250,7 +325,17 @@ namespace Renderer::assembler {
 			.vertex = "vertex text\n",
 			.fragment = "fragment text\n",
 			.hooks = read.hooks,
-			.blockSizes = {{"AuraUniforms", 4}, {"WindUniforms", 28}, {"DrawUniforms", 196}},
+			.blocks = {
+				{"AuraUniforms", {.size = 4, .members = {{.name = "AuraUniforms.glow", .type = "float", .offset = 0, .size = 4}}}},
+				{"WindUniforms",
+				 {.size = 28,
+				  .members =
+					  {
+						  {.name = "WindUniforms.gust", .type = "vec2", .offset = 0, .size = 8},
+						  {.name = "WindUniforms.dir_x", .type = "float", .offset = 24, .size = 4},
+					  }}},
+				{"DrawUniforms", {.size = 168}},
+			},
 		});
 		ASSERT_TRUE(embedded.error.empty()) << embedded.error;
 		EXPECT_NE(embedded.header.find("namespace game_shader {"), std::string::npos);
@@ -258,17 +343,27 @@ namespace Renderer::assembler {
 		EXPECT_NE(embedded.header.find("Hooks, in chain order: aura.vert.glsl, bend.vert.glsl, wind_sway.vert.glsl."), std::string::npos);
 		EXPECT_NE(
 			embedded.header.find(
-				"HookUniformBlock kAura{\n\t\t.hook = \"aura\",\n\t\t.block = \"AuraUniforms\",\n\t\t.binding = 1,\n\t\t.size = 16,\n\t};"
+				"HookUniformBlock kAura{\n\t\t.hook = \"aura\",\n\t\t.block = \"AuraUniforms\",\n\t\t.binding = 1,\n\t\t.size = 16,\n\t\t."
+				"members = kAuraMembers,\n\t};"
 			),
 			std::string::npos
 		) << embedded.header;
 		EXPECT_NE(
 			embedded.header.find(
 				"HookUniformBlock kWindSway{\n\t\t.hook = \"wind_sway\",\n\t\t.block = \"WindUniforms\",\n\t\t.binding = 2,\n\t\t.size = "
-				"32,\n\t};"
+				"32,\n\t\t.members = kWindSwayMembers,\n\t};"
 			),
 			std::string::npos
 		) << embedded.header;
+		// Each member's constant, its offset and size for a static_assert, then the list the block points at.
+		EXPECT_NE(
+			embedded.header.find(
+				"HookUniformMember kWindSwayDirX{.name = \"WindUniforms.dir_x\", .type = \"float\", .offset = 24, .size = 4};"
+			),
+			std::string::npos
+		) << embedded.header;
+		EXPECT_NE(embedded.header.find("HookUniformMember kWindSwayMembers[] = {kWindSwayGust, kWindSwayDirX};"), std::string::npos);
+		EXPECT_NE(embedded.header.find("HookUniformMember kAuraGlow{"), std::string::npos);
 		EXPECT_EQ(embedded.header.find("kBend"), std::string::npos); // no block, nothing to fill
 
 		EXPECT_NE(embedded.source.find("#include \"GameShader.h\""), std::string::npos);
@@ -310,6 +405,41 @@ namespace Renderer::assembler {
 		}
 		EXPECT_GT(pieces, 1U);
 		EXPECT_EQ(joined, text);
+	}
+
+	TEST(EmbedTest, TheSourceIncludesItsHeaderByThePathItIsGiven) {
+		const Embedded embedded = embed({.nameSpace = "n", .header = "include/game/Shader.h", .vertex = "v\n", .fragment = "f\n"});
+		ASSERT_TRUE(embedded.error.empty()) << embedded.error;
+		EXPECT_NE(embedded.source.find("#include \"include/game/Shader.h\""), std::string::npos);
+	}
+
+	TEST(EmbedTest, AMemberTheStepCantDescribeOrNameFailsTheBuild) {
+		const Hooks	   read = readHooks({hookFile("aura", "AuraUniforms")});
+		const Embedded unknown = embed(
+			{.nameSpace = "n",
+			 .header = "H.h",
+			 .vertex = "v",
+			 .fragment = "f",
+			 .hooks = read.hooks,
+			 .blocks = {{"AuraUniforms", {.size = 24, .members = {{.name = "AuraUniforms.m", .offset = 0, .size = 0}}}}}}
+		);
+		EXPECT_NE(unknown.error.find("member AuraUniforms.m of AuraUniforms has a type the build doesn't handle"), std::string::npos);
+		const Embedded taken = embed(
+			{.nameSpace = "n",
+			 .header = "H.h",
+			 .vertex = "v",
+			 .fragment = "f",
+			 .hooks = read.hooks,
+			 .blocks = {
+				 {"AuraUniforms",
+				  {.size = 8,
+				   .members = {
+					   {.name = "AuraUniforms.glow_x", .type = "float", .offset = 0, .size = 4},
+					   {.name = "AuraUniforms.glowX", .type = "float", .offset = 4, .size = 4},
+				   }}}
+			 }}
+		);
+		EXPECT_NE(taken.error.find("kAuraGlowX, is already taken"), std::string::npos);
 	}
 
 	TEST(EmbedTest, ABlockMissingFromTheLinkedProgramFailsTheBuild) {

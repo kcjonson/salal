@@ -3,8 +3,8 @@
 // into a RenderTarget on a hidden GL 3.3 core context and read back; skipped where none can
 // be made (headless CI). The camera puts world (x, y) at pixel (x, y).
 
-#include "OffsetHookShader.h"
 #include "backend/gl/GLBackend.h"
+#include "generated/OffsetHookShader.h"
 #include "primitives/Primitives.h"
 #include "resources/RenderTarget.h"
 #include "vector/Types.h"
@@ -15,18 +15,25 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <span>
 #include <vector>
 
 namespace Renderer {
 
-	// The block offset.vert.glsl declares, member for member.
+	// The block offset.vert.glsl declares, member for member, checked against what the build
+	// reflected from the shader.
 	struct OffsetUniforms {
 		Foundation::Vec2 local{0.0F, 0.0F};
 		Foundation::Vec2 world{0.0F, 0.0F};
 	};
 	static_assert(sizeof(OffsetUniforms) == offset_hook_shader::kOffset.size);
+	static_assert(std::size(offset_hook_shader::kOffsetMembers) == 2);
+	static_assert(offsetof(OffsetUniforms, local) == offset_hook_shader::kOffsetLocal.offset);
+	static_assert(sizeof(OffsetUniforms::local) == offset_hook_shader::kOffsetLocal.size);
+	static_assert(offsetof(OffsetUniforms, world) == offset_hook_shader::kOffsetWorld.offset);
+	static_assert(sizeof(OffsetUniforms::world) == offset_hook_shader::kOffsetWorld.size);
 	static_assert(offset_hook_shader::kOffset.binding == 1);
 
 	class ShaderHooksTest : public ::testing::Test {
