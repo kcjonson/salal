@@ -455,7 +455,8 @@ namespace app {
 		EXPECT_FALSE(static_cast<bool>(error));
 		EXPECT_EQ(error.error(), LoadError::Corrupt);
 		EXPECT_EQ(error.value_or("fallback"), "fallback");
-		EXPECT_THROW(static_cast<void>(error.value()), std::bad_variant_access);
+		EXPECT_THROW(static_cast<void>(error.value()), BadExpectedAccess);
+		EXPECT_THROW(static_cast<void>(*error), BadExpectedAccess);
 
 		std::string moved = std::move(value).value();
 		EXPECT_EQ(moved, "save");
