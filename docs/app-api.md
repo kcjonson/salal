@@ -1053,9 +1053,33 @@ What changes where a player or worldsim's tooling can see, owned:
 
 - A press and release inside one frame arrive as a down then an up; today the
   host's arrive as a lone up, while injected ones already arrive as both.
+- An up then a down on one button inside a frame arrive as an up then a down;
+  today it is a lone down, so the earlier press never gets its up.
 - Keys injected through `/api/input` reach the focus manager.
+- Keys worldsim's `InputManager` never mapped (Semicolon, Equal, the brackets,
+  Backslash, Grave, F13 and up, CapsLock) reach the focus manager too; every
+  focusable ignores them.
+- Injected pointer events carry the Shift, Control and Alt held; today they
+  never carry modifiers.
+- A key tapped inside one frame reads `pressed()` in update; `isKeyPressed`
+  misses it today, so `keydown,space` and `keyup,space` in one request now
+  toggle pause where they did nothing.
+- An injected scroll behaves like a wheel: it is sent again every frame until
+  something consumes it, it overwrites a pending real one, and in GameScene one
+  the ui doesn't take zooms the camera. Today it reaches the ui once and never
+  zooms.
+- Injected middle-button presses and releases no longer reach the ui; the
+  bridge sends Left and Right only, as the host path did.
+- ClipScene and VectorPerfScene see injected keys, since they read the frame's
+  snapshot and not `glfwGetKey`.
 - `/api/state` and `/api/dev` answer 404 at once for what nothing registered,
   instead of 503 after 2 s or a queued ack; asset-manager answers tree and lint.
+- A scene without ui roots answers tree and lint with empty roots and a zero
+  count, where today nothing drains them and they give 503 after 2 s.
+- While paused, dev routes and state providers run, since steps 3 and 10 run
+  every frame; today `/api/dev` queues until resume and `/api/state`, tree and
+  lint give 503 after 2 s. Worldsim's camera control answers at once and still
+  applies in the scene's next update, so the camera waits for resume.
 - A Release build has no dev server unless built for profiling (decision 4).
 - The screenshot is read before present (decision 9).
 - `/api/control?action=exit` signals completion after scenes exit and GL is
@@ -1074,6 +1098,13 @@ What changes where a player or worldsim's tooling can see, owned:
   top first, where today it is the one scene's `exportState()`; a script
   reads `scenes[0].state`.
 - Startup logs before the window aren't on `/stream/logs`.
+- `parseCommandLine` is stricter about `--http-port`: a trailing flag with no
+  value, port 0 and `80x` are invalid (exit 1), where today the first is
+  ignored, the second turns the server off and the third reads as 80.
+- The window is 80% of the monitor's work area, not of the video mode, so a
+  taskbar makes it smaller than today.
+- A second instance opens its window, finds the port busy, then closes and
+  exits; today the server binds the port before the window opens.
 
 ## Sequencing
 
@@ -1088,7 +1119,7 @@ slice would leave worldsim with two loops.
 | 4. Dev server (`v0.13.0`) | from worldsim into `app`, behind the flags; registrations with handles, control actions, providers and the empty defaults, `what=scene` from the stack; the new `/api/input` events; `step`; the fixes; `PngEncoder` into `renderer` | none | route tests against an `App` on the headless platform; a Release build links no httplib and opens no socket, and one built with `SALAL_DEV_SERVER_IN_RELEASE` serves |
 | 5. Settings and saves (`v0.14.0`) | `Settings`, `userConfigDir`, migration, `video.*` applied by `App`, `setFullscreen`, `ActionMap` bindings; `SaveStore`, `userDataDir`, envelopes, backups, upgrade chains | none | tests: round trip, unknown keys kept, corrupt file moved aside, migration, a newer file; a save upgraded across three versions, a failed upgrade leaving the original, a newer save refused untouched, a crash between temp and rename |
 | 6. Sandbox (`v0.15.0`) | the harness: a scene picker drawn with `Primitives`, scene by name, the dev server, a committed atlas (decision 8); the renderer-level scenes from worldsim's ui-sandbox (`sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, and `input_test` rewritten on snapshots, the drag's start from the frame's events and its end from the snapshot) | none | screenshots of each scene through the dev server, the picker's state through a registered provider |
-| 7. Worldsim converts | pin | delete `libs/engine/{application,scene,input,clipboard,debug}`, `graphics/PngEncoder`, and its copies of the six scenes the sandbox took; the table above | every scene through the dev server, screenshots identical; scripted `/api/input` runs before and after: a click that switches scene, Tab and typing into a field, scrolling a list in the game ui (no zoom), input while paused, the camera action; asset-cli PNGs; ctest; the three ports |
+| 7. Worldsim converts (done 2026-10-28) | pin | the pin ([worldsim#313](https://github.com/kcjonson/worldsim/pull/313)), then the conversion ([worldsim#314](https://github.com/kcjonson/worldsim/pull/314)): delete `libs/engine/{application,scene,input,clipboard,debug}`, `graphics/PngEncoder`, and its copies of the six scenes the sandbox took; the table above | every scene through the dev server, screenshots identical; scripted `/api/input` runs before and after: a click that switches scene, Tab and typing into a field, scrolling a list in the game ui (no zoom), input while paused, the camera action; asset-cli PNGs; ctest; the three ports |
 
 PR 5 depends on nothing after PR 2 and can go anywhere after it; PR 6 needs
 PRs 3 and 4. When this merges the board's items are retitled to match: the

@@ -43,7 +43,6 @@ namespace Renderer::Primitives {
 	static CoordinateSystem*			g_coordinateSystem = nullptr;
 	static FontRenderer*				g_fontRenderer = nullptr;
 	static bool							g_warnedNoFontRenderer = false; // drawText warns once until a font renderer is set
-	static FrameUpdateCallback			g_frameUpdateCallback = nullptr;
 	static TextureHandle				g_tileAtlasTexture;
 	static std::vector<glm::vec4>		g_tileAtlasRects;
 	static std::stack<Foundation::Rect> g_scissorStack;
@@ -167,10 +166,6 @@ namespace Renderer::Primitives {
 		}
 	}
 
-	void setFrameUpdateCallback(FrameUpdateCallback callback) {
-		g_frameUpdateCallback = callback;
-	}
-
 	// --- Frame Lifecycle ---
 
 	void clear(const Foundation::Color& color) {
@@ -206,11 +201,6 @@ namespace Renderer::Primitives {
 		}
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->beginFrame();
-		}
-
-		// Invoke frame update callback for FontRenderer cache LRU tracking
-		if (g_frameUpdateCallback != nullptr) {
-			g_frameUpdateCallback();
 		}
 	}
 

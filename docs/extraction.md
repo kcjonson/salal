@@ -3,11 +3,14 @@
 Surveyed 2026-10-25, revised the same day after Kevin's decision to migrate
 dual-deck-builder to C++, and revised again the same day after the Phase 0
 surveys. Updated 2026-10-26 with what phase 0.5 landed in worldsim, and again
-with how phase 1 is being executed and what scoping it turned up.
+with how phase 1 is being executed and what scoping it turned up, and 2026-10-28
+with phase 2 done.
 
 This is the engine repo. `foundation` and `renderer` are imported (plain copies
-of worldsim at `870dd755` and `2cc7e40a`); phase 2 PRs 1 to 6 are in (`v0.10.0`
-to `v0.15.0`), and `ui` is a placeholder until its phase lands. "Sequencing" below says where each stands.
+of worldsim at `870dd755` and `2cc7e40a`); phase 2 is done, with `app` in
+(`v0.10.0` to `v0.15.0`) and worldsim converted onto it, and `ui` is a
+placeholder until phase 3. Next is phase 2b, audio, once decision B is settled,
+then phase 3, `ui`. "Sequencing" below says where each stands.
 
 ## Corrections in this revision (2026-10-25)
 
@@ -665,11 +668,11 @@ Follow-ups recorded and kept out of the moves, so the imports stay pure:
   and geometry barely touch foundation.
 - `RenderToTexture`'s `glGetIntegerv` save and restore.
 
-### Phase 2, carve out `app`
+### Phase 2, carve out `app` (done 2026-10-28)
 
 Designed in [app-api.md](app-api.md), which sequences it as seven PRs, each a
-minor tag, with worldsim pinning once at the end. PRs 1 to 6 are in
-(`v0.10.0` to `v0.15.0`): the input types, the accumulator and `ActionMap` in
+minor tag, with worldsim pinning once at the end. Salal PRs 1 to 6 are
+`v0.10.0` to `v0.15.0`: the input types, the accumulator and `ActionMap` in
 `foundation/input/`, then the clock, the GLFW and headless platforms, the
 frame, the scene stack, overlays and the context object in `app`, then the
 device layer: GLFW's keyboard, mouse and gamepads, hot-plug, player slots, key
@@ -677,9 +680,15 @@ names, capture, axis edges and the clipboard, then the dev server behind its
 compile flags, with `PngEncoder` in `renderer`, then the settings file, with
 `ActionMap` bindings through it, and saves, then the sandbox harness: a scene
 picker drawn with `Primitives` over the six renderer-level scenes from
-worldsim's ui-sandbox, with a committed JetBrains Mono atlas.
+worldsim's ui-sandbox, with a committed JetBrains Mono atlas. Worldsim pinned
+`v0.15.0` ([worldsim#313](https://github.com/kcjonson/worldsim/pull/313)) and
+converted in a second PR ([worldsim#314](https://github.com/kcjonson/worldsim/pull/314)):
+world-sim, ui-sandbox and asset-manager run on `app`, and `libs/engine`'s
+application, scene, input, clipboard and debug code is deleted. The differences
+a player or worldsim's tooling can see are the list in app-api.md's "What
+worldsim keeps".
 
-The 16-file slice (`application/`, `scene/`, `input/`, `clipboard/`) plus what
+What the phase held, as planned: the 16-file slice (`application/`, `scene/`, `input/`, `clipboard/`) plus what
 the consumers need from a frame owner and worldsim never built:
 
 - The `tick()` split and a fixed-step accumulator. Worldsim's loop is
@@ -713,8 +722,8 @@ prototype can start here.
 
 ### Phase 2b, audio
 
-Decision B. After `app`, before `ui`, because the feel prototype wants audible
-thrust and nothing in `ui` depends on it.
+Decision B, and next now that phase 2 is done. After `app`, before `ui`, because
+the feel prototype wants audible thrust and nothing in `ui` depends on it.
 
 ### Phase 3, extract `ui`
 

@@ -14,11 +14,14 @@ and worldsim consumes salal through FetchContent, pinned to a tag. The
 renderer's backend boundary is under way ([docs/renderer-boundary.md](docs/renderer-boundary.md),
 PRs 1 to 4 in), with a null backend for headless tests, and the base shader
 takes the hooks a game assembles into it at build time
-([docs/shader-hooks.md](docs/shader-hooks.md)). Phase 2 is carving `app` out
-of worldsim ([docs/app-api.md](docs/app-api.md)): the input types, the frame,
-the platforms, the scene stack, the devices, the dev server, settings and saves,
-and the sandbox harness are in (phase 2 PRs 1 to 6, `v0.10.0` to `v0.15.0`);
-worldsim's conversion is next. `ui` is a placeholder until phase 3.
+([docs/shader-hooks.md](docs/shader-hooks.md)). Phase 2, carving `app` out of
+worldsim ([docs/app-api.md](docs/app-api.md)), is done: the input types, the
+frame, the platforms, the scene stack, the devices, the dev server, settings and
+saves, and the sandbox harness are in (salal PRs 1 to 6, `v0.10.0` to
+`v0.15.0`), and worldsim pinned `v0.15.0` ([worldsim#313](https://github.com/kcjonson/worldsim/pull/313))
+and converted its GUI apps onto `app` ([worldsim#314](https://github.com/kcjonson/worldsim/pull/314)).
+Audio is next, once its decision is made, then phase 3, `ui`, which is a
+placeholder until then.
 CI builds and tests on Windows, macOS and Linux.
 
 The engine is being extracted from [worldsim](https://github.com/kcjonson/worldsim),
