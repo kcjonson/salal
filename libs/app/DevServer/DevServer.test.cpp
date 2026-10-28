@@ -21,8 +21,9 @@
 #include <nlohmann/json.hpp>
 #endif
 
+#include <algorithm>
 #include <chrono>
-#include <cmath>
+#include <cstdint>
 #include <future>
 #include <limits>
 #include <map>
