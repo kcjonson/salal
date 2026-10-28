@@ -23,6 +23,7 @@ add_library(salal_app STATIC
     platform/GlfwInput.cpp
     platform/GlfwPlatform.cpp
     platform/HeadlessPlatform.cpp
+    saves/SaveStore.cpp
     scene/SceneStack.cpp
     settings/Bindings.cpp
     settings/Settings.cpp
