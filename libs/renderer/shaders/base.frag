@@ -163,8 +163,15 @@ void main() {
 		// Calculate the effective outer edge (shape edge or border outer edge)
 		float effectiveOuter = max(0.0, borderOuter);
 
-		// Calculate alpha for the entire renderable area (shape + any outside border)
-		float shapeAlpha = 1.0 - smoothstep(-pixelSize + effectiveOuter, pixelSize + effectiveOuter, dist);
+		// Calculate alpha for the entire renderable area (shape + any outside border).
+		// A zero-size box with no border is flat (triangles, a fill's feather ring, a
+		// flat stroke piece): its own triangles are the shape, so coverage 1. Left to
+		// smoothstep, triangles would ask for smoothstep(0, 0, 0), which GLSL leaves
+		// undefined.
+		float shapeAlpha = 1.0;
+		if (halfSize.x > 0.0 || halfSize.y > 0.0 || borderWidth > 0.001) {
+			shapeAlpha = 1.0 - smoothstep(-pixelSize + effectiveOuter, pixelSize + effectiveOuter, dist);
+		}
 
 		// Early exit if completely transparent (optimization)
 		if (shapeAlpha < 0.001) {
