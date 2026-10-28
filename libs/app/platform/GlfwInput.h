@@ -11,6 +11,7 @@
 #include <glm/vec2.hpp>
 
 #include <span>
+#include <vector>
 
 namespace app::glfw {
 
@@ -31,6 +32,9 @@ namespace app::glfw {
 	foundation::InputEvent cursorEnterEvent(int entered, double time);
 	foundation::InputEvent mouseButtonEvent(int button, int action, int mods, glm::vec2 cursor, double time);
 	foundation::InputEvent scrollEvent(double x, double y, glm::vec2 cursor, double time);
+	// What a window opening under a still cursor reports, since GLFW sends nothing until it moves: a
+	// PointerEnter and a PointerMove to it while it's over the content area, nothing otherwise.
+	std::vector<foundation::InputEvent> cursorAtOpen(bool hovered, double x, double y, double time);
 
 	// Whether each of a pad's triggers has read below 0 since it connected. GLFW leaves an axis the
 	// pad's mapping lacks at 0, which would read half pulled, and a mapped trigger rests at -1. The

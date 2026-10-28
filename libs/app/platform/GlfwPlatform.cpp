@@ -60,10 +60,11 @@ namespace app {
 				glfwSetScrollCallback(window, scrollCallback);
 				glfwSetJoystickCallback(joystickCallback);
 
-				double x = 0.0;
-				double y = 0.0;
-				glfwGetCursorPos(window, &x, &y);
-				cursor = {static_cast<float>(x), static_cast<float>(y)};
+				refreshCursor();
+				const bool hovered = glfwGetWindowAttrib(window, GLFW_HOVERED) == GLFW_TRUE;
+				for (const foundation::InputEvent& event : glfw::cursorAtOpen(hovered, cursor.x, cursor.y, glfwClock.now())) {
+					relay.inputEvent(event);
+				}
 
 				// glfwInit found the pads already plugged in, before there was a callback to hear of them.
 				for (int jid = 0; jid < foundation::kMaxRealGamepads; ++jid) {
@@ -141,16 +142,22 @@ namespace app {
 			static GlfwPlatform& from(GLFWwindow* window) { return *static_cast<GlfwPlatform*>(glfwGetWindowUserPointer(window)); }
 
 			// A minimized window reports 0x0, which the App ignores; GL keeps the viewport it had.
+			// A resize can move the content under a still cursor, so its cached position is read again.
 			static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
 				if (width > 0 && height > 0) {
 					glViewport(0, 0, width, height);
 				}
-				from(window).relay.framebufferResized(viewportOf(window));
+				GlfwPlatform& platform = from(window);
+				platform.refreshCursor();
+				platform.relay.framebufferResized(viewportOf(window));
 			}
 
 			static void focusCallback(GLFWwindow* window, int focused) {
 				GlfwPlatform& platform = from(window);
 				platform.hasFocus = focused == GLFW_TRUE;
+				if (platform.hasFocus) {
+					platform.refreshCursor();
+				}
 				platform.relay.inputEvent({
 					.type = platform.hasFocus ? foundation::InputEvent::Type::FocusGained : foundation::InputEvent::Type::FocusLost,
 					.time = platform.glfwClock.now(),
@@ -202,6 +209,14 @@ namespace app {
 						static_cast<std::uint8_t>(jid), g_glfwPlatform->glfwClock.now(), g_glfwPlatform->relay
 					);
 				}
+			}
+
+			// Where the cursor is now, for button and scroll events until the next move reports it.
+			void refreshCursor() {
+				double x = 0.0;
+				double y = 0.0;
+				glfwGetCursorPos(window, &x, &y);
+				cursor = {static_cast<float>(x), static_cast<float>(y)};
 			}
 
 			// Only a joystick with a gamepad mapping, from GLFW's built-in SDL database, is a gamepad.

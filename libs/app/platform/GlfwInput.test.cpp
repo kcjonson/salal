@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <set>
+#include <vector>
 
 namespace app {
 
@@ -129,6 +130,18 @@ namespace app {
 		EXPECT_EQ(scroll.scroll, glm::vec2(-1.0F, 2.5F));
 		EXPECT_EQ(scroll.position, glm::vec2(3.0F, 4.0F));
 		EXPECT_EQ(scroll.mods, 0);
+	}
+
+	// GLFW reports a cursor only once it moves, so a window opening under a still one says where it is.
+	TEST(GlfwInputTest, AWindowOpeningUnderTheCursorReportsItEnteredAndWhere) {
+		const std::vector<InputEvent> under = glfw::cursorAtOpen(true, 12.5, 40.0, 1.0);
+		ASSERT_EQ(under.size(), 2U);
+		EXPECT_EQ(under[0].type, InputEvent::Type::PointerEnter);
+		EXPECT_EQ(under[1].type, InputEvent::Type::PointerMove);
+		EXPECT_EQ(under[1].device, kMouse);
+		EXPECT_EQ(under[1].position, glm::vec2(12.5F, 40.0F));
+		EXPECT_EQ(under[1].time, 1.0);
+		EXPECT_TRUE(glfw::cursorAtOpen(false, 12.5, 40.0, 1.0).empty());
 	}
 
 	TEST(GlfwInputTest, AGamepadStateBecomesASampleWithTriggersFromZero) {

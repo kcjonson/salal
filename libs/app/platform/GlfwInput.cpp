@@ -235,6 +235,13 @@ namespace app::glfw {
 		return {.type = InputEvent::Type::Scroll, .device = kMouse, .time = time, .position = cursor, .scroll = pointOf(x, y)};
 	}
 
+	std::vector<InputEvent> cursorAtOpen(bool hovered, double x, double y, double time) {
+		if (!hovered) {
+			return {};
+		}
+		return {cursorEnterEvent(GLFW_TRUE, time), cursorPosEvent(x, y, time)};
+	}
+
 	GamepadSample gamepadSample(std::span<const unsigned char, 15> buttons, std::span<const float, 6> axes, TriggersSeen& seen) {
 		GamepadSample sample;
 		for (std::size_t i = 0; i < sample.buttons.size(); ++i) {
