@@ -119,7 +119,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		/**
 		 * Result of text wrapping operation (cached for performance). It keeps the
-		 * family it was measured in, which generateWrappedGlyphQuads lays it out in.
+		 * family and scale it was measured with, which generateWrappedGlyphQuads lays it
+		 * out with, so glyph sizes, line widths and line height all come from one scale.
 		 */
 		struct WrappedTextResult {
 			std::vector<std::string> lines;		  // Each line of wrapped text
@@ -128,6 +129,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float					 totalHeight; // Sum of line heights
 			float					 lineHeight;  // Height per line in pixels
 			FontFamily				 family;	  // The family the lines were measured in, as resolved (the one they draw with)
+			float					 scale;		  // The scale the lines were measured at (fontSize / 16.0)
 		};
 
 		/**
@@ -176,10 +178,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		/**
 		 * Generate glyph quads for wrapped/multi-line text, in the family and at the
-		 * line height it was wrapped with
-		 * @param wrapped The lines from wrapText, with their family and line height
+		 * scale and line height it was wrapped with
+		 * @param wrapped The lines from wrapText, with their family, scale and line height
 		 * @param position Top-left position of the text block
-		 * @param scale Scaling factor (the one the text was wrapped at)
 		 * @param color Text color (RGBA 0-1 range)
 		 * @param hAlign Horizontal alignment per line
 		 * @param containerWidth Container width for alignment (0 = use line width)
@@ -188,7 +189,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void generateWrappedGlyphQuads(
 			const WrappedTextResult&	wrapped,
 			const glm::vec2&			position,
-			float						scale,
 			const glm::vec4&			color,
 			Foundation::HorizontalAlign hAlign,
 			float						containerWidth,
