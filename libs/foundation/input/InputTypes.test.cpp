@@ -16,11 +16,42 @@ namespace {
 	static_assert(valueOf(Key::Num9) - valueOf(Key::Num0) == 9);
 	static_assert(valueOf(Key::F25) - valueOf(Key::F1) == 24);
 
+	template <typename Enum>
+	constexpr bool follows(Enum before, Enum after) {
+		return valueOf(after) == valueOf(before) + 1;
+	}
+
+	// GLFW's order across every group boundary, and where GLFW's navigation keys differ from the
+	// order worldsim's enum had.
+	static_assert(follows(Key::Unknown, Key::Space));
+	static_assert(follows(Key::Slash, Key::Num0));
+	static_assert(follows(Key::Num9, Key::Semicolon));
+	static_assert(follows(Key::Equal, Key::A));
+	static_assert(follows(Key::Z, Key::LeftBracket));
+	static_assert(follows(Key::World2, Key::Escape));
+	static_assert(follows(Key::Delete, Key::Right));
+	static_assert(follows(Key::Up, Key::PageUp));
+	static_assert(follows(Key::End, Key::CapsLock));
+	static_assert(follows(Key::Pause, Key::F1));
+	static_assert(follows(Key::F25, Key::Kp0));
+	static_assert(follows(Key::KpEqual, Key::LeftShift));
+	static_assert(follows(Key::RightSuper, Key::Menu));
+	static_assert(follows(Key::Menu, Key::Count));
+
 	// A GLFW button number casts straight to MouseButton.
 	static_assert(valueOf(MouseButton::Left) == 0);
 	static_assert(valueOf(MouseButton::Right) == 1);
 	static_assert(valueOf(MouseButton::Middle) == 2);
+	static_assert(valueOf(MouseButton::Button4) == 3);
+	static_assert(valueOf(MouseButton::Button5) == 4);
+	static_assert(valueOf(MouseButton::Button6) == 5);
+	static_assert(valueOf(MouseButton::Button7) == 6);
 	static_assert(valueOf(MouseButton::Button8) == 7);
+
+	static_assert(isPadSlot({.kind = DeviceKind::Gamepad, .index = 0}));
+	static_assert(isPadSlot({.kind = DeviceKind::Gamepad, .index = kMaxRealGamepads + kMaxVirtualGamepads - 1}));
+	static_assert(!isPadSlot({.kind = DeviceKind::Gamepad, .index = kMaxRealGamepads + kMaxVirtualGamepads}));
+	static_assert(!isPadSlot({.kind = DeviceKind::Keyboard, .index = 0}));
 
 	TEST(InputTypes, KeyIsDenseFromUnknownToCount) {
 		EXPECT_EQ(valueOf(Key::Unknown), 0);

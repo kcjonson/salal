@@ -1,6 +1,7 @@
 #include "InputAccumulator.h"
 
 #include <gtest/gtest.h>
+#include <limits>
 #include <vector>
 
 using namespace foundation;
@@ -246,7 +247,7 @@ namespace {
 		EXPECT_EQ(padAxisOf(gone, 2, GamepadAxis::RightTrigger), 0.0F);
 	}
 
-	TEST(InputAccumulator, PadInputWhileDisconnectedChangesNothing) {
+	TEST(InputAccumulator, PadInputWhileDisconnectedIsDropped) {
 		InputAccumulator input;
 		input.push(padButton(Type::ButtonDown, 1, GamepadButton::Start));
 		input.push(padAxis(1, GamepadAxis::LeftY, -1.0F));
@@ -255,6 +256,18 @@ namespace {
 		EXPECT_FALSE(frame.pads[1].connected);
 		expectState(padButtonOf(frame, 1, GamepadButton::Start), false, 0);
 		EXPECT_EQ(padAxisOf(frame, 1, GamepadAxis::LeftY), 0.0F);
+		EXPECT_TRUE(input.frameEvents().empty());
+	}
+
+	TEST(InputAccumulator, NonFiniteAxisValuesAreDropped) {
+		InputAccumulator input;
+		input.push(padEvent(Type::DeviceConnected, 0));
+		input.push(padAxis(0, GamepadAxis::RightX, 0.5F));
+		input.push(padAxis(0, GamepadAxis::RightX, std::numeric_limits<float>::quiet_NaN()));
+		input.push(padAxis(0, GamepadAxis::RightX, std::numeric_limits<float>::infinity()));
+
+		const InputSnapshot frame = input.consumeFrame();
+		EXPECT_EQ(padAxisOf(frame, 0, GamepadAxis::RightX), 0.5F);
 		EXPECT_EQ(input.frameEvents().size(), 2U);
 	}
 
@@ -320,6 +333,25 @@ namespace {
 		expectState(mouseOf(tick, MouseButton::Left), true, 1);
 	}
 
+	TEST(InputAccumulator, PointerUpAndScrollCarryThePointer) {
+		InputAccumulator input;
+		input.push(pointer(Type::PointerMove, {10.0F, 10.0F}));
+		input.push(pointer(Type::PointerDown, {10.0F, 10.0F}));
+		input.consumeTick();
+
+		input.push(pointer(Type::PointerUp, {50.0F, 30.0F}));
+		InputSnapshot tick = input.consumeTick();
+		EXPECT_EQ(tick.pointer, glm::vec2(50.0F, 30.0F));
+		EXPECT_EQ(tick.pointerDelta, glm::vec2(40.0F, 20.0F));
+		expectState(mouseOf(tick, MouseButton::Left), false, 1);
+
+		input.push({.type = Type::Scroll, .device = kMouse, .position = {45.0F, 60.0F}, .scroll = {0.0F, -1.0F}});
+		tick = input.consumeTick();
+		EXPECT_EQ(tick.pointer, glm::vec2(45.0F, 60.0F));
+		EXPECT_EQ(tick.pointerDelta, glm::vec2(-5.0F, 30.0F));
+		EXPECT_EQ(tick.scroll, glm::vec2(0.0F, -1.0F));
+	}
+
 	TEST(InputAccumulator, EnterAndLeaveSetPointerInWindowOnly) {
 		InputAccumulator input;
 		input.push(pointer(Type::PointerMove, {5.0F, 5.0F}));
@@ -380,12 +412,35 @@ namespace {
 		input.push({.type = Type::KeyDown, .mods = ModAlt, .key = Key::A});
 		EXPECT_EQ(input.consumeTick().mods, 0);
 
+		struct Modifier {
+			Key			 key;
+			std::uint8_t bit;
+		};
+		const Modifier modifiers[] = {
+			{.key = Key::LeftShift, .bit = ModShift},
+			{.key = Key::RightShift, .bit = ModShift},
+			{.key = Key::LeftControl, .bit = ModControl},
+			{.key = Key::RightControl, .bit = ModControl},
+			{.key = Key::LeftAlt, .bit = ModAlt},
+			{.key = Key::RightAlt, .bit = ModAlt},
+			{.key = Key::LeftSuper, .bit = ModSuper},
+			{.key = Key::RightSuper, .bit = ModSuper},
+		};
+		for (const Modifier& modifier : modifiers) {
+			input.push(keyDown(modifier.key));
+			EXPECT_EQ(input.consumeTick().mods, modifier.bit) << "key " << static_cast<int>(modifier.key);
+			input.push(keyUp(modifier.key));
+			EXPECT_EQ(input.consumeTick().mods, 0) << "key " << static_cast<int>(modifier.key);
+		}
+
 		input.push(keyDown(Key::LeftShift));
-		EXPECT_EQ(input.consumeTick().mods, ModShift);
 		input.push(keyDown(Key::RightControl));
 		input.push(keyDown(Key::LeftSuper));
 		EXPECT_EQ(input.consumeTick().mods, ModShift | ModControl | ModSuper);
+		input.push(keyDown(Key::RightShift));
 		input.push(keyUp(Key::LeftShift));
+		EXPECT_EQ(input.consumeTick().mods, ModShift | ModControl | ModSuper);
+		input.push(keyUp(Key::RightShift));
 		EXPECT_EQ(input.consumeTick().mods, ModControl | ModSuper);
 	}
 

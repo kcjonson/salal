@@ -8,15 +8,23 @@
 //   for one already up change nothing.
 // - FocusLost releases every held key and mouse button, since the platform may never send their
 //   ups. Pads are polled, not focus-bound, and keep their state.
-// - DeviceDisconnected releases the pad's held buttons and zeroes its axes; button and axis
-//   events for a pad that isn't connected change nothing.
-// - mods is rebuilt from the held modifier keys, not copied from the event, so it agrees with keys.
+// - DeviceDisconnected releases the pad's held buttons and zeroes its axes.
+// - mods is rebuilt from the held modifier keys, not copied from the event, so it agrees with keys
+//   and misses a modifier held since before the window had focus; ui that needs the modifiers at
+//   the moment of an event reads event.mods.
 // - The first known pointer position adds no delta; after that every position-carrying event adds
 //   its move to pointerDelta. Axis values clamp to [-1, 1].
-// - An event naming Key::Unknown or a Count value, a button or axis event whose device isn't a
-//   gamepad in pads[], or a connection event for a gamepad past pads[] is dropped, from state and
-//   from frameEvents. Everything else is recorded, Char included. Key and pointer events go to the
-//   one keyboard and mouse whatever their device says.
+// - Dropped, from state and from frameEvents: an event naming Key::Unknown or a Count value, a
+//   non-finite axis value, a button or axis event for a pad that isn't a connected gamepad in
+//   pads[], and a connection event for a gamepad past pads[]. Everything else is recorded, Char
+//   included. Key and pointer events go to the one keyboard and mouse whatever their device says.
+//
+// What that asks of the producers:
+// - Pad input before DeviceConnected is dropped, so the device layer sends DeviceConnected for pads
+//   present at startup (GLFW has no callback for them), the dev server sends one before a virtual
+//   pad's first input, and the device layer resets its poll diff to all-released on disconnect so
+//   a button held through a reconnect sends its ButtonDown.
+// - pendingEvents is cleared only by consumeFrame, which the app calls every frame, paused or not.
 
 #include "InputTypes.h"
 

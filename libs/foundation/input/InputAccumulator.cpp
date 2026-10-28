@@ -1,6 +1,7 @@
 #include "InputAccumulator.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace foundation {
@@ -12,12 +13,12 @@ namespace foundation {
 			return static_cast<std::size_t>(value);
 		}
 
-		bool isPad(const DeviceId& device) {
-			return device.kind == DeviceKind::Gamepad && device.index < kMaxRealGamepads + kMaxVirtualGamepads;
-		}
-
-		bool isValid(const InputEvent& event) {
+		// state is either reader; the two always agree on which pads are connected.
+		bool accepted(const InputEvent& event, const InputSnapshot& state) {
 			using Type = InputEvent::Type;
+			const auto connectedPad = [&] {
+				return isPadSlot(event.device) && state.pads[event.device.index].connected;
+			};
 			switch (event.type) {
 				case Type::KeyDown:
 				case Type::KeyUp:
@@ -27,12 +28,12 @@ namespace foundation {
 					return indexOf(event.mouseButton) < indexOf(MouseButton::Count);
 				case Type::ButtonDown:
 				case Type::ButtonUp:
-					return isPad(event.device) && indexOf(event.button) < indexOf(GamepadButton::Count);
+					return connectedPad() && indexOf(event.button) < indexOf(GamepadButton::Count);
 				case Type::Axis:
-					return isPad(event.device) && indexOf(event.axis) < indexOf(GamepadAxis::Count);
+					return connectedPad() && indexOf(event.axis) < indexOf(GamepadAxis::Count) && std::isfinite(event.value);
 				case Type::DeviceConnected:
 				case Type::DeviceDisconnected:
-					return event.device.kind != DeviceKind::Gamepad || isPad(event.device);
+					return event.device.kind != DeviceKind::Gamepad || isPadSlot(event.device);
 				case Type::Char:
 				case Type::PointerMove:
 				case Type::Scroll:
@@ -122,27 +123,19 @@ namespace foundation {
 					reader.pointerInWindow = false;
 					break;
 				case Type::ButtonDown:
-				case Type::ButtonUp: {
-					GamepadState& pad = reader.pads[event.device.index];
-					if (pad.connected) {
-						setDown(pad.buttons[indexOf(event.button)], event.type == Type::ButtonDown);
-					}
+				case Type::ButtonUp:
+					setDown(reader.pads[event.device.index].buttons[indexOf(event.button)], event.type == Type::ButtonDown);
 					break;
-				}
-				case Type::Axis: {
-					GamepadState& pad = reader.pads[event.device.index];
-					if (pad.connected) {
-						pad.axes[indexOf(event.axis)] = std::clamp(event.value, -1.0F, 1.0F);
-					}
+				case Type::Axis:
+					reader.pads[event.device.index].axes[indexOf(event.axis)] = std::clamp(event.value, -1.0F, 1.0F);
 					break;
-				}
 				case Type::DeviceConnected:
-					if (isPad(event.device)) {
+					if (isPadSlot(event.device)) {
 						reader.pads[event.device.index].connected = true;
 					}
 					break;
 				case Type::DeviceDisconnected:
-					if (isPad(event.device)) {
+					if (isPadSlot(event.device)) {
 						GamepadState& pad = reader.pads[event.device.index];
 						releaseAll(pad.buttons);
 						pad.axes.fill(0.0F);
@@ -180,7 +173,7 @@ namespace foundation {
 	} // namespace
 
 	void InputAccumulator::push(const InputEvent& event) {
-		if (!isValid(event)) {
+		if (!accepted(event, tickReader)) {
 			return;
 		}
 		apply(tickReader, event, pointerKnown);

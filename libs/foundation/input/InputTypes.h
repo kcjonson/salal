@@ -63,8 +63,8 @@ namespace foundation {
 		Y,
 		Z,
 
-		LeftBracket,  // [
-		Backslash,	  // backslash
+		LeftBracket, // [
+		Backslash,
 		RightBracket, // ]
 		GraveAccent,  // `
 		World1,		  // non-US #1
@@ -170,6 +170,8 @@ namespace foundation {
 		Count
 	};
 
+	// Sticks run -1 to 1. Triggers run 0 (released) to 1; GLFW reports them -1 to 1, and the device
+	// layer maps v to (v + 1) / 2, so a zeroed or disconnected pad reads released.
 	enum class GamepadAxis : std::uint8_t { LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigger, Count };
 
 	enum class DeviceKind : std::uint8_t { Keyboard, Mouse, Gamepad };
@@ -183,11 +185,18 @@ namespace foundation {
 	inline constexpr int kMaxRealGamepads = 16;	  // GLFW joystick ids 0 to 15, pads[0..15]
 	inline constexpr int kMaxVirtualGamepads = 4; // the dev server's vpad0 to vpad3, pads[16..19]
 
+	// A gamepad with a slot in InputSnapshot::pads.
+	constexpr bool isPadSlot(const DeviceId& device) {
+		return device.kind == DeviceKind::Gamepad && device.index < kMaxRealGamepads + kMaxVirtualGamepads;
+	}
+
 	// GLFW's bit values.
 	enum Mod : std::uint8_t { ModShift = 1, ModControl = 2, ModAlt = 4, ModSuper = 8 };
 
 	// One per platform callback, in order. Positions are in GLFW window coordinates, which are
-	// logical pixels already; PointerMove, PointerDown, PointerUp and Scroll carry the pointer's.
+	// logical pixels already. PointerMove, PointerDown, PointerUp and Scroll carry the pointer's, and
+	// the producer fills it on all four: GLFW's button and scroll callbacks carry none, so the device
+	// layer supplies the cursor position.
 	struct InputEvent {
 		enum class Type : std::uint8_t {
 			KeyDown,
