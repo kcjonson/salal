@@ -110,6 +110,13 @@ namespace app::testing {
 			StateArgs args;
 		};
 
+		// A scene whose name() is null, which the server reads at step 10 every frame.
+		class NamelessScene final : public TypedScene<> {
+		  public:
+			const char* name() const override { return nullptr; }
+			void		render(float /*alpha*/) override {}
+		};
+
 		// A headless platform that writes its presents and vsync changes into the journal.
 		class PresentingPlatform final : public Platform {
 		  public:
@@ -195,6 +202,32 @@ namespace app::testing {
 		const DevServer::Registration route = server().route("idle", [](const DevRequest&) { return ok(); });
 		EXPECT_TRUE(route.active());
 		EXPECT_TRUE(frame());
+	}
+
+	// The exit's reply closes the connection from the server's side, which leaves the port in TIME_WAIT
+	// on Linux and macOS; a relaunch on it at once must still bind.
+	TEST_F(DevServerTest, ARelaunchRightAfterAnExitGetsThePortBack) {
+		serve();
+		const int		   port = this->port();
+		std::future<Reply> exit = send("/api/control?action=exit");
+		waitParked(1);
+		EXPECT_FALSE(frame());
+		app.reset();
+		ASSERT_EQ(exit.get().body, R"({"status":"ok","action":"exit","shutdown":"complete"})");
+
+		AppConfig samePort = served();
+		samePort.devServer.port = port;
+		serve(std::move(samePort));
+		EXPECT_EQ(this->port(), port);
+		EXPECT_EQ(get("/api/health").status, 200);
+	}
+
+	TEST_F(DevServerTest, ATimeoutPastAnHourIsHeldToAnHour) {
+		serve(served(std::numeric_limits<double>::max()));
+		const DevServer::Registration route = server().route("slow", [](const DevRequest&) { return ok(R"({"slow":true})"); });
+		const Reply					  reply = ask("/api/dev/slow");
+		EXPECT_EQ(reply.status, 200);
+		EXPECT_EQ(reply.body, R"({"slow":true})");
 	}
 
 	TEST_F(DevServerTest, ABusyPortFailsCreateAndLeavesNothingBehind) {
@@ -735,6 +768,13 @@ namespace app::testing {
 		EXPECT_EQ(get("/api/state?what=sim").status, 404);
 	}
 
+	TEST_F(DevServerTest, ASceneWithNoNameIsServedWithAnEmptyOne) {
+		serve();
+		app->scenes().push<NamelessScene>();
+		frame();
+		EXPECT_EQ(ask("/api/state?what=scene").body, R"({"scenes":[{"name":"","state":null}]})");
+	}
+
 	TEST_F(DevServerTest, SceneStateIsEveryStackedSceneTopFirst) {
 		serve();
 		EXPECT_EQ(ask("/api/state?what=scene").body, R"({"scenes":[]})");
@@ -866,6 +906,37 @@ namespace app::testing {
 		EXPECT_EQ(reply.body, R"({"error":"Missing required parameter 'ev'"})");
 		frame();
 		EXPECT_TRUE(top<MainScene>().events.empty());
+	}
+
+	TEST_F(DevServerTest, InputWaitingForAPausedAppIsCapped) {
+		// Each event distinct: cpp-httplib keeps one of a repeated key=value pair.
+		const auto chars = [](int first, int count) {
+			std::string events;
+			for (int i = 0; i < count; ++i) {
+				events += "&ev=char," + std::to_string(first + i);
+			}
+			return events;
+		};
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		ask("/api/control?action=pause");
+		EXPECT_EQ(get("/api/input?ev=connect,vpad2" + chars(100, 499)).body, R"({"status":"ok","queued":500})");
+		EXPECT_EQ(get("/api/input?ev=char,65" + chars(1000, 499)).body, R"({"status":"ok","queued":500})");
+		const Reply full = get("/api/input?ev=connect,vpad3" + chars(2000, 25));
+		EXPECT_EQ(full.status, 429);
+		EXPECT_EQ(
+			full.body,
+			R"({"error":"1000 injected events already wait for the app, which takes them only while it runs unpaused; at most 1024 wait"})"
+		);
+		EXPECT_EQ(get("/api/input?ev=connect,vpad3").status, 200); // the refused connect left vpad3 unconnected
+
+		app->resume();
+		frame();
+		const MainScene& scene = top<MainScene>();
+		ASSERT_EQ(scene.events.size(), 1001U);
+		EXPECT_EQ(scene.events.front().type, InputEvent::Type::DeviceConnected);
+		EXPECT_EQ(scene.events.back().type, InputEvent::Type::DeviceConnected);
 	}
 
 #else

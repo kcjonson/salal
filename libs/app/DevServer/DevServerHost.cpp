@@ -20,8 +20,10 @@ namespace app::detail {
 		constexpr const char* kHost = "127.0.0.1";
 		// How long an exit request waits for ~App to tear the app down before it answers anyway.
 		constexpr auto kExitWait = std::chrono::seconds(30);
-		constexpr auto kStreamPoll = std::chrono::milliseconds(10);
-		constexpr auto kStreamInterval = std::chrono::milliseconds(100); // 10 Hz
+		// Injected events waiting for the frame, which a paused app doesn't take.
+		constexpr std::size_t kMaxQueuedInput = 1024;
+		constexpr auto		  kStreamPoll = std::chrono::milliseconds(10);
+		constexpr auto		  kStreamInterval = std::chrono::milliseconds(100); // 10 Hz
 
 		// Invalid UTF-8 in a log message or a name is replaced, never thrown over.
 		std::string dump(const nlohmann::ordered_json& json) {
@@ -64,13 +66,17 @@ namespace app::detail {
 			});
 		}
 
-		// A busy port fails the bind instead of being shared: SO_EXCLUSIVEADDRUSE on Windows, where a
-		// plain bind can take a port another socket holds with SO_REUSEADDR; on POSIX, none of
+		// A busy port fails the bind instead of being shared, and a port the last run's exit left in
+		// TIME_WAIT doesn't. On Windows, SO_EXCLUSIVEADDRUSE, without which a plain bind can take a port
+		// another socket holds with SO_REUSEADDR (and with which TIME_WAIT doesn't block a rebind). On
+		// POSIX, SO_REUSEADDR, which rebinds over TIME_WAIT but not over a live listener, in place of
 		// cpp-httplib's default SO_REUSEPORT, which would let two servers listen on one port.
-		void exclusiveAddress([[maybe_unused]] socket_t sock) {
+		void exclusiveAddress(socket_t sock) {
+			const int on = 1;
 #ifdef _WIN32
-			const int exclusive = 1;
-			setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
+			setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&on), sizeof(on));
+#else
+			setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 #endif
 		}
 
@@ -307,13 +313,18 @@ namespace app::detail {
 		std::unique_lock lock(mailbox);
 		if (!stopping) {
 			queue.push_back(job);
-			changed.wait_for(lock, timeout, [&] { return job->done || (stopping && !job->taken); });
+			changed.wait_for(lock, timeout, [&] { return job->done || stopping; });
 			if (job->taken && !job->done) {
-				changed.wait(lock, [&] { return job->done; });
+				// Answered within the drain that took it, unless something threw out of the drain; then
+				// teardown lets it go rather than leaving it to hang the pool's join.
+				changed.wait(lock, [&] { return job->done || stopping; });
 			}
 		}
 		if (job->done) {
 			return job->afterShutdown ? exitReply(lock) : std::move(job->response);
+		}
+		if (job->taken) {
+			return errorReply(500, "the app stopped before answering");
 		}
 		std::erase(queue, job);
 		if (stopping) {
@@ -400,10 +411,13 @@ namespace app::detail {
 		}
 
 		std::unique_lock  lock(mailbox);
-		ParsedInput		  parsed = parseInputEvents(evs, virtualPads);
-		const std::size_t queued = evs.size();
-		if (parsed.error.empty()) {
+		VirtualPads		  pads = virtualPads;
+		ParsedInput		  parsed = parseInputEvents(evs, pads);
+		const std::size_t waiting = injected.size();
+		const bool		  full = parsed.error.empty() && waiting + parsed.events.size() > kMaxQueuedInput;
+		if (parsed.error.empty() && !full) {
 			injected.insert(injected.end(), parsed.events.begin(), parsed.events.end());
+			virtualPads = pads;
 		}
 		lock.unlock();
 
@@ -411,7 +425,19 @@ namespace app::detail {
 			reply(res, {.status = 400, .body = dump({{"error", parsed.error}, {"ev", parsed.failed}})});
 			return;
 		}
-		reply(res, jsonReply({{"status", "ok"}, {"queued", queued}}));
+		if (full) {
+			reply(
+				res,
+				errorReply(
+					429,
+					std::to_string(waiting) +
+						" injected events already wait for the app, which takes them only while it runs unpaused; at most " +
+						std::to_string(kMaxQueuedInput) + " wait"
+				)
+			);
+			return;
+		}
+		reply(res, jsonReply({{"status", "ok"}, {"queued", evs.size()}}));
 	}
 
 	void DevServerHost::control(const httplib::Request& req, httplib::Response& res) {

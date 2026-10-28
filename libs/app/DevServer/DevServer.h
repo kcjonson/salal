@@ -43,7 +43,7 @@ namespace app {
 	struct DevServerConfig {
 		bool   enabled = false;		  // --http-port turns it on; ignored where the server isn't compiled in
 		int	   port = 0;			  // 0 to 65535; 0 takes any free port, which DevServer::port() reports
-		double requestTimeout = 10.0; // seconds a request waits for the frame before it's answered 503 and dropped
+		double requestTimeout = 10.0; // seconds a request waits for the frame before it's answered 503 and dropped; at most an hour
 	};
 
 	// What a route or control action is asked: its verb or action, and the query's parameters, the

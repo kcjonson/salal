@@ -29,6 +29,9 @@ namespace app {
 		using detail::DevKind;
 		using detail::errorReply;
 
+		// An hour. Far past it the wait's deadline overflows, and every parked request would 503 at once.
+		constexpr double kMaxRequestTimeout = 3600.0;
+
 		std::string dump(const nlohmann::ordered_json& json) {
 			return json.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
 		}
@@ -195,7 +198,12 @@ namespace app {
 			LOG_ERROR(Engine, "App::create: the dev server's request timeout must be positive (given %g)", config.requestTimeout);
 			return false;
 		}
-		host = detail::DevServerHost::start(config, registry);
+		DevServerConfig serving = config;
+		if (serving.requestTimeout > kMaxRequestTimeout) {
+			LOG_WARNING(Engine, "Dev server: a request timeout of %gs is held to %gs", serving.requestTimeout, kMaxRequestTimeout);
+			serving.requestTimeout = kMaxRequestTimeout;
+		}
+		host = detail::DevServerHost::start(serving, registry);
 		return host != nullptr;
 	}
 
@@ -282,13 +290,12 @@ namespace app {
 		if (host == nullptr) {
 			return;
 		}
-		Scene* top = app.scenes().top();
-		if (Renderer::MetricsCollector* collector = app.metrics(); collector != nullptr) {
-			const Foundation::PerformanceMetrics latest = collector->getCurrentMetrics();
-			host->publish(&latest, top != nullptr ? top->name() : "");
-		} else {
-			host->publish(nullptr, top != nullptr ? top->name() : "");
-		}
+		const Scene*						 top = app.scenes().top();
+		const std::string					 topName = top != nullptr && top->name() != nullptr ? top->name() : "";
+		Renderer::MetricsCollector*			 collector = app.metrics();
+		const Foundation::PerformanceMetrics latest =
+			collector != nullptr ? collector->getCurrentMetrics() : Foundation::PerformanceMetrics{};
+		host->publish(collector != nullptr ? &latest : nullptr, topName);
 
 		// Each stacked scene's name and exportState(), top first: its JSON as it gave it, or null for
 		// none, and an error beside a null when it threw or gave something that isn't JSON.
