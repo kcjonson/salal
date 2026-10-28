@@ -20,10 +20,12 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace {
 
 	using foundation::InputEvent;
+	using foundation::InputSnapshot;
 	using foundation::Key;
 	using foundation::MouseButton;
 
@@ -63,11 +65,11 @@ namespace {
 		{.key = Key::Right, .label = "RIGHT"},
 	}};
 
-	const foundation::ButtonState& button(const foundation::InputSnapshot& input, MouseButton which) {
+	const foundation::ButtonState& button(const InputSnapshot& input, MouseButton which) {
 		return input.mouse[static_cast<std::size_t>(which)];
 	}
 
-	const foundation::ButtonState& key(const foundation::InputSnapshot& input, Key which) {
+	const foundation::ButtonState& key(const InputSnapshot& input, Key which) {
 		return input.keys[static_cast<std::size_t>(which)];
 	}
 
@@ -83,9 +85,53 @@ namespace {
 		return "(" + std::to_string(static_cast<int>(value.x)) + ", " + std::to_string(static_cast<int>(value.y)) + ")";
 	}
 
-	void text(const std::string& line, float x, float y, float size, const Foundation::Color& color) {
-		Renderer::Primitives::drawText({.text = line, .position = {x, y}, .scale = size / 16.0F, .color = color});
+	std::string hex(char32_t codepoint) {
+		std::ostringstream digits;
+		digits << std::uppercase << std::hex << static_cast<std::uint32_t>(codepoint);
+		const std::string out = digits.str();
+		return std::string(out.size() < 4 ? 4 - out.size() : 0, '0') + out;
 	}
+
+	struct Line {
+		std::string		  text;
+		float			  size = kTextSize;
+		Foundation::Color color = kText;
+	};
+
+	// Lines down the window from a top-left corner, kLineHeight apart.
+	class Column {
+	  public:
+		Column(float left, float top)
+			: x(left),
+			  y(top) {}
+
+		void line(const Line& args) {
+			Renderer::Primitives::drawText({.text = args.text, .position = {x, y}, .scale = args.size / 16.0F, .color = args.color});
+			y += kLineHeight;
+		}
+
+		void gap(float lines) { y += kLineHeight * lines; }
+
+	  private:
+		float x;
+		float y;
+	};
+
+	// One line of the recent-events list. A key's repeats, and the characters they type, fold into the
+	// line of its press.
+	struct Recent {
+		std::string		 text;
+		InputEvent::Type type = InputEvent::Type::KeyDown;
+		Key				 key = Key::Unknown;
+		int				 repeats = 0;
+
+		std::string line() const {
+			if (repeats == 0) {
+				return text;
+			}
+			return text + " (" + std::to_string(repeats) + (repeats == 1 ? " repeat)" : " repeats)");
+		}
+	};
 
 	class InputTestScene final : public app::Scene {
 	  public:
@@ -98,100 +144,77 @@ namespace {
 				if (event.type == InputEvent::Type::PointerDown && event.mouseButton == MouseButton::Left) {
 					dragStart = event.position;
 				}
-				// The pointer line shows where it is; a list of every move would hide everything else.
-				if (event.type != InputEvent::Type::PointerMove) {
-					recent.push_front(describe(event));
-					if (recent.size() > kRecentEvents) {
-						recent.pop_back();
-					}
-				}
+				remember(event);
 			}
-			input = frame.input;
-			if (!button(input, MouseButton::Left).down) {
+			if (!button(frame.input, MouseButton::Left).down) {
 				dragStart.reset();
 			}
 		}
 
 		void render(float /*alpha*/) override {
+			const InputSnapshot& input = owner->input().frame();
 			Renderer::Primitives::clear(kBackground);
-			float y = kTop;
-			text("Input Test Scene", kLeft, y, kTitleSize, kText);
-			y += kLineHeight * 1.5F;
 
-			text("Pointer: " + point(input.pointer), kLeft, y, kTextSize, kText);
-			y += kLineHeight;
-			text("Pointer Delta: " + point(input.pointerDelta), kLeft, y, kTextSize, kText);
-			y += kLineHeight;
+			Column left(kLeft, kTop);
+			left.line({.text = "Input Test Scene", .size = kTitleSize});
+			left.gap(0.5F);
+			left.line({.text = "Pointer: " + point(input.pointer)});
+			left.line({.text = "Pointer Delta: " + point(input.pointerDelta)});
 
-			const bool left = button(input, MouseButton::Left).down;
-			const bool right = button(input, MouseButton::Right).down;
-			const bool middle = button(input, MouseButton::Middle).down;
-			text(
-				std::string("Mouse Buttons: L:") + (left ? "DOWN" : "UP") + "  R:" + (right ? "DOWN" : "UP") +
-					"  M:" + (middle ? "DOWN" : "UP"),
-				kLeft,
-				y,
-				kTextSize,
-				left || right || middle ? kHeld : kText
+			const bool leftDown = button(input, MouseButton::Left).down;
+			const bool rightDown = button(input, MouseButton::Right).down;
+			const bool middleDown = button(input, MouseButton::Middle).down;
+			left.line(
+				{.text = std::string("Mouse Buttons: L:") + (leftDown ? "DOWN" : "UP") + "  R:" + (rightDown ? "DOWN" : "UP") +
+						 "  M:" + (middleDown ? "DOWN" : "UP"),
+				 .color = leftDown || rightDown || middleDown ? kHeld : kText}
 			);
-			y += kLineHeight;
 
-			if (dragStart) {
-				text("Dragging: Start" + point(*dragStart) + " Delta" + point(input.pointer - *dragStart), kLeft, y, kTextSize, kEdge);
+			// update doesn't run while the App is paused, so the drag shows only while the button is down now.
+			if (dragStart && leftDown) {
+				left.line({.text = "Dragging: Start" + point(*dragStart) + " Delta" + point(input.pointer - *dragStart), .color = kEdge});
 			} else {
-				text("Dragging: No", kLeft, y, kTextSize, kText);
+				left.line({.text = "Dragging: No"});
 			}
-			y += kLineHeight;
 
 			std::ostringstream scroll;
 			scroll << "Scroll: (" << input.scroll.x << ", " << input.scroll.y << ")";
-			text(scroll.str(), kLeft, y, kTextSize, input.scroll != glm::vec2(0.0F) ? kEdge : kText);
-			y += kLineHeight;
-
-			text(
-				std::string("Pointer In Window: ") + (input.pointerInWindow ? "YES" : "NO"),
-				kLeft,
-				y,
-				kTextSize,
-				input.pointerInWindow ? kHeld : kEdge
+			left.line({.text = scroll.str(), .color = input.scroll != glm::vec2(0.0F) ? kEdge : kText});
+			left.line(
+				{.text = std::string("Pointer In Window: ") + (input.pointerInWindow ? "YES" : "NO"),
+				 .color = input.pointerInWindow ? kHeld : kEdge}
 			);
-			y += kLineHeight * 1.5F;
+			left.gap(0.5F);
 
-			text("Keyboard (Try WASD, Arrow Keys, Space, Enter):", kLeft, y, kTextSize, kHeading);
-			y += kLineHeight;
+			left.line({.text = "Keyboard (Try WASD, Arrow Keys, Space, Enter):", .color = kHeading});
 			for (const KeyRow& row : kKeys) {
 				const foundation::ButtonState& state = key(input, row.key);
-				const char*					   label = "UP";
-				Foundation::Color			   color = kText;
 				if (state.pressed()) {
-					label = "PRESSED";
-					color = kHeld;
+					left.line({.text = std::string(row.label) + ": PRESSED", .color = kHeld});
 				} else if (state.released()) {
-					label = "RELEASED";
-					color = kEdge;
+					left.line({.text = std::string(row.label) + ": RELEASED", .color = kEdge});
 				} else if (state.down) {
-					label = "DOWN";
-					color = kHeading;
+					left.line({.text = std::string(row.label) + ": DOWN", .color = kHeading});
+				} else {
+					left.line({.text = std::string(row.label) + ": UP"});
 				}
-				text(std::string(row.label) + ": " + label, kLeft, y, kTextSize, color);
-				y += kLineHeight;
 			}
+			left.gap(1.0F);
+			left.line(
+				{.text = "Try moving the mouse, clicking, dragging, scrolling, and pressing keys!", .size = kHintSize, .color = kHint}
+			);
 
-			y += kLineHeight;
-			text("Try moving the mouse, clicking, dragging, scrolling, and pressing keys!", kLeft, y, kHintSize, kHint);
-
-			float eventsY = kTop + (kLineHeight * 1.5F);
-			text("Recent events, newest first:", kEventsLeft, eventsY, kTextSize, kHeading);
-			eventsY += kLineHeight;
-			for (const std::string& line : recent) {
-				text(line, kEventsLeft, eventsY, kTextSize, kText);
-				eventsY += kLineHeight;
+			Column events(kEventsLeft, kTop + (kLineHeight * 1.5F));
+			events.line({.text = "Recent events, newest first:", .color = kHeading});
+			for (const Recent& entry : recent) {
+				events.line({.text = entry.line()});
 			}
 		}
 
 		std::string exportState() const override {
-			const auto pair = [](const glm::vec2& value) {
-				return nlohmann::ordered_json::array({value.x, value.y});
+			const InputSnapshot& input = owner->input().frame();
+			const auto			 pair = [](const glm::vec2& value) {
+				  return nlohmann::ordered_json::array({value.x, value.y});
 			};
 			nlohmann::ordered_json keysDown = nlohmann::ordered_json::array();
 			for (std::size_t index = 1; index < input.keys.size(); ++index) {
@@ -199,33 +222,71 @@ namespace {
 					keysDown.push_back(owner->input().keyName(static_cast<Key>(index)));
 				}
 			}
+			const bool			   leftDown = button(input, MouseButton::Left).down;
 			nlohmann::ordered_json drag = nullptr;
-			if (dragStart) {
+			if (dragStart && leftDown) {
 				drag = {{"start", pair(*dragStart)}, {"delta", pair(input.pointer - *dragStart)}};
+			}
+			nlohmann::ordered_json lines = nlohmann::ordered_json::array();
+			for (const Recent& entry : recent) {
+				lines.push_back(entry.line());
 			}
 			return nlohmann::ordered_json{
 				{"pointer", pair(input.pointer)},
 				{"pointerDelta", pair(input.pointerDelta)},
 				{"buttons",
-				 {{"left", button(input, MouseButton::Left).down},
+				 {{"left", leftDown},
 				  {"right", button(input, MouseButton::Right).down},
 				  {"middle", button(input, MouseButton::Middle).down}}},
 				{"drag", drag},
 				{"scroll", pair(input.scroll)},
 				{"pointerInWindow", input.pointerInWindow},
 				{"keysDown", keysDown},
-				{"recent", recent},
+				{"recent", lines},
 			}
 				.dump();
 		}
 
 	  private:
-		std::string describe(const InputEvent& event) const {
+		void remember(const InputEvent& event) {
+			using Type = InputEvent::Type;
+			// GLFW reports a repeat's character straight after the repeat.
+			const bool repeatsCharacter = repeatCharacterNext && event.type == Type::Char;
+			repeatCharacterNext = event.type == Type::KeyDown && event.repeat;
+			if (repeatsCharacter) {
+				return;
+			}
+			if (repeatCharacterNext) {
+				// The newest line but characters, if it is this key's press, takes the repeat.
+				for (Recent& entry : recent) {
+					if (entry.type == Type::Char) {
+						continue;
+					}
+					if (entry.type == Type::KeyDown && entry.key == event.key) {
+						++entry.repeats;
+						return;
+					}
+					break;
+				}
+			}
+			std::optional<std::string> text = describe(event);
+			if (!text) {
+				return;
+			}
+			recent.push_front({.text = std::move(*text), .type = event.type, .key = event.key, .repeats = event.repeat ? 1 : 0});
+			if (recent.size() > kRecentEvents) {
+				recent.pop_back();
+			}
+		}
+
+		// The list's line for an event. None for a move, which the pointer line shows, or a pad's axis,
+		// which changes nearly every frame while a stick drifts: either would push everything else out.
+		std::optional<std::string> describe(const InputEvent& event) const {
 			using Type = InputEvent::Type;
 			const std::string pad = "pad" + std::to_string(event.device.index);
 			switch (event.type) {
 				case Type::KeyDown:
-					return "keydown " + owner->input().keyName(event.key) + (event.repeat ? " (repeat)" : "");
+					return "keydown " + owner->input().keyName(event.key);
 				case Type::KeyUp:
 					return "keyup " + owner->input().keyName(event.key);
 				case Type::Char:
@@ -247,11 +308,6 @@ namespace {
 					return pad + " button " + std::to_string(static_cast<int>(event.button)) + " down";
 				case Type::ButtonUp:
 					return pad + " button " + std::to_string(static_cast<int>(event.button)) + " up";
-				case Type::Axis: {
-					std::ostringstream line;
-					line << pad << " axis " << static_cast<int>(event.axis) << " " << event.value;
-					return line.str();
-				}
 				case Type::DeviceConnected:
 					return "connect " + pad;
 				case Type::DeviceDisconnected:
@@ -261,22 +317,16 @@ namespace {
 				case Type::FocusGained:
 					return "focus gained";
 				case Type::PointerMove:
-					return "move " + point(event.position);
+				case Type::Axis:
+					return std::nullopt;
 			}
-			return "unknown event";
+			return std::nullopt;
 		}
 
-		static std::string hex(char32_t codepoint) {
-			std::ostringstream digits;
-			digits << std::uppercase << std::hex << static_cast<std::uint32_t>(codepoint);
-			std::string out = digits.str();
-			return std::string(out.size() < 4 ? 4 - out.size() : 0, '0') + out;
-		}
-
-		app::App*				  owner = nullptr;
-		foundation::InputSnapshot input{};
-		std::optional<glm::vec2>  dragStart;
-		std::deque<std::string>	  recent;
+		app::App*				 owner = nullptr;
+		std::optional<glm::vec2> dragStart;
+		std::deque<Recent>		 recent;
+		bool					 repeatCharacterNext = false; // the last event was a key repeat
 	};
 
 } // namespace
