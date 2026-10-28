@@ -54,6 +54,7 @@ Not in phase 2:
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
 | salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
 | salal `libs/app/DevServer`, `libs/renderer/PngEncoder` | phase 2 PR 4: the dev server behind its flags, its registrations, the input grammar, and the PNG encoder; tests not counted | 1,914 |
+| salal `libs/app/settings`, `saves`, `storage` | phase 2 PR 5: the settings file and `ActionMap` bindings through it, saves, the per-user directories, control names, and the safe write the settings and saves share; tests not counted | 1,853 |
 | salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1, axis edges PR 3) | 768 |
 
 What changed since app-carve-out.md's survey, and matters here:
@@ -133,6 +134,9 @@ public:
 	virtual bool closeRequested() const = 0;
 	virtual void present() = 0;
 	virtual void setVsync(bool) = 0;
+	virtual void setFullscreen(std::optional<int> monitor) = 0; // the window system's monitor order; windowed, logged, for one that isn't there
+	virtual std::optional<int> fullscreenMonitor() const = 0;
+	virtual void setWindowSize(int width, int height) = 0;      // the windowed size: now while windowed, where fullscreen returns to otherwise
 	virtual std::optional<std::string> keyLabel(foundation::Key) const = 0; // the layout's label on a key that prints; glfwGetKeyName
 	virtual std::string clipboardText() const = 0;
 	virtual void setClipboardText(const std::string&) = 0;
@@ -149,6 +153,8 @@ public:
 	void disconnectGamepad(std::uint8_t index);
 	void setGamepad(std::uint8_t index, const GamepadSample&);
 	void setKeyLabel(foundation::Key, std::string);
+	void addMonitor(int width, int height);            // what setFullscreen takes; the window resizes at once, its event in the next poll
+	bool vsync() const;
 };
 struct GamepadSample { std::array<bool, 15> buttons{}; std::array<float, 6> axes{}; }; // one poll of a pad, triggers 0 to 1
 
@@ -168,14 +174,18 @@ struct FrameConfig {
 };
 
 struct AppConfig {
-	std::string organization, applicationName; // the per-user settings directory
+	std::string organization, applicationName; // name the per-user directories
 	FrameConfig frame;
 	Renderer::backend::ShaderSource baseShader;  // the game's base shader with its hooks (salal_base_shader)
 	std::span<const Renderer::FontAtlasSource> fontAtlases; // empty: no text, logged once, not a failure
 	Renderer::FontFamily defaultFont = Renderer::FontFamily::Default;
 	Foundation::Color clearColor{0.1F, 0.1F, 0.15F, 1.0F}; // through Primitives::clear; the glClear in worldsim's loop goes
 	std::vector<std::filesystem::path> resourceRoots;      // searched before the exe directory and cwd
-	std::filesystem::path settingsFile;                     // under the per-user directory; empty for none
+	std::filesystem::path settingsFile;                     // relative: under userConfigDir(organization, applicationName); empty for none
+	int settingsVersion = 1;                                // the game's settings format, saved as the file's "version"
+	Settings::Migrate migrateSettings;                      // brings an older file up to settingsVersion
+	std::filesystem::path savesDirectory;                   // relative: under userDataDir(organization, applicationName); empty for none
+	SaveFormat saveFormat;                                  // the game's save version and its upgrade steps
 	DevServerConfig devServer;                              // enabled, port, request timeout; a no-op where the server isn't compiled in
 	bool metrics = false;
 };
@@ -583,28 +593,83 @@ namespace app {
 class Settings {
 public:
 	using Migrate = std::function<void(nlohmann::json&, int fromVersion)>;
-	static Settings load(const std::filesystem::path&, int version, Migrate = {}); // missing: empty; unreadable: logged, moved aside, empty
+	Settings();                                                                      // in memory, no file
+	static Settings load(const std::filesystem::path&, int version, Migrate = {}); // missing: empty; unreadable or corrupt: logged, moved aside, empty
 	template <typename T> T get(std::string_view path, T fallback) const;           // "video.vsync"
-	template <typename T> void set(std::string_view path, T value);
-	nlohmann::json& section(std::string_view name);                                  // a game-owned subtree
-	bool save();                                                                     // temp file, then rename; unknown keys kept
+	template <typename T> void set(std::string_view path, T value);                 // an empty std::optional sets null
+	bool contains(std::string_view path) const;                                      // null counts
+	nlohmann::json& section(std::string_view path);                                  // a game-owned subtree
+	bool save();                                                                     // temp file, flushed, then renamed; unknown keys kept
+	const std::filesystem::path& file() const;                                       // empty in memory
+	int version() const;                                                             // what save writes
 };
+bool validFileName(std::string_view);                                                // the names userConfigDir, userDataDir and slots take
 std::filesystem::path userConfigDir(std::string_view organization, std::string_view application);
+void writeBindings(const foundation::ActionMap&, nlohmann::json& section);
+void readBindings(const nlohmann::json& section, foundation::ActionMap&);
 }
 ```
 
 - Location: `%APPDATA%\<org>\<app>` on Windows, `~/Library/Application Support/<org>/<app>`
-  on macOS, `$XDG_CONFIG_HOME/<org>/<app>` (else `~/.config/...`) on Linux.
+  on macOS, `$XDG_CONFIG_HOME/<org>/<app>` (else `~/.config/...`) on Linux,
+  read from the environment (an `XDG_` variable that isn't an absolute path is
+  ignored, as the spec says) and made by the first save. `AppConfig::settingsFile`
+  is under it when relative, and used as it is when absolute (tests). Both names
+  have to pass `validFileName` (under saves, below); otherwise there's no
+  directory, logged, and the settings live in memory.
 - Unknown keys survive a save, which is how dual-deck-builder keeps older and
   newer builds compatible; a `version` field plus the game's `Migrate` covers
   the rest. A file newer than the build loads as it is, isn't migrated down,
-  and keeps its version on save.
-- `app` reads its own keys (`video.vsync`, `video.fullscreenMonitor`, the
-  window size) at create and applies changes through `setVsync` and
-  `setFullscreen`; `ActionMap` bindings round-trip through a section.
+  and keeps its version on save. The top-level `version` is the Settings' own,
+  taken out at load and written by `save`; a file without one, or with one that
+  isn't a whole number of 0 or more, reads as version 0. `Migrate` runs once,
+  with the file's version, and the file is at the build's version after it (with
+  no `Migrate`, as it is). The file changes when the game saves, not at load.
+- A file that can't be read, isn't JSON, or is JSON but not an object is moved
+  aside to `<file>.corrupt`, replacing one there, and the settings start empty;
+  so do they when `Migrate` throws or leaves something other than an object.
+- Paths are keys joined by dots; one with an empty key reads and sets nothing,
+  logged, and its section isn't saved. `get` gives the fallback for nothing
+  there or a value of another type, logged: a bool only from a bool, an integer
+  only from an integer in the type's range, a float from any number, a string
+  from a string. `set` makes the objects along its path and replaces, logged,
+  anything on the way that isn't one, so a set is always read back; `section`
+  does the same for the subtree itself.
+- `app` reads its own keys at create, `video.vsync`, `video.fullscreenMonitor`
+  (null for windowed) and the windowed size as `video.windowWidth` and
+  `video.windowHeight`, and applies them through the platform, the monitor
+  before the size; a key that isn't there leaves the window as its
+  `WindowConfig` made it. `setVsync` and `setFullscreen` apply a change and
+  keep it in the settings, the monitor as asked, so one unplugged now is tried
+  again at the next launch; a windowed resize keeps the size. The App never
+  saves the file; the game does, from its settings screen or before shutdown.
   Everything else is the game's.
-- `nlohmann::json` is in `app`'s public API, so `app` links it PUBLIC where
-  the renderer keeps it private.
+- `setFullscreen` goes through three platform calls, `setFullscreen`,
+  `fullscreenMonitor` and `setWindowSize`; the GLFW platform remembers where
+  the window was before it went fullscreen and puts it back there. GLFW resizes
+  the window inside the call on Windows and macOS, outside any poll, so the App
+  takes the platform's new size at once, the coordinate system and `Primitives`
+  with it, and the frame that asked draws at the size GL's viewport already has;
+  scenes and overlays hear of it through `onResize` after the next poll, as of
+  any resize. The GLFW platform's relay keeps a held resize in its place among
+  the events held around it (the latest only), where it used to deliver it first.
+- `ActionMap` bindings round-trip through a section as
+  `{"actions": {"<action>": [{"key": "Space", "scale": 1, "threshold": 0.5, "deadzone": 0}, ...]}, "sticks": [{"x": "LeftX", "y": "LeftY", "radius": 0.2}]}`.
+  A binding names its control under its source (`key`, `mouse`, `button`,
+  `axis`) by foundation's enumerator name, read in any case (`controlName`
+  and `controlNamed`, in `input/ControlNames.h`), since the enum values
+  follow GLFW's order; every field is written, so a change to `Binding`'s
+  defaults doesn't change a saved binding. Reading goes over a map's defaults
+  action by action: an action in the section replaces that action's bindings
+  (`[]` clears it), one that isn't there keeps its default, and what this
+  build can't read is skipped, logged. Writing replaces the map's actions and
+  sticks in the section and keeps the rest, a newer build's actions included.
+  `foundation` stays free of JSON; `ActionMap` gained `actions()`,
+  `bindings(action)`, `stickDeadzones()` and `unbind(action)`, which clears
+  an action and keeps it listed, so a cleared action is written as `[]` and
+  stays cleared over the defaults.
+- `nlohmann::json` is in `app`'s public API, so `app` links it PUBLIC, in
+  every configuration, where the renderer keeps it private.
 
 ## Game state and saves
 
@@ -623,23 +688,50 @@ settings file's safe write and versioning:
 ```cpp
 namespace app {
 struct SaveFormat {
-	int version;                                                     // the game's format version, not salal's
+	int version = 1;                                                 // the game's format version, not salal's; 1 or more
 	std::vector<std::function<bool(std::vector<std::byte>&)>> upgrades; // upgrades[i] takes version i+1 to i+2; the game writes each step
 };
+struct SlotInfo { std::string name; int version = 0; std::uint64_t writes = 0; std::chrono::system_clock::time_point written; bool intact = false; };
+template <typename T, typename E> class Expected; // std::expected's has_value, value, error, operator*, ->, bool and value_or; Unexpected(e) for an error
 class SaveStore {
 public:
 	enum class LoadError { Missing, Corrupt, NewerThanBuild, UpgradeFailed };
-	bool write(std::string_view slot, std::span<const std::byte>);                   // temp file, then rename; the previous save kept as the backup
-	std::expected<std::vector<std::byte>, LoadError> read(std::string_view slot);     // runs every upgrade needed, in order, before returning
-	bool writeJson(std::string_view slot, const nlohmann::json&);                    // the same, for games that save JSON
-	std::expected<nlohmann::json, LoadError> readJson(std::string_view slot);
-	std::vector<SlotInfo> slots() const;                                              // name, version, time written
-	bool restoreBackup(std::string_view slot);
+	SaveStore(std::filesystem::path directory, SaveFormat);                          // the directory is made by the first write
+	bool write(std::string_view slot, std::span<const std::byte>);                   // temp file, flushed, then renamed; the previous save kept as the backup
+	Expected<std::vector<std::byte>, LoadError> read(std::string_view slot);         // runs every upgrade needed, in order, before returning
+	bool writeJson(std::string_view slot, const nlohmann::json&);                    // the same, for games that save JSON, as its text
+	Expected<nlohmann::json, LoadError> readJson(std::string_view slot);
+	std::vector<SlotInfo> slots() const;                                              // by name: version, writes, time written, intact
+	bool restoreBackup(std::string_view slot);                                        // swaps the save and its backup
 	bool remove(std::string_view slot);
 };
 std::filesystem::path userDataDir(std::string_view organization, std::string_view application); // beside, not inside, the settings directory
 }
 ```
+
+The design first wrote `std::expected`, which is C++23; salal is C++20 and
+stays so, with no dependency added, so `read` and `readJson` return
+`app::Expected` (`saves/Expected.h`), the part of `std::expected` they need
+under its member names, and moving to the standard type is a respelling.
+
+A slot is `<slot>.save` in the store's directory, with `<slot>.save.bak` beside
+it. Each file is an envelope, little-endian:
+
+| offset | size | field |
+|---|---|---|
+| 0 | 8 | magic, ASCII `SALALSAV` |
+| 8 | 4 | envelope version, u32, 1 |
+| 12 | 4 | the game's format version, i32, 1 or more |
+| 16 | 8 | write counter, u64, from 1 |
+| 24 | 8 | time written, i64, microseconds since 1970-01-01 UTC |
+| 32 | 8 | payload length n, u64 |
+| 40 | n | the game's bytes |
+| 40+n | 4 | CRC-32 (zlib's) of everything before it |
+
+A later envelope version keeps the first 16 bytes where they are, so an older
+build can still say which version a save is, and reports it `NewerThanBuild`.
+The time is in the envelope rather than taken from the file, whose modification
+time a copy may not keep.
 
 - Each save is an envelope: the game's format version, a write counter, and
   the game's bytes. Bytes rather than JSON, so a game with large binary data
@@ -647,7 +739,46 @@ std::filesystem::path userDataDir(std::string_view organization, std::string_vie
 - On load the store runs the game's upgrade steps from the save's version to
   the build's, in order, once, and keeps the pre-upgrade file as the backup
   until the upgraded save is written. A save newer than the build isn't loaded
-  and isn't touched.
+  and isn't touched. As landed: once every step has succeeded the upgraded save
+  is written back at the build's version, the pre-upgrade file becoming its
+  backup, so the steps don't run on every load (if that write fails the bytes
+  are still returned, logged, and the next read upgrades again). A step that
+  returns false or throws, or a version the format has no step for (past the end
+  of `upgrades`, or an empty function), is `UpgradeFailed`, and every file is
+  as it was.
+- A write copies the save it replaces over the backup, then writes the new save,
+  each through a temp file flushed to the disk and renamed over its target, so
+  at every moment the save is whole, the last good one or the new one, and a
+  temp file a crash left is replaced by the next write. A save damaged some
+  other way (a disk that lost a write: a short file, a bad CRC) is `Corrupt` to
+  `read`, and when it's written over it's copied aside to `<slot>.save.corrupt`
+  instead of over the backup, so it never replaces a good one. A newer build's
+  save is kept as the backup like any other.
+- `restoreBackup` swaps the save and its backup, so a second call undoes it;
+  with no save the backup is renamed into place, and a damaged save is moved
+  aside first. A missing or damaged backup is refused with nothing changed. A
+  backup alone isn't `read` (`Missing`); `slots()` shows its slot, not intact.
+- The write counter goes on from the higher of the save's and the backup's, so
+  it never repeats in a slot, a restore included. Nothing on load chooses by it;
+  it's in `SlotInfo` to tell which of two copies is the later.
+- `slots()` lists every slot with a save or a backup, by name in byte order,
+  from each save's header alone (its CRC is `read`'s to check). `remove` takes
+  the save, the backup, a copy moved aside and any temp file, and is true for a
+  slot that had none.
+- Slot names become file names, so they, and the organization and application
+  names, have to pass `validFileName`: 1 to 64 characters from ASCII letters,
+  digits, space, `-`, `_` and `.`, not starting or ending with a space or a dot,
+  and not a Windows device name (CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9,
+  any case, alone or before a dot). A refused slot is `Missing` to `read` and
+  false everywhere else, logged, and no file is touched.
+- `userDataDir` is `%LOCALAPPDATA%\<org>\<app>` on Windows (saves can be large,
+  and Local doesn't roam), `~/Library/Application Support/<org>/<app> Data` on
+  macOS, which has one root for both, and `$XDG_DATA_HOME/<org>/<app>` (else
+  `~/.local/share/...`) on Linux. `AppConfig::savesDirectory` is under it when
+  relative.
+- A store isn't thread-safe. Two on one directory (two processes, say) don't
+  tear each other's files, since every write is a rename, but don't coordinate:
+  the last write wins, and the counter goes on from what's on disk.
 - Dual-deck-builder built all of this by hand (A/B slots, a recovery copy, a
   `{version, sequence, campaign}` envelope, upgrades from 8 to 12); asteroids
   asks for Continue, profiles, leaderboards and "save migrations". The
