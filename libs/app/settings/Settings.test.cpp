@@ -2,14 +2,18 @@
 // file kept as it is, and what get, set and section do with paths and types the file doesn't match.
 
 #include "settings/Settings.h"
+#include "detail/SafeFile.h"
 #include "tests/TempDir.h"
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace app {
@@ -239,6 +243,104 @@ namespace app {
 			settings.section(path)["x"] = 1;
 		}
 		EXPECT_EQ(settings.get<nlohmann::json>("a", nullptr), nullptr);
+		EXPECT_FALSE(settings.contains("x"));
+
+		// Nothing of it is saved either.
+		const TempDir temp;
+		Settings	  saved = Settings::load(temp / "settings.json", 1);
+		for (const std::string path : {"", ".", "a..b", ".a", "a."}) {
+			saved.set(path, 1);
+			saved.section(path)["x"] = 1;
+		}
+		ASSERT_TRUE(saved.save());
+		EXPECT_EQ(fileJson(temp / "settings.json"), nlohmann::json::parse(R"({"version": 1})"));
+	}
+
+	TEST(SettingsTest, VersionIsTheSettingsOwnAndNoPathStartsWithIt) {
+		const TempDir temp;
+		Settings	  settings = Settings::load(temp / "settings.json", 3);
+		settings.set("version", 9);
+		settings.set("version.minor", 1);
+		settings.section("version")["x"] = 1;
+		settings.set("versions", 2); // only the key itself is reserved
+		EXPECT_FALSE(settings.contains("version"));
+		EXPECT_EQ(settings.get("version", 0), 0);
+		ASSERT_TRUE(settings.save());
+		EXPECT_EQ(fileJson(temp / "settings.json"), nlohmann::json::parse(R"({"version": 3, "versions": 2})"));
+
+		EXPECT_EQ(Settings::load(temp / "other.json", 0).version(), 1);
+		EXPECT_EQ(Settings::load({}, -4).version(), 1);
+	}
+
+	TEST(SettingsTest, ANumberJsonCannotHoldIsRefused) {
+		Settings settings;
+		settings.set("nan", std::numeric_limits<double>::quiet_NaN());
+		settings.set("inf", std::numeric_limits<float>::infinity());
+		settings.set("optional", std::optional<double>(-std::numeric_limits<double>::infinity()));
+		settings.set("fine", 0.5F);
+		settings.set("none", std::optional<double>());
+		EXPECT_FALSE(settings.contains("nan"));
+		EXPECT_FALSE(settings.contains("inf"));
+		EXPECT_FALSE(settings.contains("optional"));
+		EXPECT_EQ(settings.get("fine", 0.0F), 0.5F);
+		EXPECT_TRUE(settings.contains("none"));
+	}
+
+	TEST(SettingsTest, AStringLiteralFallbackReadsAsAString) {
+		Settings settings;
+		settings.set("player.name", "Kevin");
+		static_assert(std::is_same_v<decltype(settings.get("player.name", "anon")), std::string>);
+		EXPECT_EQ(settings.get("player.name", "anon"), "Kevin");
+		EXPECT_EQ(settings.get("player.title", "anon"), "anon");
+		settings.set("player.level", 3);
+		EXPECT_EQ(settings.get("player.level", "none"), "none"); // a number isn't a string
+	}
+
+	TEST(SettingsTest, FindReadsWithoutMakingAnything) {
+		const TempDir temp;
+		writeText(temp / "settings.json", R"({"version": 1, "audio": 7})");
+		Settings settings = Settings::load(temp / "settings.json", 1);
+		EXPECT_EQ(settings.find("input"), nullptr);
+		EXPECT_EQ(settings.find("input.bindings"), nullptr);
+		EXPECT_EQ(settings.find(""), nullptr);
+		ASSERT_NE(settings.find("audio"), nullptr);
+		EXPECT_EQ(*settings.find("audio"), 7);
+		ASSERT_TRUE(settings.save());
+		EXPECT_EQ(fileJson(temp / "settings.json"), nlohmann::json::parse(R"({"version": 1, "audio": 7})"));
+	}
+
+	TEST(SettingsTest, PathsAreObjectKeysSoADottedKeyIsReachedOnlyThroughItsSectionAndArraysArentIndexed) {
+		const TempDir temp;
+		writeText(temp / "settings.json", R"({"version": 1, "a.b": 1, "7": {"8": true}, "list": [10, 20], "a": {"b": 2}})");
+		Settings settings = Settings::load(temp / "settings.json", 1);
+		EXPECT_EQ(settings.get("a.b", 0), 2);		 // the path a, then b
+		EXPECT_EQ(settings.get("7.8", false), true); // numeric keys are keys
+		EXPECT_EQ(settings.get("list.0", 0), 0);	 // an array isn't indexed by path
+		EXPECT_FALSE(settings.contains("list.1"));
+		ASSERT_NE(settings.find("list"), nullptr);
+		EXPECT_EQ((*settings.find("list"))[1], 20);
+		settings.set("7.9", 3);
+		ASSERT_TRUE(settings.save());
+		EXPECT_EQ(
+			fileJson(temp / "settings.json"),
+			nlohmann::json::parse(R"({"version": 1, "a.b": 1, "7": {"8": true, "9": 3}, "list": [10, 20], "a": {"b": 2}})")
+		);
+	}
+
+	TEST(SettingsTest, ACorruptFileThatCannotBeMovedAsideIsNeverSavedOver) {
+		const TempDir temp;
+		const auto	  file = temp / "settings.json";
+		writeText(file, "{ not json");
+		detail::setFaultForTests([](const std::filesystem::path& target) {
+			return target.filename().string().starts_with("settings.json.corrupt");
+		});
+		Settings settings = Settings::load(file, 1);
+		detail::setFaultForTests({});
+		settings.set("video.vsync", false); // this run's
+		EXPECT_EQ(settings.get("video.vsync", true), false);
+		EXPECT_FALSE(settings.save());
+		EXPECT_EQ(readText(file), "{ not json");
+		EXPECT_EQ(filesIn(temp.path()), std::vector<std::string>{"settings.json"});
 	}
 
 	TEST(SettingsTest, SettingsWithNoFileSaveNothing) {

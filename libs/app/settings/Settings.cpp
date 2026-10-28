@@ -12,11 +12,15 @@ namespace app {
 
 	namespace {
 
-		constexpr const char*	   kVersionKey = "version";
+		constexpr std::string_view kVersionKey = "version";
 		constexpr std::string_view kCorruptSuffix = ".corrupt";
 
-		// The path's keys; empty for an empty path or one with an empty key ("a..b", ".a").
+		// The path's keys; empty for an empty path, one with an empty key ("a..b", ".a"), and one starting
+		// with the reserved "version".
 		std::vector<std::string> keysOf(std::string_view path) {
+			if (path == kVersionKey || path.starts_with(std::string(kVersionKey) + ".")) {
+				return {};
+			}
 			std::vector<std::string> keys;
 			while (true) {
 				const std::size_t	   dot = path.find('.');
@@ -34,7 +38,10 @@ namespace app {
 
 		void invalidPath(std::string_view path) {
 			LOG_ERROR(
-				Engine, "Settings: \"%.*s\" isn't a path (keys joined by dots, none empty)", static_cast<int>(path.size()), path.data()
+				Engine,
+				"Settings: \"%.*s\" isn't a path (keys joined by dots, none empty, not starting with \"version\")",
+				static_cast<int>(path.size()),
+				path.data()
 			);
 		}
 
@@ -42,8 +49,13 @@ namespace app {
 
 	Settings Settings::load(const std::filesystem::path& file, int version, Migrate migrate) {
 		Settings settings;
-		settings.path = file;
+		settings.filePath = file;
 		settings.fileVersion = version;
+		if (version < 1) {
+			LOG_ERROR(Engine, "Settings: a version of %d; versions start at 1, so it's 1", version);
+			settings.fileVersion = 1;
+		}
+		version = settings.fileVersion;
 		if (file.empty()) {
 			return settings;
 		}
@@ -51,7 +63,10 @@ namespace app {
 		const std::string name = detail::pathText(file);
 		const auto		  setAside = [&](const char* why) {
 			   LOG_ERROR(Engine, "Settings: %s %s; starting empty", name.c_str(), why);
-			   detail::moveAside(file, kCorruptSuffix);
+			   if (!detail::moveAside(file, kCorruptSuffix)) {
+				   LOG_ERROR(Engine, "Settings: %s stays where it is, and these settings won't be saved over it", name.c_str());
+				   settings.fileKept = true;
+			   }
 			   return settings;
 		};
 
@@ -73,7 +88,7 @@ namespace app {
 		}
 
 		int fromVersion = 0;
-		if (const auto found = values.find(kVersionKey); found != values.end()) {
+		if (const auto found = values.find(std::string(kVersionKey)); found != values.end()) {
 			const std::optional<int> given = detail::fromJson<int>(*found);
 			if (given && *given >= 0) {
 				fromVersion = *given;
@@ -123,20 +138,26 @@ namespace app {
 	}
 
 	bool Settings::save() {
-		if (path.empty()) {
+		if (filePath.empty()) {
 			return true;
 		}
+		if (fileKept) {
+			LOG_ERROR(
+				Engine, "Settings: not saving over %s, the corrupt file that couldn't be moved aside", detail::pathText(filePath).c_str()
+			);
+			return false;
+		}
 		nlohmann::json written = values;
-		written[kVersionKey] = fileVersion;
+		written[std::string(kVersionKey)] = fileVersion;
 		std::string text;
 		try {
 			text = written.dump(1, '\t');
 		} catch (const nlohmann::json::exception& e) {
-			LOG_ERROR(Engine, "Settings: can't write %s: %s", detail::pathText(path).c_str(), e.what());
+			LOG_ERROR(Engine, "Settings: can't write %s: %s", detail::pathText(filePath).c_str(), e.what());
 			return false;
 		}
 		text.push_back('\n');
-		return detail::writeFileSafely(path, std::as_bytes(std::span(text)));
+		return detail::writeFileSafely(filePath, std::as_bytes(std::span(text)));
 	}
 
 	const nlohmann::json* Settings::find(std::string_view path) const {
@@ -184,6 +205,10 @@ namespace app {
 			node = &child;
 		}
 		return &(*node)[keys.back()];
+	}
+
+	void Settings::notFinite(std::string_view path) const {
+		LOG_WARNING(Engine, "Settings: \"%.*s\" set to a number JSON can't hold; refused", static_cast<int>(path.size()), path.data());
 	}
 
 	void Settings::typeMismatch(std::string_view path) const {

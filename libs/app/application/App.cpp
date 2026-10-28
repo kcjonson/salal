@@ -1,6 +1,7 @@
 #include "application/App.h"
 
 #include "detail/Guard.h"
+#include "storage/UserDirectories.h"
 
 #include <primitives/Primitives.h>
 #include <utils/Log.h>

@@ -4,6 +4,7 @@
 // directory. The App never saves the settings itself.
 
 #include "application/App.h"
+#include "storage/UserDirectories.h"
 #include "tests/AppHarness.h"
 #include "tests/ScopedEnv.h"
 #include "tests/TempDir.h"
