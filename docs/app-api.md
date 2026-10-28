@@ -53,7 +53,7 @@ Not in phase 2:
 | worldsim `libs/engine/clipboard` | `ClipboardManager`, implementing `UI::IClipboard` over GLFW | 62 |
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
 | salal `libs/app`, `apps/sandbox` | placeholders: `app::layerDepth()`, a `main` that returns it | |
-| salal `libs/foundation/input/InputTypes.h` | `Key` and `MouseButton` only; no snapshot, accumulator, `ActionMap` or gamepad types yet | 124 |
+| salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1) | 763 |
 
 What changed since app-carve-out.md's survey, and matters here:
 
@@ -281,7 +281,7 @@ enum class Key : std::uint16_t { Unknown, /* GLFW's full token set in GLFW's ord
 enum class MouseButton : std::uint8_t { Left, Right, Middle, Button4, Button5, Button6, Button7, Button8, Count }; // GLFW's button numbers
 enum class GamepadButton : std::uint8_t { A, B, X, Y, LeftBumper, RightBumper, Back, Start, Guide,
 	LeftThumb, RightThumb, DpadUp, DpadRight, DpadDown, DpadLeft, Count }; // GLFW's gamepad layout
-enum class GamepadAxis : std::uint8_t { LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigger, Count };
+enum class GamepadAxis : std::uint8_t { LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigger, Count }; // triggers 0 (released) to 1; the device layer maps GLFW's -1 to 1
 enum class DeviceKind : std::uint8_t { Keyboard, Mouse, Gamepad };
 struct DeviceId { DeviceKind kind = DeviceKind::Keyboard; std::uint8_t index = 0; bool operator==(const DeviceId&) const = default; };
 inline constexpr int kMaxRealGamepads = 16;    // GLFW joystick ids 0 to 15, pads[0..15]
@@ -370,11 +370,11 @@ The rules this carries:
   with `glfwSetJoystickCallback` for hot-plug. GLFW's built-in SDL mapping
   database is used as is. Pads are sampled at the frame rate, since ticks
   within a frame run back to back with nothing between them to sample.
-- Slots live in `app::Input`, not in the snapshot, which is per device;
-  decision D's text says the snapshot carries the slot and is amended in this
-  change. A claimed pad that disconnects keeps its slot, `slotConnected` goes
-  false, and the game decides whether to pause. A pad that connects while a
-  slot is waiting on the same model GUID takes that slot; anything else
+- Slots live in `app::Input`, not in the snapshot, which holds every device's
+  state; decision D's text says the snapshot carries the slot and is amended in
+  this change. A claimed pad that disconnects keeps its slot, `slotConnected`
+  goes false, and the game decides whether to pause. A pad that connects while
+  a slot is waiting on the same model GUID takes that slot; anything else
   arrives unclaimed.
 - Keys are positions, as decision D settled; `keyName` shows the layout's
   label, with a fallback because GLFW names only printable keys.
