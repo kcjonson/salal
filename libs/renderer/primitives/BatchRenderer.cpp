@@ -3,6 +3,7 @@
 
 #include "primitives/BatchRenderer.h"
 #include "CoordinateSystem/CoordinateSystem.h"
+#include "primitives/BoundaryLoops.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -24,6 +25,9 @@ namespace Renderer {
 		}
 
 		constexpr float kTwoPi = 2.0F * std::numbers::pi_v<float>;
+
+		// How far a feather ring's outer edge may run out at a sharp corner, in pixels.
+		constexpr float kFeatherMiterLimit = 4.0F;
 
 		// The stream buffers' first size; the backend grows them as a flush needs.
 		constexpr size_t kInitialVertexBytes = 4096 * sizeof(BatchVertex);
@@ -350,34 +354,25 @@ namespace Renderer {
 		recordGroup(zGroupStart, zIndex, blend);
 	}
 
-	void BatchRenderer::addTriangles( // NOLINT(readability-convert-member-functions-to-static)
-		const Foundation::Vec2*	 inputVertices,
-		const uint16_t*			 inputIndices,
-		size_t					 vertexCount,
-		size_t					 indexCount,
-		const Foundation::Color& color,
-		const Foundation::Color* inputColors,
-		float					 zIndex,
-		Primitives::BlendMode	 blend
-	) { // NOLINT(readability-convert-member-functions-to-static)
+	void BatchRenderer::addTriangles(const TriangleMeshArgs& mesh) {
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
 
-		Foundation::Vec4 uniformColorVec = color.toVec4();
+		Foundation::Vec4 uniformColorVec = mesh.color.toVec4();
 
 		// Default data (not used for tessellated shapes, but required for vertex format)
 		// Use borderPosition=1 (Center) so shader treats these as shapes, not text
 		Foundation::Vec2 zeroVec2(0.0F, 0.0F);
 		Foundation::Vec4 zeroVec4(0.0F, 0.0F, 0.0F, 0.0F);
-		Foundation::Vec4 shapeParams(0.0F, 0.0F, 0.0F, renderMode(1.0F, blend)); // borderPos=1 marks as shape
+		Foundation::Vec4 shapeParams(0.0F, 0.0F, 0.0F, renderMode(1.0F, mesh.blend)); // borderPos=1 marks as shape
 
 		// Add all vertices (positions transformed by currentTransform)
-		for (size_t i = 0; i < vertexCount; ++i) {
+		for (size_t i = 0; i < mesh.vertices.size(); ++i) {
 			// Use per-vertex color if provided, otherwise uniform color
-			Foundation::Vec4 colorVec = (inputColors != nullptr) ? inputColors[i].toVec4() : uniformColorVec;
+			Foundation::Vec4 colorVec = (mesh.colors != nullptr) ? mesh.colors[i].toVec4() : uniformColorVec;
 
 			vertices.push_back({
-				TransformPosition(inputVertices[i], currentTransform, transformClass == TransformClass::kIdentity),
+				TransformPosition(mesh.vertices[i], currentTransform, transformClass == TransformClass::kIdentity),
 				zeroVec2, // texCoord (unused for triangles)
 				colorVec,
 				zeroVec4,		  // data1 (unused)
@@ -387,62 +382,109 @@ namespace Renderer {
 		}
 
 		// Add all indices (offset by baseIndex)
-		for (size_t i = 0; i < indexCount; ++i) {
-			indices.push_back(baseIndex + inputIndices[i]);
+		for (const uint16_t index : mesh.indices) {
+			indices.push_back(baseIndex + index);
 		}
 
 		// Tessellated shapes ignore the bound atlas; tag every vertex invalid.
-		vertexAtlas.insert(vertexAtlas.end(), vertexCount, TextureHandle{});
+		vertexAtlas.insert(vertexAtlas.end(), mesh.vertices.size(), TextureHandle{});
 
-		recordGroup(zGroupStart, zIndex, blend);
+		if (mesh.feather != nullptr && !mesh.feather->empty()) {
+			addFeather(baseIndex, *mesh.feather);
+		}
+
+		recordGroup(zGroupStart, mesh.zIndex, mesh.blend);
+	}
+
+	void BatchRenderer::addFeather(uint32_t meshBase, const BoundaryLoops& loops) {
+		const float pixel = 1.0F / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
+		// The loops keep the mesh on their left; a mirroring transform turns it to the right.
+		const float determinant = (currentTransform[0][0] * currentTransform[1][1]) - (currentTransform[0][1] * currentTransform[1][0]);
+		const float side = determinant < 0.0F ? -1.0F : 1.0F;
+		const auto	outward = [side](const Foundation::Vec2& from, const Foundation::Vec2& to) {
+			 const Foundation::Vec2 direction = to - from;
+			 const float			length = glm::length(direction);
+			 return length > 0.0F ? Foundation::Vec2(direction.y, -direction.x) * (side / length) : Foundation::Vec2(0.0F, 0.0F);
+		};
+
+		// One outer vertex per boundary vertex, the fill's own vertex its inner one.
+		const uint32_t ringBase = static_cast<uint32_t>(vertices.size());
+		for (size_t loop = 0; loop < loops.count(); ++loop) {
+			const uint32_t start = loops.starts[loop];
+			const uint32_t size = loops.starts[loop + 1] - start;
+			for (uint32_t v = 0; v < size; ++v) {
+				const Foundation::Vec2 previous = vertices[meshBase + loops.vertices[start + ((v + size - 1) % size)]].position;
+				const Foundation::Vec2 next = vertices[meshBase + loops.vertices[start + ((v + 1) % size)]].position;
+				BatchVertex			   outer = vertices[meshBase + loops.vertices[start + v]];
+				Foundation::Vec2	   normalIn = outward(previous, outer.position);
+				Foundation::Vec2	   normalOut = outward(outer.position, next);
+				if (normalIn == Foundation::Vec2(0.0F, 0.0F)) {
+					normalIn = normalOut;
+				} else if (normalOut == Foundation::Vec2(0.0F, 0.0F)) {
+					normalOut = normalIn;
+				}
+				// The miter is 1 / cos(half the turn), 2 / |sum|, pixels long; a spike back on
+				// itself has no miter and goes a pixel along its last edge's normal.
+				const Foundation::Vec2 sum = normalIn + normalOut;
+				const float			   sumLength = glm::length(sum);
+				const Foundation::Vec2 offset =
+					sumLength > 1e-6F ? sum * (pixel * std::min(kFeatherMiterLimit, 2.0F / sumLength) / sumLength) : normalOut * pixel;
+				outer.position += offset;
+				outer.color.a = 0.0F;
+				vertices.push_back(outer);
+			}
+		}
+		for (size_t loop = 0; loop < loops.count(); ++loop) {
+			const uint32_t start = loops.starts[loop];
+			const uint32_t size = loops.starts[loop + 1] - start;
+			for (uint32_t v = 0; v < size; ++v) {
+				const uint32_t w = (v + 1) % size;
+				const uint32_t innerA = meshBase + loops.vertices[start + v];
+				const uint32_t innerB = meshBase + loops.vertices[start + w];
+				const uint32_t outerA = ringBase + start + v;
+				const uint32_t outerB = ringBase + start + w;
+				for (const uint32_t corner : {innerA, innerB, outerB, innerA, outerB, outerA}) {
+					indices.push_back(corner);
+				}
+			}
+		}
+		vertexAtlas.insert(vertexAtlas.end(), vertices.size() - ringBase, TextureHandle{});
 	}
 
 	void BatchRenderer::addStroke(
-		std::span<const StrokePiece>	  pieces,
-		std::span<const Foundation::Vec2> triangles,
-		const Foundation::Color&		  color,
-		float							  zIndex,
-		Primitives::BlendMode			  blend
+		std::span<const StrokePiece> pieces,
+		const Foundation::Color&	 color,
+		float						 zIndex,
+		Primitives::BlendMode		 blend
 	) {
 		const uint32_t		   groupStart = static_cast<uint32_t>(indices.size());
 		const Foundation::Vec4 colorVec = color.toVec4();
 		const Foundation::Vec4 noBorder(0.0F, 0.0F, 0.0F, 0.0F);
 		// Border position 1 (center) with a zero border width: a plain filled SDF box.
 		const float mode = renderMode(1.0F, blend);
+		const bool	isIdentity = transformClass == TransformClass::kIdentity;
 		for (const StrokePiece& piece : pieces) {
-			// Box-local x runs along the axis, y along its normal; the quad reaches a
-			// pixel past the box on every side.
+			// Box-local x runs along the axis, y along its normal.
+			const uint32_t		   baseIndex = static_cast<uint32_t>(vertices.size());
 			const Foundation::Vec2 normal(-piece.axis.y, piece.axis.x);
-			const float			   reachX = piece.halfLength + pixelPadding;
-			const float			   reachY = piece.halfWidth + pixelPadding;
-			const Foundation::Vec2 alongX = piece.axis * reachX;
-			const Foundation::Vec2 alongY = normal * reachY;
-			const Foundation::Vec2 corners[4] = {
-				piece.center - alongX - alongY,
-				piece.center + alongX - alongY,
-				piece.center + alongX + alongY,
-				piece.center - alongX + alongY,
-			};
-			const Foundation::Vec2 local[4] = {{-reachX, -reachY}, {reachX, -reachY}, {reachX, reachY}, {-reachX, reachY}};
-			pushQuad(corners, local, colorVec, noBorder, {piece.halfLength, piece.halfWidth, piece.cornerRadius, mode});
-		}
-		// Flat triangles as addTriangles draws them: a zero-size box, so the shape is the
-		// triangle itself.
-		const bool isIdentity = transformClass == TransformClass::kIdentity;
-		for (size_t i = 0; i + 2 < triangles.size(); i += 3) {
-			const uint32_t baseIndex = static_cast<uint32_t>(vertices.size());
-			for (size_t corner = 0; corner < 3; ++corner) {
+			const Foundation::Vec4 shape(piece.halfLength, piece.halfWidth, piece.cornerRadius, mode);
+			for (uint8_t k = 0; k < piece.cornerCount; ++k) {
+				const Foundation::Vec2 local = piece.corners[k] - piece.center;
 				vertices.push_back(
-					{TransformPosition(triangles[i + corner], currentTransform, isIdentity),
-					 Foundation::Vec2(0.0F, 0.0F),
+					{TransformPosition(piece.corners[k], currentTransform, isIdentity),
+					 Foundation::Vec2(glm::dot(local, piece.axis), glm::dot(local, normal)),
 					 colorVec,
 					 noBorder,
-					 Foundation::Vec4(0.0F, 0.0F, 0.0F, mode),
+					 shape,
 					 currentClipBounds}
 				);
-				indices.push_back(baseIndex + static_cast<uint32_t>(corner));
 			}
-			vertexAtlas.insert(vertexAtlas.end(), 3, TextureHandle{});
+			for (uint32_t k = 1; k + 1 < piece.cornerCount; ++k) {
+				indices.push_back(baseIndex);
+				indices.push_back(baseIndex + k);
+				indices.push_back(baseIndex + k + 1);
+			}
+			vertexAtlas.insert(vertexAtlas.end(), piece.cornerCount, TextureHandle{});
 		}
 		recordGroup(groupStart, zIndex, blend);
 	}
@@ -822,6 +864,10 @@ namespace Renderer {
 		currentClipBounds = Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
 	}
 
+	float BatchRenderer::getLocalDevicePixel() const {
+		return 1.0F / (std::max(largestScale, 1e-3F) * (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F));
+	}
+
 	void BatchRenderer::setTransform(const Foundation::Mat4& transform) {
 		currentTransform = transform;
 		// Classify once per transform change (expensive to do per-vertex).
@@ -835,6 +881,10 @@ namespace Renderer {
 		transformTranslation = Foundation::Vec2(transform[3][0], transform[3][1]);
 		const float areaScale = std::sqrt(std::abs((transform[0][0] * transform[1][1]) - (transform[0][1] * transform[1][0])));
 		pixelPadding = 1.0F / std::max(areaScale, 1e-3F);
+		const float squares = (transform[0][0] * transform[0][0]) + (transform[0][1] * transform[0][1]) +
+							  (transform[1][0] * transform[1][0]) + (transform[1][1] * transform[1][1]);
+		const float determinant = areaScale * areaScale;
+		largestScale = std::sqrt(0.5F * (squares + std::sqrt(std::max((squares * squares) - (4.0F * determinant * determinant), 0.0F))));
 		if (!linearIsIdentity || transform[3][2] != 0.0F) {
 			transformClass = TransformClass::kGeneral;
 		} else if (transform[3][0] == 0.0F && transform[3][1] == 0.0F) {

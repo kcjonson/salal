@@ -9,6 +9,7 @@ find_package(Stb REQUIRED)
 add_library(salal_renderer STATIC
     primitives/Primitives.cpp
     primitives/BatchRenderer.cpp
+    primitives/BoundaryLoops.cpp
     primitives/Stroke.cpp
     font/FontRenderer.cpp
     stb_image.cpp

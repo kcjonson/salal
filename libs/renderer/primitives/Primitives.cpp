@@ -6,6 +6,7 @@
 #include "font/FontRenderer.h"
 #include "graphics/ClipTypes.h"
 #include "primitives/BatchRenderer.h"
+#include "primitives/BoundaryLoops.h"
 #include "primitives/Stroke.h"
 #include "resources/RenderTarget.h"
 #include "vector/Tessellator.h"
@@ -63,10 +64,12 @@ namespace Renderer::Primitives {
 	// wrong mesh. A silhouette drawn every frame (under a changing PushTransform)
 	// tessellates once. Bounded by emptying the whole cache when it is full: a
 	// frame's working set of silhouettes is far below the capacity, so it refills
-	// in one frame, and nothing per entry needs tracking.
+	// in one frame, and nothing per entry needs tracking. The mesh's boundary loops,
+	// which the fill's feather runs along, are found with it.
 	struct PolygonCacheEntry {
 		std::vector<Foundation::Vec2> outline;
 		renderer::TessellatedMesh	  mesh;
+		BoundaryLoops				  boundary;
 	};
 	constexpr size_t									   kPolygonCacheCapacity = 1024;
 	static std::unordered_map<uint64_t, PolygonCacheEntry> g_polygonCache;
@@ -366,7 +369,13 @@ namespace Renderer::Primitives {
 			args.end - offset,	 // end, left
 		};
 		static constexpr uint16_t kQuadIndices[6] = {0, 1, 2, 0, 2, 3};
-		g_batchRenderer->addTriangles(quad, kQuadIndices, 4, 6, args.style.color, nullptr, static_cast<float>(args.zIndex), args.blend);
+		g_batchRenderer->addTriangles(
+			{.vertices = quad,
+			 .indices = kQuadIndices,
+			 .color = args.style.color,
+			 .zIndex = static_cast<float>(args.zIndex),
+			 .blend = args.blend}
+		);
 	}
 
 	void drawTriangles(const TrianglesArgs& args) {
@@ -374,15 +383,17 @@ namespace Renderer::Primitives {
 			return;
 		}
 
+		static thread_local BoundaryLoops boundary;
+		const bool						  feathered =
+			args.antiAlias && findBoundaryLoops({args.vertices, args.vertexCount}, {args.indices, args.indexCount}, boundary);
 		g_batchRenderer->addTriangles(
-			args.vertices,
-			args.indices,
-			args.vertexCount,
-			args.indexCount,
-			args.color,
-			args.colors,
-			static_cast<float>(args.zIndex),
-			args.blend
+			{.vertices = {args.vertices, args.vertexCount},
+			 .indices = {args.indices, args.indexCount},
+			 .color = args.color,
+			 .colors = args.colors,
+			 .zIndex = static_cast<float>(args.zIndex),
+			 .blend = args.blend,
+			 .feather = feathered ? &boundary : nullptr}
 		);
 	}
 
@@ -478,26 +489,37 @@ namespace Renderer::Primitives {
 			return hash;
 		}
 
-		// The cached fill for `outline`, tessellating it on a miss. An outline the
-		// tessellator rejects caches an empty mesh, so it is reported once.
-		const renderer::TessellatedMesh& polygonFill(std::span<const Foundation::Vec2> outline) {
+		// The cached fill for `outline`, tessellating it on a miss, its repeated points
+		// dropped first so no zero-area triangle stands between neighbours. An outline the
+		// tessellator rejects caches an empty mesh, so it is reported once; a mesh whose
+		// boundary doesn't chain into loops (an outline touching itself) caches none, said
+		// once, and its fill stays aliased.
+		const PolygonCacheEntry& polygonFill(std::span<const Foundation::Vec2> outline) {
 			const uint64_t hash = hashOutline(outline);
 			const auto	   found = g_polygonCache.find(hash);
 			if (found != g_polygonCache.end() && std::ranges::equal(found->second.outline, outline)) {
-				return found->second.mesh;
+				return found->second;
 			}
 			if (g_polygonCache.size() >= kPolygonCacheCapacity) {
 				g_polygonCache.clear();
 			}
 			PolygonCacheEntry entry;
 			entry.outline.assign(outline.begin(), outline.end());
+			static thread_local std::vector<Foundation::Vec2> distinct;
+			distinctPoints(outline, true, distinct);
 			renderer::Tessellator tessellator;
-			if (!tessellator.Tessellate(renderer::VectorPath(entry.outline), entry.mesh)) {
+			if (!tessellator.Tessellate(renderer::VectorPath(distinct), entry.mesh)) {
 				LOG_WARNING(Renderer, "drawPolygon: could not tessellate a %zu-point outline", outline.size());
 				entry.mesh.clear();
 			}
-			PolygonCacheEntry& stored = g_polygonCache.insert_or_assign(hash, std::move(entry)).first->second;
-			return stored.mesh;
+			if (!findBoundaryLoops(entry.mesh.vertices, entry.mesh.indices, entry.boundary) && !entry.mesh.indices.empty()) {
+				LOG_DEBUG(
+					Renderer,
+					"drawPolygon: a %zu-point outline's fill has no closed boundary, as where it touches itself, so it is drawn aliased",
+					outline.size()
+				);
+			}
+			return g_polygonCache.insert_or_assign(hash, std::move(entry)).first->second;
 		}
 
 	} // namespace
@@ -509,30 +531,27 @@ namespace Renderer::Primitives {
 
 		const float zIndex = static_cast<float>(args.zIndex);
 		if (args.style.fill.a > 0.0F) {
-			const renderer::TessellatedMesh& mesh = polygonFill(args.vertices);
-			if (!mesh.indices.empty()) {
+			const PolygonCacheEntry& fill = polygonFill(args.vertices);
+			if (!fill.mesh.indices.empty()) {
 				g_batchRenderer->addTriangles(
-					mesh.vertices.data(),
-					mesh.indices.data(),
-					mesh.vertices.size(),
-					mesh.indices.size(),
-					args.style.fill,
-					nullptr,
-					zIndex,
-					args.blend
+					{.vertices = fill.mesh.vertices,
+					 .indices = fill.mesh.indices,
+					 .color = args.style.fill,
+					 .zIndex = zIndex,
+					 .blend = args.blend,
+					 .feather = &fill.boundary}
 				);
 			}
 		}
 
 		if (args.style.border.has_value() && args.style.border->width > 0.0F) {
 			const Foundation::LineStyle& border = args.style.border.value();
-			// The fill is not anti-aliased: a pixel is fill or not by its centre. The
-			// border's inner edge runs a pixel inside the outline, so its edge ramp (a pixel
-			// either side) lies over fill and every pixel outside the fill is fully border.
-			static thread_local std::vector<StrokePiece>	  pieces;
-			static thread_local std::vector<Foundation::Vec2> wedges;
-			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces, wedges);
-			g_batchRenderer->addStroke(pieces, wedges, border.color, zIndex, args.blend);
+			// The border's inner edge runs a pixel inside the outline, so its edge ramp (a
+			// pixel either side) lies over the fill, and outside the outline, where the
+			// fill's feather fades, the border is whole.
+			static thread_local std::vector<StrokePiece> pieces;
+			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces);
+			g_batchRenderer->addStroke(pieces, border.color, zIndex, args.blend);
 		}
 	}
 
@@ -541,9 +560,11 @@ namespace Renderer::Primitives {
 			return;
 		}
 		static thread_local std::vector<StrokePiece> pieces;
-		strokePolyline(args, pieces);
+		// Points within a quarter of a device pixel of the line drawn without them go, so a
+		// noisy line's near-repeats don't uncut the joints either side.
+		strokePolyline(args, g_batchRenderer->getLocalPixel(), 0.25F * g_batchRenderer->getLocalDevicePixel(), pieces);
 		if (!pieces.empty()) {
-			g_batchRenderer->addStroke(pieces, {}, args.color, static_cast<float>(args.zIndex), args.blend);
+			g_batchRenderer->addStroke(pieces, args.color, static_cast<float>(args.zIndex), args.blend);
 		}
 	}
 

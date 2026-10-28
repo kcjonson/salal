@@ -1,35 +1,60 @@
 #pragma once
 
-// Stroke geometry for drawPolyline and a polygon's border: the boxes a stroked
-// polyline is drawn with, and an outline pushed outward. Plain math, no GL; the
-// batch draws each piece as one anti-aliased SDF quad.
+// Stroke geometry for drawPolyline and a polygon's border: the convex pieces a
+// stroke is drawn with, and an outline pushed outward. Plain math, no GL; the
+// batch draws each piece as its polygon, shaded by its SDF.
 
 #include "math/Types.h"
 #include "primitives/Primitives.h"
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <span>
 #include <vector>
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
-	// One quad of a stroke: a box 2 halfLength long and 2 halfWidth wide around
+	// One piece of a stroke: the convex polygon it owns, corners[0, cornerCount) in
+	// order with positive winding (cross products of consecutive edges >= 0), and the
+	// SDF it is shaded with there, a box 2 halfLength long and 2 halfWidth wide around
 	// `center`, its length along the unit `axis`, its corners rounded by
-	// `cornerRadius`. A round joint or cap is a disk: all three equal.
+	// `cornerRadius`. A box of zero size is flat: coverage 1 over the whole polygon.
 	struct StrokePiece {
-		Foundation::Vec2 center{0.0F, 0.0F};
-		Foundation::Vec2 axis{1.0F, 0.0F};
-		float			 halfLength = 0.0F;
-		float			 halfWidth = 0.0F;
-		float			 cornerRadius = 0.0F;
+		static constexpr size_t kMaxCorners = 6;
+
+		Foundation::Vec2						  center{0.0F, 0.0F};
+		Foundation::Vec2						  axis{1.0F, 0.0F};
+		float									  halfLength = 0.0F;
+		float									  halfWidth = 0.0F;
+		float									  cornerRadius = 0.0F;
+		std::array<Foundation::Vec2, kMaxCorners> corners{};
+		uint8_t									  cornerCount = 0;
 	};
 
+	// `points` without consecutive repeats (closer than a ten-thousandth of a unit), and
+	// when `closed` without a last point that repeats the first: what a stroke and a
+	// polygon's fill are laid out from.
+	void distinctPoints(std::span<const Foundation::Vec2> points, bool closed, std::vector<Foundation::Vec2>& out);
+
 	// The pieces that stroke `args.points` at `args.width` with its cap, join and
-	// closed flag (its colour, id, z and blend are the caller's). Segments are
-	// butt-ended boxes, extended by half the width for a square cap or to the miter
-	// point at a mitered joint; every joint and round cap adds a disk, which also
-	// covers the seam where two butt ends meet. Points closer than a ten-thousandth
-	// of a unit to the one before are dropped; fewer than two points draw nothing,
-	// and a closed line with only two left is the open segment between them, capped.
-	void strokePolyline(const Primitives::PolylineArgs& args, std::vector<StrokePiece>& out);
+	// closed flag (its colour, id, z and blend are the caller's), `pixel` units to a
+	// pixel. Each segment's piece runs between its joints' bisectors: two neighbours
+	// share the cut's two end points as the same floats, so the rasteriser gives each
+	// pixel on it to one of them, and every pixel of the stroke belongs to one piece.
+	// Each piece reaches a pixel past its SDF, so the edge ramp fits: a capsule for a
+	// round joint or cap, a box run on past the miter point for a miter, a box for a
+	// butt or square cap. A segment whose ends differ (a round joint beside a butt cap)
+	// is two pieces, cut across it midway between its ends' cuts. A segment too short
+	// for its joints' cuts leaves both joints uncut, as does a joint within about 8.6
+	// degrees of a hairpin: there the pieces end straight at their SDF's reach and
+	// overlap. Points closer than a ten-thousandth of a unit to the one before are
+	// dropped, and so are interior points within `tolerance` of the segment that
+	// replaces them, which keeps input noise from leaving segments too short for their
+	// turns; a closed line keeps three points or more, and an open one's end segment
+	// turns no further than moves its cap's corners by the tolerance. Fewer than two
+	// points draw nothing, and a closed line with only two left is
+	// the open segment between them, capped.
+	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out);
 
 	// `outline`, a closed polygon of either winding, with every edge moved
 	// `distance` outward and each vertex at its moved edges' meeting point. A convex
@@ -39,17 +64,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	void offsetOutline(std::span<const Foundation::Vec2> outline, float distance, std::vector<Foundation::Vec2>& out);
 
 	// A polygon's border: a closed stroke along `outline` whose outer edge runs
-	// `width` outside it and whose inner edge runs `inset` inside it, under the
-	// fill's edge, so no background shows between fill and border. Its joints are
-	// mitered up to a right-angle turn and round past it on the outside. At a notch
-	// sharper than a right angle the stroke turns further than that, so `wedges`
-	// gets the flat triangle (three points) that carries it into the notch's corner.
-	void strokeOutline(
-		std::span<const Foundation::Vec2> outline,
-		float							  width,
-		float							  inset,
-		std::vector<StrokePiece>&		  pieces,
-		std::vector<Foundation::Vec2>&	  wedges
-	);
+	// `width` outside it and whose inner edge runs `inset` inside it, under the fill's
+	// edge, so no background shows between fill and border. `inset` is a pixel, which
+	// is also how far its pieces reach past their SDF. Its joints are mitered up to a
+	// right-angle turn and round past it on the outside, and a notch is mitered into
+	// its corner whatever its turn. A notch sharper than a right angle that isn't, its
+	// joint left uncut (strokePolyline) or its centre line folded back over a feature
+	// narrower than the border, gets a flat piece that carries the border into it: the
+	// triangle from its edges' inner corners at the joint to where the border's inner
+	// edges meet, no further from the corner than 4 times half the stroke's width.
+	void strokeOutline(std::span<const Foundation::Vec2> outline, float width, float inset, std::vector<StrokePiece>& pieces);
 
 } // namespace Renderer

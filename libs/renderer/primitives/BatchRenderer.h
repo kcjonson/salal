@@ -28,8 +28,20 @@
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
-	// Forward declaration
 	class CoordinateSystem;
+	struct BoundaryLoops;
+
+	// What addTriangles adds: an indexed mesh, in one colour or a colour per vertex, and
+	// optionally its boundary loops (findBoundaryLoops) for a feather ring.
+	struct TriangleMeshArgs {
+		std::span<const Foundation::Vec2> vertices;
+		std::span<const uint16_t>		  indices;
+		Foundation::Color				  color;			// Every vertex's, without `colors`
+		const Foundation::Color*		  colors = nullptr; // One per vertex
+		float							  zIndex = 0.0F;
+		Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha;
+		const BoundaryLoops*			  feather = nullptr;
+	};
 
 	// BatchVertex, the batch's vertex, is in backend/Backend.h: the backend uploads it.
 	//
@@ -123,28 +135,21 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
 		);
 
-		// Add raw triangles (for circles, polygons, etc.)
-		// If inputColors is provided, uses per-vertex colors; otherwise uses uniform color
-		void addTriangles(
-			const Foundation::Vec2*	 inputVertices,
-			const uint16_t*			 inputIndices,
-			size_t					 vertexCount,
-			size_t					 indexCount,
-			const Foundation::Color& color,
-			const Foundation::Color* inputColors = nullptr,
-			float					 zIndex = 0.0F,
-			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha
-		);
+		// Add an indexed triangle mesh as one draw group (drawTriangles, drawLine, a
+		// polygon's fill). With `mesh.feather`, a ring one device pixel wide runs outside
+		// each loop in the same group, each boundary vertex's colour fading to alpha 0
+		// across it, a linear coverage ramp. Its outer edge sits on the miter of the
+		// vertex's two edges, at most 4 pixels out, outward through any transform,
+		// mirrored or not.
+		void addTriangles(const TriangleMeshArgs& mesh);
 
 		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
-		// an SDF box quad padded by a pixel so its edge ramp is not cut off, and its flat
-		// `triangles`, three points each (strokeOutline's wedges).
+		// its polygon as a fan, shaded by its SDF box.
 		void addStroke(
-			std::span<const StrokePiece>	  pieces,
-			std::span<const Foundation::Vec2> triangles,
-			const Foundation::Color&		  color,
-			float							  zIndex = 0.0F,
-			Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha
+			std::span<const StrokePiece> pieces,
+			const Foundation::Color&	 color,
+			float						 zIndex = 0.0F,
+			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
 		);
 
 		// Add a ring, arc or pie as one SDF quad (see Primitives::ArcArgs).
@@ -243,6 +248,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Local units per logical pixel under the current transform.
 		float getLocalPixel() const { return pixelPadding; }
 
+		// The local length that spans at most a device pixel in any direction under the
+		// current transform (which stretches most along its largest singular value) and the
+		// coordinate system's pixel ratio.
+		float getLocalDevicePixel() const;
+
 		// Rendering statistics structure
 		struct RenderStats {
 			uint32_t drawCalls = 0;
@@ -328,6 +338,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Record the index range [groupStart, current end) as one draw group.
 		void recordGroup(uint32_t groupStart, float zIndex, Primitives::BlendMode blend);
 
+		// addTriangles' feather ring along `loops`, whose indices count from `meshBase`,
+		// the mesh's first vertex in the batch.
+		void addFeather(uint32_t meshBase, const BoundaryLoops& loops);
+
 		// Append the four corners of a quad, TL, TR, BR, BL, positions through the
 		// current transform, and its two triangles, all tagged with `texture`.
 		void pushQuad(
@@ -387,6 +401,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Local units per logical pixel under currentTransform (the inverse of its
 		// area scale), the padding SDF quads get so their edge ramp fits.
 		float pixelPadding = 1.0F;
+
+		// currentTransform's largest singular value: how far it stretches a unit at most.
+		float largestScale = 1.0F;
 
 		// Caches addTextQuad's run-origin snap: every glyph of a text run shares the
 		// same {pixelRatio, translation, runOrigin}, so the delta is computed once per

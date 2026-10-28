@@ -13,9 +13,12 @@
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <glm/geometric.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -198,6 +201,337 @@ namespace Renderer {
 		expectNear(pixel(6, 16), {0, 0, 255, 255});
 		expectNear(pixel(5, 5), {0, 0, 255, 255}); // the mitered corner
 		expectNear(pixel(2, 16), {0, 0, 0, 0});	   // past the border
+	}
+
+	TEST_F(PrimitivesDrawTest, TranslucentAndAdditiveStrokesCoverEachPixelOnce) {
+		// Each stroke alone over transparent, at alpha 0.5: one cover stores 128 in alpha
+		// (or, additive, in the colour), two would store 191. `inside` is a pixel well
+		// within the stroke.
+		struct Case {
+			const char*					  name;
+			std::vector<Foundation::Vec2> points;
+			float						  width;
+			Primitives::LineCap			  cap;
+			Primitives::LineJoin		  join;
+			bool						  closed;
+			std::array<int, 2>			  inside;
+		};
+		const std::vector<Foundation::Vec2> elbow = {{4.0F, 6.0F}, {26.0F, 6.0F}, {26.0F, 28.0F}};
+		const std::vector<Foundation::Vec2> zigzag = {{3.0F, 26.0F}, {10.0F, 8.0F}, {17.0F, 26.0F}, {24.0F, 8.0F}, {30.0F, 26.0F}};
+		const std::vector<Foundation::Vec2> square = {{6.0F, 6.0F}, {26.0F, 6.0F}, {26.0F, 26.0F}, {6.0F, 26.0F}};
+		const std::vector<Foundation::Vec2> triangle = {{4.0F, 27.0F}, {16.0F, 4.0F}, {28.0F, 27.0F}};
+		const std::vector<Case>				cases = {
+			{"round elbow, butt caps", elbow, 6.0F, Primitives::LineCap::Butt, Primitives::LineJoin::Round, false, {15, 6}},
+			{"mitered elbow, square caps", elbow, 6.0F, Primitives::LineCap::Square, Primitives::LineJoin::Miter, false, {26, 15}},
+			{"round zigzag, round caps", zigzag, 4.0F, Primitives::LineCap::Round, Primitives::LineJoin::Round, false, {13, 16}},
+			{"mitered closed square", square, 4.0F, Primitives::LineCap::Butt, Primitives::LineJoin::Miter, true, {16, 6}},
+			{"round closed triangle", triangle, 5.0F, Primitives::LineCap::Butt, Primitives::LineJoin::Round, true, {15, 27}},
+		};
+		for (const Primitives::BlendMode blend : {Primitives::BlendMode::Alpha, Primitives::BlendMode::Additive}) {
+			const int channel = blend == Primitives::BlendMode::Alpha ? 3 : 1;
+			for (const Case& stroke : cases) {
+				render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+					Primitives::drawPolyline(
+						{.points = stroke.points,
+						 .width = stroke.width,
+						 .color = {0.0F, 1.0F, 0.0F, 0.5F},
+						 .cap = stroke.cap,
+						 .join = stroke.join,
+						 .closed = stroke.closed,
+						 .blend = blend}
+					);
+				});
+				int most = 0;
+				for (int y = 0; y < kSize; ++y) {
+					for (int x = 0; x < kSize; ++x) {
+						most = std::max(most, pixel(x, y)[channel]);
+					}
+				}
+				EXPECT_LE(most, 129) << stroke.name << (channel == 3 ? ", alpha" : ", additive");
+				EXPECT_NEAR(pixel(stroke.inside[0], stroke.inside[1])[channel], 128, 1) << stroke.name;
+			}
+		}
+
+		// A border-only polygon at alpha 0.5, its 53-degree notch mitered into the corner.
+		const std::array<Foundation::Vec2, 7> notched = {
+			{{6.0F, 6.0F}, {12.0F, 6.0F}, {16.0F, 14.0F}, {20.0F, 6.0F}, {26.0F, 6.0F}, {26.0F, 26.0F}, {6.0F, 26.0F}}
+		};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			Primitives::drawPolygon(
+				{.vertices = notched,
+				 .style = {
+					 .fill = Foundation::Color::transparent(),
+					 .border = Foundation::LineStyle{.color = {1.0F, 1.0F, 1.0F, 0.5F}, .width = 3.0F}
+				 }}
+			);
+		});
+		int most = 0;
+		for (int y = 0; y < kSize; ++y) {
+			for (int x = 0; x < kSize; ++x) {
+				most = std::max(most, pixel(x, y)[3]);
+			}
+		}
+		EXPECT_LE(most, 129);
+		EXPECT_NEAR(pixel(4, 16)[3], 128, 1);
+	}
+
+	TEST_F(PrimitivesDrawTest, AMiteredJointDrawsNoSeamAcrossTheStroke) {
+		// Opaque white over black: every pixel whose centre is a pixel and a half inside the
+		// stroke is whole. A cut miter's box once ended inside its piece at a gentle turn,
+		// and its end face's ramp drew a darker column across the stroke at the joint.
+		const auto expectWhole = [&](const char* name, const auto& inside) {
+			for (int y = 0; y < kSize; ++y) {
+				for (int x = 0; x < kSize; ++x) {
+					if (inside(static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F)) {
+						EXPECT_GE(pixel(x, y)[0], 254) << name << " at " << x << ", " << y;
+					}
+				}
+			}
+		};
+		const auto mitered = [](const std::vector<Foundation::Vec2>& points, float width) {
+			Primitives::drawPolyline(
+				{.points = points, .width = width, .color = Foundation::Color::white(), .join = Primitives::LineJoin::Miter}
+			);
+		};
+
+		// Straight through a joint on a pixel's centre, then on a pixel's edge, width 10: drawPolyline
+		// drops a point that straight, so a 3-degree turn keeps its joint.
+		for (const float joint : {16.5F, 16.0F}) {
+			const std::vector<Foundation::Vec2> line = {{2.0F, 16.5F}, {joint, 16.5F}, {30.0F, 16.5F}};
+			render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { mitered(line, 10.0F); });
+			expectWhole("straight", [](float x, float y) { return x > 3.5F && x < 28.5F && std::abs(y - 16.5F) < 3.5F; });
+		}
+
+		const float							slight = 3.0F * std::numbers::pi_v<float> / 180.0F;
+		const std::vector<Foundation::Vec2> nearlyStraight = {
+			{2.0F, 16.5F}, {16.5F, 16.5F}, Foundation::Vec2(16.5F, 16.5F) + (Foundation::Vec2(std::cos(slight), std::sin(slight)) * 13.5F)
+		};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { mitered(nearlyStraight, 10.0F); });
+		expectWhole("3 degrees", [&](float x, float y) {
+			const Foundation::Vec2 p = Foundation::Vec2(x, y) - nearlyStraight[1];
+			const Foundation::Vec2 direction(std::cos(slight), std::sin(slight));
+			const float			   before = x < nearlyStraight[1].x && x > 3.5F ? std::abs(p.y) : 99.0F;
+			const float			   along = glm::dot(p, direction);
+			const float			   after = along > 0.0F && along < 12.0F ? std::abs((direction.x * p.y) - (direction.y * p.x)) : 99.0F;
+			return std::min(before, after) < 3.5F;
+		});
+
+		// A 10-degree turn.
+		const float							turn = 10.0F * std::numbers::pi_v<float> / 180.0F;
+		const Foundation::Vec2				direction(std::cos(turn), std::sin(turn));
+		const std::vector<Foundation::Vec2> bend = {{2.0F, 12.5F}, {16.5F, 12.5F}, Foundation::Vec2(16.5F, 12.5F) + (direction * 14.0F)};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { mitered(bend, 10.0F); });
+		expectWhole("10 degrees", [&](float x, float y) {
+			const Foundation::Vec2 p = Foundation::Vec2(x, y) - bend[1];
+			const float			   before = x < bend[1].x && x > 3.5F ? std::abs(p.y) : 99.0F;
+			const float			   along = glm::dot(p, direction);
+			const float			   after = along > 0.0F && along < 12.5F ? std::abs((direction.x * p.y) - (direction.y * p.x)) : 99.0F;
+			return std::min(before, after) < 3.5F;
+		});
+
+		// A 32-gon's border, 3 wide: mitered at every vertex, its band whole all round.
+		std::vector<Foundation::Vec2> gon;
+		for (int k = 0; k < 32; ++k) {
+			const float angle = static_cast<float>(k) * 2.0F * std::numbers::pi_v<float> / 32.0F;
+			gon.emplace_back(16.0F + (9.0F * std::cos(angle)), 16.0F + (9.0F * std::sin(angle)));
+		}
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+			Primitives::drawPolygon(
+				{.vertices = gon,
+				 .style = {
+					 .fill = Foundation::Color::transparent(),
+					 .border = Foundation::LineStyle{.color = Foundation::Color::white(), .width = 3.0F}
+				 }}
+			);
+		});
+		// The band runs from a pixel inside the outline to 3 outside it, about 8 to 12 from the
+		// centre; a pixel in from both its edges is 9 to 11.
+		expectWhole("32-gon border", [](float x, float y) {
+			const float r = std::hypot(x - 16.0F, y - 16.0F);
+			return r > 9.4F && r < 10.9F;
+		});
+	}
+
+	TEST_F(PrimitivesDrawTest, ABorderFoldedOverASmallBumpDrawsNothingPastItsWidth) {
+		// A 60 x 60 square at (10, 10) with a bump on one edge smaller than its 8-wide border.
+		// The border's centre line folds over the bump; a flat piece once took its tip from
+		// that fold and ran a solid spike some 60 pixels out of the square.
+		constexpr int kLarge = 160;
+		RenderTarget  large = RenderTarget::create(kLarge, kLarge);
+		ASSERT_TRUE(large.isValid());
+		std::vector<Foundation::Vec2> bump = {
+			{0.0F, 0.0F}, {20.0F, 0.0F}, {25.0F, 3.0F}, {27.0F, 4.0F}, {32.0F, 0.0F}, {60.0F, 0.0F}, {60.0F, 60.0F}, {0.0F, 60.0F}
+		};
+		for (Foundation::Vec2& point : bump) {
+			point += Foundation::Vec2(10.0F, 10.0F);
+		}
+		drawInto(large, Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+			Primitives::drawPolygon(
+				{.vertices = bump,
+				 .style = {
+					 .fill = Foundation::Color::transparent(),
+					 .border = Foundation::LineStyle{.color = Foundation::Color::white(), .width = 8.0F}
+				 }}
+			);
+		});
+		std::vector<uint8_t> read(static_cast<size_t>(kLarge) * kLarge * 4, 0);
+		large.readPixels(read);
+		// The border's outer edge is at 78 on the far sides; nothing lit two pixels past it.
+		int outside = 0;
+		for (int y = 0; y < kLarge; ++y) {
+			for (int x = 0; x < kLarge; ++x) {
+				const uint8_t red = read[((static_cast<size_t>(kLarge - 1 - y) * kLarge) + static_cast<size_t>(x)) * 4];
+				if (red > 0 && (x >= 80 || y >= 80)) {
+					++outside;
+				}
+			}
+		}
+		EXPECT_EQ(outside, 0);
+	}
+
+	TEST_F(PrimitivesDrawTest, ASharpNotchsBorderCoversItAllTheWayDown) {
+		// Red fill, white border, over black, into a target of its own: the border's green.
+		constexpr int kLarge = 140;
+		RenderTarget  large = RenderTarget::create(kLarge, kLarge);
+		ASSERT_TRUE(large.isValid());
+		std::vector<uint8_t> read(static_cast<size_t>(kLarge) * kLarge * 4, 0);
+		const auto			 drawBorder = [&](const std::vector<Foundation::Vec2>& outline, float width) {
+			  drawInto(large, Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+				  Primitives::drawPolygon(
+					  {.vertices = outline,
+							   .style = {
+								   .fill = Foundation::Color::red(),
+								   .border = Foundation::LineStyle{.color = Foundation::Color::white(), .width = width}
+					   }}
+				  );
+			  });
+			  large.readPixels(read);
+		};
+		const auto green = [&](int x, int y) {
+			return read[(((static_cast<size_t>(kLarge - 1 - y) * kLarge) + static_cast<size_t>(x)) * 4) + 1];
+		};
+
+		// A slit 30 deep and 4 wide, its axis on the centres of column 32, its bottom at
+		// y 22. It turns 172 degrees, so its joint is left uncut and its centre line runs far
+		// outside it; the flat piece has to reach from there to the slit's bottom. Down the
+		// axis, from inside the fill above the bottom to the mouth, the border is whole.
+		std::vector<Foundation::Vec2> slit = {
+			{0.0F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}, {22.0F, 40.0F}, {20.0F, 10.0F}, {18.0F, 40.0F}, {0.0F, 40.0F}
+		};
+		for (Foundation::Vec2& point : slit) {
+			point += Foundation::Vec2(12.5F, 12.0F);
+		}
+		for (const float width : {4.0F, 8.0F}) {
+			drawBorder(slit, width);
+			for (int y = 16; y < 52; ++y) {
+				EXPECT_GE(green(32, y), 250) << "border " << width << ", y " << y;
+			}
+		}
+
+		// A 24-pointed star, radii 50 and 10, its notches turning 161 degrees, border 6.
+		// Round the notches every pixel outside it by half a pixel to a pixel short of the
+		// border's width is at least half covered; at the tips, which the miter limit cuts
+		// short, at least a quarter, as before the partition.
+		std::vector<Foundation::Vec2> star;
+		for (int k = 0; k < 24; ++k) {
+			const float radius = (k % 2 == 0) ? 50.0F : 10.0F;
+			const float angle = static_cast<float>(k) * 2.0F * std::numbers::pi_v<float> / 24.0F;
+			star.emplace_back(70.0F + (radius * std::cos(angle)), 70.0F + (radius * std::sin(angle)));
+		}
+		drawBorder(star, 6.0F);
+		const auto signedDistance = [&](Foundation::Vec2 p) {
+			float distance = 1e30F;
+			bool  inside = false;
+			for (size_t i = 0, j = star.size() - 1; i < star.size(); j = i++) {
+				const Foundation::Vec2 a = star[j];
+				const Foundation::Vec2 ab = star[i] - a;
+				const float			   t = std::clamp(glm::dot(p - a, ab) / glm::dot(ab, ab), 0.0F, 1.0F);
+				distance = std::min(distance, glm::length(p - (a + (ab * t))));
+				if ((star[i].y > p.y) != (a.y > p.y) && p.x < star[i].x + ((a.x - star[i].x) * (p.y - star[i].y) / (a.y - star[i].y))) {
+					inside = !inside;
+				}
+			}
+			return inside ? -distance : distance;
+		};
+		int band = 0;
+		for (int y = 0; y < kLarge; ++y) {
+			for (int x = 0; x < kLarge; ++x) {
+				const float distance = signedDistance({static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F});
+				if (distance > 0.5F && distance < 5.0F) {
+					++band;
+					const bool nearNotch = std::hypot(static_cast<float>(x) + 0.5F - 70.0F, static_cast<float>(y) + 0.5F - 70.0F) < 40.0F;
+					EXPECT_GE(green(x, y), nearNotch ? 128 : 60) << x << ", " << y;
+				}
+			}
+		}
+		EXPECT_GT(band, 1000);
+	}
+
+	TEST_F(PrimitivesDrawTest, APolygonsFillRampsOverThePixelOutsideItsEdge) {
+		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			Primitives::drawPolygon({.vertices = square, .style = {.fill = Foundation::Color::white()}});
+		});
+		for (int y = 8; y < 24; ++y) {
+			for (int x = 8; x < 24; ++x) {
+				expectNear(pixel(x, y), {255, 255, 255, 255});
+			}
+		}
+		// Half a pixel out, half the ramp; a pixel and a half out, nothing.
+		expectNear(pixel(7, 16), {128, 128, 128, 128}, 2);
+		expectNear(pixel(24, 16), {128, 128, 128, 128}, 2);
+		expectNear(pixel(16, 7), {128, 128, 128, 128}, 2);
+		expectNear(pixel(6, 16), {0, 0, 0, 0});
+		expectNear(pixel(25, 16), {0, 0, 0, 0});
+	}
+
+	TEST_F(PrimitivesDrawTest, TwoOpaquePolygonsSharingAnEdgeShowNoSeam) {
+		// Off the pixel grid, so the shared diagonal crosses pixels anywhere.
+		const std::array<Foundation::Vec2, 3> first = {{{8.3F, 8.2F}, {24.7F, 8.2F}, {8.3F, 24.9F}}};
+		const std::array<Foundation::Vec2, 3> second = {{{24.7F, 8.2F}, {24.7F, 24.9F}, {8.3F, 24.9F}}};
+		const Foundation::Color				  fill(0.4F, 0.6F, 0.8F, 1.0F);
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+			Primitives::drawPolygon({.vertices = first, .style = {.fill = fill}});
+			Primitives::drawPolygon({.vertices = second, .style = {.fill = fill}});
+		});
+		for (int y = 9; y < 24; ++y) {
+			for (int x = 9; x < 24; ++x) {
+				expectNear(pixel(x, y), {102, 153, 204, 255});
+			}
+		}
+	}
+
+	TEST_F(PrimitivesDrawTest, TwoTranslucentPolygonsSharingAnEdgeShowADenserBandAlongIt) {
+		// The feather's trade: at alpha 0.5 over transparent each fill stores 128, and along
+		// the shared diagonal each one's ring lies over the other's fill, up to
+		// 0.5 + 0.5 * 0.5 = 0.75 (191) where the ring starts. Away from it, one cover.
+		const std::array<Foundation::Vec2, 3> first = {{{8.3F, 8.2F}, {24.7F, 8.2F}, {8.3F, 24.9F}}};
+		const std::array<Foundation::Vec2, 3> second = {{{24.7F, 8.2F}, {24.7F, 24.9F}, {8.3F, 24.9F}}};
+		const Foundation::Color				  fill(1.0F, 1.0F, 1.0F, 0.5F);
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			Primitives::drawPolygon({.vertices = first, .style = {.fill = fill}});
+			Primitives::drawPolygon({.vertices = second, .style = {.fill = fill}});
+		});
+		// Signed distance from the shared diagonal, 16.7 x + 16.4 y = 16.7 * 24.7 + 16.4 * 8.2.
+		const auto fromDiagonal = [](int x, int y) {
+			const float cx = static_cast<float>(x) + 0.5F;
+			const float cy = static_cast<float>(y) + 0.5F;
+			return ((16.7F * cx) + (16.4F * cy) - ((16.7F * 24.7F) + (16.4F * 8.2F))) / std::hypot(16.7F, 16.4F);
+		};
+		int denser = 0;
+		for (int y = 10; y < 23; ++y) {
+			for (int x = 10; x < 23; ++x) {
+				const int	alpha = pixel(x, y)[3];
+				const float away = std::abs(fromDiagonal(x, y));
+				EXPECT_LE(alpha, 192) << x << ", " << y;
+				if (away > 1.5F) {
+					EXPECT_NEAR(alpha, 128, 1) << x << ", " << y;
+				} else if (alpha > 140) {
+					++denser;
+				}
+			}
+		}
+		EXPECT_GT(denser, 8);
 	}
 
 	TEST_F(PrimitivesDrawTest, ClearStoresPremultipliedColour) {

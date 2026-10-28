@@ -223,6 +223,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const char*				 id = nullptr;		 // Optional: for inspection/debugging
 			int						 zIndex = 0;		 // Optional: explicit draw order
 			BlendMode				 blend = BlendMode::Alpha;
+			bool					 antiAlias = false; // Optional: feather the mesh's boundary
 		};
 
 		// Draw a rectangle with optional fill and border
@@ -231,7 +232,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Draw a line
 		void drawLine(const LineArgs& args);
 
-		// Draw triangles from a mesh (for vector graphics tessellation)
+		// Draw triangles from a mesh (for vector graphics tessellation). Aliased unless
+		// `antiAlias`: then a ring one device pixel wide runs outside the mesh's
+		// boundary, each boundary vertex's colour fading to transparent across it, as
+		// drawPolygon's fill has. The boundary is found per call from the indices, which
+		// costs, so leave it off for large per-frame batches; a mesh whose boundary
+		// doesn't close into loops, or pinches (one vertex starting two boundary edges),
+		// draws aliased.
 		void drawTriangles(const TrianglesArgs& args);
 
 		// Arguments for DrawCircle
@@ -279,13 +286,20 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Draw a filled polygon, convex or not, self-crossing filled by the nonzero
 		// rule. The outline is tessellated once per distinct vertex list and cached,
-		// so a silhouette drawn every frame under PushTransform costs one
-		// tessellation. The fill is not anti-aliased (as drawTriangles). A border is a
-		// closed stroke with miter joins (strokeOutline) whose outer edge runs its width
-		// outside the outline and whose inner edge runs a pixel inside, so its
-		// anti-aliased edge covers the fill's aliased one and no background shows
-		// between them; a notch sharper than a right angle gets a flat wedge into its
-		// corner.
+		// with its boundary, so a silhouette drawn every frame under PushTransform costs
+		// one tessellation. The fill is anti-aliased by a ring one device pixel wide
+		// outside its boundary, the fill colour fading to transparent across it, so it
+		// covers its area plus about half a pixel along its edge. Two opaque polygons
+		// that share an edge show no seam; two translucent ones show a band about a pixel
+		// wide along it, denser than either, where each one's ring lies over the other's
+		// fill. A fill whose boundary doesn't close into loops, as where the outline
+		// touches itself at a point, is drawn aliased, and a debug log says so once.
+		//
+		// A border is drawPolyline's stroke, closed and mitered (strokeOutline), so its
+		// pieces overlap where drawPolyline's do. Its outer edge runs its width outside the
+		// outline and its inner edge a pixel inside, over the fill's edge, so no background
+		// shows between them. A notch is mitered into its corner, except beside an edge
+		// too short for its cut, where it is round with a flat piece into the corner.
 		void drawPolygon(const PolygonArgs& args);
 
 		// Arguments for DrawPolyline
@@ -301,9 +315,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			BlendMode	blend = BlendMode::Alpha;
 		};
 
-		// Draw a stroked polyline, anti-aliased: one SDF quad per segment, one per
-		// round or mitered joint, one per round cap. The pieces overlap at joints, so
-		// a translucent or additive stroke is brighter or denser there.
+		// Draw a stroked polyline, anti-aliased: a convex SDF piece per segment, cut
+		// along each joint's bisector so neighbouring pieces share the cut and every
+		// pixel belongs to one of them, round joins and caps exact. A translucent or
+		// additive stroke covers each pixel once, except where the line crosses itself,
+		// where a segment is too short for the cuts its sharp joints need, and at a turn
+		// within about 8.6 degrees of a hairpin: there pieces overlap. Points within a
+		// quarter of a device pixel of the line drawn without them are dropped first, so
+		// sub-pixel noise in the input (a hand's jitter, integer mouse samples) leaves no
+		// short segments behind; noise larger than that still can. A closed line keeps
+		// three points or more, and an end segment turns its cap by no more than that.
 		void drawPolyline(const PolylineArgs& args);
 
 		// Arguments for DrawArc. Angles are radians from +x, and a positive sweep turns

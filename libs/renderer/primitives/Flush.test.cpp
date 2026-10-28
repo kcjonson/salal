@@ -9,10 +9,12 @@
 #include "primitives/Primitives.h"
 #include "vector/Types.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -349,6 +351,174 @@ namespace Renderer {
 		std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 4), 9);
 		Primitives::readBackbuffer(pixels, width, height);
 		EXPECT_EQ(pixels[0], 0);
+	}
+
+	namespace {
+
+		const std::array<Foundation::Vec2, 4> kSquare = {{{10.0F, 10.0F}, {30.0F, 10.0F}, {30.0F, 30.0F}, {10.0F, 30.0F}}};
+		const std::array<uint16_t, 6>		  kSquareIndices = {0, 1, 2, 0, 2, 3};
+
+		size_t countAlpha(const std::vector<BatchVertex>& vertices, float alpha) {
+			return static_cast<size_t>(std::ranges::count_if(vertices, [alpha](const BatchVertex& v) { return v.color.a == alpha; }));
+		}
+
+	} // namespace
+
+	TEST_F(FlushTest, APolygonsFillCarriesItsFeatherRingInItsGroup) {
+		Primitives::beginFrame();
+		Primitives::drawPolygon({.vertices = kSquare, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 8U);
+		EXPECT_EQ(countAlpha(uploaded, 0.8F), 4U);
+		EXPECT_EQ(countAlpha(uploaded, 0.0F), 4U);
+		// Every outer vertex a pixel out from both edges at its corner.
+		for (const BatchVertex& vertex : uploaded) {
+			if (vertex.color.a == 0.0F) {
+				const bool onX = std::abs(vertex.position.x - 9.0F) < 1e-5F || std::abs(vertex.position.x - 31.0F) < 1e-5F;
+				const bool onY = std::abs(vertex.position.y - 9.0F) < 1e-5F || std::abs(vertex.position.y - 31.0F) < 1e-5F;
+				EXPECT_TRUE(onX && onY) << vertex.position.x << ", " << vertex.position.y;
+			}
+		}
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U + (4U * 6U));
+
+		// Drawn again, from the cache: the same ring.
+		gpu->clearRecord();
+		Primitives::beginFrame();
+		Primitives::drawPolygon({.vertices = kSquare, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
+		Primitives::drawPolygon({.vertices = kSquare, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(countAlpha(vertices(gpu->draws()[0]), 0.0F), 8U);
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 2U * (6U + (4U * 6U)));
+	}
+
+	TEST_F(FlushTest, APolylineDropsTheSamePointsAtEveryZoomAndNoneFurtherOffThanAQuarterPixel) {
+		// Drawn at 1x and at 2x, a closed three-point line and a line whose second point turns
+		// its butt cap upload the same pieces; under scale(4, 0.25) a point 0.24 units off the
+		// line, 0.96 pixels across the stretch, stays.
+		const auto pieceVertices =
+			[&](const std::vector<Foundation::Vec2>& points, float width, bool closed, const Foundation::Mat4& transform) {
+				gpu->clearRecord();
+				Primitives::beginFrame();
+				Primitives::PushTransform(transform);
+				Primitives::drawPolyline({.points = points, .width = width, .closed = closed});
+				Primitives::PopTransform();
+				Primitives::endFrame();
+				return gpu->draws().empty() ? size_t{0} : vertices(gpu->draws()[0]).size();
+			};
+		const Foundation::Mat4				one(1.0F);
+		const Foundation::Mat4				two = glm::scale(one, Foundation::Vec3(2.0F, 2.0F, 1.0F));
+		const std::vector<Foundation::Vec2> flat = {{10.0F, 10.0F}, {20.0F, 10.2F}, {30.0F, 10.0F}};
+		EXPECT_EQ(pieceVertices(flat, 10.0F, true, one), pieceVertices(flat, 10.0F, true, two));
+		const std::vector<Foundation::Vec2> hooked = {{10.0F, 50.0F}, {11.0F, 50.2F}, {110.0F, 50.2F}};
+		EXPECT_EQ(pieceVertices(hooked, 40.0F, false, one), pieceVertices(hooked, 40.0F, false, two));
+		const std::vector<Foundation::Vec2> bent = {{10.0F, 10.0F}, {10.24F, 20.0F}, {10.0F, 30.0F}};
+		const Foundation::Mat4				stretched = glm::scale(one, Foundation::Vec3(4.0F, 0.25F, 1.0F));
+		const std::vector<Foundation::Vec2> straight = {{10.0F, 10.0F}, {10.0F, 30.0F}};
+		EXPECT_GT(pieceVertices(bent, 2.0F, false, stretched), pieceVertices(straight, 2.0F, false, stretched));
+	}
+
+	TEST_F(FlushTest, AnOutlineThatRepeatsItsFirstPointStillFeathersInEitherWinding) {
+		// Tessellated with the repeat, the fan held a zero-area triangle whose edge ran the
+		// same way as its neighbour's in one winding, and the fill lost its ring.
+		const std::vector<Foundation::Vec2> closed = {{10.0F, 10.0F}, {10.0F, 30.0F}, {30.0F, 30.0F}, {30.0F, 10.0F}, {10.0F, 10.0F}};
+		const std::vector<Foundation::Vec2> reversed(closed.rbegin(), closed.rend());
+		for (const std::vector<Foundation::Vec2>* outline : {&closed, &reversed}) {
+			gpu->clearRecord();
+			Primitives::beginFrame();
+			Primitives::drawPolygon({.vertices = *outline, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
+			Primitives::endFrame();
+			ASSERT_EQ(gpu->draws().size(), 1U);
+			const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+			EXPECT_EQ(countAlpha(uploaded, 0.0F), 4U);
+			EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U + (4U * 6U));
+		}
+	}
+
+	TEST_F(FlushTest, DrawTrianglesIsAliasedUnlessItsAskedToAntiAlias) {
+		Primitives::beginFrame();
+		Primitives::drawTriangles(
+			{.vertices = kSquare.data(),
+			 .indices = kSquareIndices.data(),
+			 .vertexCount = 4,
+			 .indexCount = 6,
+			 .color = Foundation::Color::white()}
+		);
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		// Exactly the mesh: its vertices, its indices, a flat zero-size box.
+		const std::vector<BatchVertex> aliased = vertices(gpu->draws()[0]);
+		ASSERT_EQ(aliased.size(), 4U);
+		for (size_t i = 0; i < 4; ++i) {
+			EXPECT_EQ(aliased[i].position, kSquare[i]);
+			EXPECT_EQ(aliased[i].color, Foundation::Vec4(1.0F));
+			EXPECT_EQ(aliased[i].data2, Foundation::Vec4(0.0F, 0.0F, 0.0F, 1.0F));
+		}
+		EXPECT_EQ(indices(gpu->draws()[0]), (std::vector<uint32_t>{0, 1, 2, 0, 2, 3}));
+
+		gpu->clearRecord();
+		Primitives::beginFrame();
+		Primitives::drawTriangles(
+			{.vertices = kSquare.data(),
+			 .indices = kSquareIndices.data(),
+			 .vertexCount = 4,
+			 .indexCount = 6,
+			 .color = Foundation::Color::white(),
+			 .antiAlias = true}
+		);
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> feathered = vertices(gpu->draws()[0]);
+		ASSERT_EQ(feathered.size(), 8U);
+		EXPECT_EQ(feathered[4].position, Foundation::Vec2(9.0F, 9.0F));
+		EXPECT_EQ(feathered[4].color, Foundation::Vec4(1.0F, 1.0F, 1.0F, 0.0F));
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 30U);
+	}
+
+	TEST_F(FlushTest, AMeshWhoseBoundaryPinchesStaysAliasedWhenAskedToAntiAlias) {
+		const std::array<Foundation::Vec2, 5> bowtie = {{{0.0F, 0.0F}, {10.0F, 0.0F}, {5.0F, 5.0F}, {0.0F, 10.0F}, {10.0F, 10.0F}}};
+		const std::array<uint16_t, 6>		  pinched = {0, 1, 2, 2, 4, 3};
+		Primitives::beginFrame();
+		Primitives::drawTriangles(
+			{.vertices = bowtie.data(),
+			 .indices = pinched.data(),
+			 .vertexCount = 5,
+			 .indexCount = 6,
+			 .color = Foundation::Color::white(),
+			 .antiAlias = true}
+		);
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(vertices(gpu->draws()[0]).size(), 5U);
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U);
+	}
+
+	TEST_F(FlushTest, APolylinesPiecesShareTheirCutsBitForBitThroughTheTransform) {
+		// Under a rotation and scale the cut's two ends, transformed once per piece, land
+		// on the same floats in both pieces.
+		const std::array<Foundation::Vec2, 3> elbow = {{{0.0F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}}};
+		Primitives::beginFrame();
+		Primitives::PushTransform(
+			glm::scale(
+				glm::rotate(glm::translate(Foundation::Mat4(1.0F), {100.3F, 50.7F, 0.0F}), 0.37F, {0.0F, 0.0F, 1.0F}), {1.7F, 1.7F, 1.0F}
+			)
+		);
+		Primitives::drawPolyline({.points = elbow, .width = 9.0F, .color = {1.0F, 1.0F, 1.0F, 0.5F}, .join = Primitives::LineJoin::Miter});
+		Primitives::PopTransform();
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 8U); // two pieces of four corners
+		const auto shared = [&](size_t a, size_t b) {
+			return std::memcmp(&uploaded[a].position, &uploaded[b].position, sizeof(Foundation::Vec2)) == 0;
+		};
+		// The first piece ends outer, inner; the second starts inner, outer.
+		EXPECT_TRUE(shared(0, 7));
+		EXPECT_TRUE(shared(1, 6));
 	}
 
 	// The same through the base shader with the test hook, tests/hooks/offset.vert.glsl.
