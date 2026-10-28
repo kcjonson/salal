@@ -1,7 +1,7 @@
 #pragma once
 
 // What the App runs on: the window and its GL context, the clock, the events the window system
-// reports, gamepads, key labels, and present. createGlfwPlatform makes the native one;
+// reports, gamepads, key labels, the clipboard, and present. createGlfwPlatform makes the native one;
 // HeadlessPlatform runs a frame with no window and no GPU. No window-system or GL type appears here.
 
 #include "input/DeviceInfo.h"
@@ -74,6 +74,10 @@ namespace app {
 		// What the keyboard layout prints on a key, for keys that print something; nullopt for the rest,
 		// and where the window system can't say.
 		virtual std::optional<std::string> keyLabel(foundation::Key key) const = 0;
+
+		// The system clipboard's text; empty when it holds none.
+		virtual std::string clipboardText() const = 0;
+		virtual void		setClipboardText(const std::string& text) = 0;
 	};
 
 	// A window with a GL 3.3 core context current on the calling thread; null, logged, when the window

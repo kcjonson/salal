@@ -8,6 +8,7 @@
 // One App at a time: the renderer's Primitives are module-static, and the App starts and stops them.
 
 #include "application/AppConfig.h"
+#include "clipboard/Clipboard.h"
 #include "detail/TypeKey.h"
 #include "input/Input.h"
 #include "platform/Platform.h"
@@ -93,6 +94,7 @@ namespace app {
 		}
 
 		Input&						input();
+		Clipboard&					clipboard();
 		const Clock&				clock() const;
 		const Renderer::Viewport&	viewport() const;
 		Renderer::CoordinateSystem& coordinateSystem();
@@ -149,6 +151,7 @@ namespace app {
 		std::unique_ptr<Renderer::FontRenderer>		fontRenderer;
 		std::unique_ptr<Renderer::MetricsCollector> metricsCollector;
 		Input										inputState{*platform};
+		Clipboard									clipboardState{*platform};
 		SceneStack									sceneStack{*this};
 		std::vector<std::unique_ptr<Overlay>>		overlays;
 		std::vector<std::unique_ptr<Overlay>>		joiningOverlays;

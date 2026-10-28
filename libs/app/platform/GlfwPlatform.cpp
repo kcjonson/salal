@@ -1,5 +1,5 @@
 // The native platform over GLFW: one window with a GL 3.3 core context, its framebuffer size, focus
-// and close, the keyboard, the mouse and gamepads, key labels, and present with vsync.
+// and close, the keyboard, the mouse and gamepads, key labels, the clipboard, and present with vsync.
 // GLFW and GL stay in this file and in GlfwInput.cpp, which turns GLFW's values into events.
 
 #include "platform/Gamepads.h"
@@ -188,6 +188,13 @@ namespace app {
 				}
 				return std::string(label);
 			}
+
+			std::string clipboardText() const override {
+				const char* text = glfwGetClipboardString(window);
+				return text == nullptr ? std::string() : std::string(text);
+			}
+
+			void setClipboardText(const std::string& text) override { glfwSetClipboardString(window, text.c_str()); }
 
 		  private:
 			static GlfwPlatform& from(GLFWwindow* window) { return *static_cast<GlfwPlatform*>(glfwGetWindowUserPointer(window)); }

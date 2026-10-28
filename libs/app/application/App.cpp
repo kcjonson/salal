@@ -599,6 +599,10 @@ namespace app {
 		return inputState;
 	}
 
+	Clipboard& App::clipboard() {
+		return clipboardState;
+	}
+
 	const Clock& App::clock() const {
 		return platform->clock();
 	}

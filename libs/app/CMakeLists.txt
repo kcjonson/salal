@@ -5,6 +5,7 @@ find_package(glfw3 CONFIG REQUIRED)
 add_library(salal_app STATIC
     application/App.cpp
     application/CommandLine.cpp
+    clipboard/Clipboard.cpp
     input/Input.cpp
     platform/Gamepads.cpp
     platform/GlfwInput.cpp

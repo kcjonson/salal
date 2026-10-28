@@ -27,7 +27,7 @@ namespace app {
 	}
 
 	// The layout labels the keys that print, whatever the layout; Escape prints nothing, and Unknown
-	// has no GLFW code to ask about.
+	// has no GLFW code to ask about. The clipboard isn't tried here: it's the user's.
 	TEST(GlfwPlatformTest, KeyLabelsAreForKeysThatPrint) {
 		std::unique_ptr<Platform> platform = createGlfwPlatform({.title = "salal key label test", .sizePercent = 0.1F, .vsync = false});
 		if (platform == nullptr) {

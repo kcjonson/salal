@@ -73,6 +73,8 @@ namespace app::testing {
 			}
 			void					   setVsync(bool enabled) override { vsync = enabled; }
 			std::optional<std::string> keyLabel(foundation::Key /*key*/) const override { return std::nullopt; }
+			std::string				   clipboardText() const override { return {}; }
+			void					   setClipboardText(const std::string& /*text*/) override {}
 
 			ManualClock time;
 			bool		closeOnNextPoll = false;

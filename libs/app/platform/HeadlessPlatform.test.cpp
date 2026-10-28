@@ -153,4 +153,11 @@ namespace app {
 		EXPECT_EQ(platform.keyLabel(foundation::Key::W), std::nullopt);
 	}
 
+	TEST(HeadlessPlatformTest, TheClipboardIsAString) {
+		HeadlessPlatform platform(640, 480);
+		EXPECT_EQ(platform.clipboardText(), "");
+		platform.setClipboardText("copied text");
+		EXPECT_EQ(platform.clipboardText(), "copied text");
+	}
+
 } // namespace app

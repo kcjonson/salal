@@ -4,7 +4,7 @@
 // ManualClock, and what a window system would report is queued by hand and arrives in the next
 // poll, in the order it was queued, as a callback would. Gamepads are polled as GLFW's are: each
 // connected pad's state is sampled once per poll, after the queue, and diffed into events by the
-// same GamepadTracker the GLFW platform runs.
+// same GamepadTracker the GLFW platform runs. The clipboard is a string.
 
 #include "input/DeviceInfo.h"
 #include "platform/Clock.h"
@@ -54,6 +54,8 @@ namespace app {
 		void										present() override {}
 		void										setVsync(bool /*enabled*/) override {}
 		std::optional<std::string>					keyLabel(foundation::Key key) const override;
+		std::string									clipboardText() const override { return clipboard; }
+		void										setClipboardText(const std::string& text) override { clipboard = text; }
 
 	  private:
 		struct Queued {
@@ -72,6 +74,7 @@ namespace app {
 		GamepadTracker											gamepads;
 		std::array<GamepadSample, foundation::kMaxRealGamepads> padStates{};
 		std::map<foundation::Key, std::string>					keyLabels;
+		std::string												clipboard;
 	};
 
 } // namespace app
