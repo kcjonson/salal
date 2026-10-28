@@ -1,6 +1,9 @@
 // The native platform over GLFW: one window with a GL 3.3 core context, its framebuffer size, focus
-// and close, and present with vsync. GLFW and GL stay in this file.
+// and close, the keyboard, the mouse and gamepads, key labels, and present with vsync.
+// GLFW and GL stay in this file and in GlfwInput.cpp, which turns GLFW's values into events.
 
+#include "platform/Gamepads.h"
+#include "platform/GlfwInput.h"
 #include "platform/Platform.h"
 
 #include <backend/gl/GLBackend.h>
@@ -9,16 +12,21 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
+#include <cstdint>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace app {
 
 	namespace {
 
-		// GLFW is process-wide: a second platform's glfwTerminate would take the first one's window with it.
-		bool g_glfwPlatformAlive = false; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+		class GlfwPlatform;
+
+		// GLFW is process-wide: a second platform's glfwTerminate would take the first one's window with
+		// it, and the joystick callback has no window to find the platform through.
+		GlfwPlatform* g_glfwPlatform = nullptr; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 		class GlfwClock final : public Clock {
 		  public:
@@ -36,21 +44,101 @@ namespace app {
 			return viewport;
 		}
 
+		// Passes what the callbacks report to the poll's listener. What arrives outside a poll (the pads
+		// found at startup, a resize or focus change from a window call) is held, in order, and goes to
+		// the next poll's listener before anything new; a held resize goes first, the latest only.
+		class EventRelay final : public PlatformEvents {
+		  public:
+			void attach(PlatformEvents& events) {
+				listener = &events;
+				if (heldResize) {
+					events.framebufferResized(*std::exchange(heldResize, std::nullopt));
+				}
+				for (const Held& item : std::exchange(held, {})) {
+					std::visit([&](const auto& reported) { deliver(events, reported); }, item);
+				}
+			}
+			void detach() { listener = nullptr; }
+
+			void inputEvent(const foundation::InputEvent& event) override { relay(event); }
+			void deviceConnected(const DeviceInfo& device, double time) override { relay(Connected{.device = device, .time = time}); }
+			void deviceDisconnected(foundation::DeviceId device, double time) override {
+				relay(Disconnected{.device = device, .time = time});
+			}
+			void framebufferResized(const Renderer::Viewport& viewport) override {
+				if (listener != nullptr) {
+					listener->framebufferResized(viewport);
+				} else {
+					heldResize = viewport;
+				}
+			}
+
+		  private:
+			struct Connected {
+				DeviceInfo device;
+				double	   time = 0.0;
+			};
+			struct Disconnected {
+				foundation::DeviceId device;
+				double				 time = 0.0;
+			};
+			using Held = std::variant<foundation::InputEvent, Connected, Disconnected>;
+
+			static void deliver(PlatformEvents& events, const foundation::InputEvent& event) { events.inputEvent(event); }
+			static void deliver(PlatformEvents& events, const Connected& connected) {
+				events.deviceConnected(connected.device, connected.time);
+			}
+			static void deliver(PlatformEvents& events, const Disconnected& disconnected) {
+				events.deviceDisconnected(disconnected.device, disconnected.time);
+			}
+
+			template <typename Reported>
+			void relay(const Reported& reported) {
+				if (listener != nullptr) {
+					deliver(*listener, reported);
+				} else {
+					held.emplace_back(reported);
+				}
+			}
+
+			PlatformEvents*					  listener = nullptr;
+			std::optional<Renderer::Viewport> heldResize;
+			std::vector<Held>				  held;
+		};
+
 		class GlfwPlatform final : public Platform {
 		  public:
 			explicit GlfwPlatform(GLFWwindow* glfwWindow)
 				: window(glfwWindow),
 				  hasFocus(glfwGetWindowAttrib(glfwWindow, GLFW_FOCUSED) == GLFW_TRUE) {
+				g_glfwPlatform = this;
 				glfwSetWindowUserPointer(window, this);
 				glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 				glfwSetWindowFocusCallback(window, focusCallback);
-				g_glfwPlatformAlive = true;
+				glfwSetKeyCallback(window, keyCallback);
+				glfwSetCharCallback(window, charCallback);
+				glfwSetCursorPosCallback(window, cursorPosCallback);
+				glfwSetCursorEnterCallback(window, cursorEnterCallback);
+				glfwSetMouseButtonCallback(window, mouseButtonCallback);
+				glfwSetScrollCallback(window, scrollCallback);
+				glfwSetJoystickCallback(joystickCallback);
+
+				double x = 0.0;
+				double y = 0.0;
+				glfwGetCursorPos(window, &x, &y);
+				cursor = {static_cast<float>(x), static_cast<float>(y)};
+
+				// glfwInit found the pads already plugged in, before there was a callback to hear of them.
+				for (int jid = 0; jid < foundation::kMaxRealGamepads; ++jid) {
+					joystickConnected(jid);
+				}
 			}
 
 			~GlfwPlatform() override {
+				glfwSetJoystickCallback(nullptr);
 				glfwDestroyWindow(window);
 				glfwTerminate();
-				g_glfwPlatformAlive = false;
+				g_glfwPlatform = nullptr;
 			}
 
 			GlfwPlatform(const GlfwPlatform&) = delete;
@@ -72,23 +160,34 @@ namespace app {
 				return backend;
 			}
 
-			// Callbacks fire inside glfwPollEvents; anything that arrived outside one is held for it.
+			// Callbacks fire inside glfwPollEvents, and a pad found gone while sampling disconnects inside
+			// glfwGetGamepadState, so both run with the listener attached.
 			void pollEvents(PlatformEvents& events) override {
-				listener = &events;
-				if (heldResize) {
-					events.framebufferResized(*std::exchange(heldResize, std::nullopt));
-				}
-				for (const foundation::InputEvent& event : std::exchange(heldEvents, {})) {
-					events.inputEvent(event);
-				}
+				relay.attach(events);
 				glfwPollEvents();
-				listener = nullptr;
+				const double now = glfwClock.now();
+				for (std::uint8_t pad = 0; pad < foundation::kMaxRealGamepads; ++pad) {
+					GLFWgamepadstate state;
+					if (gamepads.connected(pad) && glfwGetGamepadState(pad, &state) == GLFW_TRUE) {
+						gamepads.sample(pad, glfw::gamepadSample(state.buttons, state.axes), now, relay);
+					}
+				}
+				relay.detach();
 			}
 
 			bool focused() const override { return hasFocus; }
 			bool closeRequested() const override { return glfwWindowShouldClose(window) == GLFW_TRUE; }
 			void present() override { glfwSwapBuffers(window); }
 			void setVsync(bool enabled) override { glfwSwapInterval(enabled ? 1 : 0); }
+
+			std::optional<std::string> keyLabel(foundation::Key key) const override {
+				const int	glfwKey = glfw::toGlfwKey(key);
+				const char* label = glfwKey == GLFW_KEY_UNKNOWN ? nullptr : glfwGetKeyName(glfwKey, 0);
+				if (label == nullptr) {
+					return std::nullopt;
+				}
+				return std::string(label);
+			}
 
 		  private:
 			static GlfwPlatform& from(GLFWwindow* window) { return *static_cast<GlfwPlatform*>(glfwGetWindowUserPointer(window)); }
@@ -98,35 +197,90 @@ namespace app {
 				if (width > 0 && height > 0) {
 					glViewport(0, 0, width, height);
 				}
-				GlfwPlatform&			 platform = from(window);
-				const Renderer::Viewport viewport = viewportOf(window);
-				if (platform.listener != nullptr) {
-					platform.listener->framebufferResized(viewport);
-				} else {
-					platform.heldResize = viewport;
-				}
+				from(window).relay.framebufferResized(viewportOf(window));
 			}
 
 			static void focusCallback(GLFWwindow* window, int focused) {
 				GlfwPlatform& platform = from(window);
 				platform.hasFocus = focused == GLFW_TRUE;
-				const foundation::InputEvent event{
+				platform.relay.inputEvent({
 					.type = platform.hasFocus ? foundation::InputEvent::Type::FocusGained : foundation::InputEvent::Type::FocusLost,
 					.time = platform.glfwClock.now(),
-				};
-				if (platform.listener != nullptr) {
-					platform.listener->inputEvent(event);
-				} else {
-					platform.heldEvents.push_back(event);
+				});
+			}
+
+			static void keyCallback(GLFWwindow* window, int key, int /*scancode*/, int action, int mods) {
+				GlfwPlatform& platform = from(window);
+				platform.relay.inputEvent(glfw::keyEvent(key, action, mods, platform.glfwClock.now()));
+			}
+
+			static void charCallback(GLFWwindow* window, unsigned int codepoint) {
+				GlfwPlatform& platform = from(window);
+				platform.relay.inputEvent(glfw::charEvent(codepoint, platform.glfwClock.now()));
+			}
+
+			// The last position is what button and scroll events carry, in order with the moves.
+			static void cursorPosCallback(GLFWwindow* window, double x, double y) {
+				GlfwPlatform&				 platform = from(window);
+				const foundation::InputEvent event = glfw::cursorPosEvent(x, y, platform.glfwClock.now());
+				platform.cursor = event.position;
+				platform.relay.inputEvent(event);
+			}
+
+			static void cursorEnterCallback(GLFWwindow* window, int entered) {
+				GlfwPlatform& platform = from(window);
+				platform.relay.inputEvent(glfw::cursorEnterEvent(entered, platform.glfwClock.now()));
+			}
+
+			static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+				GlfwPlatform& platform = from(window);
+				platform.relay.inputEvent(glfw::mouseButtonEvent(button, action, mods, platform.cursor, platform.glfwClock.now()));
+			}
+
+			static void scrollCallback(GLFWwindow* window, double x, double y) {
+				GlfwPlatform& platform = from(window);
+				platform.relay.inputEvent(glfw::scrollEvent(x, y, platform.cursor, platform.glfwClock.now()));
+			}
+
+			static void joystickCallback(int jid, int event) {
+				if (g_glfwPlatform == nullptr || jid < 0 || jid >= foundation::kMaxRealGamepads) {
+					return;
+				}
+				if (event == GLFW_CONNECTED) {
+					g_glfwPlatform->joystickConnected(jid);
+				} else if (event == GLFW_DISCONNECTED) {
+					g_glfwPlatform->gamepads.disconnect(
+						static_cast<std::uint8_t>(jid), g_glfwPlatform->glfwClock.now(), g_glfwPlatform->relay
+					);
 				}
 			}
 
-			GLFWwindow*							window;
-			GlfwClock							glfwClock;
-			PlatformEvents*						listener = nullptr;
-			bool								hasFocus;
-			std::optional<Renderer::Viewport>	heldResize;
-			std::vector<foundation::InputEvent> heldEvents;
+			// Only a joystick with a gamepad mapping, from GLFW's built-in SDL database, is a gamepad.
+			void joystickConnected(int jid) {
+				if (glfwJoystickIsGamepad(jid) != GLFW_TRUE) {
+					if (glfwJoystickPresent(jid) == GLFW_TRUE) {
+						[[maybe_unused]] const char* name = glfwGetJoystickName(jid);
+						LOG_INFO(Engine, "Joystick %d (%s) has no gamepad mapping; not a gamepad", jid, name != nullptr ? name : "unnamed");
+					}
+					return;
+				}
+				const char* name = glfwGetGamepadName(jid);
+				const char* guid = glfwGetJoystickGUID(jid);
+				gamepads.connect(
+					{.id = {.kind = foundation::DeviceKind::Gamepad, .index = static_cast<std::uint8_t>(jid)},
+					 .name = name != nullptr ? name : "",
+					 .modelGuid = guid != nullptr ? guid : ""},
+					glfwClock.now(),
+					relay
+				);
+			}
+
+			GLFWwindow*	   window;
+			GlfwClock	   glfwClock;
+			bool		   hasFocus;
+			glm::vec2	   cursor{};
+			EventRelay	   relay;
+			GamepadTracker gamepads;
 		};
 
 		// The window's size: sizePercent of the primary monitor's work area, or the whole of a
@@ -192,7 +346,7 @@ namespace app {
 	} // namespace
 
 	std::unique_ptr<Platform> createGlfwPlatform(const WindowConfig& config) {
-		if (g_glfwPlatformAlive) {
+		if (g_glfwPlatform != nullptr) {
 			LOG_ERROR(Engine, "createGlfwPlatform: a GLFW platform is alive already, and there is one at a time");
 			return nullptr;
 		}

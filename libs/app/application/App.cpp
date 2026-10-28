@@ -278,7 +278,19 @@ namespace app {
 	}
 
 	void App::inputEvent(const foundation::InputEvent& event) {
-		inputState.accumulator.push(event);
+		if (event.type == foundation::InputEvent::Type::DeviceConnected || event.type == foundation::InputEvent::Type::DeviceDisconnected) {
+			LOG_WARNING(Engine, "A connection came through inputEvent, which has no name or model for it; dropped");
+			return;
+		}
+		inputState.push(event);
+	}
+
+	void App::deviceConnected(const DeviceInfo& device, double time) {
+		inputState.connect(device, time);
+	}
+
+	void App::deviceDisconnected(foundation::DeviceId device, double time) {
+		inputState.disconnect(device, time);
 	}
 
 	// Inside the platform's callback, as worldsim's does; the scenes hear of it once the poll is over.
@@ -296,7 +308,7 @@ namespace app {
 	}
 
 	void App::readFrameInput() {
-		inputState.frameState = inputState.accumulator.consumeFrame();
+		inputState.readFrame();
 	}
 
 	void App::dispatchEvents() {

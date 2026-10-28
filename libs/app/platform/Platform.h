@@ -1,9 +1,10 @@
 #pragma once
 
 // What the App runs on: the window and its GL context, the clock, the events the window system
-// reports, and present. createGlfwPlatform makes the native one; HeadlessPlatform runs a frame with
-// no window and no GPU. No window-system or GL type appears here.
+// reports, gamepads, key labels, and present. createGlfwPlatform makes the native one;
+// HeadlessPlatform runs a frame with no window and no GPU. No window-system or GL type appears here.
 
+#include "input/DeviceInfo.h"
 #include "platform/Clock.h"
 
 #include <CoordinateSystem/CoordinateSystem.h>
@@ -23,11 +24,19 @@ namespace app {
 		bool			   vsync = true;
 	};
 
-	// What a platform reports while it polls. The App is the one listener.
+	// What a platform reports while it polls. The App is the one listener, and the dev server feeds
+	// injected input through the same calls.
 	class PlatformEvents {
 	  public:
-		// An input event, in arrival order, stamped with the platform's clock.
+		// An input event, in arrival order, stamped with the platform's clock. Connections come through
+		// deviceConnected and deviceDisconnected instead; a DeviceConnected or DeviceDisconnected event
+		// given here is dropped, logged.
 		virtual void inputEvent(const foundation::InputEvent& event) = 0;
+		// A gamepad arrived, with the name and model GUID its event can't carry. Its DeviceConnected
+		// joins the input events in arrival order, at `time`.
+		virtual void deviceConnected(const DeviceInfo& device, double time) = 0;
+		// A gamepad left. Its DeviceDisconnected joins the input events in arrival order, at `time`.
+		virtual void deviceDisconnected(foundation::DeviceId device, double time) = 0;
 		// The framebuffer changed size; the viewport holds the window's logical and framebuffer sizes.
 		virtual void framebufferResized(const Renderer::Viewport& viewport) = 0;
 
@@ -48,7 +57,8 @@ namespace app {
 		// logged, when it cannot be made.
 		virtual std::unique_ptr<Renderer::backend::Backend> createBackend() = 0;
 
-		// Process what the window system queued, reporting it to `events` as it arrives.
+		// Process what the window system queued, reporting it to `events` as it arrives, then sample the
+		// connected gamepads once and report what changed since the last sample.
 		virtual void pollEvents(PlatformEvents& events) = 0;
 
 		virtual bool focused() const = 0;
@@ -60,6 +70,10 @@ namespace app {
 		virtual void present() = 0;
 
 		virtual void setVsync(bool enabled) = 0;
+
+		// What the keyboard layout prints on a key, for keys that print something; nullopt for the rest,
+		// and where the window system can't say.
+		virtual std::optional<std::string> keyLabel(foundation::Key key) const = 0;
 	};
 
 	// A window with a GL 3.3 core context current on the calling thread; null, logged, when the window

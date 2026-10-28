@@ -119,6 +119,8 @@ namespace app {
 		bool startFonts();
 
 		void inputEvent(const foundation::InputEvent& event) override;
+		void deviceConnected(const DeviceInfo& device, double time) override;
+		void deviceDisconnected(foundation::DeviceId device, double time) override;
 		void framebufferResized(const Renderer::Viewport& newViewport) override;
 
 		void  bindContext(void* value, const void* type);
@@ -146,7 +148,7 @@ namespace app {
 		Renderer::CoordinateSystem					coordinates;
 		std::unique_ptr<Renderer::FontRenderer>		fontRenderer;
 		std::unique_ptr<Renderer::MetricsCollector> metricsCollector;
-		Input										inputState;
+		Input										inputState{*platform};
 		SceneStack									sceneStack{*this};
 		std::vector<std::unique_ptr<Overlay>>		overlays;
 		std::vector<std::unique_ptr<Overlay>>		joiningOverlays;

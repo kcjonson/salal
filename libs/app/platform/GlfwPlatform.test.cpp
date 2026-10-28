@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 
 namespace app {
 
@@ -23,6 +24,18 @@ namespace app {
 
 		first.reset();
 		EXPECT_NE(createGlfwPlatform({.title = "after", .sizePercent = 0.1F, .vsync = false}), nullptr);
+	}
+
+	// The layout labels the keys that print, whatever the layout; Escape prints nothing, and Unknown
+	// has no GLFW code to ask about.
+	TEST(GlfwPlatformTest, KeyLabelsAreForKeysThatPrint) {
+		std::unique_ptr<Platform> platform = createGlfwPlatform({.title = "salal key label test", .sizePercent = 0.1F, .vsync = false});
+		if (platform == nullptr) {
+			GTEST_SKIP() << "No window with a GL 3.3 core context here";
+		}
+		EXPECT_TRUE(platform->keyLabel(foundation::Key::A).has_value());
+		EXPECT_EQ(platform->keyLabel(foundation::Key::Escape), std::nullopt);
+		EXPECT_EQ(platform->keyLabel(foundation::Key::Unknown), std::nullopt);
 	}
 
 } // namespace app
