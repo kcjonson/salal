@@ -249,10 +249,14 @@ namespace app {
 	}
 
 	std::optional<DeviceId> Input::deviceForSlot(int slot) const {
-		if (!slotConnected(slot)) {
+		if (slot < 0 || slot >= kMaxPlayerSlots) {
 			return std::nullopt;
 		}
-		return slots[static_cast<std::size_t>(slot)].device;
+		const Slot& held = slots[static_cast<std::size_t>(slot)];
+		if (!held.claimed || held.idTaken) {
+			return std::nullopt;
+		}
+		return held.device;
 	}
 
 	bool Input::slotConnected(int slot) const {
@@ -359,8 +363,14 @@ namespace app {
 			if (waiting.claimed && !waiting.connected && !waiting.modelGuid.empty() && waiting.modelGuid == device.modelGuid) {
 				waiting.device = device.id;
 				waiting.connected = true;
+				waiting.idTaken = false;
 				LOG_INFO(Engine, "Slot %zu takes back its gamepad, now %d", slot, int{device.id.index});
 				break;
+			}
+		}
+		for (Slot& waiting : slots) {
+			if (waiting.claimed && !waiting.connected && waiting.device == device.id) {
+				waiting.idTaken = true;
 			}
 		}
 		accumulator.push({.type = InputEvent::Type::DeviceConnected, .device = device.id, .time = time});

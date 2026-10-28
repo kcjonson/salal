@@ -235,12 +235,13 @@ namespace app::testing {
 		frame();
 		input().claim(1, padId(0));
 
+		// Away, the slot still names the pad's id, which reads as released.
 		platform->disconnectGamepad(0);
 		frame();
 		EXPECT_FALSE(input().slotConnected(1));
-		EXPECT_EQ(input().deviceForSlot(1), std::nullopt);
+		EXPECT_EQ(input().deviceForSlot(1), padId(0));
 
-		// A different model takes the old joystick id and arrives unclaimed.
+		// A different model takes the old joystick id and arrives unclaimed; the slot names nothing now.
 		platform->connectGamepad(pad(0, "03other"));
 		frame();
 		EXPECT_FALSE(input().slotConnected(1));
@@ -255,6 +256,38 @@ namespace app::testing {
 		// The unclaimed one can be claimed by another slot.
 		input().claim(2, padId(0));
 		EXPECT_EQ(input().deviceForSlot(2), padId(0));
+	}
+
+	// A sim reading its slot's pad through an ActionMap sees the release when the pad is pulled with a
+	// button and a trigger held, then nothing.
+	TEST_F(InputTest, ASlotsPadPulledWhileHeldGivesTheSimItsRelease) {
+		start();
+		foundation::ActionMap map;
+		map.bind("fire", {.source = Binding::Source::GamepadButton, .control = static_cast<std::uint16_t>(GamepadButton::A)});
+		map.bind("throttle", {.source = Binding::Source::GamepadAxis, .control = static_cast<std::uint16_t>(GamepadAxis::RightTrigger)});
+		std::vector<std::string> seen;
+		const auto				 describe = [](const foundation::ActionState& state) {
+			  return std::string(state.button.down ? "down " : "up ") + std::to_string(state.button.transitions);
+		};
+		hooks()[kPlay].fixedUpdate = [&](App& owner, const TickContext& tick) {
+			const std::optional<DeviceId>	device = owner.input().deviceForSlot(0);
+			const std::span<const DeviceId> devices = device ? std::span(&*device, 1) : std::span<const DeviceId>{};
+			seen.push_back(
+				describe(map.evaluate("fire", tick.input, devices)) + " / " + describe(map.evaluate("throttle", tick.input, devices))
+			);
+		};
+		app->scenes().push<PlayScene>();
+		platform->connectGamepad(pad(0, "0300"));
+		frame(); // the first frame runs no tick
+		input().claim(0, padId(0));
+		GamepadSample held = holding(GamepadButton::A);
+		held.axes[static_cast<std::size_t>(GamepadAxis::RightTrigger)] = 1.0F;
+		platform->setGamepad(0, held);
+		frame();
+		platform->disconnectGamepad(0);
+		frame();
+		frame();
+		EXPECT_EQ(seen, (std::vector<std::string>{"down 1 / down 1", "up 1 / up 1", "up 0 / up 0"}));
 	}
 
 	TEST_F(InputTest, TwoSlotsWaitingOnOneModelTakeItsPadsLowestSlotFirst) {

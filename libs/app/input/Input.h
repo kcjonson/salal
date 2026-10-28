@@ -55,8 +55,12 @@ namespace app {
 		void claim(int slot, foundation::DeviceId device);
 		// Frees the slot, a waiting one included: its pad arrives unclaimed when it comes back.
 		void release(int slot);
-		// The slot's device while it's connected; nullopt for a free slot and for one whose pad is away,
-		// since a different pad may have its joystick id meanwhile.
+		// The slot's device while it's connected, and once its pad has left until another device connects
+		// at that id: the accumulator has released and zeroed it, so a sim reading it sees the release,
+		// then nothing. nullopt for a free slot and for a waiting one whose id another device has taken.
+		// A pad that leaves and comes back at another id in one poll moves the slot before a tick reads
+		// the release, so the sim sees a second press with no release between; one that leaves as another
+		// device takes its id in one poll leaves the slot nothing to read the release from.
 		std::optional<foundation::DeviceId> deviceForSlot(int slot) const;
 		// Claimed, with its device connected: false for a free slot and for one waiting for its pad.
 		bool slotConnected(int slot) const;
@@ -78,6 +82,7 @@ namespace app {
 		struct Slot {
 			bool				 claimed = false;
 			bool				 connected = false; // its device is; a claimed pad that left waits with this false
+			bool				 idTaken = false;	// another device connected at the departed pad's id
 			foundation::DeviceId device{};
 			std::string			 modelGuid; // the model a waiting slot takes back
 		};
