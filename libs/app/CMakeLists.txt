@@ -7,6 +7,7 @@ add_library(salal_app STATIC
     application/CommandLine.cpp
     clipboard/Clipboard.cpp
     input/Input.cpp
+    platform/EventRelay.cpp
     platform/Gamepads.cpp
     platform/GlfwInput.cpp
     platform/GlfwPlatform.cpp

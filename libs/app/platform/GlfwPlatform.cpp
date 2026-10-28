@@ -2,6 +2,7 @@
 // and close, the keyboard, the mouse and gamepads, key labels, the clipboard, and present with vsync.
 // GLFW and GL stay in this file and in GlfwInput.cpp, which turns GLFW's values into events.
 
+#include "platform/EventRelay.h"
 #include "platform/Gamepads.h"
 #include "platform/GlfwInput.h"
 #include "platform/Platform.h"
@@ -15,9 +16,6 @@
 #include <array>
 #include <cstdint>
 #include <optional>
-#include <utility>
-#include <variant>
-#include <vector>
 
 namespace app {
 
@@ -44,68 +42,6 @@ namespace app {
 			glfwGetFramebufferSize(window, &viewport.framebufferWidth, &viewport.framebufferHeight);
 			return viewport;
 		}
-
-		// Passes what the callbacks report to the poll's listener. What arrives outside a poll (the pads
-		// found at startup, a resize or focus change from a window call) is held, in order, and goes to
-		// the next poll's listener before anything new; a held resize goes first, the latest only.
-		class EventRelay final : public PlatformEvents {
-		  public:
-			void attach(PlatformEvents& events) {
-				listener = &events;
-				if (heldResize) {
-					events.framebufferResized(*std::exchange(heldResize, std::nullopt));
-				}
-				for (const Held& item : std::exchange(held, {})) {
-					std::visit([&](const auto& reported) { deliver(events, reported); }, item);
-				}
-			}
-			void detach() { listener = nullptr; }
-
-			void inputEvent(const foundation::InputEvent& event) override { relay(event); }
-			void deviceConnected(const DeviceInfo& device, double time) override { relay(Connected{.device = device, .time = time}); }
-			void deviceDisconnected(foundation::DeviceId device, double time) override {
-				relay(Disconnected{.device = device, .time = time});
-			}
-			void framebufferResized(const Renderer::Viewport& viewport) override {
-				if (listener != nullptr) {
-					listener->framebufferResized(viewport);
-				} else {
-					heldResize = viewport;
-				}
-			}
-
-		  private:
-			struct Connected {
-				DeviceInfo device;
-				double	   time = 0.0;
-			};
-			struct Disconnected {
-				foundation::DeviceId device;
-				double				 time = 0.0;
-			};
-			using Held = std::variant<foundation::InputEvent, Connected, Disconnected>;
-
-			static void deliver(PlatformEvents& events, const foundation::InputEvent& event) { events.inputEvent(event); }
-			static void deliver(PlatformEvents& events, const Connected& connected) {
-				events.deviceConnected(connected.device, connected.time);
-			}
-			static void deliver(PlatformEvents& events, const Disconnected& disconnected) {
-				events.deviceDisconnected(disconnected.device, disconnected.time);
-			}
-
-			template <typename Reported>
-			void relay(const Reported& reported) {
-				if (listener != nullptr) {
-					deliver(*listener, reported);
-				} else {
-					held.emplace_back(reported);
-				}
-			}
-
-			PlatformEvents*					  listener = nullptr;
-			std::optional<Renderer::Viewport> heldResize;
-			std::vector<Held>				  held;
-		};
 
 		class GlfwPlatform final : public Platform {
 		  public:
