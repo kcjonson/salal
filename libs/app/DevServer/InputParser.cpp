@@ -52,6 +52,21 @@ namespace app::detail {
 			"lefttrigger",
 			"righttrigger",
 		};
+
+		// The tables are read by position, so a name left out (an enum value added before Count) would
+		// leave an empty name, which an empty field matches.
+		template <std::size_t N>
+		constexpr bool everyNameSet(const std::array<std::string_view, N>& names) {
+			for (const std::string_view name : names) {
+				if (name.empty()) {
+					return false;
+				}
+			}
+			return true;
+		}
+		static_assert(everyNameSet(kButtonNames), "a name for every GamepadButton, in its order");
+		static_assert(everyNameSet(kAxisNames), "a name for every GamepadAxis, in its order");
+
 		constexpr std::array<std::pair<std::string_view, Key>, 18> kNamedKeys{{
 			{"space", Key::Space},
 			{"escape", Key::Escape},
@@ -123,8 +138,8 @@ namespace app::detail {
 			}
 			int function = 0;
 			if (lower.size() > 1 && lower[0] == 'f') {
-				const auto [end, error] = std::from_chars(lower.data() + 1, lower.data() + lower.size(), function);
-				if (error != std::errc{} || end != lower.data() + lower.size()) {
+				const auto [end, ec] = std::from_chars(lower.data() + 1, lower.data() + lower.size(), function);
+				if (ec != std::errc{} || end != lower.data() + lower.size()) {
 					function = 0;
 				}
 			}
@@ -142,8 +157,8 @@ namespace app::detail {
 				base = 16;
 			}
 			std::uint32_t value = 0;
-			const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value, base);
-			if (text.empty() || error != std::errc{} || end != text.data() + text.size() || value == 0 || value > 0x10FFFF ||
+			const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), value, base);
+			if (text.empty() || ec != std::errc{} || end != text.data() + text.size() || value == 0 || value > 0x10FFFF ||
 				(value >= 0xD800 && value <= 0xDFFF)) {
 				return std::nullopt;
 			}
@@ -199,18 +214,18 @@ namespace app::detail {
 				return false;
 			}
 
-			bool fieldCount(std::size_t least, std::size_t most, const char* usage) {
+			bool fieldCount(std::size_t least, std::size_t most, std::string_view usage) {
 				if (fields.size() < least || fields.size() > most) {
-					return fail(std::string("expected ") + usage);
+					return fail("expected " + std::string(usage));
 				}
 				return true;
 			}
 
 			bool pointer(std::string_view type, std::vector<InputEvent>& out) {
-				const bool scroll = type == "scroll";
-				const bool takesButton = type == "down" || type == "up" || type == "click";
-				if (scroll ? !fieldCount(4, 4, "scroll,x,y,delta")
-						   : !fieldCount(3, takesButton ? 4 : 3, "type,x,y with an optional button")) {
+				const bool		  scroll = type == "scroll";
+				const bool		  takesButton = type == "down" || type == "up" || type == "click";
+				const std::string usage = std::string(type) + (scroll ? ",x,y,delta" : takesButton ? ",x,y[,left|right|middle]" : ",x,y");
+				if (!fieldCount(3 + (scroll ? 1 : 0), 3 + (scroll || takesButton ? 1 : 0), usage)) {
 					return false;
 				}
 				const std::optional<float> x = parseFloat(fields[1]);
@@ -290,8 +305,8 @@ namespace app::detail {
 				int vpad = -1;
 				if (name.starts_with("vpad")) {
 					const std::string_view digits = name.substr(4);
-					const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), vpad);
-					if (digits.empty() || error != std::errc{} || end != digits.data() + digits.size()) {
+					const auto [end, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), vpad);
+					if (digits.empty() || ec != std::errc{} || end != digits.data() + digits.size()) {
 						vpad = -1;
 					}
 				}

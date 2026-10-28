@@ -6,7 +6,9 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace app::detail {
@@ -100,7 +102,7 @@ namespace app::detail {
 		EXPECT_EQ(parsed.events[0].device, kKeyboard);
 		EXPECT_EQ(parsed.events[0].codepoint, U'A');
 		EXPECT_EQ(parsed.events[1].codepoint, U'\U0001F600');
-		EXPECT_EQ(parsed.events[2].codepoint, U'é');
+		EXPECT_EQ(parsed.events[2].codepoint, U'\u00E9');
 
 		const std::string error = "a codepoint is a Unicode scalar value, decimal or hex after 0x or U+";
 		EXPECT_EQ(errorOf("char,0"), error);
@@ -181,8 +183,10 @@ namespace app::detail {
 
 	TEST(InputParserTest, MalformedEvents) {
 		EXPECT_EQ(errorOf(""), "empty event");
-		EXPECT_EQ(errorOf("move,1"), "expected type,x,y with an optional button");
-		EXPECT_EQ(errorOf("move,1,2,left"), "expected type,x,y with an optional button");
+		EXPECT_EQ(errorOf("move,1"), "expected move,x,y");
+		EXPECT_EQ(errorOf("move,1,2,left"), "expected move,x,y");
+		EXPECT_EQ(errorOf("click,1"), "expected click,x,y[,left|right|middle]");
+		EXPECT_EQ(errorOf("down,1,2,left,4"), "expected down,x,y[,left|right|middle]");
 		EXPECT_EQ(errorOf("click,a,2"), "non-numeric coordinates");
 		EXPECT_EQ(errorOf("click,1,2x"), "non-numeric coordinates");
 		EXPECT_EQ(errorOf("down,1,2,back"), "unknown button (expected left|right|middle)");
@@ -193,6 +197,85 @@ namespace app::detail {
 		EXPECT_EQ(errorOf("keydown,F13"), "unknown key 'F13'");
 		EXPECT_EQ(errorOf("keydown,shift"), "unknown key 'shift'");
 		EXPECT_EQ(errorOf("keydown,a,b"), "expected keydown,<key> or keyup,<key>");
+	}
+
+	// Every name the grammar takes, against the enum value it must give, written out here rather than
+	// read back from the parser's tables: worldsim's key names, and foundation's pad layout.
+	TEST(InputParserTest, EveryNameParsesToItsEnum) {
+		const std::array<std::pair<std::string, GamepadButton>, static_cast<std::size_t>(GamepadButton::Count)> buttons{{
+			{"a", GamepadButton::A},
+			{"b", GamepadButton::B},
+			{"x", GamepadButton::X},
+			{"y", GamepadButton::Y},
+			{"leftbumper", GamepadButton::LeftBumper},
+			{"rightbumper", GamepadButton::RightBumper},
+			{"back", GamepadButton::Back},
+			{"start", GamepadButton::Start},
+			{"guide", GamepadButton::Guide},
+			{"leftthumb", GamepadButton::LeftThumb},
+			{"rightthumb", GamepadButton::RightThumb},
+			{"dpadup", GamepadButton::DpadUp},
+			{"dpadright", GamepadButton::DpadRight},
+			{"dpaddown", GamepadButton::DpadDown},
+			{"dpadleft", GamepadButton::DpadLeft},
+		}};
+		const std::array<std::pair<std::string, GamepadAxis>, static_cast<std::size_t>(GamepadAxis::Count)>		axes{{
+			{"leftx", GamepadAxis::LeftX},
+			{"lefty", GamepadAxis::LeftY},
+			{"rightx", GamepadAxis::RightX},
+			{"righty", GamepadAxis::RightY},
+			{"lefttrigger", GamepadAxis::LeftTrigger},
+			{"righttrigger", GamepadAxis::RightTrigger},
+		}};
+		std::vector<std::pair<std::string, Key>>																keys{
+																		   {"space", Key::Space},
+																		   {"escape", Key::Escape},
+																		   {"esc", Key::Escape},
+																		   {"enter", Key::Enter},
+																		   {"return", Key::Enter},
+																		   {"tab", Key::Tab},
+																		   {"backspace", Key::Backspace},
+																		   {"delete", Key::Delete},
+																		   {"del", Key::Delete},
+																		   {"insert", Key::Insert},
+																		   {"home", Key::Home},
+																		   {"end", Key::End},
+																		   {"pageup", Key::PageUp},
+																		   {"pagedown", Key::PageDown},
+																		   {"up", Key::Up},
+																		   {"down", Key::Down},
+																		   {"left", Key::Left},
+																		   {"right", Key::Right},
+		   };
+		for (int letter = 0; letter < 26; ++letter) {
+			keys.emplace_back(std::string(1, static_cast<char>('a' + letter)), static_cast<Key>(static_cast<int>(Key::A) + letter));
+		}
+		for (int digit = 0; digit < 10; ++digit) {
+			keys.emplace_back(std::string(1, static_cast<char>('0' + digit)), static_cast<Key>(static_cast<int>(Key::Num0) + digit));
+		}
+		for (int function = 1; function <= 12; ++function) {
+			keys.emplace_back("F" + std::to_string(function), static_cast<Key>(static_cast<int>(Key::F1) + function - 1));
+		}
+		ASSERT_EQ(keys.size(), 18U + 26U + 10U + 12U);
+
+		VirtualPads pads{true, false, false, false};
+		for (const auto& [name, button] : buttons) {
+			const ParsedInput parsed = parse({"pad,vpad0," + name + ",down"}, pads);
+			ASSERT_EQ(parsed.events.size(), 1U) << name << ": " << parsed.error;
+			EXPECT_EQ(parsed.events[0].button, button) << name;
+		}
+		for (const auto& [name, axis] : axes) {
+			const ParsedInput parsed = parse({"axis,vpad0," + name + ",0.5"}, pads);
+			ASSERT_EQ(parsed.events.size(), 1U) << name << ": " << parsed.error;
+			EXPECT_EQ(parsed.events[0].axis, axis) << name;
+		}
+		for (const auto& [name, key] : keys) {
+			const ParsedInput parsed = parse({"keydown," + name});
+			ASSERT_EQ(parsed.events.size(), 1U) << name << ": " << parsed.error;
+			EXPECT_EQ(parsed.events[0].key, key) << name;
+		}
+		EXPECT_EQ(errorOf("pad,vpad0,,down"), "vpad0 isn't connected (connect,vpad0 first)");
+		EXPECT_EQ(parse({"pad,vpad0,,down"}, pads).error, "unknown pad button ''");
 	}
 
 } // namespace app::detail
