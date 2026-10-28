@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <string_view>
 #include <utility>
 
 namespace sandbox {
@@ -20,7 +21,7 @@ namespace sandbox {
 		constexpr float kHeaderHeight = 32.0F;
 		constexpr float kRowHeight = 26.0F;
 		constexpr float kInset = 4.0F;		// rows from the panel's sides and bottom
-		constexpr float kTextInset = 12.0F; // text from a row's left edge
+		constexpr float kTextInset = 12.0F; // left-aligned text from its box's left edge
 		constexpr float kCorner = 6.0F;
 
 		const Foundation::Color kPanelFill(0.11F, 0.12F, 0.16F, 0.96F);
@@ -31,18 +32,24 @@ namespace sandbox {
 		const Foundation::Color kSelectedFill(0.22F, 0.26F, 0.36F, 1.0F);
 		const Foundation::Color kCurrentMark(0.35F, 0.65F, 1.0F, 1.0F);
 
-		// `text` in `box`, centred on its height, and on its width or kTextInset in from its left.
-		void
-		label(const std::string& text, const Foundation::Rect& box, const Foundation::Color& color, Foundation::HorizontalAlign align) {
-			const bool centred = align == Foundation::HorizontalAlign::Center;
+		struct LabelArgs {
+			std::string					text;
+			Foundation::Rect			box;
+			Foundation::Color			color;
+			Foundation::HorizontalAlign align = Foundation::HorizontalAlign::Left;
+		};
+
+		// Text in its box, centred on the box's height, and on its width or kTextInset in from its left.
+		void label(const LabelArgs& args) {
+			const bool centred = args.align == Foundation::HorizontalAlign::Center;
 			Renderer::Primitives::drawText(
-				{.text = text,
-				 .position = {centred ? box.x : box.x + kTextInset, box.y},
-				 .color = color,
-				 .hAlign = align,
+				{.text = args.text,
+				 .position = {centred ? args.box.x : args.box.x + kTextInset, args.box.y},
+				 .color = args.color,
+				 .hAlign = args.align,
 				 .vAlign = Foundation::VerticalAlign::Middle,
-				 .boxWidth = centred ? box.width : 0.0F,
-				 .boxHeight = box.height}
+				 .boxWidth = centred ? args.box.width : 0.0F,
+				 .boxHeight = args.box.height}
 			);
 		}
 
@@ -56,17 +63,33 @@ namespace sandbox {
 		: owner(owningApp),
 		  scenes(std::move(args.scenes)),
 		  open(args.open),
+		  pressedRow(scenes.size()),
 		  state(owningApp.devServer().stateProvider("picker", [this] { return stateJson(); })) {}
 
 	bool Picker::handleEvent(const foundation::InputEvent& event) {
 		using Type = foundation::InputEvent::Type;
 		switch (event.type) {
 			case Type::KeyDown:
-				return handleKey(event);
-			case Type::PointerMove:
+				return keyDown(event);
+			case Type::KeyUp:
+				return keyUp(event);
 			case Type::PointerDown:
+				return pointerDown(event);
 			case Type::PointerUp:
-				return handlePointer(event);
+				return pointerUp(event);
+			case Type::PointerMove:
+				if (const std::size_t row = rowAt(event.position); row < scenes.size()) {
+					selected = row;
+				}
+				return false;
+			case Type::Scroll:
+				return over(event.position);
+			case Type::FocusLost: // what was held is released without its events
+				heldKeys.reset();
+				heldButtons.reset();
+				pressedTab = false;
+				pressedRow = scenes.size();
+				return false;
 			default:
 				return false;
 		}
@@ -74,81 +97,157 @@ namespace sandbox {
 
 	void Picker::render() {
 		namespace P = Renderer::Primitives;
-		const Layout where = layout();
+		const Foundation::Rect tab = tabBounds();
 
 		P::drawRect(
-			{.bounds = where.tab,
+			{.bounds = tab,
 			 .style = {
 				 .fill = open ? kTabOpenFill : kPanelFill,
 				 .border = Foundation::BorderStyle{.color = kBorder, .width = 1.0F, .cornerRadius = kCorner}
 			 }}
 		);
-		label("F1 scenes", where.tab, kRowText, Foundation::HorizontalAlign::Center);
+		label({.text = "F1 scenes", .box = tab, .color = kRowText, .align = Foundation::HorizontalAlign::Center});
 		if (!open) {
 			return;
 		}
 
+		const Foundation::Rect panel = panelBounds();
 		P::drawRect(
-			{.bounds = where.panel,
+			{.bounds = panel,
 			 .style = {.fill = kPanelFill, .border = Foundation::BorderStyle{.color = kBorder, .width = 1.0F, .cornerRadius = kCorner}}}
 		);
-		label("scenes", {where.panel.x, where.panel.y, where.panel.width, kHeaderHeight}, kHeaderText, Foundation::HorizontalAlign::Left);
+		label({.text = "scenes", .box = {panel.x, panel.y, panel.width, kHeaderHeight}, .color = kHeaderText});
 		const std::size_t running = current();
 		for (std::size_t i = 0; i < scenes.size(); ++i) {
-			const Foundation::Rect& row = where.rows[i];
+			const Foundation::Rect row = rowBounds(i);
 			if (i == selected) {
 				P::drawRect({.bounds = row, .style = {.fill = kSelectedFill}});
 			}
 			if (i == running) {
 				P::drawRect({.bounds = {row.x, row.y + 5.0F, 3.0F, row.height - 10.0F}, .style = {.fill = kCurrentMark}});
 			}
-			label(scenes[i], row, i == running ? Foundation::Color::white() : kRowText, Foundation::HorizontalAlign::Left);
+			label({.text = scenes[i], .box = row, .color = i == running ? Foundation::Color::white() : kRowText});
 		}
 	}
 
-	Picker::Layout Picker::layout() const {
+	Foundation::Rect Picker::tabBounds() const {
 		const Renderer::Viewport& window = owner.viewport();
-		const float				  width = static_cast<float>(window.logicalWidth);
-		const float				  height = static_cast<float>(window.logicalHeight);
-		const float				  panelHeight = kHeaderHeight + (static_cast<float>(scenes.size()) * kRowHeight) + kInset;
-
-		Layout where{
-			.tab = {width - kMargin - kTabWidth, height - kMargin - kTabHeight, kTabWidth, kTabHeight},
-			.panel = {width - kMargin - kPanelWidth, height - kMargin - kTabHeight - kGap - panelHeight, kPanelWidth, panelHeight},
+		return {
+			static_cast<float>(window.logicalWidth) - kMargin - kTabWidth,
+			static_cast<float>(window.logicalHeight) - kMargin - kTabHeight,
+			kTabWidth,
+			kTabHeight
 		};
-		where.rows.reserve(scenes.size());
-		for (std::size_t i = 0; i < scenes.size(); ++i) {
-			where.rows.emplace_back(
-				where.panel.x + kInset,
-				where.panel.y + kHeaderHeight + (static_cast<float>(i) * kRowHeight),
-				kPanelWidth - (2.0F * kInset),
-				kRowHeight
-			);
-		}
-		return where;
 	}
 
-	bool Picker::handleKey(const foundation::InputEvent& event) {
-		using foundation::Key;
-		if (event.key == Key::F1) {
-			if (!event.repeat) {
-				setOpen(!open);
+	Foundation::Rect Picker::panelBounds() const {
+		const Foundation::Rect tab = tabBounds();
+		const float			   height = kHeaderHeight + (static_cast<float>(scenes.size()) * kRowHeight) + kInset;
+		return {tab.right() - kPanelWidth, tab.y - kGap - height, kPanelWidth, height};
+	}
+
+	Foundation::Rect Picker::rowBounds(std::size_t index) const {
+		const Foundation::Rect panel = panelBounds();
+		return {
+			panel.x + kInset, panel.y + kHeaderHeight + (static_cast<float>(index) * kRowHeight), kPanelWidth - (2.0F * kInset), kRowHeight
+		};
+	}
+
+	std::size_t Picker::rowAt(const Foundation::Vec2& point) const {
+		if (!open || !panelBounds().contains(point)) {
+			return scenes.size();
+		}
+		for (std::size_t i = 0; i < scenes.size(); ++i) {
+			if (rowBounds(i).contains(point)) {
+				return i;
+			}
+		}
+		return scenes.size();
+	}
+
+	bool Picker::over(const Foundation::Vec2& point) const {
+		return tabBounds().contains(point) || (open && panelBounds().contains(point));
+	}
+
+	bool Picker::keyDown(const foundation::InputEvent& event) {
+		const auto index = static_cast<std::size_t>(event.key);
+		if (index >= heldKeys.size()) {
+			return false;
+		}
+		if (event.repeat) {
+			if (!heldKeys.test(index)) {
+				return false; // the scene has this key
+			}
+			if (open && (event.key == foundation::Key::Up || event.key == foundation::Key::Down)) {
+				moveSelection(event.key == foundation::Key::Up);
 			}
 			return true;
 		}
-		if (!open || scenes.empty()) {
+		const bool taken = pressKey(event.key);
+		heldKeys.set(index, taken);
+		return taken;
+	}
+
+	bool Picker::keyUp(const foundation::InputEvent& event) {
+		const auto index = static_cast<std::size_t>(event.key);
+		if (index >= heldKeys.size() || !heldKeys.test(index)) {
 			return false;
 		}
-		switch (event.key) {
+		heldKeys.reset(index);
+		return true;
+	}
+
+	bool Picker::pointerDown(const foundation::InputEvent& event) {
+		const auto button = static_cast<std::size_t>(event.mouseButton);
+		if (button >= heldButtons.size()) {
+			return false;
+		}
+		const bool taken = over(event.position);
+		heldButtons.set(button, taken);
+		if (taken && event.mouseButton == foundation::MouseButton::Left) {
+			pressedTab = tabBounds().contains(event.position);
+			pressedRow = pressedTab ? scenes.size() : rowAt(event.position);
+		}
+		return taken;
+	}
+
+	bool Picker::pointerUp(const foundation::InputEvent& event) {
+		const auto button = static_cast<std::size_t>(event.mouseButton);
+		if (button >= heldButtons.size() || !heldButtons.test(button)) {
+			return false;
+		}
+		heldButtons.reset(button);
+		if (event.mouseButton == foundation::MouseButton::Left) {
+			if (pressedTab && tabBounds().contains(event.position)) {
+				setOpen(!open);
+			} else if (pressedRow < scenes.size() && rowAt(event.position) == pressedRow) {
+				choose(pressedRow);
+			}
+			pressedTab = false;
+			pressedRow = scenes.size();
+		}
+		return true;
+	}
+
+	bool Picker::pressKey(foundation::Key key) {
+		using foundation::Key;
+		if (key == Key::F1) {
+			setOpen(!open);
+			return true;
+		}
+		if (!open) {
+			return false;
+		}
+		switch (key) {
 			case Key::Up:
-				selected = (selected + scenes.size() - 1) % scenes.size();
-				return true;
 			case Key::Down:
-				selected = (selected + 1) % scenes.size();
+				moveSelection(key == Key::Up);
 				return true;
 			case Key::Enter:
 			case Key::KpEnter:
-				choose(selected);
+				if (selected < scenes.size()) {
+					choose(selected);
+				}
 				return true;
 			case Key::Escape:
 				setOpen(false);
@@ -158,33 +257,11 @@ namespace sandbox {
 		}
 	}
 
-	bool Picker::handlePointer(const foundation::InputEvent& event) {
-		const Layout where = layout();
-		const bool	 overTab = where.tab.contains(event.position);
-		const bool	 overPanel = open && where.panel.contains(event.position);
-		std::size_t	 row = scenes.size();
-		for (std::size_t i = 0; overPanel && i < scenes.size(); ++i) {
-			if (where.rows[i].contains(event.position)) {
-				row = i;
-				break;
-			}
+	void Picker::moveSelection(bool up) {
+		if (scenes.empty()) {
+			return;
 		}
-
-		using Type = foundation::InputEvent::Type;
-		if (event.type == Type::PointerMove) {
-			if (row < scenes.size()) {
-				selected = row;
-			}
-			return false;
-		}
-		if (event.type == Type::PointerDown && event.mouseButton == foundation::MouseButton::Left) {
-			if (overTab) {
-				setOpen(!open);
-			} else if (row < scenes.size()) {
-				choose(row);
-			}
-		}
-		return overTab || overPanel;
+		selected = up ? (selected + scenes.size() - 1) % scenes.size() : (selected + 1) % scenes.size();
 	}
 
 	void Picker::setOpen(bool value) {
@@ -211,17 +288,16 @@ namespace sandbox {
 	}
 
 	std::string Picker::stateJson() const {
-		const Layout		   where = layout();
 		nlohmann::ordered_json list = nlohmann::ordered_json::array();
 		for (std::size_t i = 0; i < scenes.size(); ++i) {
-			list.push_back({{"name", scenes[i]}, {"bounds", bounds(where.rows[i])}});
+			list.push_back({{"name", scenes[i]}, {"bounds", bounds(rowBounds(i))}});
 		}
 		const std::size_t running = current();
 		return nlohmann::ordered_json{
 			{"open", open},
 			{"current", running < scenes.size() ? nlohmann::ordered_json(scenes[running]) : nlohmann::ordered_json(nullptr)},
 			{"selected", selected < scenes.size() ? nlohmann::ordered_json(scenes[selected]) : nlohmann::ordered_json(nullptr)},
-			{"tab", bounds(where.tab)},
+			{"tab", bounds(tabBounds())},
 			{"scenes", list},
 		}
 			.dump();
