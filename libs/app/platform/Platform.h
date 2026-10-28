@@ -63,7 +63,8 @@ namespace app {
 	};
 
 	// A window with a GL 3.3 core context current on the calling thread; null, logged, when the window
-	// system or the window can't start. Its createBackend() is the GL backend on that context.
+	// system or the window can't start, and while another GLFW platform is alive (GLFW is process-wide).
+	// Its createBackend() is the GL backend on that context.
 	std::unique_ptr<Platform> createGlfwPlatform(const WindowConfig& config);
 
 } // namespace app

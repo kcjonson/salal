@@ -17,6 +17,9 @@ namespace app {
 
 	namespace {
 
+		// GLFW is process-wide: a second platform's glfwTerminate would take the first one's window with it.
+		bool g_glfwPlatformAlive = false; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 		class GlfwClock final : public Clock {
 		  public:
 			double now() const override { return glfwGetTime(); }
@@ -41,11 +44,13 @@ namespace app {
 				glfwSetWindowUserPointer(window, this);
 				glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 				glfwSetWindowFocusCallback(window, focusCallback);
+				g_glfwPlatformAlive = true;
 			}
 
 			~GlfwPlatform() override {
 				glfwDestroyWindow(window);
 				glfwTerminate();
+				g_glfwPlatformAlive = false;
 			}
 
 			GlfwPlatform(const GlfwPlatform&) = delete;
@@ -88,8 +93,11 @@ namespace app {
 		  private:
 			static GlfwPlatform& from(GLFWwindow* window) { return *static_cast<GlfwPlatform*>(glfwGetWindowUserPointer(window)); }
 
+			// A minimized window reports 0x0, which the App ignores; GL keeps the viewport it had.
 			static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
-				glViewport(0, 0, width, height);
+				if (width > 0 && height > 0) {
+					glViewport(0, 0, width, height);
+				}
 				GlfwPlatform&			 platform = from(window);
 				const Renderer::Viewport viewport = viewportOf(window);
 				if (platform.listener != nullptr) {
@@ -122,7 +130,7 @@ namespace app {
 		};
 
 		// The window's size: sizePercent of the primary monitor's work area, or the whole of a
-		// fullscreen monitor.
+		// fullscreen monitor. Null, logged, with no monitor or video mode to size it by.
 		GLFWwindow* createWindow(const WindowConfig& config) {
 			GLFWmonitor* fullscreen = nullptr;
 			if (config.fullscreenMonitor) {
@@ -141,18 +149,30 @@ namespace app {
 			int height = 0;
 			if (fullscreen != nullptr) {
 				const GLFWvidmode* mode = glfwGetVideoMode(fullscreen);
+				if (mode == nullptr) {
+					LOG_ERROR(Engine, "Monitor %d has no video mode", *config.fullscreenMonitor);
+					return nullptr;
+				}
 				width = mode->width;
 				height = mode->height;
 				LOG_INFO(Engine, "Window: fullscreen %dx%d on monitor %d", width, height, *config.fullscreenMonitor);
 			} else {
 				GLFWmonitor* primary = glfwGetPrimaryMonitor();
-				int			 areaX = 0;
-				int			 areaY = 0;
-				int			 areaWidth = 0;
-				int			 areaHeight = 0;
+				if (primary == nullptr) {
+					LOG_ERROR(Engine, "No primary monitor to size the window by");
+					return nullptr;
+				}
+				int areaX = 0;
+				int areaY = 0;
+				int areaWidth = 0;
+				int areaHeight = 0;
 				glfwGetMonitorWorkarea(primary, &areaX, &areaY, &areaWidth, &areaHeight);
 				if (areaWidth <= 0 || areaHeight <= 0) {
 					const GLFWvidmode* mode = glfwGetVideoMode(primary);
+					if (mode == nullptr) {
+						LOG_ERROR(Engine, "The primary monitor has no work area or video mode to size the window by");
+						return nullptr;
+					}
 					areaWidth = mode->width;
 					areaHeight = mode->height;
 				}
@@ -172,6 +192,10 @@ namespace app {
 	} // namespace
 
 	std::unique_ptr<Platform> createGlfwPlatform(const WindowConfig& config) {
+		if (g_glfwPlatformAlive) {
+			LOG_ERROR(Engine, "createGlfwPlatform: a GLFW platform is alive already, and there is one at a time");
+			return nullptr;
+		}
 		glfwSetErrorCallback(errorCallback);
 		if (glfwInit() != GLFW_TRUE) {
 			LOG_ERROR(Engine, "Failed to initialize GLFW");

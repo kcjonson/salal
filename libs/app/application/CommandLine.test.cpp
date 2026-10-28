@@ -64,8 +64,21 @@ namespace app {
 		EXPECT_EQ(parsed.scene, "a");
 	}
 
+	TEST(CommandLineTest, AFlagWhereThePortGoesIsNoPort) {
+		const CommandLine parsed = parse({"--http-port", "--scene=x"});
+		EXPECT_FALSE(parsed.valid);
+		EXPECT_FALSE(parsed.httpPort.has_value());
+		EXPECT_EQ(parsed.scene, "x"); // the flag is read as itself, not swallowed as the port
+	}
+
+	TEST(CommandLineTest, AnHttpPortCanBeJoinedWithEquals) {
+		EXPECT_EQ(parse({"--http-port=8090"}).httpPort, 8090);
+		EXPECT_FALSE(parse({"--http-port="}).valid);
+		EXPECT_FALSE(parse({"--http-port=80x"}).valid);
+	}
+
 	TEST(CommandLineTest, FlagsTheEngineDoesNotKnowAreTheGames) {
-		const CommandLine parsed = parse({"--seed", "42", "--scene", "x", "--http-port=8090"});
+		const CommandLine parsed = parse({"--seed", "42", "--scene", "x", "--http-ports=8090"});
 		EXPECT_TRUE(parsed.valid);
 		EXPECT_FALSE(parsed.scene.has_value());
 		EXPECT_FALSE(parsed.httpPort.has_value());

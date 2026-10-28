@@ -12,6 +12,7 @@ namespace app {
 	namespace {
 		constexpr std::string_view kScene = "--scene=";
 		constexpr std::string_view kHttpPort = "--http-port";
+		constexpr std::string_view kHttpPortEquals = "--http-port=";
 		constexpr std::string_view kHelp = "--help";
 
 		std::optional<int> parsePort(std::string_view text) {
@@ -31,13 +32,17 @@ namespace app {
 			const std::string_view arg = args[i];
 			if (arg.starts_with(kScene)) {
 				commandLine.scene = std::string(arg.substr(kScene.size()));
-			} else if (arg == kHttpPort) {
-				if (i + 1 == args.size()) {
+			} else if (arg == kHttpPort || arg.starts_with(kHttpPortEquals)) {
+				std::string_view value;
+				if (arg != kHttpPort) {
+					value = arg.substr(kHttpPortEquals.size());
+				} else if (i + 1 == args.size() || std::string_view(args[i + 1]).starts_with("--")) {
 					LOG_ERROR(Engine, "--http-port needs a port");
 					commandLine.valid = false;
 					continue;
+				} else {
+					value = args[++i];
 				}
-				const std::string_view value = args[++i];
 				commandLine.httpPort = parsePort(value);
 				if (!commandLine.httpPort) {
 					LOG_ERROR(Engine, "Invalid port number '%.*s'", static_cast<int>(value.size()), value.data());
