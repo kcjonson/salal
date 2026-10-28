@@ -84,6 +84,9 @@ namespace app::testing {
 			bool					   closeRequested() const override { return false; }
 			void					   present() override {}
 			void					   setVsync(bool /*enabled*/) override {}
+			void					   setFullscreen(std::optional<int> /*monitor*/) override {}
+			std::optional<int>		   fullscreenMonitor() const override { return std::nullopt; }
+			void					   setWindowSize(int /*width*/, int /*height*/) override {}
 			std::optional<std::string> keyLabel(Key /*key*/) const override { return std::nullopt; }
 			std::string				   clipboardText() const override { return {}; }
 			void					   setClipboardText(const std::string& /*text*/) override {}

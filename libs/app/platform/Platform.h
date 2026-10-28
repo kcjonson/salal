@@ -71,6 +71,18 @@ namespace app {
 
 		virtual void setVsync(bool enabled) = 0;
 
+		// Fullscreen on the connected monitor at `monitor` (the window system's order, 0 the primary) at
+		// its current video mode, or windowed at the size and place the window had before it went
+		// fullscreen. A monitor that isn't connected leaves it windowed, logged. The resize reaches the
+		// next poll's listener as one from outside a poll does; viewport() has the new size at once where
+		// the window system resizes at once (Windows, macOS), and after the poll that brings it otherwise.
+		virtual void setFullscreen(std::optional<int> monitor) = 0;
+		// The monitor the window is fullscreen on; nullopt while it's windowed.
+		virtual std::optional<int> fullscreenMonitor() const = 0;
+		// The windowed size in logical pixels: applied now while windowed, the size fullscreen returns to
+		// otherwise. Sizes below 1 are refused, logged.
+		virtual void setWindowSize(int width, int height) = 0;
+
 		// What the keyboard layout prints on a key, for keys that print something; nullopt for the rest,
 		// and where the window system can't say.
 		virtual std::optional<std::string> keyLabel(foundation::Key key) const = 0;

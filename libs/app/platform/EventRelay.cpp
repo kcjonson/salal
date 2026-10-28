@@ -6,9 +6,6 @@ namespace app {
 
 	void EventRelay::attach(PlatformEvents& events) {
 		listener = &events;
-		if (heldResize) {
-			events.framebufferResized(*std::exchange(heldResize, std::nullopt));
-		}
 		for (const Held& item : std::exchange(held, {})) {
 			deliver(events, item);
 		}
@@ -31,11 +28,10 @@ namespace app {
 	}
 
 	void EventRelay::framebufferResized(const Renderer::Viewport& viewport) {
-		if (listener != nullptr) {
-			listener->framebufferResized(viewport);
-		} else {
-			heldResize = viewport;
+		if (listener == nullptr) {
+			std::erase_if(held, [](const Held& item) { return std::holds_alternative<Renderer::Viewport>(item); });
 		}
+		relay(viewport);
 	}
 
 	void EventRelay::deliver(PlatformEvents& events, const Held& item) {
@@ -45,6 +41,8 @@ namespace app {
 			events.deviceConnected(connected->device, connected->time);
 		} else if (const auto* disconnected = std::get_if<Disconnected>(&item)) {
 			events.deviceDisconnected(disconnected->device, disconnected->time);
+		} else if (const auto* viewport = std::get_if<Renderer::Viewport>(&item)) {
+			events.framebufferResized(*viewport);
 		}
 	}
 

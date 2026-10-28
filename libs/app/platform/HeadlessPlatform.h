@@ -4,7 +4,8 @@
 // ManualClock, and what a window system would report is queued by hand and arrives in the next
 // poll, in the order it was queued, as a callback would. Gamepads are polled as GLFW's are: each
 // connected pad's state is sampled once per poll, after the queue, and diffed into events by the
-// same GamepadTracker the GLFW platform runs. The clipboard is a string.
+// same GamepadTracker the GLFW platform runs. The clipboard is a string. The window goes fullscreen on
+// monitors a test adds, resizing at once as Windows and macOS do, with the resize event in the next poll.
 
 #include "input/DeviceInfo.h"
 #include "platform/Clock.h"
@@ -46,13 +47,21 @@ namespace app {
 		// The label the layout prints on `key`, which keyLabel gives back; keys with none give nullopt.
 		void setKeyLabel(foundation::Key key, std::string label);
 
+		// A monitor of width x height, at the next index setFullscreen takes; there are none until one is added.
+		void addMonitor(int width, int height);
+		// What setVsync last set; true until it's called.
+		bool vsync() const { return swapInterval; }
+
 		Renderer::Viewport							viewport() const override { return current; }
 		std::unique_ptr<Renderer::backend::Backend> createBackend() override;
 		void										pollEvents(PlatformEvents& events) override;
 		bool										focused() const override { return hasFocus; }
 		bool										closeRequested() const override { return false; }
 		void										present() override {}
-		void										setVsync(bool /*enabled*/) override {}
+		void										setVsync(bool enabled) override { swapInterval = enabled; }
+		void										setFullscreen(std::optional<int> monitor) override;
+		std::optional<int>							fullscreenMonitor() const override { return fullscreen; }
+		void										setWindowSize(int width, int height) override;
 		std::optional<std::string>					keyLabel(foundation::Key key) const override;
 		std::string									clipboardText() const override { return clipboard; }
 		void										setClipboardText(const std::string& text) override { clipboard = text; }
@@ -66,6 +75,14 @@ namespace app {
 			DeviceInfo			   device{};
 		};
 
+		struct Size {
+			int width = 0;
+			int height = 0;
+		};
+
+		// The window resized by a call on it: at once, with its event queued for the next poll.
+		void resizeNow(Size size);
+
 		ManualClock												manualClock;
 		Renderer::Viewport										current;
 		bool													hasFocus = true;
@@ -75,6 +92,10 @@ namespace app {
 		std::array<GamepadSample, foundation::kMaxRealGamepads> padStates{};
 		std::map<foundation::Key, std::string>					keyLabels;
 		std::string												clipboard;
+		bool													swapInterval = true;
+		std::vector<Size>										monitors;
+		std::optional<int>										fullscreen;
+		Size													windowed;
 	};
 
 } // namespace app

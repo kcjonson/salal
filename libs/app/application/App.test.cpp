@@ -72,6 +72,9 @@ namespace app::testing {
 				time.advance(presentSeconds);
 			}
 			void					   setVsync(bool enabled) override { vsync = enabled; }
+			void					   setFullscreen(std::optional<int> /*monitor*/) override {}
+			std::optional<int>		   fullscreenMonitor() const override { return std::nullopt; }
+			void					   setWindowSize(int /*width*/, int /*height*/) override {}
 			std::optional<std::string> keyLabel(foundation::Key /*key*/) const override { return std::nullopt; }
 			std::string				   clipboardText() const override { return {}; }
 			void					   setClipboardText(const std::string& /*text*/) override {}

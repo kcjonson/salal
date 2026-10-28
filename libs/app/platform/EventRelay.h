@@ -1,15 +1,15 @@
 #pragma once
 
 // Passes what a window system's callbacks report to the poll's listener. What arrives outside a poll
-// (the pads found at startup, a resize or focus change from a window call) is held, in order, and goes
-// to the next poll's listener before anything new; a held resize goes first, the latest only.
+// (the pads found at startup, a resize or focus change from a window call such as setFullscreen) is
+// held, in order, and goes to the next poll's listener before anything new. Only the latest held resize
+// is kept, in the place it arrived, so it's delivered in order with the focus changes around it.
 
 #include "input/DeviceInfo.h"
 #include "platform/Platform.h"
 
 #include <input/InputTypes.h>
 
-#include <optional>
 #include <variant>
 #include <vector>
 
@@ -35,14 +35,13 @@ namespace app {
 			foundation::DeviceId device;
 			double				 time = 0.0;
 		};
-		using Held = std::variant<foundation::InputEvent, Connected, Disconnected>;
+		using Held = std::variant<foundation::InputEvent, Connected, Disconnected, Renderer::Viewport>;
 
 		static void deliver(PlatformEvents& events, const Held& item);
 		void		relay(Held item);
 
-		PlatformEvents*					  listener = nullptr;
-		std::optional<Renderer::Viewport> heldResize;
-		std::vector<Held>				  held;
+		PlatformEvents*	  listener = nullptr;
+		std::vector<Held> held;
 	};
 
 } // namespace app

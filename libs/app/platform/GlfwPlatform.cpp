@@ -48,11 +48,34 @@ namespace app {
 			return viewport;
 		}
 
+		// A windowed window's place and size, in screen coordinates.
+		struct WindowRect {
+			int x = 0;
+			int y = 0;
+			int width = 0;
+			int height = 0;
+		};
+
+		// The connected monitor at `index`, in glfwGetMonitors' order; null, logged, for one that isn't.
+		GLFWmonitor* monitorAt(int index) {
+			int					monitorCount = 0;
+			GLFWmonitor** const monitors = glfwGetMonitors(&monitorCount);
+			if (index >= 0 && index < monitorCount) {
+				return monitors[index]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+			}
+			LOG_WARNING(Engine, "Fullscreen monitor %d isn't connected (%d are); windowed", index, monitorCount);
+			return nullptr;
+		}
+
 		class GlfwPlatform final : public Platform {
 		  public:
-			explicit GlfwPlatform(GLFWwindow* glfwWindow)
+			// `fullscreenOn` is the monitor the window was made fullscreen on, and `windowedRect` where it
+			// goes when it leaves fullscreen until it has been windowed itself.
+			GlfwPlatform(GLFWwindow* glfwWindow, std::optional<int> fullscreenOn, WindowRect windowedRect)
 				: window(glfwWindow),
-				  hasFocus(glfwGetWindowAttrib(glfwWindow, GLFW_FOCUSED) == GLFW_TRUE) {
+				  hasFocus(glfwGetWindowAttrib(glfwWindow, GLFW_FOCUSED) == GLFW_TRUE),
+				  fullscreenIndex(fullscreenOn),
+				  windowed(windowedRect) {
 				g_glfwPlatform = this;
 				glfwSetWindowUserPointer(window, this);
 				glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
@@ -122,6 +145,48 @@ namespace app {
 			bool closeRequested() const override { return glfwWindowShouldClose(window) == GLFW_TRUE; }
 			void present() override { glfwSwapBuffers(window); }
 			void setVsync(bool enabled) override { glfwSwapInterval(enabled ? 1 : 0); }
+
+			// glfwSetWindowMonitor resizes the window inside the call on Windows and macOS, outside any
+			// poll, so the framebuffer callback's resize is held by the relay, in order, for the next one.
+			void setFullscreen(std::optional<int> monitor) override {
+				GLFWmonitor* const		 target = monitor ? monitorAt(*monitor) : nullptr;
+				const std::optional<int> index = target != nullptr ? monitor : std::nullopt;
+				if (index == fullscreenIndex) {
+					return;
+				}
+				if (target != nullptr) {
+					const GLFWvidmode* mode = glfwGetVideoMode(target);
+					if (mode == nullptr) {
+						LOG_ERROR(Engine, "Monitor %d has no video mode; the window stays as it is", *index);
+						return;
+					}
+					if (!fullscreenIndex) {
+						glfwGetWindowPos(window, &windowed.x, &windowed.y);
+						glfwGetWindowSize(window, &windowed.width, &windowed.height);
+					}
+					glfwSetWindowMonitor(window, target, 0, 0, mode->width, mode->height, mode->refreshRate);
+					LOG_INFO(Engine, "Window: fullscreen %dx%d on monitor %d", mode->width, mode->height, *index);
+				} else {
+					glfwSetWindowMonitor(window, nullptr, windowed.x, windowed.y, windowed.width, windowed.height, 0);
+					LOG_INFO(Engine, "Window: windowed %dx%d", windowed.width, windowed.height);
+				}
+				fullscreenIndex = index;
+				refreshCursor();
+			}
+
+			std::optional<int> fullscreenMonitor() const override { return fullscreenIndex; }
+
+			void setWindowSize(int width, int height) override {
+				if (width < 1 || height < 1) {
+					LOG_WARNING(Engine, "A window size of %dx%d refused", width, height);
+					return;
+				}
+				windowed.width = width;
+				windowed.height = height;
+				if (!fullscreenIndex) {
+					glfwSetWindowSize(window, width, height);
+				}
+			}
 
 			std::optional<std::string> keyLabel(foundation::Key key) const override {
 				// A key this keyboard lacks has no scancode, and glfwGetKeyName raises an error for it.
@@ -247,62 +312,71 @@ namespace app {
 			GLFWwindow*													 window;
 			GlfwClock													 glfwClock;
 			bool														 hasFocus;
+			std::optional<int>											 fullscreenIndex;
+			WindowRect													 windowed;
 			glm::vec2													 cursor{};
 			EventRelay													 relay;
 			GamepadTracker												 gamepads;
 			std::array<glfw::TriggersSeen, foundation::kMaxRealGamepads> triggersSeen{};
 		};
 
-		// The window's size: sizePercent of the primary monitor's work area, or the whole of a
-		// fullscreen monitor. Null, logged, with no monitor or video mode to size it by.
-		GLFWwindow* createWindow(const WindowConfig& config) {
-			GLFWmonitor* fullscreen = nullptr;
-			if (config.fullscreenMonitor) {
-				int					monitorCount = 0;
-				GLFWmonitor** const monitors = glfwGetMonitors(&monitorCount);
-				if (*config.fullscreenMonitor >= 0 && *config.fullscreenMonitor < monitorCount) {
-					fullscreen = monitors[*config.fullscreenMonitor]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-				} else {
-					LOG_WARNING(
-						Engine, "Fullscreen monitor %d isn't connected (%d are); windowed", *config.fullscreenMonitor, monitorCount
-					);
-				}
+		// sizePercent of the primary monitor's work area, centred in it. Null, logged, with no monitor or
+		// video mode to size it by.
+		std::optional<WindowRect> windowedRect(float sizePercent) {
+			GLFWmonitor* primary = glfwGetPrimaryMonitor();
+			if (primary == nullptr) {
+				LOG_ERROR(Engine, "No primary monitor to size the window by");
+				return std::nullopt;
 			}
+			int areaX = 0;
+			int areaY = 0;
+			int areaWidth = 0;
+			int areaHeight = 0;
+			glfwGetMonitorWorkarea(primary, &areaX, &areaY, &areaWidth, &areaHeight);
+			if (areaWidth <= 0 || areaHeight <= 0) {
+				const GLFWvidmode* mode = glfwGetVideoMode(primary);
+				if (mode == nullptr) {
+					LOG_ERROR(Engine, "The primary monitor has no work area or video mode to size the window by");
+					return std::nullopt;
+				}
+				areaWidth = mode->width;
+				areaHeight = mode->height;
+			}
+			const int width = static_cast<int>(static_cast<float>(areaWidth) * sizePercent);
+			const int height = static_cast<int>(static_cast<float>(areaHeight) * sizePercent);
+			LOG_INFO(Engine, "Work area: %dx%d", areaWidth, areaHeight);
+			return WindowRect{
+				.x = areaX + ((areaWidth - width) / 2), .y = areaY + ((areaHeight - height) / 2), .width = width, .height = height
+			};
+		}
 
-			int width = 0;
-			int height = 0;
+		struct CreatedWindow {
+			GLFWwindow*		   window = nullptr;
+			std::optional<int> fullscreenOn;
+			WindowRect		   windowed;
+		};
+
+		// The window, windowed at sizePercent of the primary monitor's work area or covering a fullscreen
+		// monitor, and where it goes when windowed. No window, logged, with no monitor or video mode to
+		// size it by.
+		CreatedWindow createWindow(const WindowConfig& config) {
+			const std::optional<WindowRect> windowed = windowedRect(config.sizePercent);
+			if (!windowed) {
+				return {};
+			}
+			GLFWmonitor* const fullscreen = config.fullscreenMonitor ? monitorAt(*config.fullscreenMonitor) : nullptr;
+			int				   width = windowed->width;
+			int				   height = windowed->height;
 			if (fullscreen != nullptr) {
 				const GLFWvidmode* mode = glfwGetVideoMode(fullscreen);
 				if (mode == nullptr) {
 					LOG_ERROR(Engine, "Monitor %d has no video mode", *config.fullscreenMonitor);
-					return nullptr;
+					return {};
 				}
 				width = mode->width;
 				height = mode->height;
 				LOG_INFO(Engine, "Window: fullscreen %dx%d on monitor %d", width, height, *config.fullscreenMonitor);
 			} else {
-				GLFWmonitor* primary = glfwGetPrimaryMonitor();
-				if (primary == nullptr) {
-					LOG_ERROR(Engine, "No primary monitor to size the window by");
-					return nullptr;
-				}
-				int areaX = 0;
-				int areaY = 0;
-				int areaWidth = 0;
-				int areaHeight = 0;
-				glfwGetMonitorWorkarea(primary, &areaX, &areaY, &areaWidth, &areaHeight);
-				if (areaWidth <= 0 || areaHeight <= 0) {
-					const GLFWvidmode* mode = glfwGetVideoMode(primary);
-					if (mode == nullptr) {
-						LOG_ERROR(Engine, "The primary monitor has no work area or video mode to size the window by");
-						return nullptr;
-					}
-					areaWidth = mode->width;
-					areaHeight = mode->height;
-				}
-				width = static_cast<int>(static_cast<float>(areaWidth) * config.sizePercent);
-				height = static_cast<int>(static_cast<float>(areaHeight) * config.sizePercent);
-				LOG_INFO(Engine, "Work area: %dx%d", areaWidth, areaHeight);
 				LOG_INFO(Engine, "Window: %dx%d (%.0f%% of the work area)", width, height, config.sizePercent * 100.0F);
 			}
 
@@ -310,7 +384,11 @@ namespace app {
 			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 			glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
-			return glfwCreateWindow(width, height, config.title.c_str(), fullscreen, nullptr);
+			return {
+				.window = glfwCreateWindow(width, height, config.title.c_str(), fullscreen, nullptr),
+				.fullscreenOn = fullscreen != nullptr ? config.fullscreenMonitor : std::nullopt,
+				.windowed = *windowed,
+			};
 		}
 
 	} // namespace
@@ -325,15 +403,15 @@ namespace app {
 			LOG_ERROR(Engine, "Failed to initialize GLFW");
 			return nullptr;
 		}
-		GLFWwindow* window = createWindow(config);
-		if (window == nullptr) {
+		const CreatedWindow created = createWindow(config);
+		if (created.window == nullptr) {
 			LOG_ERROR(Engine, "Failed to create GLFW window");
 			glfwTerminate();
 			return nullptr;
 		}
-		glfwMakeContextCurrent(window);
+		glfwMakeContextCurrent(created.window);
 		glfwSwapInterval(config.vsync ? 1 : 0);
-		return std::make_unique<GlfwPlatform>(window);
+		return std::make_unique<GlfwPlatform>(created.window, created.fullscreenOn, created.windowed);
 	}
 
 } // namespace app

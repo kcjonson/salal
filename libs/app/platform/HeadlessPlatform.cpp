@@ -1,13 +1,15 @@
 #include "platform/HeadlessPlatform.h"
 
 #include <backend/NullBackend.h>
+#include <utils/Log.h>
 
 #include <utility>
 
 namespace app {
 
 	HeadlessPlatform::HeadlessPlatform(int width, int height)
-		: current{.logicalWidth = width, .logicalHeight = height, .framebufferWidth = width, .framebufferHeight = height} {}
+		: current{.logicalWidth = width, .logicalHeight = height, .framebufferWidth = width, .framebufferHeight = height},
+		  windowed{.width = width, .height = height} {}
 
 	void HeadlessPlatform::push(const foundation::InputEvent& event) {
 		foundation::InputEvent stamped = event;
@@ -47,6 +49,48 @@ namespace app {
 
 	void HeadlessPlatform::setKeyLabel(foundation::Key key, std::string label) {
 		keyLabels[key] = std::move(label);
+	}
+
+	void HeadlessPlatform::addMonitor(int width, int height) {
+		monitors.push_back({.width = width, .height = height});
+	}
+
+	void HeadlessPlatform::setFullscreen(std::optional<int> monitor) {
+		std::optional<int> target;
+		if (monitor && *monitor >= 0 && static_cast<std::size_t>(*monitor) < monitors.size()) {
+			target = monitor;
+		} else if (monitor) {
+			LOG_WARNING(Engine, "Fullscreen monitor %d isn't connected (%zu are); windowed", *monitor, monitors.size());
+		}
+		if (target == fullscreen) {
+			return;
+		}
+		if (!fullscreen) {
+			windowed = {.width = current.logicalWidth, .height = current.logicalHeight};
+		}
+		fullscreen = target;
+		resizeNow(target ? monitors[static_cast<std::size_t>(*target)] : windowed);
+	}
+
+	void HeadlessPlatform::setWindowSize(int width, int height) {
+		if (width < 1 || height < 1) {
+			LOG_WARNING(Engine, "A window size of %dx%d refused", width, height);
+			return;
+		}
+		windowed = {.width = width, .height = height};
+		if (!fullscreen) {
+			resizeNow(windowed);
+		}
+	}
+
+	void HeadlessPlatform::resizeNow(Size size) {
+		if (size.width == current.logicalWidth && size.height == current.logicalHeight) {
+			return;
+		}
+		current = {
+			.logicalWidth = size.width, .logicalHeight = size.height, .framebufferWidth = size.width, .framebufferHeight = size.height
+		};
+		queued.push_back({.kind = Queued::Kind::Resize, .viewport = current});
 	}
 
 	std::optional<std::string> HeadlessPlatform::keyLabel(foundation::Key key) const {
