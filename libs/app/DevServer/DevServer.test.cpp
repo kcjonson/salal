@@ -609,6 +609,55 @@ namespace app::testing {
 		EXPECT_EQ(reply.connection, "close");
 	}
 
+	TEST_F(DevServerTest, AfterAnExitTheRestOfStep3IsAnswered503WithoutRunning) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		int		   runs = 0;
+		const auto counted = [&runs](const DevRequest&) {
+			++runs;
+			return ok();
+		};
+		const DevServer::Registration route = server().route("count", counted);
+		const DevServer::Registration control = server().control("count", counted);
+		std::future<Reply>			  exit = send("/api/control?action=exit");
+		waitParked(1);
+		std::future<Reply> laterControl = send("/api/control?action=count");
+		waitParked(2);
+		std::future<Reply> laterRoute = send("/api/dev/count");
+		waitParked(3);
+		std::future<Reply> secondExit = send("/api/control?action=exit");
+		waitParked(4);
+		take();
+		EXPECT_FALSE(frame());
+		EXPECT_EQ(take(), std::vector<std::string>{});
+		for (std::future<Reply>* later : {&laterControl, &laterRoute}) {
+			const Reply reply = later->get();
+			EXPECT_EQ(reply.status, 503);
+			EXPECT_EQ(reply.body, R"({"error":"the app is exiting"})");
+		}
+		EXPECT_EQ(runs, 0);
+		app.reset();
+		EXPECT_EQ(exit.get().body, R"({"status":"ok","action":"exit","shutdown":"complete"})");
+		EXPECT_EQ(secondExit.get().body, R"({"status":"ok","action":"exit","shutdown":"complete"})");
+	}
+
+	TEST_F(DevServerTest, AGameActionThatExitsEndsTheFrameAtStep3) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		const DevServer::Registration quit = server().control("quit", [this](const DevRequest&) {
+			app->requestExit();
+			return ok();
+		});
+		std::future<Reply>			  reply = send("/api/control?action=quit");
+		waitParked(1);
+		take();
+		EXPECT_FALSE(frame());
+		EXPECT_EQ(reply.get().status, 200);
+		EXPECT_EQ(take(), std::vector<std::string>{});
+	}
+
 	// --- Waiting for the frame ---
 
 	TEST_F(DevServerTest, ARequestTheFrameDoesntReachIsDroppedNotRunLater) {

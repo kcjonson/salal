@@ -228,13 +228,15 @@ namespace app {
 		return !exitRequested && !platform->closeRequested();
 	}
 
-	// An exit asked for at step 3, through the dev server, ends the frame there.
+	// An exit asked for at step 3, through the dev server or a game action it ran, ends the frame there;
+	// one asked for before it, by an onResize say, finishes the frame, as a scene's requestExit does.
 	void App::runFrame() {
 		beginFrame();
 		pollEvents();
 		endSection(sections.poll);
+		const bool exitBefore = exitRequested;
 		devServerPreFrame();
-		if (exitRequested) {
+		if (exitRequested && !exitBefore) {
 			return;
 		}
 		readFrameInput();

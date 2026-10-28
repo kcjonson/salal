@@ -255,19 +255,21 @@ namespace app {
 		}
 		for (const std::shared_ptr<DevJob>& job : host->takePreFrame()) {
 			const DevRequest& request = job->request;
-			if (job->kind == DevJob::Kind::Route) {
-				host->answer(*job, runHandler(*registry, DevKind::Route, request));
-			} else if (request.name == "exit") {
+			if (job->kind == DevJob::Kind::Control && request.name == "exit") {
 				LOG_INFO(Engine, "Exit requested through the dev server");
 				app.requestExit();
 				host->answerAfterShutdown(*job);
+			} else if (app.exitRequested) {
+				host->answer(*job, errorReply(503, "the app is exiting"));
+			} else if (job->kind == DevJob::Kind::Route) {
+				host->answer(*job, runHandler(*registry, DevKind::Route, request));
 			} else if (detail::isBuiltInControl(request.name)) {
 				host->answer(*job, builtInControl(app, request));
 			} else {
 				host->answer(*job, runHandler(*registry, DevKind::Control, request));
 			}
 		}
-		if (app.paused()) {
+		if (app.exitRequested || app.paused()) {
 			return;
 		}
 		for (foundation::InputEvent& event : host->takeInput()) {

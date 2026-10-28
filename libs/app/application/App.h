@@ -108,6 +108,8 @@ namespace app {
 		void addOverlay(std::unique_ptr<Overlay> overlay);
 
 	  private:
+		friend class DevServer; // at step 3, whether exit has been asked for
+
 		// Each section's length in the frame metrics times, in milliseconds. Pacing is in none of them,
 		// only in the frame's time.
 		struct Sections {

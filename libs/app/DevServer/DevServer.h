@@ -122,7 +122,8 @@ namespace app {
 		// asks for a port that's busy or out of range, or a timeout that isn't positive.
 		bool start(const DevServerConfig& config);
 		// Step 3: control actions, then routes, then the injected input, which joins `input` unless
-		// the app is paused. Stops after an exit, which ends the frame.
+		// the app is paused. Once exit has been asked for, what is left is answered 503 without being
+		// run, and the input stays queued; an exit asked for here ends the frame.
 		void servePreFrame(App& app, foundation::InputAccumulator& input);
 		// Step 10, before present: the screenshot, then the state providers; the metrics and the top
 		// scene's name for the streams.
