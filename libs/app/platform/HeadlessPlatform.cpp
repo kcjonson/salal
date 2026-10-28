@@ -56,12 +56,11 @@ namespace app {
 	}
 
 	void HeadlessPlatform::setFullscreen(std::optional<int> monitor) {
-		std::optional<int> target;
-		if (monitor && *monitor >= 0 && static_cast<std::size_t>(*monitor) < monitors.size()) {
-			target = monitor;
-		} else if (monitor) {
-			LOG_WARNING(Engine, "Fullscreen monitor %d isn't connected (%zu are); windowed", *monitor, monitors.size());
+		if (monitor && (*monitor < 0 || static_cast<std::size_t>(*monitor) >= monitors.size())) {
+			LOG_WARNING(Engine, "Fullscreen monitor %d isn't connected (%zu are); the window stays as it is", *monitor, monitors.size());
+			return;
 		}
+		const std::optional<int> target = monitor;
 		if (target == fullscreen) {
 			return;
 		}

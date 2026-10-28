@@ -94,6 +94,37 @@ namespace app::testing {
 		EXPECT_EQ(sizeOf(app->viewport()), "800x600 (800x600)");
 	}
 
+	TEST_F(AppSettingsTest, KeysOfTheWrongTypeOrHalfAWindowSizeLeaveTheWindowAlone) {
+		writeText(temp / "settings.json", R"({"version": 1, "video": {"vsync": "no", "fullscreenMonitor": "first", "windowWidth": 1024}})");
+		start(withFiles(), twoMonitors);
+		EXPECT_TRUE(platform->vsync());
+		EXPECT_EQ(platform->fullscreenMonitor(), std::nullopt);
+		EXPECT_EQ(sizeOf(app->viewport()), "800x600 (800x600)");
+	}
+
+	TEST_F(AppSettingsTest, ASavedMonitorThatIsNotConnectedAtCreateLeavesTheWindowAsItsConfigMadeIt) {
+		writeText(temp / "settings.json", R"({"version": 1, "video": {"fullscreenMonitor": 5}})");
+		start(withFiles(), twoMonitors);
+		EXPECT_EQ(platform->fullscreenMonitor(), std::nullopt);
+		EXPECT_EQ(sizeOf(app->viewport()), "800x600 (800x600)");
+		app.reset();
+
+		start(withFiles(), [](HeadlessPlatform& headless) {
+			twoMonitors(headless);
+			headless.setFullscreen(0);
+		});
+		EXPECT_EQ(platform->fullscreenMonitor(), 0);
+		EXPECT_EQ(app->fullscreenMonitor(), 0);
+		EXPECT_EQ(app->settings().get<std::optional<int>>("video.fullscreenMonitor", std::nullopt), 5); // as the player asked
+	}
+
+	TEST_F(AppSettingsTest, ASettingsVersionBelowOneFailsCreate) {
+		AppConfig bad = withFiles();
+		bad.settingsVersion = 0;
+		auto headless = std::make_unique<HeadlessPlatform>(800, 600);
+		EXPECT_EQ(App::create(std::move(bad), std::move(headless)), nullptr);
+	}
+
 	TEST_F(AppSettingsTest, TheGamesMigrationRunsBeforeTheAppReadsItsKeys) {
 		writeText(temp / "settings.json", R"({"version": 1, "vsync": false})");
 		AppConfig migrating = withFiles();
@@ -155,6 +186,7 @@ namespace app::testing {
 		start(withFiles());
 		app->setFullscreen(1);
 		EXPECT_EQ(platform->fullscreenMonitor(), std::nullopt);
+		EXPECT_EQ(app->fullscreenMonitor(), std::nullopt);
 		EXPECT_EQ(sizeOf(app->viewport()), "800x600 (800x600)");
 		EXPECT_EQ(app->settings().get<std::optional<int>>("video.fullscreenMonitor", std::nullopt), 1);
 	}
@@ -177,6 +209,11 @@ namespace app::testing {
 		frame();
 		EXPECT_EQ(app->settings().get("video.windowWidth", 0), 900);
 		EXPECT_EQ(app->settings().get("video.windowHeight", 0), 700);
+		platform->resize(0, 0); // minimized
+		frame();
+		EXPECT_EQ(app->settings().get("video.windowWidth", 0), 900);
+		platform->resize(900, 700);
+		frame();
 		app->setFullscreen(0);
 		frame();
 		EXPECT_EQ(app->settings().get("video.windowWidth", 0), 900);

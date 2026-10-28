@@ -151,6 +151,10 @@ namespace app {
 		if (!validFrame(config.frame)) {
 			return nullptr;
 		}
+		if (config.settingsVersion < 1) {
+			LOG_ERROR(Engine, "App::create: a settingsVersion of %d; versions start at 1", config.settingsVersion);
+			return nullptr;
+		}
 		std::unique_ptr<App> created(new App(std::move(config), std::move(platform)));
 		if (!created->start()) {
 			return nullptr;
@@ -167,6 +171,7 @@ namespace app {
 	bool App::start() {
 		Foundation::setResourceRoots(config.resourceRoots);
 		openStorage();
+		applyWindowSettings();
 
 		const Renderer::Viewport window = platform->viewport();
 		coordinates.setViewport(window);
@@ -203,20 +208,29 @@ namespace app {
 		return true;
 	}
 
-	// The settings, with the App's keys applied to the window before anything reads its size: the
-	// monitor, then the windowed size, which is then where fullscreen returns to. A key that isn't there
-	// leaves the window as its WindowConfig made it.
 	void App::openStorage() {
 		userSettings = Settings::load(
 			userPath(config.settingsFile, userConfigDir, config, "settings"), config.settingsVersion, config.migrateSettings
 		);
 		saveStore = SaveStore(userPath(config.savesDirectory, userDataDir, config, "saves"), config.saveFormat);
+	}
 
+	// The App's keys applied to the window before anything reads its size: vsync, the monitor, then the
+	// windowed size, which is then where fullscreen returns to. A key that isn't there, or holds the wrong
+	// type, leaves the window as its WindowConfig made it. The window is already showing, so a saved
+	// fullscreen or size is a visible switch at launch.
+	void App::applyWindowSettings() {
 		if (const std::optional<bool> vsync = userSettings.get<std::optional<bool>>(kVsync, std::nullopt)) {
 			platform->setVsync(*vsync);
 		}
-		if (userSettings.contains(kFullscreenMonitor)) {
-			platform->setFullscreen(userSettings.get<std::optional<int>>(kFullscreenMonitor, std::nullopt));
+		if (const nlohmann::json* monitor = userSettings.find(kFullscreenMonitor); monitor != nullptr) {
+			if (const auto chosen = detail::fromJson<std::optional<int>>(*monitor)) {
+				platform->setFullscreen(*chosen);
+			} else {
+				LOG_WARNING(
+					Engine, "App: video.fullscreenMonitor is a %s, not a monitor or null; the window stays as it is", monitor->type_name()
+				);
+			}
 		}
 		const int width = userSettings.get<int>(kWindowWidth, 0);
 		const int height = userSettings.get<int>(kWindowHeight, 0);
@@ -692,6 +706,10 @@ namespace app {
 
 	Input& App::input() {
 		return inputState;
+	}
+
+	std::optional<int> App::fullscreenMonitor() const {
+		return platform->fullscreenMonitor();
 	}
 
 	Settings& App::settings() {

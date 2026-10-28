@@ -13,6 +13,7 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -63,8 +64,27 @@ namespace app {
 			if (index >= 0 && index < monitorCount) {
 				return monitors[index]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 			}
-			LOG_WARNING(Engine, "Fullscreen monitor %d isn't connected (%d are); windowed", index, monitorCount);
+			LOG_WARNING(Engine, "Fullscreen monitor %d isn't connected (%d are)", index, monitorCount);
 			return nullptr;
+		}
+
+		// The work area of the monitor holding the point, the primary's when none does.
+		WindowRect workAreaAt(int x, int y) {
+			int					monitorCount = 0;
+			GLFWmonitor** const monitors = glfwGetMonitors(&monitorCount);
+			WindowRect			area;
+			for (int i = 0; i < monitorCount; ++i) {
+				glfwGetMonitorWorkarea(
+					monitors[i], &area.x, &area.y, &area.width, &area.height
+				); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+				if (x >= area.x && x < area.x + area.width && y >= area.y && y < area.y + area.height) {
+					return area;
+				}
+			}
+			if (GLFWmonitor* primary = glfwGetPrimaryMonitor(); primary != nullptr) {
+				glfwGetMonitorWorkarea(primary, &area.x, &area.y, &area.width, &area.height);
+			}
+			return area;
 		}
 
 		class GlfwPlatform final : public Platform {
@@ -149,28 +169,34 @@ namespace app {
 			// glfwSetWindowMonitor resizes the window inside the call on Windows and macOS, outside any
 			// poll, so the framebuffer callback's resize is held by the relay, in order, for the next one.
 			void setFullscreen(std::optional<int> monitor) override {
-				GLFWmonitor* const		 target = monitor ? monitorAt(*monitor) : nullptr;
-				const std::optional<int> index = target != nullptr ? monitor : std::nullopt;
+				GLFWmonitor* const target = monitor ? monitorAt(*monitor) : nullptr;
+				if (monitor && target == nullptr) {
+					return; // logged; the window stays as it is
+				}
+				const std::optional<int> index = monitor;
 				if (index == fullscreenIndex) {
 					return;
 				}
+				const std::optional<int> previous = fullscreenIndex;
 				if (target != nullptr) {
 					const GLFWvidmode* mode = glfwGetVideoMode(target);
 					if (mode == nullptr) {
 						LOG_ERROR(Engine, "Monitor %d has no video mode; the window stays as it is", *index);
 						return;
 					}
-					if (!fullscreenIndex) {
+					if (!previous) {
 						glfwGetWindowPos(window, &windowed.x, &windowed.y);
 						glfwGetWindowSize(window, &windowed.width, &windowed.height);
 					}
+					// Set before the call, whose callbacks can reach a listener inside it.
+					fullscreenIndex = index;
 					glfwSetWindowMonitor(window, target, 0, 0, mode->width, mode->height, mode->refreshRate);
 					LOG_INFO(Engine, "Window: fullscreen %dx%d on monitor %d", mode->width, mode->height, *index);
 				} else {
+					fullscreenIndex = std::nullopt;
 					glfwSetWindowMonitor(window, nullptr, windowed.x, windowed.y, windowed.width, windowed.height, 0);
 					LOG_INFO(Engine, "Window: windowed %dx%d", windowed.width, windowed.height);
 				}
-				fullscreenIndex = index;
 				refreshCursor();
 			}
 
@@ -181,11 +207,19 @@ namespace app {
 					LOG_WARNING(Engine, "A window size of %dx%d refused", width, height);
 					return;
 				}
-				windowed.width = width;
-				windowed.height = height;
-				if (!fullscreenIndex) {
-					glfwSetWindowSize(window, width, height);
+				if (fullscreenIndex) {
+					windowed = onWorkArea({.x = windowed.x, .y = windowed.y, .width = width, .height = height}, 0, 0, 0, 0);
+					return;
 				}
+				int left = 0;
+				int top = 0;
+				int right = 0;
+				int bottom = 0;
+				glfwGetWindowFrameSize(window, &left, &top, &right, &bottom);
+				glfwGetWindowPos(window, &windowed.x, &windowed.y);
+				windowed = onWorkArea({.x = windowed.x, .y = windowed.y, .width = width, .height = height}, left, top, right, bottom);
+				glfwSetWindowSize(window, windowed.width, windowed.height);
+				glfwSetWindowPos(window, windowed.x, windowed.y);
 			}
 
 			std::optional<std::string> keyLabel(foundation::Key key) const override {
@@ -279,6 +313,20 @@ namespace app {
 						static_cast<std::uint8_t>(jid), g_glfwPlatform->glfwClock.now(), g_glfwPlatform->relay
 					);
 				}
+			}
+
+			// The rect, frame included, shrunk to fit the work area of the monitor its centre is on and moved
+			// onto it, so a size saved on a bigger monitor doesn't open half off screen.
+			static WindowRect onWorkArea(WindowRect rect, int left, int top, int right, int bottom) {
+				const WindowRect area = workAreaAt(rect.x + (rect.width / 2), rect.y + (rect.height / 2));
+				if (area.width <= 0 || area.height <= 0) {
+					return rect;
+				}
+				rect.width = std::clamp(rect.width, 1, std::max(1, area.width - left - right));
+				rect.height = std::clamp(rect.height, 1, std::max(1, area.height - top - bottom));
+				rect.x = std::clamp(rect.x, area.x + left, std::max(area.x + left, area.x + area.width - right - rect.width));
+				rect.y = std::clamp(rect.y, area.y + top, std::max(area.y + top, area.y + area.height - bottom - rect.height));
+				return rect;
 			}
 
 			// Where the cursor is now, for button and scroll events until the next move reports it.

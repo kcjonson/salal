@@ -35,9 +35,9 @@ namespace app {
 	  public:
 		// The App on `platform`, with the renderer started on the platform's backend, the game's fonts
 		// loaded and, when AppConfig::devServer asks, the dev server listening; null, logged, for no
-		// platform, a FrameConfig with a step, delta or tick cap that isn't positive, no backend, font
-		// atlases that don't give the default family, a dev server port that's busy, or an App already
-		// alive. Never exits the process.
+		// platform, a FrameConfig with a step, delta or tick cap that isn't positive, a settingsVersion
+		// below 1, no backend, font atlases that don't give the default family, a dev server port that's
+		// busy, or an App already alive. Never exits the process.
 		static std::unique_ptr<App> create(AppConfig config, std::unique_ptr<Platform> platform);
 
 		// shutdown() if it hasn't run, then the fonts, the renderer and the window, then the dev server,
@@ -90,6 +90,9 @@ namespace app {
 		// viewport does, so the frame it's called in draws at that size; scenes and overlays hear of it
 		// through onResize after the next frame's poll, as of any resize.
 		void setFullscreen(std::optional<int> monitor);
+		// The monitor the window is fullscreen on now, which video.fullscreenMonitor needn't be (it keeps
+		// what was asked for); nullopt while windowed.
+		std::optional<int> fullscreenMonitor() const;
 
 		SceneStack& scenes();
 
@@ -142,6 +145,7 @@ namespace app {
 		bool start();
 		bool startFonts();
 		void openStorage();
+		void applyWindowSettings();
 
 		void inputEvent(const foundation::InputEvent& event) override;
 		void deviceConnected(const DeviceInfo& device, double time) override;

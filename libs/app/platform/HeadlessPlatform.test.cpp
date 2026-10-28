@@ -201,6 +201,31 @@ namespace app {
 		EXPECT_TRUE(nothing.resizes.empty());
 	}
 
+	TEST(HeadlessPlatformTest, FullscreenMovesToAnotherMonitorAndAMissingOneChangesNothing) {
+		HeadlessPlatform platform(640, 480);
+		platform.addMonitor(1920, 1080);
+		platform.addMonitor(2560, 1440);
+		platform.setFullscreen(0);
+		platform.setFullscreen(1);
+		EXPECT_EQ(platform.fullscreenMonitor(), 1);
+		EXPECT_EQ(platform.viewport().logicalWidth, 2560);
+		PlatformLog log;
+		platform.pollEvents(log);
+		ASSERT_EQ(log.resizes.size(), 2U);
+		EXPECT_EQ(log.resizes[0].logicalWidth, 1920);
+		EXPECT_EQ(log.resizes[1].logicalWidth, 2560);
+
+		platform.setFullscreen(7); // fullscreen stays where it is
+		EXPECT_EQ(platform.fullscreenMonitor(), 1);
+		EXPECT_EQ(platform.viewport().logicalWidth, 2560);
+		PlatformLog nothing;
+		platform.pollEvents(nothing);
+		EXPECT_TRUE(nothing.resizes.empty());
+
+		platform.setFullscreen(std::nullopt);
+		EXPECT_EQ(platform.viewport().logicalWidth, 640); // the windowed size from before monitor 0
+	}
+
 	TEST(HeadlessPlatformTest, GoingFullscreenRemembersTheWindowedSizeAndVsyncIsKept) {
 		HeadlessPlatform platform(640, 480);
 		platform.addMonitor(1920, 1080);
