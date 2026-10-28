@@ -52,6 +52,9 @@ repo's `specboard.md`.
   contract: how a game adds vertex code to the one program at build time
   (`salal_base_shader()`), the hook points, uniform blocks, and what fails the
   build.
+- **[docs/app-api.md](docs/app-api.md)** is the phase 2 design of `app`: the
+  frame, input and the per-tick snapshot, scenes, settings and saves, the dev
+  server, and the seven PRs that land it.
 
 For how the first consumer intends to use this engine, see `tech-stack.md` in
 `../asteroids-roguelike/docs/`. Its layer diagram, PRNG choice and primitive
@@ -92,8 +95,10 @@ to 4 are in (`v0.2.0` to `v0.5.0`), and after them the base shader takes hooks
 assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which took
 worldsim's grass deform out of the renderer and into a worldsim hook.
 `foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
-ported bit for bit (decision A). Phase 2 carves `app` out of `libs/engine`;
-`ui` is extracted last.
+ported bit for bit (decision A). Phase 2 carves `app` out of `libs/engine`, in
+the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PR 1 is in
+(`v0.10.0`): the input types, the accumulator and `ActionMap` in
+`foundation/input/`. `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to

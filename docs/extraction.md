@@ -667,6 +667,10 @@ Follow-ups recorded and kept out of the moves, so the imports stay pure:
 
 ### Phase 2, carve out `app`
 
+Designed in [app-api.md](app-api.md), which sequences it as seven PRs, each a
+minor tag, with worldsim pinning once at the end. PR 1 is in (`v0.10.0`): the
+input types, the accumulator and `ActionMap` in `foundation/input/`.
+
 The 16-file slice (`application/`, `scene/`, `input/`, `clipboard/`) plus what
 the consumers need from a frame owner and worldsim never built:
 
