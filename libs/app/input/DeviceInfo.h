@@ -2,6 +2,7 @@
 
 #include <input/InputTypes.h>
 
+#include <cstdint>
 #include <string>
 
 namespace app {
@@ -14,5 +15,14 @@ namespace app {
 		std::string			 name;
 		std::string			 modelGuid;
 	};
+
+	// The one keyboard and the one mouse.
+	inline constexpr foundation::DeviceId kKeyboard{.kind = foundation::DeviceKind::Keyboard};
+	inline constexpr foundation::DeviceId kMouse{.kind = foundation::DeviceKind::Mouse};
+
+	// The gamepad in pads[index].
+	constexpr foundation::DeviceId padId(std::uint8_t index) {
+		return {.kind = foundation::DeviceKind::Gamepad, .index = index};
+	}
 
 } // namespace app

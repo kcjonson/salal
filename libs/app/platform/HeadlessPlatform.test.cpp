@@ -21,7 +21,7 @@ namespace app {
 		using testing::PlatformLog;
 
 		DeviceInfo pad(std::uint8_t index, std::string name, std::string guid) {
-			return {.id = {.kind = foundation::DeviceKind::Gamepad, .index = index}, .name = std::move(name), .modelGuid = std::move(guid)};
+			return {.id = padId(index), .name = std::move(name), .modelGuid = std::move(guid)};
 		}
 
 		GamepadSample holding(GamepadButton button) {

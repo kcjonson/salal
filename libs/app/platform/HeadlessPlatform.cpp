@@ -36,11 +36,7 @@ namespace app {
 	}
 
 	void HeadlessPlatform::disconnectGamepad(std::uint8_t index) {
-		queued.push_back(
-			{.kind = Queued::Kind::Disconnect,
-			 .event = {.time = manualClock.now()},
-			 .device = {.id = {.kind = foundation::DeviceKind::Gamepad, .index = index}}}
-		);
+		queued.push_back({.kind = Queued::Kind::Disconnect, .event = {.time = manualClock.now()}, .device = {.id = padId(index)}});
 	}
 
 	void HeadlessPlatform::setGamepad(std::uint8_t index, const GamepadSample& state) {

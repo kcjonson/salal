@@ -280,7 +280,7 @@ namespace app {
 				const char* name = glfwGetGamepadName(jid);
 				const char* guid = glfwGetJoystickGUID(jid);
 				gamepads.connect(
-					{.id = {.kind = foundation::DeviceKind::Gamepad, .index = static_cast<std::uint8_t>(jid)},
+					{.id = padId(static_cast<std::uint8_t>(jid)),
 					 .name = name != nullptr ? name : "",
 					 .modelGuid = guid != nullptr ? guid : ""},
 					glfwClock.now(),

@@ -2,12 +2,6 @@
 
 namespace app {
 
-	namespace {
-		constexpr foundation::DeviceId padId(std::uint8_t index) {
-			return {.kind = foundation::DeviceKind::Gamepad, .index = index};
-		}
-	} // namespace
-
 	void GamepadTracker::connect(const DeviceInfo& pad, double time, PlatformEvents& events) {
 		if (pad.id.kind != foundation::DeviceKind::Gamepad || pad.id.index >= pads.size() || pads[pad.id.index].connected) {
 			return;

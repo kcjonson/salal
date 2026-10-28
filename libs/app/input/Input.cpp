@@ -18,8 +18,6 @@ namespace app {
 		using foundation::InputEvent;
 		using foundation::Key;
 
-		constexpr DeviceId	  kKeyboard{.kind = DeviceKind::Keyboard};
-		constexpr DeviceId	  kMouse{.kind = DeviceKind::Mouse};
 		constexpr std::size_t kPads = foundation::kMaxRealGamepads + foundation::kMaxVirtualGamepads;
 
 		// The English name of each Key, in Key's order.

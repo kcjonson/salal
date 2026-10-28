@@ -23,9 +23,6 @@ namespace app {
 		constexpr int kPress = 1;	// GLFW_PRESS
 		constexpr int kRepeat = 2;	// GLFW_REPEAT
 
-		constexpr foundation::DeviceId kKeyboard{.kind = foundation::DeviceKind::Keyboard};
-		constexpr foundation::DeviceId kMouse{.kind = foundation::DeviceKind::Mouse};
-
 	} // namespace
 
 	TEST(GlfwInputTest, EveryKeyRoundTripsThroughItsOwnGlfwCode) {

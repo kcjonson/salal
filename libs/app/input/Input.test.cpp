@@ -33,13 +33,6 @@ namespace app::testing {
 		using foundation::Key;
 		using foundation::MouseButton;
 
-		constexpr DeviceId kKeyboard{.kind = DeviceKind::Keyboard};
-		constexpr DeviceId kMouse{.kind = DeviceKind::Mouse};
-
-		constexpr DeviceId padId(std::uint8_t index) {
-			return {.kind = DeviceKind::Gamepad, .index = index};
-		}
-
 		DeviceInfo pad(std::uint8_t index, std::string guid, std::string name = "Pad") {
 			return {.id = padId(index), .name = std::move(name), .modelGuid = std::move(guid)};
 		}

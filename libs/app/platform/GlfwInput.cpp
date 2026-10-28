@@ -173,9 +173,6 @@ namespace app::glfw {
 		static_assert(GLFW_GAMEPAD_AXIS_LAST + 1 == static_cast<int>(GamepadAxis::Count));
 		static_assert(GLFW_GAMEPAD_AXIS_LEFT_TRIGGER == static_cast<int>(GamepadAxis::LeftTrigger));
 
-		constexpr foundation::DeviceId kKeyboard{.kind = foundation::DeviceKind::Keyboard};
-		constexpr foundation::DeviceId kMouse{.kind = foundation::DeviceKind::Mouse};
-
 		std::uint8_t modsOf(int mods) {
 			return static_cast<std::uint8_t>(mods & kModMask);
 		}

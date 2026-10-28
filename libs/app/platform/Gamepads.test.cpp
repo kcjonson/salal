@@ -19,7 +19,7 @@ namespace app {
 		using testing::PlatformLog;
 
 		DeviceInfo pad(std::uint8_t index) {
-			return {.id = {.kind = foundation::DeviceKind::Gamepad, .index = index}, .name = "Pad", .modelGuid = "0300"};
+			return {.id = padId(index), .name = "Pad", .modelGuid = "0300"};
 		}
 
 		void set(GamepadSample& sample, GamepadButton button, bool down) {
@@ -52,7 +52,7 @@ namespace app {
 		EXPECT_EQ(log.entries[0].time, 1.0);
 		for (std::size_t i = 1; i < log.entries.size(); ++i) {
 			EXPECT_EQ(log.entries[i].time, 2.0);
-			EXPECT_EQ(log.entries[i].event.device, (foundation::DeviceId{.kind = foundation::DeviceKind::Gamepad, .index = 2}));
+			EXPECT_EQ(log.entries[i].event.device, padId(2));
 		}
 
 		// Release and move: only those.
