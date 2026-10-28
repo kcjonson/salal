@@ -4,11 +4,14 @@
 #include "input/Input.h"
 #include "tests/AppHarness.h"
 
+#include <backend/NullBackend.h>
 #include <input/ActionMap.h>
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -70,6 +73,32 @@ namespace app::testing {
 			EXPECT_EQ(binding->deadzone, 0.0F);
 		}
 
+		// A platform that makes the PlatformEvents calls a test scripts, as the dev server will for its
+		// virtual pads, which no polled platform reports.
+		class ScriptedPlatform final : public Platform {
+		  public:
+			const Clock&								clock() const override { return time; }
+			Renderer::Viewport							viewport() const override { return {800, 600, 800, 600}; }
+			std::unique_ptr<Renderer::backend::Backend> createBackend() override {
+				return std::make_unique<Renderer::backend::NullBackend>();
+			}
+			void pollEvents(PlatformEvents& events) override {
+				for (const std::function<void(PlatformEvents&)>& step : std::exchange(script, {})) {
+					step(events);
+				}
+			}
+			bool					   focused() const override { return true; }
+			bool					   closeRequested() const override { return false; }
+			void					   present() override {}
+			void					   setVsync(bool /*enabled*/) override {}
+			std::optional<std::string> keyLabel(Key /*key*/) const override { return std::nullopt; }
+			std::string				   clipboardText() const override { return {}; }
+			void					   setClipboardText(const std::string& /*text*/) override {}
+
+			ManualClock										  time;
+			std::vector<std::function<void(PlatformEvents&)>> script;
+		};
+
 		class InputTest : public AppTest {
 		  protected:
 			Input& input() { return app->input(); }
@@ -105,7 +134,8 @@ namespace app::testing {
 		EXPECT_EQ(input().events()[0].type, InputEvent::Type::DeviceDisconnected);
 	}
 
-	// A connection names its pad, so one through inputEvent, with no name or model, is dropped.
+	// A connection names its pad, so one through inputEvent, with no name or model, is dropped, and so
+	// is a disconnection, which would otherwise zero a pad that Input still lists.
 	TEST_F(InputTest, AConnectionEventPushedAsInputIsDropped) {
 		start();
 		platform->push({.type = InputEvent::Type::DeviceConnected, .device = padId(0)});
@@ -114,6 +144,67 @@ namespace app::testing {
 		EXPECT_TRUE(input().events().empty());
 		EXPECT_FALSE(input().frame().pads[0].connected);
 		EXPECT_EQ(input().devices().size(), 2U);
+
+		platform->connectGamepad(pad(1, "0301"));
+		platform->setGamepad(1, holding(GamepadButton::B));
+		frame();
+		input().claim(0, padId(1));
+		platform->push({.type = InputEvent::Type::DeviceDisconnected, .device = padId(1)});
+		frame();
+		EXPECT_TRUE(input().events().empty());
+		EXPECT_TRUE(input().frame().pads[1].connected);
+		EXPECT_TRUE(input().frame().pads[1].buttons[static_cast<std::size_t>(GamepadButton::B)].down);
+		EXPECT_EQ(ids(input().devices()), (std::vector<DeviceId>{kKeyboard, kMouse, padId(1)}));
+		EXPECT_TRUE(input().slotConnected(0));
+	}
+
+	// Connections straight through PlatformEvents, the dev server's way in: a virtual pad's index is
+	// accepted like a real one's, and a duplicate, a keyboard, an index past pads[], a disconnection of
+	// a pad never connected and one of the mouse are dropped.
+	TEST(InputConnectionTest, PlatformEventsTakeVirtualPadsAndDropWhatIsNotAPad) {
+		auto					   owned = std::make_unique<ScriptedPlatform>();
+		ScriptedPlatform&		   platform = *owned;
+		const std::unique_ptr<App> app = App::create({}, std::move(owned));
+		ASSERT_NE(app, nullptr);
+		Input& input = app->input();
+
+		platform.script.emplace_back([](PlatformEvents& events) {
+			events.deviceConnected({.id = padId(16), .name = "vpad0", .modelGuid = "virtual"}, 0.0);
+			events.deviceConnected({.id = padId(16), .name = "again", .modelGuid = "virtual"}, 0.0);
+			events.deviceConnected({.id = kKeyboard, .name = "Second keyboard"}, 0.0);
+			events.deviceConnected({.id = padId(20), .name = "past pads[]"}, 0.0);
+			events.inputEvent({.type = InputEvent::Type::ButtonDown, .device = padId(16), .button = GamepadButton::X});
+		});
+		app->tick();
+		EXPECT_EQ(ids(input.devices()), (std::vector<DeviceId>{kKeyboard, kMouse, padId(16)}));
+		EXPECT_EQ(input.devices()[2].name, "vpad0");
+		ASSERT_EQ(input.events().size(), 2U);
+		EXPECT_EQ(input.events()[0].type, InputEvent::Type::DeviceConnected);
+		EXPECT_EQ(input.events()[1].type, InputEvent::Type::ButtonDown);
+		EXPECT_TRUE(input.frame().pads[16].buttons[static_cast<std::size_t>(GamepadButton::X)].down);
+		EXPECT_EQ(input.pressedDevice(), padId(16));
+		input.claim(0, padId(16));
+		EXPECT_EQ(input.deviceForSlot(0), padId(16));
+
+		platform.script.emplace_back([](PlatformEvents& events) {
+			events.deviceDisconnected(padId(3), 1.0);
+			events.deviceDisconnected(kMouse, 1.0);
+			events.deviceDisconnected(padId(16), 1.0);
+		});
+		app->tick();
+		EXPECT_EQ(ids(input.devices()), (std::vector<DeviceId>{kKeyboard, kMouse}));
+		ASSERT_EQ(input.events().size(), 1U);
+		EXPECT_EQ(input.events()[0].type, InputEvent::Type::DeviceDisconnected);
+		EXPECT_EQ(input.events()[0].device, padId(16));
+		EXPECT_FALSE(input.slotConnected(0));
+
+		// The same model back as another virtual pad takes the slot.
+		platform.script.emplace_back([](PlatformEvents& events) {
+			events.deviceConnected({.id = padId(17), .name = "vpad1", .modelGuid = "virtual"}, 2.0);
+		});
+		app->tick();
+		EXPECT_TRUE(input.slotConnected(0));
+		EXPECT_EQ(input.deviceForSlot(0), padId(17));
 	}
 
 	// --- The first press ---
