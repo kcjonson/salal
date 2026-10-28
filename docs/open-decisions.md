@@ -240,11 +240,11 @@ and dropping `engine` from ui's link list were the last of phase 0.5
 the namespace is now `foundation::`), and the rest of the untangle landed on
 2026-10-25/26 ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291)
 through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)). Phase 2
-PRs 1 to 4 are in (`v0.10.0` to `v0.13.0`): the completed `Key`, the gamepad
+PRs 1 to 5 are in (`v0.10.0` to `v0.14.0`): the completed `Key`, the gamepad
 types, the snapshot, the accumulator and `ActionMap` are in `foundation/input/`,
 `app`'s frame feeds the accumulator and hands each fixed tick its snapshot,
-`app`'s device layer polls GLFW's devices into it, and the dev server injects
-into it.
+`app`'s device layer polls GLFW's devices into it, the dev server injects into
+it, and `ActionMap`'s bindings go through the settings file by control name.
 
 ## E. ECS core
 

@@ -208,9 +208,13 @@ namespace app::testing {
 
 		static AppConfig config(FrameConfig frame = {.fixedStep = kStep}) { return {.frame = frame}; }
 
-		App& start(AppConfig appConfig = config()) {
+		// `prepare` sets the platform up before the App is made on it (monitors, a window state).
+		App& start(AppConfig appConfig = config(), const std::function<void(HeadlessPlatform&)>& prepare = {}) {
 			auto headless = std::make_unique<HeadlessPlatform>(800, 600);
 			platform = headless.get();
+			if (prepare) {
+				prepare(*headless);
+			}
 			app = App::create(std::move(appConfig), std::move(headless));
 			EXPECT_NE(app, nullptr);
 			return *app;

@@ -64,15 +64,38 @@ namespace foundation {
 	} // namespace
 
 	void ActionMap::bind(std::string_view action, Binding binding) {
-		auto found = actions.find(action);
-		if (found == actions.end()) {
-			found = actions.emplace(std::string(action), std::vector<Binding>{}).first;
+		auto found = byAction.find(action);
+		if (found == byAction.end()) {
+			found = byAction.emplace(std::string(action), std::vector<Binding>{}).first;
 		}
 		found->second.push_back(binding);
 	}
 
+	void ActionMap::unbind(std::string_view action) {
+		auto found = byAction.find(action);
+		if (found == byAction.end()) {
+			byAction.emplace(std::string(action), std::vector<Binding>{});
+			return;
+		}
+		found->second.clear();
+	}
+
+	std::vector<std::string_view> ActionMap::actions() const {
+		std::vector<std::string_view> names;
+		names.reserve(byAction.size());
+		for (const auto& [name, bound] : byAction) {
+			names.emplace_back(name);
+		}
+		return names;
+	}
+
+	std::span<const Binding> ActionMap::bindings(std::string_view action) const {
+		const auto found = byAction.find(action);
+		return found != byAction.end() ? std::span<const Binding>(found->second) : std::span<const Binding>();
+	}
+
 	void ActionMap::setStickDeadzone(GamepadAxis x, GamepadAxis y, float radius) {
-		for (Stick& stick : sticks) {
+		for (StickDeadzone& stick : sticks) {
 			if ((stick.x == x && stick.y == y) || (stick.x == y && stick.y == x)) {
 				stick.radius = radius;
 				return;
@@ -82,8 +105,8 @@ namespace foundation {
 	}
 
 	ActionState ActionMap::evaluate(std::string_view action, const InputSnapshot& input, std::span<const DeviceId> devices) const {
-		const auto found = actions.find(action);
-		if (found == actions.end()) {
+		const auto found = byAction.find(action);
+		if (found == byAction.end()) {
 			return {};
 		}
 
@@ -144,7 +167,7 @@ namespace foundation {
 
 	float ActionMap::axisValue(const Axes& axes, GamepadAxis axis, float deadzone) const {
 		float value = axes[indexOf(axis)];
-		for (const Stick& stick : sticks) {
+		for (const StickDeadzone& stick : sticks) {
 			if (axis == stick.x || axis == stick.y) {
 				const float x = axes[indexOf(stick.x)];
 				const float y = axes[indexOf(stick.y)];
