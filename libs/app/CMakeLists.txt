@@ -15,6 +15,7 @@ add_library(salal_app STATIC
     application/App.cpp
     application/CommandLine.cpp
     clipboard/Clipboard.cpp
+    detail/SafeFile.cpp
     input/Input.cpp
     platform/EventRelay.cpp
     platform/Gamepads.cpp
@@ -22,6 +23,7 @@ add_library(salal_app STATIC
     platform/GlfwPlatform.cpp
     platform/HeadlessPlatform.cpp
     scene/SceneStack.cpp
+    storage/UserDirectories.cpp
 )
 add_library(salal::app ALIAS salal_app)
 
