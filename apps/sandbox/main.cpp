@@ -1,8 +1,8 @@
 // The sandbox: salal's renderer-level test scenes on the GLFW platform, with the scene picker over them
 // (Picker.h). --scene=<name> starts in that scene with the picker closed; without it the first scene
-// runs with the picker open. Where the dev server is compiled in it serves on 127.0.0.1:8090, or
-// --http-port's port; /api/control?action=scene&scene=<name> switches scene. Close the window, or ask
-// /api/control?action=exit, to quit.
+// runs with the picker open. The dev server serves on 127.0.0.1:8090, or --http-port's port, in the
+// configurations it is compiled into; /api/control?action=scene&scene=<name> switches scene. Close the
+// window, or ask /api/control?action=exit, to quit.
 
 #include "BaseShader.h"
 #include "Picker.h"
@@ -24,6 +24,14 @@
 namespace {
 
 	constexpr int kDevServerPort = 8090; // worldsim's ui-sandbox port
+
+	// On by default where the server is compiled in. Elsewhere only --http-port asks for it, so a build
+	// without it logs that nothing listens only when someone asked, and a Release launch logs nothing.
+#ifdef SALAL_DEV_SERVER
+	constexpr bool kDevServerCompiledIn = true;
+#else
+	constexpr bool kDevServerCompiledIn = false;
+#endif
 
 	// The one family the sandbox loads (docs/app-api.md, decision 8), staged beside the exe by
 	// CMakeLists.txt.
@@ -75,7 +83,8 @@ int main(int argc, char** argv) {
 		 .baseShader = base_shader::source(),
 		 .fontAtlases = kFontAtlases,
 		 .defaultFont = kMonoFont,
-		 .devServer = {.enabled = true, .port = commandLine.httpPort.value_or(kDevServerPort)},
+		 .devServer =
+			 {.enabled = kDevServerCompiledIn || commandLine.httpPort.has_value(), .port = commandLine.httpPort.value_or(kDevServerPort)},
 		 .metrics = true},
 		std::move(platform)
 	);
