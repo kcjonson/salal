@@ -390,12 +390,12 @@ public:
 	const foundation::InputSnapshot& frame() const;           // this frame's state; replaces InputManager's polled API
 	std::span<const foundation::InputEvent> events() const;   // this frame's events, in order
 	std::span<const DeviceInfo> devices() const;              // connected now: keyboard, mouse, then pads by id
-	std::optional<foundation::DeviceId> pressedDevice() const; // the first device with a press this frame, in event order: "press a button to join"; axes don't press
+	std::optional<foundation::DeviceId> pressedDevice() const; // the first press this frame, in event order, from a device not backing its share of slots: "press a button to join"
 	void claim(int slot, foundation::DeviceId);               // a keyboard can back two slots, a mouse or pad one; refused, logged, past that
 	void release(int slot);
-	std::optional<foundation::DeviceId> deviceForSlot(int slot) const; // nullopt while the slot's pad is away
+	std::optional<foundation::DeviceId> deviceForSlot(int slot) const; // a departed pad's id until another device takes it
 	bool slotConnected(int slot) const;
-	std::string keyName(foundation::Key) const;               // the layout's label for the main block's printable keys, a fixed English table for the rest
+	std::string keyName(foundation::Key) const;               // the layout's label for the main block's printable keys, capitalised; a fixed English table for the rest
 	std::optional<Binding> captureNext();                     // the next press this frame not yet returned, for a rebinding screen; an axis past half travel binds its half
 };
 }
@@ -422,20 +422,41 @@ The rules this carries:
   a slot is waiting on the same model GUID takes that slot; anything else
   arrives unclaimed. Two slots waiting on one model take its pads lowest slot
   first; a pad with no GUID is taken back by nothing. While a slot waits,
-  `deviceForSlot` is empty, since another pad may have its joystick id
-  meanwhile; releasing a waiting slot ends the wait.
+  `deviceForSlot` still names the departed pad's id, which the accumulator has
+  released and zeroed, so a sim reading it sees the release; once another
+  device connects at that id it's empty. A pad that leaves and comes back at
+  another id in one poll moves the slot before a tick reads the release, so a
+  sim sees a second press with no release between. Releasing a waiting slot
+  ends the wait, and a claim on a claimed slot replaces its device.
+- `pressedDevice` counts a key going down (not a repeat) as the keyboard's,
+  whatever device the event names, a mouse button as the mouse's and a pad
+  button as its pad's. It skips a device that backs its share of slots already,
+  so a joined player's press doesn't hide a new one's. Sticks and triggers
+  don't press.
+- `captureNext` binds a stick or trigger crossing half travel away from rest to
+  that half: scale 1, or -1 for a stick's negative half.
 - An axis read as a button has edges: each reader's snapshot holds the axes at
   its last read (`startAxes`) beside their values now, and `ActionMap` folds
-  an axis binding's crossing with its button bindings' transitions. Pads are
-  sampled once a frame, so the frame reader sees every crossing; a tick reader
-  spanning frames with no tick, or several virtual pad events in one frame, sees
-  the net one.
+  an axis binding's crossing with its button bindings' transitions, reporting
+  the most transitions some order of the bindings' changes gives. Pads are
+  sampled once a frame, so the frame reader sees every crossing but one: a pad
+  that disconnects and reconnects in one poll with a trigger held gives no edge
+  (a held button gives a release and a press). The tick reader's axis edges are
+  sampled at frame rate as well, so a tick spanning frames with no tick sees
+  the net crossing, and a trigger tap shorter than the gap between ticks can be
+  lost at low tick rates; several virtual pad events in one frame give the net
+  one too.
+- A trigger the pad's mapping lacks, which GLFW leaves at 0, reads released: a
+  trigger reads 0 until GLFW has reported it below 0, where mapped ones rest.
 - Connections come through `PlatformEvents::deviceConnected` and
   `deviceDisconnected`, with the name and model GUID an `InputEvent` can't
   carry; the dev server registers its virtual pads (`pads[16..19]`) through
   the same calls.
 - Keys are positions, as decision D settled; `keyName` shows the layout's
-  label, with a fallback because GLFW names only printable keys.
+  label, with a fallback because GLFW names only printable keys. The label is
+  capitalised by codepoint, by range: ASCII, the Latin-1 Supplement (U+00E0 to
+  U+00FE but U+00F7), Greek and Cyrillic. A key the keyboard lacks has no
+  label.
 - A sim never reads `InputSnapshot`. It takes the game's own action struct,
   built from `ActionMap` in the game's `fixedUpdate` with `deviceForSlot`, and
   that struct is the replay log.

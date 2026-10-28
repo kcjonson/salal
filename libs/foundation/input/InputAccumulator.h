@@ -2,9 +2,11 @@
 
 // Folds input events into state for two readers, the fixed tick and the frame. Each reader has
 // its own transition counts, pointer delta, scroll and pad startAxes, so consuming one leaves the
-// other alone. A reader's startAxes are its axes as of its last consume: an axis crossing that
-// came and went between two consumes isn't in them, and pads are sampled once a frame, so only a
-// tick reader spanning frames with no tick, or several virtual pad events in one frame, loses one.
+// other alone. A reader's startAxes are its axes as of its last consume, so a crossing that came and
+// went between two consumes isn't in them. Pads are sampled once a frame: the frame reader loses one
+// only to a pad that disconnects and reconnects in one poll with the axis held (a held button reads a
+// release and a press there); a tick reader spanning frames with no tick loses a tap shorter than the
+// gap between ticks; several virtual pad events in one frame give the net crossing.
 //
 // What push does with what it's given:
 // - Transitions count changes of state: a repeat KeyDown, a down for a key already down and an up
