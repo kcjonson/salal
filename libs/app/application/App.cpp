@@ -157,6 +157,9 @@ namespace app {
 		if (config.metrics) {
 			metricsCollector = std::make_unique<Renderer::MetricsCollector>();
 		}
+		if (!devServerState.start(config.devServer)) {
+			return false;
+		}
 
 		LOG_INFO(
 			Engine,
@@ -200,6 +203,8 @@ namespace app {
 		Renderer::Primitives::shutdown();
 		metricsCollector.reset();
 		platform.reset();
+		// An exit request through the server is answered here, once the scenes have exited and GL is gone.
+		devServerState.stop();
 		Foundation::setResourceRoots({});
 		g_appAlive = false;
 		LOG_INFO(Engine, "App destroyed");
@@ -217,23 +222,33 @@ namespace app {
 		}
 		{
 			const ScopedFlag frame(inFrame);
-			beginFrame();
-			pollEvents();
-			endSection(sections.poll);
-			readFrameInput();
-			dispatchEvents();
-			applySceneChanges();
-			endSection(sections.input);
-			runFixedTicks();
-			updateScenes();
-			endSection(sections.update);
-			render();
-			endSection(sections.render);
-			present();
-			endSection(sections.present);
+			runFrame();
 		}
 		finishFrame();
 		return !exitRequested && !platform->closeRequested();
+	}
+
+	// An exit asked for at step 3, through the dev server, ends the frame there.
+	void App::runFrame() {
+		beginFrame();
+		pollEvents();
+		endSection(sections.poll);
+		devServerPreFrame();
+		if (exitRequested) {
+			return;
+		}
+		readFrameInput();
+		dispatchEvents();
+		applySceneChanges();
+		endSection(sections.input);
+		runFixedTicks();
+		updateScenes();
+		endSection(sections.update);
+		render();
+		devServerPostRender();
+		endSection(sections.render);
+		present();
+		endSection(sections.present);
 	}
 
 	// The clock starts at the first frame, so the first delta is 0 however long the game took to load.
@@ -293,6 +308,12 @@ namespace app {
 		coordinates.setViewport(newViewport);
 		Renderer::Primitives::setViewport(newViewport.framebufferWidth, newViewport.framebufferHeight);
 		resized = true;
+	}
+
+	// Control actions, then the game's routes; injected input joins the accumulator here unless paused,
+	// and waits in the server until resume otherwise.
+	void App::devServerPreFrame() {
+		devServerState.servePreFrame(*this, inputState.accumulator);
 	}
 
 	void App::readFrameInput() {
@@ -399,6 +420,11 @@ namespace app {
 		}
 
 		Renderer::Primitives::endFrame();
+	}
+
+	// The screenshot, then the state providers, read before present.
+	void App::devServerPostRender() {
+		devServerState.servePostRender(*this);
 	}
 
 	void App::present() {
@@ -585,6 +611,10 @@ namespace app {
 
 	Input& App::input() {
 		return inputState;
+	}
+
+	DevServer& App::devServer() {
+		return devServerState;
 	}
 
 	const Clock& App::clock() const {

@@ -1,960 +1,105 @@
-// HTTP Debug Server implementation using cpp-httplib.
+#include "DevServer/DevServerHost.h"
 
-#include "debug/DebugServer.h"
-#include "utils/Log.h"
+#include "DevServer/DevRegistry.h"
+
+#include <httplib.h>
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <chrono>
-#include <cmath>
-#include <cstdlib>
 #include <cstring>
-#include <ctime>
-#include <httplib.h>
-#include <iostream>
-#include <iterator>
-#include <sstream>
-#include <string_view>
-#include <thread>
+#include <map>
+#include <optional>
+#include <utility>
 
-// PNG encoding is centralized in Foundation::PngEncoder (single STB definition site).
-#include "graphics/PngEncoder.h"
-#include "primitives/Primitives.h"
+namespace app::detail {
 
-namespace Foundation {
+	namespace {
+		constexpr const char* kHost = "127.0.0.1";
+		// How long an exit request waits for ~App to tear the app down before it answers anyway.
+		constexpr auto kExitWait = std::chrono::seconds(30);
+		constexpr auto kStreamPoll = std::chrono::milliseconds(10);
+		constexpr auto kStreamInterval = std::chrono::milliseconds(100); // 10 Hz
 
-	// Parse one /api/input 'ev' value: "type,x,y[,button][,delta]" (see endpoint
-	// comment). Returns false with a message in error on malformed input.
-	static bool parseInputEvent(const std::string& ev, InputCommand& cmd, std::string& error) {
-		std::vector<std::string> fields;
-		std::stringstream ss(ev);
-		std::string field;
-		while (std::getline(ss, field, ',')) {
-			fields.push_back(field);
+		// Invalid UTF-8 in a log message or a name is replaced, never thrown over.
+		std::string dump(const nlohmann::ordered_json& json) {
+			return json.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
 		}
 
-		if (fields.empty()) {
-			error = "empty event";
-			return false;
+		DevResponse jsonReply(const nlohmann::ordered_json& json) {
+			return {.body = dump(json)};
 		}
 
-		const std::string& type = fields[0];
-		if (type == "move")
-			cmd.type = InputCommand::Type::Move;
-		else if (type == "down")
-			cmd.type = InputCommand::Type::Down;
-		else if (type == "up")
-			cmd.type = InputCommand::Type::Up;
-		else if (type == "click")
-			cmd.type = InputCommand::Type::Click;
-		else if (type == "scroll")
-			cmd.type = InputCommand::Type::Scroll;
-		else if (type == "keydown")
-			cmd.type = InputCommand::Type::KeyDown;
-		else if (type == "keyup")
-			cmd.type = InputCommand::Type::KeyUp;
-		else {
-			error = "unknown event type (expected move|down|up|click|scroll|keydown|keyup)";
-			return false;
+		void reply(httplib::Response& res, const DevResponse& response) {
+			res.status = response.status;
+			res.set_content(response.body, response.contentType);
 		}
 
-		// Key events carry a key name instead of coordinates: "keydown,R" / "keyup,Escape".
-		if (cmd.type == InputCommand::Type::KeyDown || cmd.type == InputCommand::Type::KeyUp) {
-			if (fields.size() < 2 || fields[1].empty()) {
-				error = "key event requires a key name (e.g. keydown,R)";
-				return false;
-			}
-			cmd.keyName = fields[1];
-			return true;
-		}
-
-		if (fields.size() < 3) {
-			error = "event requires x,y coordinates";
-			return false;
-		}
-		try {
-			cmd.x = std::stof(fields[1]);
-			cmd.y = std::stof(fields[2]);
-		} catch (...) {
-			error = "non-numeric coordinates";
-			return false;
-		}
-
-		if (cmd.type == InputCommand::Type::Scroll) {
-			if (fields.size() < 4) {
-				error = "scroll requires a delta";
-				return false;
-			}
-			try {
-				cmd.scrollDelta = std::stof(fields[3]);
-			} catch (...) {
-				error = "non-numeric scroll delta";
-				return false;
-			}
-		} else if (fields.size() >= 4) {
-			const std::string& button = fields[3];
-			if (button == "left")        cmd.button = 0;
-			else if (button == "right")  cmd.button = 1;
-			else if (button == "middle") cmd.button = 2;
-			else {
-				error = "unknown button (expected left|right|middle)";
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	std::string parseDevVerb(const std::string& path) {
-		// Expect "/api/dev/<verb>"; the verb is the segment after the prefix. A
-		// trailing slash or extra path is trimmed at the next '/'.
-		constexpr std::string_view kPrefix = "/api/dev/";
-		if (path.size() <= kPrefix.size() || path.compare(0, kPrefix.size(), kPrefix) != 0) {
-			return {};
-		}
-		std::string verb = path.substr(kPrefix.size());
-		if (auto slash = verb.find('/'); slash != std::string::npos) {
-			verb = verb.substr(0, slash);
-		}
-		std::transform(verb.begin(), verb.end(), verb.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		return verb;
-	}
-
-	// Helper function to escape strings for JSON
-	static std::string escapeJsonString(const std::string& str) {
-		std::string escaped;
-		escaped.reserve(str.length());
-		for (char c : str) {
-			switch (c) {
-				case '"':
-					escaped += "\\\"";
-					break;
-				case '\\':
-					escaped += "\\\\";
-					break;
-				case '\b':
-					escaped += "\\b";
-					break;
-				case '\f':
-					escaped += "\\f";
-					break;
-				case '\n':
-					escaped += "\\n";
-					break;
-				case '\r':
-					escaped += "\\r";
-					break;
-				case '\t':
-					escaped += "\\t";
-					break;
-				default:
-					if (static_cast<unsigned char>(c) < 0x20) {
-						// Any other control char is invalid raw in JSON; emit \u00XX.
-						char unicodeEscape[7];
-						std::snprintf(unicodeEscape, sizeof(unicodeEscape), "\\u%04x", static_cast<unsigned char>(c));
-						escaped += unicodeEscape;
-					} else {
-						escaped += c;
-					}
-			}
-		}
-		return escaped;
-	}
-
-	const char* LogEntry::toJSON() const { // NOLINT(readability-convert-member-functions-to-static)
-		// message and file must be JSON-escaped. file comes from __FILE__, and on
-		// Windows its backslash path (C:\Users\...) is a string of invalid JSON
-		// escapes; left raw, the client's JSON.parse rejects every entry and the
-		// log view silently shows nothing.
-		static thread_local std::string json;
-		json = R"({"level":")";
-		json += foundation::levelToString(level);
-		json += R"(","category":")";
-		json += foundation::categoryToString(category);
-		json += R"(","message":")";
-		json += escapeJsonString(message);
-		json += R"(","timestamp":)";
-		json += std::to_string(static_cast<unsigned long long>(timestamp));
-		json += R"(,"file":")";
-		json += escapeJsonString((file != nullptr) ? file : "");
-		json += R"(","line":)";
-		json += std::to_string(line);
-		json += "}";
-		return json.c_str();
-	}
-
-	DebugServer::DebugServer() // NOLINT(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
-		: server(),
-		  serverThread(),
-		  running(false),
-		  screenshotData(),
-		  screenshotMutex(),
-		  targetSceneName(),
-		  sceneNameMutex() {
-		// Lock-free ring buffers are initialized automatically
-	}
-
-	DebugServer::~DebugServer() {
-		stop();
-	}
-
-	void DebugServer::start(int port) { // NOLINT(readability-convert-member-functions-to-static)
-		if (running.load()) {
-			std::cerr << "DebugServer already running!" << std::endl;
-			return;
-		}
-
-		// Reset shutdown synchronization state for restart scenarios
-		{
-			std::lock_guard<std::mutex> lock(shutdownMutex);
-			shutdownComplete = false;
-			handlerDone = false;
-		}
-		controlAction.store(ControlAction::None);
-
-		running.store(true);
-
-		// Start server thread
-		serverThread = std::thread(&DebugServer::serverThreadFunc, this, port);
-
-		std::cout << "Debug server starting on port " << port << "..." << std::endl;
-	}
-
-	void DebugServer::stop() { // NOLINT(readability-convert-member-functions-to-static)
-		if (!running.load()) {
-			return;
-		}
-
-		running.store(false);
-
-		// If an exit was triggered via HTTP, wait for the handler to set the response
-		// Check exitTriggered and handlerDone inside the lock to avoid race condition
-		{
-			std::unique_lock<std::mutex> lock(shutdownMutex);
-			bool						 exitTriggered = (controlAction.load() == ControlAction::Exit);
-			if (exitTriggered && !handlerDone) {
-				shutdownCV.wait(lock, [this] { return handlerDone; });
-			}
-			// Handler has set response and is about to return (or already returned)
-		}
-
-		// Stop the server - this will:
-		// 1. Complete sending any pending responses
-		// 2. Close the listening socket
-		// 3. Make listen() return
-		if (server) {
-			server->stop();
-		}
-
-		// Wait for server thread to finish
-		if (serverThread.joinable()) {
-			serverThread.join();
-		}
-
-		std::cout << "Debug server stopped" << std::endl;
-	}
-
-	void DebugServer::updateMetrics(const PerformanceMetrics& metrics) {
-		// Lock-free write - never blocks, ~10-20 nanoseconds
-		metricsBuffer.write(metrics);
-	}
-
-	void DebugServer::updateLog( // NOLINT(readability-convert-member-functions-to-static)
-		foundation::LogLevel	level,
-		foundation::LogCategory category,
-		const char* message,
-		const char* file,
-		int			line
-	) { // NOLINT(readability-convert-member-functions-to-static)
-		// Get current timestamp in milliseconds
-		auto now = std::chrono::system_clock::now();
-		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-
-		// Create log entry
-		LogEntry entry;
-		entry.level = level;
-		entry.category = category;
-		entry.timestamp = static_cast<uint64_t>(ms);
-		entry.file = file; // Pointer to static string (safe)
-		entry.line = line;
-
-		// Copy message (truncate if too long)
-		std::strncpy(entry.message, message, sizeof(entry.message) - 1);
-		entry.message[sizeof(entry.message) - 1] = '\0'; // Ensure null termination
-
-		// Lock-free write - never blocks, ~10-20 nanoseconds
-		// If buffer is full, oldest entry is silently dropped (circular buffer)
-		logBuffer.write(entry);
-	}
-
-	PerformanceMetrics DebugServer::getMetricsSnapshot() const { // NOLINT(readability-convert-member-functions-to-static)
-		// Lock-free read - gets latest sample, ~10-20 nanoseconds
-		PerformanceMetrics metrics = {};
-		metricsBuffer.readLatest(metrics);
-		return metrics;
-	}
-
-	void DebugServer::captureScreenshotIfRequested() { // NOLINT(readability-convert-member-functions-to-static)
-		// Check if screenshot was requested (non-blocking check)
-		if (!screenshotRequested.load()) {
-			return; // No screenshot requested
-		}
-
-		LOG_INFO(Foundation, "Screenshot requested, beginning capture...");
-
-		// The backbuffer size the renderer was last told (AppLauncher feeds it the framebuffer size)
-		int width = 0;
-		int height = 0;
-		Renderer::Primitives::readBackbuffer({}, width, height);
-
-		if (width <= 0 || height <= 0) {
-			LOG_ERROR(Foundation, "Invalid viewport size for screenshot: %dx%d", width, height);
-			screenshotRequested.store(false);
-			return;
-		}
-
-		LOG_DEBUG(Foundation, "Capturing screenshot: %dx%d", width, height);
-
-		// Allocate buffer for pixel data (RGBA, 4 bytes per pixel - more efficient than RGB on most hardware)
-		std::vector<unsigned char> pixels(width * height * 4);
-
-		// Read pixels from the backbuffer
-		Renderer::Primitives::readBackbuffer(pixels, width, height);
-
-		// Flip image vertically (OpenGL origin is bottom-left, PNG origin is top-left)
-		// and force alpha opaque: the window is opaque on screen, but blended
-		// draws leave residual sub-1 backbuffer alpha that viewers would
-		// composite over their canvas, washing out the capture.
-		std::vector<unsigned char> flipped(width * height * 4);
-		for (int y = 0; y < height; y++) {
-			memcpy(flipped.data() + (height - 1 - y) * width * 4, pixels.data() + y * width * 4, width * 4);
-		}
-		for (size_t i = 3; i < flipped.size(); i += 4) {
-			flipped[i] = 255;
-		}
-
-		// Encode to PNG via the shared encoder (single STB definition site).
-		LOG_DEBUG(Foundation, "Encoding screenshot to PNG...");
-		bool encodeFailed = false;
-		{
-			std::lock_guard<std::mutex> lock(screenshotMutex);
-			screenshotData = encodePngToMemory(flipped.data(), width, height);
-			encodeFailed = screenshotData.empty();
-		}
-
-		if (encodeFailed) {
-			LOG_ERROR(Foundation, "Failed to encode screenshot to PNG");
-			screenshotRequested.store(false);
-			return;
-		}
-
-		LOG_INFO(Foundation, "Screenshot captured successfully (%zu bytes)", screenshotData.size());
-
-		// Signal that screenshot is ready
-		screenshotReady.store(true);
-		screenshotRequested.store(false);
-	}
-
-	std::string DebugServer::getTargetSceneName() const {
-		std::lock_guard<std::mutex> lock(sceneNameMutex);
-		return targetSceneName;
-	}
-
-	bool DebugServer::consumeCameraCommand(CameraCommand& out) {
-		if (!cameraCommandPending.load()) {
-			return false;
-		}
-		std::lock_guard<std::mutex> lock(cameraCommandMutex);
-		out = cameraCommand;
-		cameraCommandPending.store(false);
-		return true;
-	}
-
-	bool DebugServer::consumeInputCommands(std::vector<InputCommand>& out) {
-		if (!inputCommandsPending.load()) {
-			return false;
-		}
-		std::lock_guard<std::mutex> lock(inputCommandsMutex);
-		out.insert(out.end(), inputCommands.begin(), inputCommands.end());
-		inputCommands.clear();
-		inputCommandsPending.store(false);
-		return true;
-	}
-
-	bool DebugServer::consumeDevCommands(std::vector<DevCommand>& out) {
-		if (!devCommandsPending.load()) {
-			return false;
-		}
-		std::lock_guard<std::mutex> lock(devCommandsMutex);
-		out.insert(out.end(), std::make_move_iterator(devCommands.begin()), std::make_move_iterator(devCommands.end()));
-		devCommands.clear();
-		devCommandsPending.store(false);
-		return true;
-	}
-
-	void DebugServer::deliverDevResult(std::uint64_t id, const std::string& json) {
-		{
-			std::lock_guard<std::mutex> lock(devResultsMutex);
-			const auto					slot = devResults.find(id);
-			if (slot == devResults.end()) {
-				return;
-			}
-			slot->second = json;
-		}
-		devResultsCV.notify_all();
-	}
-
-	void DebugServer::setCurrentSceneName(const std::string& name) {
-		std::lock_guard<std::mutex> lock(sceneNameMutex);
-		currentSceneName = name;
-	}
-
-	std::string DebugServer::getCurrentSceneName() const {
-		std::lock_guard<std::mutex> lock(sceneNameMutex);
-		return currentSceneName;
-	}
-
-	void DebugServer::waitForShutdownComplete() {
-		std::unique_lock<std::mutex> lock(shutdownMutex);
-		// Add timeout to prevent indefinite blocking if main loop exits abnormally
-		if (!shutdownCV.wait_for(lock, std::chrono::seconds(30), [this] { return shutdownComplete; })) {
-			LOG_WARNING(Foundation, "Shutdown did not complete within 30 seconds; continuing anyway.");
-		}
-	}
-
-	void DebugServer::signalShutdownComplete() {
-		{
-			std::lock_guard<std::mutex> lock(shutdownMutex);
-			shutdownComplete = true;
-		}
-		shutdownCV.notify_all();
-	}
-
-	bool DebugServer::requestScreenshot(std::vector<unsigned char>& pngData, int timeoutMs) { // NOLINT(readability-identifier-naming)
-		LOG_INFO(Foundation, "Screenshot requested via HTTP, waiting for capture...");
-
-		// Clear any previous ready state
-		screenshotReady.store(false);
-
-		// Request screenshot
-		screenshotRequested.store(true);
-
-		// Wait for screenshot to be ready (with timeout)
-		auto startTime = std::chrono::steady_clock::now();
-		while (!screenshotReady.load()) {
-			auto elapsed = std::chrono::steady_clock::now() - startTime;
-			if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > timeoutMs) {
-				// Timeout - cancel request
-				LOG_ERROR(Foundation, "Screenshot capture timeout after %dms", timeoutMs);
-				screenshotRequested.store(false);
-				return false;
-			}
-
-			// Sleep briefly to avoid busy-waiting
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
-		}
-
-		// Copy screenshot data
-		{
-			std::lock_guard<std::mutex> lock(screenshotMutex);
-			pngData = screenshotData;
-		}
-
-		LOG_INFO(Foundation, "Screenshot data copied to HTTP response (%zu bytes)", pngData.size());
-
-		// Clear ready flag
-		screenshotReady.store(false);
-
-		return true;
-	}
-
-	bool DebugServer::requestState(const std::string& what, std::string& out, int timeoutMs) { // NOLINT(readability-identifier-naming)
-		// Single in-flight request: stateQuery/stateResult are one shared slot, so a second
-		// concurrent caller would clobber the first (or read the wrong JSON). try_lock fails
-		// fast instead; the route turns that into a 503. Held for the whole blocking wait.
-		std::unique_lock<std::mutex> inFlight(stateRequestMutex, std::try_to_lock);
-		if (!inFlight.owns_lock()) {
-			return false;
-		}
-
-		std::unique_lock<std::mutex> lock(stateMutex);
-		stateQuery = what;
-		stateResult.clear();
-		stateReady.store(false);
-		stateRequested.store(true);
-
-		// Block on the CV (releasing stateMutex while parked) until the game thread delivers
-		// or the timeout elapses -- no busy-poll, no tied-up CPU.
-		const bool delivered = stateCV.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return stateReady.load(); });
-		if (!delivered) {
-			stateRequested.store(false);
-			return false;
-		}
-		out = stateResult;
-		stateReady.store(false);
-		return true;
-	}
-
-	bool DebugServer::consumeStateRequest(std::string& whatOut) {
-		if (!stateRequested.load()) {
-			return false;
-		}
-		{
-			std::lock_guard<std::mutex> lock(stateMutex);
-			whatOut = stateQuery;
-		}
-		stateRequested.store(false);
-		return true;
-	}
-
-	void DebugServer::deliverState(const std::string& json) {
-		{
-			std::lock_guard<std::mutex> lock(stateMutex);
-			stateResult = json;
-			stateReady.store(true); // set under the lock so the waiter can't miss the wakeup
-		}
-		stateCV.notify_all();
-	}
-
-	void DebugServer::serverThreadFunc(int port) { // NOLINT(readability-convert-member-functions-to-static)
-		server = std::make_unique<httplib::Server>();
-
-		// Disable SO_REUSEADDR to prevent multiple instances on same port
-		server->set_socket_options([](socket_t sock) {
-			int reuse = 0;
-			setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
-		});
-
-		// --- REST Endpoints ---
-
-		// Health check endpoint
-		server->Get("/api/health", [this](const httplib::Request&, httplib::Response& res) {
-			PerformanceMetrics metrics = getMetricsSnapshot();
-
-			std::ostringstream json;
-			json << "{";
-			json << "\"status\":\"ok\",";
-			json << "\"uptime\":" << metrics.timestamp;
-			json << "}";
-
-			res.set_content(json.str(), "application/json");
-			res.set_header("Access-Control-Allow-Origin", "*");
-		});
-
-		// Current metrics snapshot
-		server->Get("/api/metrics", [this](const httplib::Request&, httplib::Response& res) {
-			PerformanceMetrics metrics = getMetricsSnapshot();
-			res.set_content(metrics.toJSON(), "application/json");
-			res.set_header("Access-Control-Allow-Origin", "*");
-		});
-
-		// Screenshot endpoint
-		server->Get("/api/ui/screenshot", [this](const httplib::Request&, httplib::Response& res) {
-			std::vector<unsigned char> pngData;
-
-			// Request screenshot and wait for it (10 second timeout for large screenshots)
-			if (requestScreenshot(pngData, 10000)) {
-				// Screenshot captured successfully - avoid copy by using data() and size()
-				res.set_content(reinterpret_cast<const char*>(pngData.data()), pngData.size(), "image/png");
-				res.set_header("Access-Control-Allow-Origin", "*");
-				res.set_header("Content-Disposition", "inline; filename=\"screenshot.png\"");
-			} else {
-				// Timeout or error
-				res.status = 500;
-				res.set_content("{\"error\":\"Screenshot capture timeout or failed\"}", "application/json");
-				res.set_header("Access-Control-Allow-Origin", "*");
-			}
-		});
-
-		// Input injection endpoint - queues synthetic input dispatched by the main
-		// loop through the same paths as real mouse/keyboard events. Coordinates are
-		// logical UI pixels. Accepts one or more 'ev' params, each a CSV:
-		//   click,x,y[,left|right|middle]   (expands to move+down+up)
-		//   move,x,y
-		//   down,x,y[,button]   up,x,y[,button]
-		//   scroll,x,y,delta
-		//   keydown,<key>   keyup,<key>   (key name, e.g. R or Escape; no coords)
-		// Pointer events also park the app's cursor at x,y, so hover state holds for
-		// later requests (e.g. a screenshot) until the real cursor moves over the window
-		// or a real mouse button or scroll event lands, either of which reclaims it.
-		// Send key events in SEPARATE requests: a keydown registers on the next frame
-		// and fires the press edge (isKeyPressed) once; a later keyup releases. A
-		// keydown and keyup batched in ONE request land in the same frame and collapse
-		// to a release, missing the press edge. Tap example (two requests):
-		//   GET /api/input?ev=keydown,R    then    GET /api/input?ev=keyup,R
-		server->Get("/api/input", [this](const httplib::Request& req, httplib::Response& res) {
-			res.set_header("Access-Control-Allow-Origin", "*");
-
-			size_t count = req.get_param_value_count("ev");
-			if (count == 0) {
-				res.status = 400;
-				res.set_content("{\"error\":\"Missing required parameter 'ev'\"}", "application/json");
-				return;
-			}
-
-			std::vector<InputCommand> parsed;
-			parsed.reserve(count);
-			for (size_t i = 0; i < count; ++i) {
-				std::string ev = req.get_param_value("ev", i);
-				InputCommand cmd;
-				std::string error;
-				if (!parseInputEvent(ev, cmd, error)) {
-					res.status = 400;
-					std::ostringstream json;
-					json << "{\"error\":\"" << escapeJsonString(error)
-						 << "\",\"ev\":\"" << escapeJsonString(ev) << "\"}";
-					res.set_content(json.str(), "application/json");
-					return;
-				}
-				parsed.push_back(cmd);
-			}
-
-			{
-				std::lock_guard<std::mutex> lock(inputCommandsMutex);
-				inputCommands.insert(inputCommands.end(), parsed.begin(), parsed.end());
-				inputCommandsPending.store(true);
-			}
-
-			std::ostringstream json;
-			json << "{\"status\":\"ok\",\"queued\":" << parsed.size() << "}";
-			res.set_content(json.str(), "application/json");
-		});
-
-		// Dev/test command endpoint - queues a generic DevCommand the app drains and
-		// interprets. DebugServer stays domain-agnostic: it parses the verb (path
-		// tail) plus every query param into a bag and queues it; the app (GameScene)
-		// knows what "freebuild"/"spawn"/"foundation" mean. Dev-only, gated by the
-		// debug server (which only runs in dev builds), mirrors /api/input's queue.
-		// The request then parks until the game thread posts the command's JSON
-		// result (deliverDevResult) and answers with it; when nothing drains dev
-		// commands (no game scene) it gives up and answers with a queued ack.
-		//   /api/dev/freebuild?on=1
-		//   /api/dev/give?material=Wood&n=100&where=site|loose|colonist|storage
-		//   /api/dev/spawn?def=<assetName>&at=x,y&n=5&scatter=3
-		//   /api/dev/foundation?pts=x0,y0;x1,y1;...&material=Wood&built=1
-		server->Get(R"(/api/dev/[A-Za-z0-9_-]+)", [this](const httplib::Request& req, httplib::Response& res) {
-			res.set_header("Access-Control-Allow-Origin", "*");
-
-			DevCommand cmd;
-			cmd.verb = parseDevVerb(req.path);
-			if (cmd.verb.empty()) {
-				res.status = 400;
-				res.set_content("{\"error\":\"Missing dev command verb (expected /api/dev/<verb>)\"}", "application/json");
-				return;
-			}
-
+		// The query's parameters, the first of a repeated key, without `skip`.
+		std::map<std::string, std::string> paramsOf(const httplib::Request& req, std::string_view skip = {}) {
+			std::map<std::string, std::string> params;
 			for (const auto& [key, value] : req.params) {
-				cmd.params.emplace_back(key, value);
-			}
-
-			const std::string	verb = cmd.verb;
-			const std::uint64_t id = nextDevCommandId.fetch_add(1);
-			cmd.id = id;
-			{
-				std::lock_guard<std::mutex> lock(devResultsMutex);
-				devResults.emplace(id, std::nullopt);
-			}
-			{
-				std::lock_guard<std::mutex> lock(devCommandsMutex);
-				devCommands.push_back(std::move(cmd));
-				devCommandsPending.store(true);
-			}
-
-			std::optional<std::string> result;
-			{
-				std::unique_lock<std::mutex> lock(devResultsMutex);
-				devResultsCV.wait_for(lock, std::chrono::milliseconds(2000), [this, id] { return devResults.at(id).has_value(); });
-				result = std::move(devResults.at(id));
-				devResults.erase(id);
-			}
-			if (result.has_value()) {
-				res.set_content(*result, "application/json");
-				return;
-			}
-			std::ostringstream json;
-			json << "{\"status\":\"ok\",\"verb\":\"" << escapeJsonString(verb) << "\",\"queued\":1}";
-			res.set_content(json.str(), "application/json");
-		});
-
-		// World-state readback. Synchronous: parks the HTTP thread while the game thread
-		// serializes the requested view to JSON (the HTTP thread must never touch the ECS).
-		//   /api/state?what=summary|colonists|construction|time
-		server->Get("/api/state", [this](const httplib::Request& req, httplib::Response& res) {
-			res.set_header("Access-Control-Allow-Origin", "*");
-			const std::string what = req.has_param("what") ? req.get_param_value("what") : "summary";
-			std::string		  json;
-			if (requestState(what, json, 2000)) {
-				res.set_content(json, "application/json");
-			} else {
-				res.status = 503;
-				res.set_content("{\"error\":\"state request unavailable (timed out, busy, or game scene not running)\"}", "application/json");
-			}
-		});
-
-		// UI-tree snapshot and layout lint. Same synchronous handshake as /api/state:
-		// the query string ("ui.tree" / "ui.lint") rides the state channel and the
-		// app-side drain routes it to the UI serializer/linter on the main thread.
-		// DebugServer stays domain-agnostic; it never touches UI types.
-		auto uiStateRoute = [this](const char* what) {
-			return [this, what](const httplib::Request&, httplib::Response& res) {
-				res.set_header("Access-Control-Allow-Origin", "*");
-				std::string json;
-				if (requestState(what, json, 2000)) {
-					res.set_content(json, "application/json");
-				} else {
-					res.status = 503;
-					res.set_content("{\"error\":\"ui state unavailable (timed out, busy, or no UI drain running)\"}", "application/json");
+				if (key != skip) {
+					params.emplace(key, value);
 				}
+			}
+			return params;
+		}
+
+		std::uint64_t unixMilliseconds() {
+			const auto now = std::chrono::system_clock::now().time_since_epoch();
+			return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+		}
+
+		std::string logJson(const LogEntry& entry) {
+			return dump({
+				{"level", foundation::levelToString(entry.level)},
+				{"category", foundation::categoryToString(entry.category)},
+				{"message", entry.message},
+				{"timestamp", entry.timestamp},
+				{"file", entry.file != nullptr ? entry.file : ""},
+				{"line", entry.line},
+			});
+		}
+
+		// A busy port fails the bind instead of being shared: SO_EXCLUSIVEADDRUSE on Windows, where a
+		// plain bind can take a port another socket holds with SO_REUSEADDR; on POSIX, none of
+		// cpp-httplib's default SO_REUSEPORT, which would let two servers listen on one port.
+		void exclusiveAddress([[maybe_unused]] socket_t sock) {
+#ifdef _WIN32
+			const int exclusive = 1;
+			setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
+#endif
+		}
+
+		// Checked on the HTTP thread, so a malformed built-in action is a 400 at once. `step` without
+		// ticks steps one; its ticks are left normalised in the request.
+		std::optional<DevResponse> invalidBuiltIn(DevRequest& request) {
+			const auto param = [&request](const char* key) -> std::optional<std::string> {
+				const auto it = request.params.find(key);
+				return it != request.params.end() ? std::optional(it->second) : std::nullopt;
 			};
-		};
-		server->Get("/api/ui/tree", uiStateRoute("ui.tree"));
-		server->Get("/api/ui/lint", uiStateRoute("ui.lint"));
-
-		// Control endpoint - allows control of sandbox via HTTP GET with query params
-		// Examples: /api/control?action=exit
-		//           /api/control?action=scene&scene=arena
-		//           /api/control?action=pause
-		server->Get("/api/control", [this](const httplib::Request& req, httplib::Response& res) {
-			res.set_header("Access-Control-Allow-Origin", "*");
-
-			// Get action parameter (required)
-			if (!req.has_param("action")) {
-				res.status = 400;
-				res.set_content("{\"error\":\"Missing required parameter 'action'\"}", "application/json");
-				return;
+			if (request.name == "scene" && param("scene").value_or("").empty()) {
+				return errorReply(400, "Scene change requires 'scene' parameter");
 			}
-
-			std::string action = req.get_param_value("action");
-
-			// Process action
-			if (action == "exit") {
-				controlAction.store(ControlAction::Exit);
-
-				// Block until main loop signals shutdown is complete
-				waitForShutdownComplete();
-
-				// Set response - this will be sent when handler returns
-				res.set_content("{\"status\":\"ok\",\"action\":\"exit\",\"shutdown\":\"complete\"}", "application/json");
-				res.set_header("Connection", "close"); // Tell client not to keep-alive
-
-				// Signal that the handler is done and response is set
-				// Main thread will call stop() after this
-				{
-					std::lock_guard<std::mutex> lock(shutdownMutex);
-					handlerDone = true;
-				}
-				shutdownCV.notify_all();
-
-				// Note: We DON'T call stop() here - the main thread does it
-				// after it sees handlerDone. This avoids the assertion failure
-				// from calling stop() on a handler thread.
-			} else if (action == "scene") {
-				// Scene change requires 'scene' parameter
-				if (!req.has_param("scene")) {
-					res.status = 400;
-					res.set_content("{\"error\":\"Scene change requires 'scene' parameter\"}", "application/json");
-					return;
-				}
-
-				std::string sceneName = req.get_param_value("scene");
-				{
-					std::lock_guard<std::mutex> lock(sceneNameMutex);
-					targetSceneName = sceneName;
-					controlAction.store(ControlAction::SceneChange);
-				}
-
-				std::ostringstream json;
-				json << "{\"status\":\"ok\",\"action\":\"scene\",\"scene\":\"" << sceneName << "\"}";
-				res.set_content(json.str(), "application/json");
-			} else if (action == "pause") {
-				controlAction.store(ControlAction::Pause);
-				res.set_content("{\"status\":\"ok\",\"action\":\"pause\"}", "application/json");
-			} else if (action == "resume") {
-				controlAction.store(ControlAction::Resume);
-				res.set_content("{\"status\":\"ok\",\"action\":\"resume\"}", "application/json");
-			} else if (action == "reload") {
-				controlAction.store(ControlAction::ReloadScene);
-				res.set_content("{\"status\":\"ok\",\"action\":\"reload\"}", "application/json");
-			} else if (action == "camera") {
-				// Remote camera control: any of x, y (world position), zoom (factor),
-				// panx, pany (-1..1 held-key style direction) may be supplied.
-				// Parses with std::from_chars-style validation: malformed values are a 400,
-				// never an exception (this runs on the HTTP handler thread).
-				auto parseFloat = [&req](const char* name, float& out) -> bool {
-					if (!req.has_param(name)) {
-						return false;
-					}
-					const std::string& value = req.get_param_value(name);
-					char*			   end = nullptr;
-					float			   parsed = std::strtof(value.c_str(), &end);
-					if (end == value.c_str() || *end != '\0' || !std::isfinite(parsed)) {
-						return false;
-					}
-					out = parsed;
-					return true;
-				};
-
-				CameraCommand cmd;
-				bool		  malformed = false;
-				if (req.has_param("x") || req.has_param("y")) {
-					cmd.hasPosition = parseFloat("x", cmd.x) && parseFloat("y", cmd.y);
-					malformed |= !cmd.hasPosition;
-				}
-				if (req.has_param("zoom")) {
-					cmd.hasZoom = parseFloat("zoom", cmd.zoom);
-					malformed |= !cmd.hasZoom;
-				}
-				if (req.has_param("panx") || req.has_param("pany")) {
-					cmd.hasPan = true;
-					if (req.has_param("panx") && !parseFloat("panx", cmd.panX)) {
-						malformed = true;
-					}
-					if (req.has_param("pany") && !parseFloat("pany", cmd.panY)) {
-						malformed = true;
-					}
-					cmd.panX = std::clamp(cmd.panX, -1.0F, 1.0F);
-					cmd.panY = std::clamp(cmd.panY, -1.0F, 1.0F);
-				}
-				if (malformed) {
-					res.status = 400;
-					res.set_content("{\"error\":\"Camera parameters must be finite numbers (x+y together, zoom, panx, pany)\"}", "application/json");
-					return;
-				}
-				if (!cmd.hasPosition && !cmd.hasZoom && !cmd.hasPan) {
-					res.status = 400;
-					res.set_content("{\"error\":\"Camera action requires x+y, zoom, panx, or pany parameters\"}", "application/json");
-					return;
-				}
-				{
-					std::lock_guard<std::mutex> lock(cameraCommandMutex);
-					cameraCommand = cmd;
-					cameraCommandPending.store(true);
-				}
-				res.set_content("{\"status\":\"ok\",\"action\":\"camera\"}", "application/json");
-			} else if (action == "vsync") {
-				std::string value = req.has_param("value") ? req.get_param_value("value") : "";
-				if (value != "0" && value != "1") {
-					res.status = 400;
-					res.set_content("{\"error\":\"Vsync action requires 'value' parameter (0 or 1)\"}", "application/json");
-					return;
-				}
-				targetVsync.store(value == "1" ? 1 : 0);
-				controlAction.store(ControlAction::SetVsync);
-				res.set_content("{\"status\":\"ok\",\"action\":\"vsync\"}", "application/json");
-			} else {
-				res.status = 400;
-				std::ostringstream json;
-				json << "{\"error\":\"Invalid action '" << action << "'. Valid actions: exit, scene, pause, resume, reload, camera, vsync\"}";
-				res.set_content(json.str(), "application/json");
+			if (request.name == "vsync" && param("value") != "0" && param("value") != "1") {
+				return errorReply(400, "Vsync action requires 'value' parameter (0 or 1)");
 			}
-		});
-
-		// --- SSE Streaming Endpoint ---
-
-		// Real-time metrics stream (10 Hz)
-		server->Get("/stream/metrics", [this](const httplib::Request&, httplib::Response& res) {
-			res.set_header("Content-Type", "text/event-stream");
-			res.set_header("Cache-Control", "no-cache");
-			res.set_header("Connection", "keep-alive");
-			res.set_header("Access-Control-Allow-Origin", "*");
-
-			res.set_chunked_content_provider("text/event-stream", [this](size_t /*offset*/, httplib::DataSink& sink) {
-				const int  updateRateHz = 10;
-				const auto updateInterval = std::chrono::milliseconds(1000 / updateRateHz);
-				auto	   lastUpdate = std::chrono::steady_clock::now();
-
-				while (running.load() && sink.is_writable()) {
-					auto now = std::chrono::steady_clock::now();
-					auto elapsed = now - lastUpdate;
-
-					// Send update if enough time has passed
-					if (elapsed >= updateInterval) {
-						PerformanceMetrics metrics = getMetricsSnapshot();
-						std::string		   sceneName = getCurrentSceneName();
-
-						// Get base metrics JSON and inject sceneName before closing brace
-						std::string metricsJson = metrics.toJSON();
-						metricsJson.pop_back(); // Remove trailing '}'
-						metricsJson += ",\"sceneName\":\"" + escapeJsonString(sceneName) + "\"}";
-
-						std::ostringstream event;
-						event << "event: metric\n";
-						event << "data: " << metricsJson << "\n\n";
-
-						std::string eventStr = event.str();
-						if (!sink.write(eventStr.c_str(), eventStr.size())) {
-							break; // Client disconnected
-						}
-
-						lastUpdate = now;
-					}
-
-					// Sleep briefly to avoid busy-waiting
-					std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			if (request.name == "step") {
+				const std::string text = param("ticks").value_or("1");
+				int				  ticks = 0;
+				const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), ticks);
+				if (error != std::errc{} || end != text.data() + text.size() || ticks < 1) {
+					return errorReply(400, "Step action takes 'ticks', a whole number from 1");
 				}
+				request.params["ticks"] = std::to_string(ticks);
+			}
+			return std::nullopt;
+		}
 
-				return false; // Done streaming
-			});
-		});
-
-		// Real-time log stream (10 Hz, throttled)
-		server->Get("/stream/logs", [this](const httplib::Request&, httplib::Response& res) {
-			res.set_header("Content-Type", "text/event-stream");
-			res.set_header("Cache-Control", "no-cache");
-			res.set_header("Connection", "keep-alive");
-			res.set_header("Access-Control-Allow-Origin", "*");
-
-			res.set_chunked_content_provider("text/event-stream", [this](size_t /*offset*/, httplib::DataSink& sink) {
-				const auto updateInterval = std::chrono::milliseconds(100); // 10 Hz
-
-				// Per-connection read cursor into the log ring. Each client keeps its OWN position and
-				// reads forward via peekAt (non-consuming), so several panels each receive every log
-				// line -- the old shared, consuming read() let one reader starve the rest. Start a
-				// ring's-worth behind the write cursor so a freshly-opened panel sees recent history.
-				const size_t ringSize = logBuffer.capacity();
-				size_t logCursor = logBuffer.writeCursor();
-				logCursor = (logCursor > ringSize) ? (logCursor - ringSize) : 0;
-
-				auto lastUpdate = std::chrono::steady_clock::now();
-				while (running.load() && sink.is_writable()) {
-					auto now = std::chrono::steady_clock::now();
-					if (now - lastUpdate >= updateInterval) {
-						const size_t writeIdx = logBuffer.writeCursor();
-						// If the writer lapped us, skip to the oldest still-buffered entry.
-						if (logCursor + ringSize < writeIdx) {
-							logCursor = writeIdx - ringSize;
-						}
-						LogEntry entry;
-						while (logCursor < writeIdx && logBuffer.peekAt(logCursor, entry)) {
-							std::ostringstream event;
-							event << "event: log\n";
-							event << "data: " << entry.toJSON() << "\n\n";
-							const std::string eventStr = event.str();
-							if (!sink.write(eventStr.c_str(), eventStr.size())) {
-								return false; // Client disconnected
-							}
-							++logCursor;
-						}
-						lastUpdate = now;
-					}
-					std::this_thread::sleep_for(std::chrono::milliseconds(10));
-				}
-
-				return false; // Done streaming
-			});
-		});
-
-		// Serve static developer client from build directory
-		// NOTE: The developer-client is a React SPA built by Vite and copied to
-		// build/developer-client/ by CMake. The files use relative paths and can
-		// be opened directly in a browser, or served here for convenience.
-		//
-		// To open directly: open build/developer-client/index.html
-		// To access via server: http://localhost:<port>/
-
-		// TODO: Implement static file serving when developer-client is built
-		// For now, return a simple placeholder that explains how to access the app
-		server->Get("/", [](const httplib::Request&, httplib::Response& res) {
-			const char* html = R"HTML(<!DOCTYPE html>
+		constexpr const char* kIndexPage = R"HTML(<!DOCTYPE html>
 <html>
 <head>
     <title>Developer Server</title>
@@ -982,39 +127,371 @@ namespace Foundation {
             <li><a href="/api/health">/api/health</a> - Server health check</li>
             <li><a href="/api/metrics">/api/metrics</a> - Current performance metrics</li>
             <li><a href="/api/ui/screenshot">/api/ui/screenshot</a> - Capture screenshot (PNG)</li>
+            <li><a href="/api/ui/tree">/api/ui/tree</a> - UI element tree</li>
+            <li><a href="/api/ui/lint">/api/ui/lint</a> - UI layout lint</li>
+            <li><a href="/api/state?what=scene">/api/state?what=scene</a> - The scene stack's state</li>
+            <li><code>/api/input?ev=...</code> - Synthetic input</li>
+            <li><code>/api/control?action=...</code> - exit, scene, pause, resume, reload, vsync, step, and the game's</li>
+            <li><code>/api/dev/&lt;verb&gt;</code> - The game's routes</li>
             <li><a href="/stream/metrics">/stream/metrics</a> - Real-time metrics (SSE)</li>
             <li><a href="/stream/logs">/stream/logs</a> - Real-time logs (SSE)</li>
         </ul>
     </div>
-
-    <div class="info">
-        <h2>Developer Client (React SPA):</h2>
-        <p>The developer client is a React application that connects to this server.</p>
-        <p><strong>To launch:</strong></p>
-        <ul>
-            <li>Build the project: <code>make</code></li>
-            <li>Open: <code>open build/developer-client/index.html</code></li>
-        </ul>
-        <p>The app will connect to this server and display real-time metrics and logs.</p>
-    </div>
 </body>
 </html>
 )HTML";
-			res.set_content(html, "text/html");
+	} // namespace
+
+	std::string parseDevVerb(const std::string& path) {
+		constexpr std::string_view kPrefix = "/api/dev/";
+		if (path.size() <= kPrefix.size() || !path.starts_with(kPrefix)) {
+			return {};
+		}
+		std::string verb = path.substr(kPrefix.size());
+		if (const auto slash = verb.find('/'); slash != std::string::npos) {
+			verb = verb.substr(0, slash);
+		}
+		std::ranges::transform(verb, verb.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		return verb;
+	}
+
+	DevResponse errorReply(int status, std::string_view message) {
+		return {.status = status, .body = dump({{"error", message}})};
+	}
+
+	// --- Starting and stopping ---
+
+	DevServerHost::DevServerHost(const DevServerConfig& serverConfig, std::shared_ptr<const DevRegistry> registrations)
+		: config(serverConfig),
+		  registry(std::move(registrations)),
+		  server(std::make_unique<httplib::Server>()) {}
+
+	std::unique_ptr<DevServerHost> DevServerHost::start(const DevServerConfig& config, std::shared_ptr<const DevRegistry> registry) {
+		std::unique_ptr<DevServerHost> host(new DevServerHost(config, std::move(registry)));
+		httplib::Server&			   server = *host->server;
+		server.set_socket_options(exclusiveAddress);
+		server.set_default_headers({{"Access-Control-Allow-Origin", "*"}});
+		host->addRoutes();
+
+		host->boundPort = config.port == 0 ? server.bind_to_any_port(kHost) : (server.bind_to_port(kHost, config.port) ? config.port : -1);
+		if (host->boundPort <= 0) {
+			if (config.port == 0) {
+				LOG_ERROR(Engine, "Dev server: no free port on %s", kHost);
+			} else {
+				LOG_ERROR(
+					Engine,
+					"Dev server: port %d is in use; another instance may be running (curl http://%s:%d/api/control?action=exit)",
+					config.port,
+					kHost,
+					config.port
+				);
+			}
+			return nullptr;
+		}
+		host->streaming = true;
+		host->serverThread = std::thread([&server] { server.listen_after_bind(); });
+		// stop() does nothing until the server runs, so the destructor could otherwise miss it.
+		server.wait_until_ready();
+		foundation::Logger::setSink(&DevServerHost::sink, host.get());
+		LOG_INFO(Engine, "Dev server: http://%s:%d", kHost, host->boundPort);
+		return host;
+	}
+
+	// The sink goes first: a thread mid-log must not reach a server that's gone. Exit requests answer
+	// now that the app is torn down, and the rest are let go before the pool joins them.
+	DevServerHost::~DevServerHost() {
+		if (!serverThread.joinable()) {
+			return;
+		}
+		foundation::Logger::setSink(nullptr, nullptr);
+		{
+			const std::lock_guard lock(mailbox);
+			stopping = true;
+			shutdownComplete = true;
+		}
+		streaming = false;
+		changed.notify_all();
+		server->stop();
+		serverThread.join();
+		LOG_INFO(Engine, "Dev server stopped");
+	}
+
+	void DevServerHost::sink(void* context, const foundation::LogRecord& record) {
+		LogEntry entry{
+			.level = record.level, .category = record.category, .timestamp = unixMilliseconds(), .file = record.file, .line = record.line
+		};
+		std::strncpy(entry.message, record.message, sizeof(entry.message) - 1);
+		static_cast<DevServerHost*>(context)->logs.write(entry);
+	}
+
+	// --- The game thread's side ---
+
+	std::size_t DevServerHost::parked() const {
+		const std::lock_guard lock(mailbox);
+		return controls.size() + routes.size() + screenshots.size() + states.size();
+	}
+
+	namespace {
+		void moveInto(std::vector<std::shared_ptr<DevJob>>& taken, std::deque<std::shared_ptr<DevJob>>& queue) {
+			for (std::shared_ptr<DevJob>& job : queue) {
+				job->taken = true;
+				taken.push_back(std::move(job));
+			}
+			queue.clear();
+		}
+	} // namespace
+
+	std::vector<std::shared_ptr<DevJob>> DevServerHost::takePreFrame() {
+		const std::lock_guard				 lock(mailbox);
+		std::vector<std::shared_ptr<DevJob>> taken;
+		moveInto(taken, controls);
+		moveInto(taken, routes);
+		return taken;
+	}
+
+	std::vector<std::shared_ptr<DevJob>> DevServerHost::takePostRender() {
+		const std::lock_guard				 lock(mailbox);
+		std::vector<std::shared_ptr<DevJob>> taken;
+		moveInto(taken, screenshots);
+		moveInto(taken, states);
+		return taken;
+	}
+
+	void DevServerHost::answer(DevJob& job, DevResponse response) {
+		{
+			const std::lock_guard lock(mailbox);
+			job.response = std::move(response);
+			job.done = true;
+		}
+		changed.notify_all();
+	}
+
+	void DevServerHost::answerAfterShutdown(DevJob& job) {
+		{
+			const std::lock_guard lock(mailbox);
+			job.afterShutdown = true;
+			job.done = true;
+		}
+		changed.notify_all();
+	}
+
+	std::vector<foundation::InputEvent> DevServerHost::takeInput() {
+		const std::lock_guard lock(mailbox);
+		return std::exchange(injected, {});
+	}
+
+	void DevServerHost::publish(const Foundation::PerformanceMetrics* latest, std::string topScene) {
+		const std::lock_guard lock(publishedMutex);
+		if (latest != nullptr) {
+			metrics = *latest;
+		}
+		sceneName = std::move(topScene);
+	}
+
+	// --- Parking ---
+
+	bool DevServerHost::stateKnown(std::string_view what) const {
+		return what == kSceneState || what == kUiTree || what == kUiLint || registry->has(DevKind::State, what);
+	}
+
+	DevResponse DevServerHost::park(DevJob::Kind kind, DevRequest request) {
+		const auto							 job = std::make_shared<DevJob>(DevJob{.kind = kind, .request = std::move(request)});
+		std::deque<std::shared_ptr<DevJob>>& queue = kind == DevJob::Kind::Control		? controls
+													 : kind == DevJob::Kind::Route		? routes
+													 : kind == DevJob::Kind::Screenshot ? screenshots
+																						: states;
+		const bool							 asksExit = kind == DevJob::Kind::Control && job->request.name == "exit";
+		const auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::duration<double>(config.requestTimeout));
+
+		std::unique_lock lock(mailbox);
+		if (!stopping) {
+			queue.push_back(job);
+			changed.wait_for(lock, timeout, [&] { return job->done || (stopping && !job->taken); });
+			if (job->taken && !job->done) {
+				changed.wait(lock, [&] { return job->done; });
+			}
+		}
+		if (job->done) {
+			return job->afterShutdown ? exitReply(lock) : std::move(job->response);
+		}
+		std::erase(queue, job);
+		if (stopping) {
+			return asksExit ? exitReply(lock) : errorReply(503, "the app is shutting down");
+		}
+		lock.unlock();
+		LOG_WARNING(Engine, "Dev server: '%s' waited %gs for a frame; dropped", job->request.name.c_str(), config.requestTimeout);
+		return errorReply(503, "timed out waiting for the app's frame; dropped");
+	}
+
+	DevResponse DevServerHost::exitReply(std::unique_lock<std::mutex>& lock) {
+		const bool complete = changed.wait_for(lock, kExitWait, [this] { return shutdownComplete; });
+		return jsonReply({{"status", "ok"}, {"action", "exit"}, {"shutdown", complete ? "complete" : "timed out"}});
+	}
+
+	// --- Routes ---
+
+	void DevServerHost::addRoutes() {
+		httplib::Server& http = *server;
+
+		http.Get("/api/health", [this](const httplib::Request&, httplib::Response& res) {
+			const std::lock_guard lock(publishedMutex);
+			reply(res, jsonReply({{"status", "ok"}, {"uptime", metrics.timestamp}}));
 		});
 
-		// Start listening (this will fail if port is in use since SO_REUSEADDR is disabled)
-		std::cout << "Debug server listening on http://localhost:" << port << std::endl;
-		if (!server->listen("127.0.0.1", port)) {
-			std::cerr << "\n";
-			std::cerr << "ERROR: Port " << port << " is already in use.\n";
-			std::cerr << "An instance of the sandbox is already running.\n";
-			std::cerr << "Use the following command to kill it:\n";
-			std::cerr << "  curl http://127.0.0.1:" << port << "/api/control?action=exit\n";
-			std::cerr << "\n";
-			running.store(false);
-			std::exit(1);
+		http.Get("/api/metrics", [this](const httplib::Request&, httplib::Response& res) {
+			const std::lock_guard lock(publishedMutex);
+			res.set_content(metrics.toJSON(), "application/json");
+		});
+
+		http.Get("/api/ui/screenshot", [this](const httplib::Request&, httplib::Response& res) {
+			const DevResponse shot = park(DevJob::Kind::Screenshot, {.name = "screenshot"});
+			reply(res, shot);
+			if (shot.status == 200) {
+				res.set_header("Content-Disposition", "inline; filename=\"screenshot.png\"");
+			}
+		});
+
+		http.Get("/api/ui/tree", [this](const httplib::Request&, httplib::Response& res) {
+			reply(res, park(DevJob::Kind::State, {.name = std::string(kUiTree)}));
+		});
+
+		http.Get("/api/ui/lint", [this](const httplib::Request&, httplib::Response& res) {
+			reply(res, park(DevJob::Kind::State, {.name = std::string(kUiLint)}));
+		});
+
+		http.Get("/api/state", [this](const httplib::Request& req, httplib::Response& res) {
+			const std::string what = req.has_param("what") ? req.get_param_value("what") : "summary";
+			if (!stateKnown(what)) {
+				reply(res, errorReply(404, "no state provider for '" + what + "'"));
+				return;
+			}
+			reply(res, park(DevJob::Kind::State, {.name = what}));
+		});
+
+		http.Get(R"(/api/dev/[A-Za-z0-9_-]+)", [this](const httplib::Request& req, httplib::Response& res) {
+			std::string verb = parseDevVerb(req.path);
+			if (!registry->has(DevKind::Route, verb)) {
+				reply(res, errorReply(404, "no dev route '" + verb + "'"));
+				return;
+			}
+			reply(res, park(DevJob::Kind::Route, {.name = std::move(verb), .params = paramsOf(req)}));
+		});
+
+		http.Get("/api/input", [this](const httplib::Request& req, httplib::Response& res) { input(req, res); });
+		http.Get("/api/control", [this](const httplib::Request& req, httplib::Response& res) { control(req, res); });
+		http.Get("/stream/metrics", [this](const httplib::Request&, httplib::Response& res) { streamMetrics(res); });
+		http.Get("/stream/logs", [this](const httplib::Request&, httplib::Response& res) { streamLogs(res); });
+		http.Get("/", [](const httplib::Request&, httplib::Response& res) { res.set_content(kIndexPage, "text/html"); });
+	}
+
+	// Parsed and queued here, not parked: injected input waits in the server while the app is paused,
+	// so a request that waited for it would time out. All of a request's events or none.
+	void DevServerHost::input(const httplib::Request& req, httplib::Response& res) {
+		const std::size_t count = req.get_param_value_count("ev");
+		if (count == 0) {
+			reply(res, errorReply(400, "Missing required parameter 'ev'"));
+			return;
+		}
+		std::vector<std::string> evs;
+		evs.reserve(count);
+		for (std::size_t i = 0; i < count; ++i) {
+			evs.push_back(req.get_param_value("ev", i));
+		}
+
+		std::unique_lock  lock(mailbox);
+		ParsedInput		  parsed = parseInputEvents(evs, virtualPads);
+		const std::size_t queued = evs.size();
+		if (parsed.error.empty()) {
+			injected.insert(injected.end(), parsed.events.begin(), parsed.events.end());
+		}
+		lock.unlock();
+
+		if (!parsed.error.empty()) {
+			reply(res, {.status = 400, .body = dump({{"error", parsed.error}, {"ev", parsed.failed}})});
+			return;
+		}
+		reply(res, jsonReply({{"status", "ok"}, {"queued", queued}}));
+	}
+
+	void DevServerHost::control(const httplib::Request& req, httplib::Response& res) {
+		if (!req.has_param("action")) {
+			reply(res, errorReply(400, "Missing required parameter 'action'"));
+			return;
+		}
+		DevRequest request{.name = req.get_param_value("action"), .params = paramsOf(req, "action")};
+		if (isBuiltInControl(request.name)) {
+			if (const std::optional<DevResponse> invalid = invalidBuiltIn(request)) {
+				reply(res, *invalid);
+				return;
+			}
+		} else if (!registry->has(DevKind::Control, request.name)) {
+			reply(res, errorReply(404, "no control action '" + request.name + "'"));
+			return;
+		}
+		const bool asksExit = request.name == "exit";
+		reply(res, park(DevJob::Kind::Control, std::move(request)));
+		if (asksExit) {
+			res.set_header("Connection", "close");
 		}
 	}
 
-} // namespace Foundation
+	// --- Streams ---
+
+	void DevServerHost::streamMetrics(httplib::Response& res) {
+		res.set_header("Cache-Control", "no-cache");
+		res.set_header("Connection", "keep-alive");
+		res.set_chunked_content_provider("text/event-stream", [this](std::size_t /*offset*/, httplib::DataSink& sink) {
+			auto last = std::chrono::steady_clock::now() - kStreamInterval;
+			while (streaming && sink.is_writable()) {
+				const auto now = std::chrono::steady_clock::now();
+				if (now - last >= kStreamInterval) {
+					std::string event;
+					{
+						const std::lock_guard lock(publishedMutex);
+						std::string			  json = metrics.toJSON();
+						json.pop_back(); // its closing brace, to add the scene's name inside it
+						event = "event: metric\ndata: " + json + ",\"sceneName\":" + dump(sceneName) + "}\n\n";
+					}
+					if (!sink.write(event.data(), event.size())) {
+						break;
+					}
+					last = now;
+				}
+				std::this_thread::sleep_for(kStreamPoll);
+			}
+			return false;
+		});
+	}
+
+	// Each connection reads the ring from its own cursor, starting a ring's worth back so a new panel
+	// sees recent history.
+	void DevServerHost::streamLogs(httplib::Response& res) {
+		res.set_header("Cache-Control", "no-cache");
+		res.set_header("Connection", "keep-alive");
+		res.set_chunked_content_provider("text/event-stream", [this](std::size_t /*offset*/, httplib::DataSink& sink) {
+			constexpr std::size_t kRing = RingBuffer<LogEntry, 1000>::capacity();
+			const std::size_t	  start = logs.writeCursor();
+			std::size_t			  cursor = start > kRing ? start - kRing : 0;
+			auto				  last = std::chrono::steady_clock::now() - kStreamInterval;
+			while (streaming && sink.is_writable()) {
+				const auto now = std::chrono::steady_clock::now();
+				if (now - last >= kStreamInterval) {
+					const std::size_t written = logs.writeCursor();
+					cursor = std::max(cursor, written > kRing ? written - kRing : 0); // the oldest not yet overwritten
+					LogEntry entry;
+					while (cursor < written && logs.peekAt(cursor, entry)) {
+						const std::string event = "event: log\ndata: " + logJson(entry) + "\n\n";
+						if (!sink.write(event.data(), event.size())) {
+							return false;
+						}
+						++cursor;
+					}
+					last = now;
+				}
+				std::this_thread::sleep_for(kStreamPoll);
+			}
+			return false;
+		});
+	}
+
+} // namespace app::detail

@@ -44,6 +44,21 @@ option(SALAL_BUILD_APP "Build salal_app" ${PROJECT_IS_TOP_LEVEL})
 option(SALAL_BUILD_SANDBOX "Build the sandbox app (implies SALAL_BUILD_APP)" ${PROJECT_IS_TOP_LEVEL})
 option(SALAL_BUILD_TESTS "Build salal's tests and benchmarks" ${PROJECT_IS_TOP_LEVEL})
 
+# app's HTTP dev server (docs/app-api.md, "Dev server"): compiled into Debug and RelWithDebInfo unless
+# SALAL_WITH_DEV_SERVER is off, and into Release only for a profiling build. No listening socket in
+# a shipped build. Ninja Multi-Config and Visual Studio build every configuration from one
+# configure, so the choice is a generator expression, SALAL_DEV_SERVER_GENEX, true in the
+# configurations that have the server; app defines SALAL_DEV_SERVER and links cpp-httplib only there.
+option(SALAL_WITH_DEV_SERVER "Compile app's dev server into Debug and RelWithDebInfo" ON)
+option(SALAL_DEV_SERVER_IN_RELEASE "Compile app's dev server into Release too, for profiling" OFF)
+if(SALAL_WITH_DEV_SERVER AND SALAL_DEV_SERVER_IN_RELEASE)
+    set(SALAL_DEV_SERVER_GENEX "$<CONFIG:Debug,RelWithDebInfo,Release>")
+elseif(SALAL_WITH_DEV_SERVER)
+    set(SALAL_DEV_SERVER_GENEX "$<CONFIG:Debug,RelWithDebInfo>")
+else()
+    set(SALAL_DEV_SERVER_GENEX "0")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -91,7 +106,9 @@ endif()
 # GLFW are the renderer's private business, so it must not export them as link
 # dependencies, and no public renderer header may reach a GL, GLES, OpenGL, GLFW
 # or glad header (docs/renderer-boundary.md). The same holds for app, whose GLFW
-# platform is the one place in it that names GLFW or GL (docs/app-api.md).
+# platform is the one place in it that names GLFW or GL (docs/app-api.md). And
+# cpp-httplib is app's dev server's alone: no lower layer links it, no public header
+# reaches it, and app links it only where SALAL_DEV_SERVER is defined.
 function(salal_check_layering)
     set(above_foundation renderer ui app)
     set(above_renderer ui app)
@@ -108,8 +125,11 @@ function(salal_check_layering)
                     message(FATAL_ERROR "Dependency rule: salal_${lib} links ${upper}, a layer above it (docs/architecture.md).")
                 endif()
             endforeach()
-            if(lib STREQUAL "foundation" AND dep MATCHES "(^|[:<])(OpenGL::|GLEW::|glfw>?$|httplib::)")
-                message(FATAL_ERROR "foundation must stay GL-free and socket-free; it links ${dep}.")
+            if(lib STREQUAL "foundation" AND dep MATCHES "(^|[:<])(OpenGL::|GLEW::|glfw>?$)")
+                message(FATAL_ERROR "foundation must stay GL-free; it links ${dep}.")
+            endif()
+            if(dep MATCHES "httplib")
+                message(FATAL_ERROR "salal_${lib} links ${dep}; cpp-httplib is app's dev server's alone (docs/app-api.md).")
             endif()
         endforeach()
         # A static library's PRIVATE links appear in the interface as $<LINK_ONLY:...>,
@@ -118,10 +138,11 @@ function(salal_check_layering)
             _salal_check_gl_private(renderer docs/renderer-boundary.md)
         endif()
     endforeach()
-    salal_check_headers_gl_free(renderer "^backend/gl/" docs/renderer-boundary.md)
+    salal_check_public_headers(renderer "^backend/gl/" docs/renderer-boundary.md)
     if(TARGET salal_app)
         _salal_check_gl_private(app docs/app-api.md)
-        salal_check_headers_gl_free(app "" docs/app-api.md)
+        _salal_check_dev_server_link()
+        salal_check_public_headers(app "" docs/app-api.md)
     endif()
 endfunction()
 
@@ -134,14 +155,31 @@ function(_salal_check_gl_private lib doc)
     endforeach()
 endfunction()
 
+# Every app link that names cpp-httplib carries SALAL_DEV_SERVER_GENEX, the condition
+# SALAL_DEV_SERVER is defined under, so a configuration without the server links none of
+# it; with SALAL_WITH_DEV_SERVER off, nothing names it. A static library's PRIVATE link
+# shows in its interface wrapped in $<LINK_ONLY:...>.
+function(_salal_check_dev_server_link)
+    set(guarded "$<${SALAL_DEV_SERVER_GENEX}:httplib::httplib>")
+    get_target_property(direct salal_app LINK_LIBRARIES)
+    get_target_property(iface salal_app INTERFACE_LINK_LIBRARIES)
+    foreach(dep IN LISTS direct iface)
+        if(dep MATCHES "httplib" AND (NOT SALAL_WITH_DEV_SERVER OR NOT (dep STREQUAL guarded OR dep STREQUAL "$<LINK_ONLY:${guarded}>")))
+            message(FATAL_ERROR "app links ${dep}; cpp-httplib goes only where the dev server is compiled in, as ${guarded} (docs/app-api.md).")
+        endif()
+    endforeach()
+endfunction()
+
 # Every header under libs/<lib> whose path doesn't match `skip` is public: in the
 # renderer, everything outside backend/gl/, backend/Backend.h and the null backend
 # included (backend/gl/ is the GL backend and the explicit GL opt-in for a game's
 # own passes, docs/renderer-boundary.md); in app, every header. Walk
 # each one's quoted and angle includes transitively through this repo's libraries
 # and fail on the first path that reaches a GL, GLES, OpenGL, GLFW or glad header
-# (GL/glew.h, GL/gl.h, GLFW/glfw3.h, ...). Headers proven clean once are not walked again.
-function(salal_check_headers_gl_free lib skip doc)
+# (GL/glew.h, GL/gl.h, GLFW/glfw3.h, ...), or cpp-httplib's, which would put the dev
+# server's sockets in every consumer's translation units. Headers proven clean once are
+# not walked again.
+function(salal_check_public_headers lib skip doc)
     set(lib_dir "${PROJECT_SOURCE_DIR}/libs/${lib}")
     file(GLOB lib_roots LIST_DIRECTORIES true "${PROJECT_SOURCE_DIR}/libs/*")
     file(GLOB_RECURSE headers RELATIVE "${lib_dir}" CONFIGURE_DEPENDS "${lib_dir}/*.h")
@@ -173,7 +211,7 @@ function(_salal_walk_includes file chain visited_var roots)
         string(REGEX MATCH "#[ \t]*include[ \t]*([<\"])([^>\"]+)[>\"]" _ "${line}")
         set(form "${CMAKE_MATCH_1}")
         set(target "${CMAKE_MATCH_2}")
-        if(target MATCHES "^(GL|GLES[23]?|OpenGL|GLFW|glad)/")
+        if(target MATCHES "^(GL|GLES[23]?|OpenGL|GLFW|glad)/" OR target STREQUAL "httplib.h")
             message(FATAL_ERROR "Public ${lib} header reaches <${target}>: ${chain} (${doc}).")
         endif()
         set(candidates "")

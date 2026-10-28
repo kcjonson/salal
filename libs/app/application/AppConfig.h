@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DevServer/DevServer.h"
+
 #include <backend/Backend.h>
 #include <font/FontRenderer.h>
 #include <graphics/Color.h>
@@ -28,8 +30,9 @@ namespace app {
 		Renderer::FontFamily					   defaultFont = Renderer::FontFamily::Default;
 		Foundation::Color clearColor{0.1F, 0.1F, 0.15F, 1.0F}; // through Primitives::clear, each frame before the scenes render
 		std::vector<std::filesystem::path>
-			 resourceRoots; // searched before the exe directory and cwd; replaces any set before create, cleared by ~App
-		bool metrics = false;
+						resourceRoots; // searched before the exe directory and cwd; replaces any set before create, cleared by ~App
+		DevServerConfig devServer;	   // enabled, port, request timeout; a no-op where the server isn't compiled in
+		bool			metrics = false;
 	};
 
 } // namespace app

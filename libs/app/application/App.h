@@ -7,6 +7,7 @@
 //
 // One App at a time: the renderer's Primitives are module-static, and the App starts and stops them.
 
+#include "DevServer/DevServer.h"
 #include "application/AppConfig.h"
 #include "detail/TypeKey.h"
 #include "input/Input.h"
@@ -28,13 +29,15 @@ namespace app {
 
 	class App final : private PlatformEvents {
 	  public:
-		// The App on `platform`, with the renderer started on the platform's backend and the game's
-		// fonts loaded; null, logged, for no platform, a FrameConfig with a step, delta or tick cap that
-		// isn't positive, no backend, font atlases that don't give the default family, or an App
-		// already alive. Never exits the process.
+		// The App on `platform`, with the renderer started on the platform's backend, the game's fonts
+		// loaded and, when AppConfig::devServer asks, the dev server listening; null, logged, for no
+		// platform, a FrameConfig with a step, delta or tick cap that isn't positive, no backend, font
+		// atlases that don't give the default family, a dev server port that's busy, or an App already
+		// alive. Never exits the process.
 		static std::unique_ptr<App> create(AppConfig config, std::unique_ptr<Platform> platform);
 
-		// shutdown() if it hasn't run, then the fonts, the renderer and the window.
+		// shutdown() if it hasn't run, then the fonts, the renderer and the window, then the dev server,
+		// which answers an exit request only now.
 		~App();
 
 		App(const App&) = delete;
@@ -43,9 +46,9 @@ namespace app {
 		App& operator=(App&&) = delete;
 
 		// One frame, as docs/app-api.md numbers it. False once exit is requested or the window's close
-		// is, after finishing that frame; from then on, and after shutdown(), false with no frame run.
-		// The clock starts at the first frame, whose delta is 0. Called from inside a frame it refuses,
-		// logged, and returns false.
+		// is, after finishing that frame (an exit through the dev server ends it at step 3); from then
+		// on, and after shutdown(), false with no frame run. The clock starts at the first frame, whose
+		// delta is 0. Called from inside a frame it refuses, logged, and returns false.
 		bool tick();
 		// The native runner: while (tick()) pace(), pacing being the platform's vsync and, with a
 		// frameCapHz, a sleep then a spin to the cap. A clock that doesn't run in real time (a
@@ -93,6 +96,7 @@ namespace app {
 		}
 
 		Input&						input();
+		DevServer&					devServer(); // always there; its calls do nothing where the server isn't compiled in
 		const Clock&				clock() const;
 		const Renderer::Viewport&	viewport() const;
 		Renderer::CoordinateSystem& coordinateSystem();
@@ -124,16 +128,19 @@ namespace app {
 		void  bindContext(void* value, const void* type);
 		void* contextFor(const void* type) const;
 
-		// The frame's steps; 3 and 10 are the dev server's.
-		void beginFrame();		  // 1
-		void pollEvents();		  // 2
-		void readFrameInput();	  // 4
-		void dispatchEvents();	  // 5
-		void applySceneChanges(); // 6
-		void runFixedTicks();	  // 7
-		void updateScenes();	  // 8
-		void render();			  // 9
-		void present();			  // 11
+		// The frame and its steps.
+		void runFrame();
+		void beginFrame();			// 1
+		void pollEvents();			// 2
+		void devServerPreFrame();	// 3
+		void readFrameInput();		// 4
+		void dispatchEvents();		// 5
+		void applySceneChanges();	// 6
+		void runFixedTicks();		// 7
+		void updateScenes();		// 8
+		void render();				// 9
+		void devServerPostRender(); // 10
+		void present();				// 11
 
 		void  fixedTick();
 		void  finishFrame();
@@ -151,6 +158,7 @@ namespace app {
 		std::vector<std::unique_ptr<Overlay>>		overlays;
 		std::vector<std::unique_ptr<Overlay>>		joiningOverlays;
 		std::function<void(App&)>					dispatch;
+		DevServer									devServerState;
 		void*										contextValue = nullptr;
 		const void*									contextType = nullptr;
 		foundation::InputSnapshot					tickInput{};
