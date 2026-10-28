@@ -218,9 +218,10 @@ Configure and build from a shell with the MSVC environment: `cl` on PATH plus
 `INCLUDE` and `LIB`. Worldsim's `scripts/setup-msvc-env.ps1` persists those to
 the User environment, so any new shell has them. A Visual Studio developer shell
 (or `vcvars64.bat`) works too, but it repoints `VCPKG_ROOT` at the VS-bundled
-vcpkg, so set it back to your own checkout before the first configure; that
-configure binds the toolchain, and fixing `VCPKG_ROOT` later won't rebind it
-without `--fresh`.
+vcpkg (no binary cache, every port built from source). A top-level configure
+refuses that toolchain, before project() installs anything. Set `VCPKG_ROOT`
+back to your own checkout, then configure with `--fresh` or delete `build/`: the
+first configure binds the toolchain, and fixing `VCPKG_ROOT` later won't rebind it.
 
 The `windows` preset picks MSVC by setting `CC` and `CXX` to `cl` in its
 environment, which CMake reads only on a build dir's first configure, so later
