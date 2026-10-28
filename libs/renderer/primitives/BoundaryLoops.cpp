@@ -24,8 +24,12 @@ namespace Renderer {
 		out.starts.clear();
 
 		// Every directed edge, sorted, so an edge's reverse and its repeats are a search away.
+		// A zero-area triangle has no winding of its own; it takes the one whose edges run
+		// back along more of its neighbours', so a sliver between them cancels out.
 		static thread_local std::vector<uint32_t> edges;
+		static thread_local std::vector<size_t>	  slivers;
 		edges.clear();
+		slivers.clear();
 		for (size_t i = 0; i + 2 < indices.size(); i += 3) {
 			const uint16_t a = indices[i];
 			uint16_t	   b = indices[i + 1];
@@ -35,7 +39,28 @@ namespace Renderer {
 			}
 			const Foundation::Vec2 ab = vertices[b] - vertices[a];
 			const Foundation::Vec2 ac = vertices[c] - vertices[a];
-			if ((ab.x * ac.y) - (ab.y * ac.x) < 0.0F) {
+			const float			   twiceArea = (ab.x * ac.y) - (ab.y * ac.x);
+			if (twiceArea == 0.0F) {
+				slivers.push_back(i);
+				continue;
+			}
+			if (twiceArea < 0.0F) {
+				std::swap(b, c);
+			}
+			edges.push_back(edgeKey(a, b));
+			edges.push_back(edgeKey(b, c));
+			edges.push_back(edgeKey(c, a));
+		}
+		std::sort(edges.begin(), edges.end());
+		const size_t solid = edges.size();
+		for (const size_t i : slivers) {
+			const uint16_t a = indices[i];
+			uint16_t	   b = indices[i + 1];
+			uint16_t	   c = indices[i + 2];
+			const auto	   reversed = [&](uint32_t from, uint32_t to) {
+				return std::binary_search(edges.begin(), edges.begin() + static_cast<std::ptrdiff_t>(solid), edgeKey(to, from)) ? 1 : 0;
+			};
+			if (reversed(a, c) + reversed(c, b) + reversed(b, a) > reversed(a, b) + reversed(b, c) + reversed(c, a)) {
 				std::swap(b, c);
 			}
 			edges.push_back(edgeKey(a, b));

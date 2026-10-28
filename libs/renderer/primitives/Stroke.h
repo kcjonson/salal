@@ -31,6 +31,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		uint8_t									  cornerCount = 0;
 	};
 
+	// `points` without consecutive repeats (closer than a ten-thousandth of a unit), and
+	// when `closed` without a last point that repeats the first: what a stroke and a
+	// polygon's fill are laid out from.
+	void distinctPoints(std::span<const Foundation::Vec2> points, bool closed, std::vector<Foundation::Vec2>& out);
+
 	// The pieces that stroke `args.points` at `args.width` with its cap, join and
 	// closed flag (its colour, id, z and blend are the caller's), `pixel` units to a
 	// pixel. Each segment's piece runs between its joints' bisectors: two neighbours

@@ -385,6 +385,23 @@ namespace Renderer {
 		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U + (4U * 6U));
 	}
 
+	TEST_F(FlushTest, AnOutlineThatRepeatsItsFirstPointStillFeathersInEitherWinding) {
+		// Tessellated with the repeat, the fan held a zero-area triangle whose edge ran the
+		// same way as its neighbour's in one winding, and the fill lost its ring.
+		const std::vector<Foundation::Vec2> closed = {{10.0F, 10.0F}, {10.0F, 30.0F}, {30.0F, 30.0F}, {30.0F, 10.0F}, {10.0F, 10.0F}};
+		const std::vector<Foundation::Vec2> reversed(closed.rbegin(), closed.rend());
+		for (const std::vector<Foundation::Vec2>* outline : {&closed, &reversed}) {
+			gpu->clearRecord();
+			Primitives::beginFrame();
+			Primitives::drawPolygon({.vertices = *outline, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
+			Primitives::endFrame();
+			ASSERT_EQ(gpu->draws().size(), 1U);
+			const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+			EXPECT_EQ(countAlpha(uploaded, 0.0F), 4U);
+			EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U + (4U * 6U));
+		}
+	}
+
 	TEST_F(FlushTest, DrawTrianglesIsAliasedUnlessItsAskedToAntiAlias) {
 		Primitives::beginFrame();
 		Primitives::drawTriangles(

@@ -25,20 +25,6 @@ namespace Renderer {
 			return {-direction.y, direction.x};
 		}
 
-		// `points` without consecutive repeats, and for a closed line without a last
-		// point that repeats the first.
-		void distinctPoints(std::span<const Foundation::Vec2> points, bool closed, std::vector<Foundation::Vec2>& out) {
-			out.clear();
-			for (const Foundation::Vec2& point : points) {
-				if (out.empty() || glm::length(point - out.back()) >= kMinSegment) {
-					out.push_back(point);
-				}
-			}
-			if (closed && out.size() > 1 && glm::length(out.back() - out.front()) < kMinSegment) {
-				out.pop_back();
-			}
-		}
-
 		float segmentDistance(const Foundation::Vec2& point, const Foundation::Vec2& from, const Foundation::Vec2& to) {
 			const Foundation::Vec2 along = to - from;
 			const float			   lengthSquared = glm::dot(along, along);
@@ -386,6 +372,18 @@ namespace Renderer {
 		}
 
 	} // namespace
+
+	void distinctPoints(std::span<const Foundation::Vec2> points, bool closed, std::vector<Foundation::Vec2>& out) {
+		out.clear();
+		for (const Foundation::Vec2& point : points) {
+			if (out.empty() || glm::length(point - out.back()) >= kMinSegment) {
+				out.push_back(point);
+			}
+		}
+		if (closed && out.size() > 1 && glm::length(out.back() - out.front()) < kMinSegment) {
+			out.pop_back();
+		}
+	}
 
 	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out) {
 		out.clear();

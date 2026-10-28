@@ -151,3 +151,27 @@ TEST(BoundaryLoopsTest, OverlapsBadIndicesAndNothingDoNotChain) {
 	EXPECT_FALSE(findBoundaryLoops(kSquare, {}, loops));
 	EXPECT_TRUE(loops.empty());
 }
+
+TEST(BoundaryLoopsTest, AZeroAreaTriangleTakesTheWindingThatCancelsItsNeighbours) {
+	// A square with a point halfway along its bottom edge, the sliver (0, 1, 2) along that
+	// edge given either way round: its edge back from 2 to 0 cancels its neighbour's.
+	const std::array<Foundation::Vec2, 5> square = {{{0.0F, 0.0F}, {5.0F, 0.0F}, {10.0F, 0.0F}, {10.0F, 10.0F}, {0.0F, 10.0F}}};
+	BoundaryLoops						  loops;
+	for (const std::array<uint16_t, 9>& indices :
+		 {std::array<uint16_t, 9>{0, 1, 2, 0, 2, 3, 0, 3, 4}, std::array<uint16_t, 9>{0, 2, 1, 0, 2, 3, 0, 3, 4}}) {
+		ASSERT_TRUE(findBoundaryLoops(square, indices, loops));
+		EXPECT_EQ(loop(loops, 0), (std::vector<uint16_t>{0, 1, 2, 3, 4}));
+	}
+}
+
+TEST(BoundaryLoopsTest, OutlinesWithCollinearPointsChainInEitherWinding) {
+	const std::vector<Foundation::Vec2> outline = {{0.0F, 0.0F}, {5.0F, 0.0F}, {10.0F, 0.0F}, {10.0F, 10.0F}, {5.0F, 10.0F}, {0.0F, 10.0F}};
+	const std::vector<Foundation::Vec2> reversed(outline.rbegin(), outline.rend());
+	for (const std::vector<Foundation::Vec2>* each : {&outline, &reversed}) {
+		const renderer::TessellatedMesh mesh = tessellate(*each);
+		BoundaryLoops					loops;
+		ASSERT_TRUE(findBoundaryLoops(mesh.vertices, mesh.indices, loops));
+		EXPECT_EQ(loops.count(), 1U);
+		EXPECT_GT(twiceArea(loops, 0, mesh.vertices), 0.0F);
+	}
+}

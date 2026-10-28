@@ -485,9 +485,11 @@ namespace Renderer::Primitives {
 			return hash;
 		}
 
-		// The cached fill for `outline`, tessellating it on a miss. An outline the
+		// The cached fill for `outline`, tessellating it on a miss, its repeated points
+		// dropped first so no zero-area triangle stands between neighbours. An outline the
 		// tessellator rejects caches an empty mesh, so it is reported once; a mesh whose
-		// boundary doesn't chain into loops caches none, and its fill stays aliased.
+		// boundary doesn't chain into loops (an outline touching itself) caches none, said
+		// once, and its fill stays aliased.
 		const PolygonCacheEntry& polygonFill(std::span<const Foundation::Vec2> outline) {
 			const uint64_t hash = hashOutline(outline);
 			const auto	   found = g_polygonCache.find(hash);
@@ -499,12 +501,20 @@ namespace Renderer::Primitives {
 			}
 			PolygonCacheEntry entry;
 			entry.outline.assign(outline.begin(), outline.end());
+			static thread_local std::vector<Foundation::Vec2> distinct;
+			distinctPoints(outline, true, distinct);
 			renderer::Tessellator tessellator;
-			if (!tessellator.Tessellate(renderer::VectorPath(entry.outline), entry.mesh)) {
+			if (!tessellator.Tessellate(renderer::VectorPath(distinct), entry.mesh)) {
 				LOG_WARNING(Renderer, "drawPolygon: could not tessellate a %zu-point outline", outline.size());
 				entry.mesh.clear();
 			}
-			findBoundaryLoops(entry.mesh.vertices, entry.mesh.indices, entry.boundary);
+			if (!findBoundaryLoops(entry.mesh.vertices, entry.mesh.indices, entry.boundary) && !entry.mesh.indices.empty()) {
+				LOG_DEBUG(
+					Renderer,
+					"drawPolygon: a %zu-point outline's fill has no closed boundary, as where it touches itself, so it is drawn aliased",
+					outline.size()
+				);
+			}
 			return g_polygonCache.insert_or_assign(hash, std::move(entry)).first->second;
 		}
 

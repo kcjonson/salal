@@ -23,11 +23,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	};
 
 	// The edges of the triangles in `indices` (each turned to positive winding over
-	// `vertices` first; a zero-area one is kept as given) that no other triangle runs
-	// back along, chained into loops. False, with `out` empty, when they don't chain:
-	// a vertex that starts two boundary edges (a pinch, where two parts of the mesh meet
-	// at a point), an edge two triangles run the same way, an index past `vertices`, or
-	// no boundary at all.
+	// `vertices` first, a zero-area one to whichever winding runs back along more of its
+	// neighbours' edges) that no other triangle runs back along, chained into loops.
+	// False, with `out` empty, when they don't chain: a vertex that starts two boundary
+	// edges (a pinch, where two parts of the mesh meet at a point), a boundary edge two
+	// triangles run the same way, an index past `vertices`, or no boundary at all.
 	bool findBoundaryLoops(std::span<const Foundation::Vec2> vertices, std::span<const uint16_t> indices, BoundaryLoops& out);
 
 } // namespace Renderer
