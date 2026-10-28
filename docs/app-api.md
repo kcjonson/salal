@@ -987,9 +987,10 @@ What the first version of this design left open, as landed:
   disconnect of one that isn't connected and a vpad past 3 are 400s, as is an
   unknown key (a 200 and a warning today). Injected events carry no modifier bits, as today.
   At most 1024 events wait for the frame; past that, which only a paused or
-  stalled app reaches, a request is a 429 and queues nothing. cpp-httplib
-  keeps one of a repeated `key=value` pair, so two identical events in one
-  request are one, as today; send a double click as two requests.
+  stalled app reaches, a request is a 429 and queues nothing. Every `ev` is
+  read from the raw query, in order, so identical ones all count: a double
+  click is two `ev=click,x,y`, where worldsim's server kept one of a repeated
+  pair.
 
 The log stream needs no singleton of its own: the logger's one sink slot
 (`foundation::Logger::setSink`, module-static as the logger is) holds the

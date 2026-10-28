@@ -45,6 +45,29 @@ namespace app::detail {
 			return params;
 		}
 
+		// Every `ev` in the raw query, in order. cpp-httplib's parse of the whole query keeps one of an
+		// identical repeated `key=value`, which would turn a double click into one click, so each pair goes
+		// through its parser alone and is decoded as the rest of the query is.
+		std::vector<std::string> eventsOf(const httplib::Request& req) {
+			std::vector<std::string> evs;
+			const std::size_t		 query = req.target.find('?');
+			if (query == std::string::npos) {
+				return evs;
+			}
+			httplib::detail::split(
+				req.target.data() + query + 1, req.target.data() + req.target.size(), '&', [&evs](const char* begin, const char* end) {
+					httplib::Params pair;
+					httplib::detail::parse_query_text(begin, static_cast<std::size_t>(end - begin), pair);
+					for (const auto& [key, value] : pair) {
+						if (key == "ev") {
+							evs.push_back(value);
+						}
+					}
+				}
+			);
+			return evs;
+		}
+
 		std::uint64_t unixMilliseconds() {
 			const auto now = std::chrono::system_clock::now().time_since_epoch();
 			return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
@@ -395,15 +418,10 @@ namespace app::detail {
 	// Parsed and queued here, not parked: injected input waits in the server while the app is paused,
 	// so a request that waited for it would time out. All of a request's events or none.
 	void DevServerHost::input(const httplib::Request& req, httplib::Response& res) {
-		const std::size_t count = req.get_param_value_count("ev");
-		if (count == 0) {
+		const std::vector<std::string> evs = eventsOf(req);
+		if (evs.empty()) {
 			reply(res, errorReply(400, "Missing required parameter 'ev'"));
 			return;
-		}
-		std::vector<std::string> evs;
-		evs.reserve(count);
-		for (std::size_t i = 0; i < count; ++i) {
-			evs.push_back(req.get_param_value("ev", i));
 		}
 
 		std::unique_lock  lock(mailbox);

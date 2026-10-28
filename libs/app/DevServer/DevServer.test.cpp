@@ -76,9 +76,11 @@ namespace app::testing {
 			std::string allowOrigin;
 		};
 
-		Reply fetch(int port, const std::string& path) {
+		// `encode` off sends the target as written; the client otherwise encodes a + and a comma itself.
+		Reply fetch(int port, const std::string& path, bool encode = true) {
 			httplib::Client client("127.0.0.1", port);
 			client.set_read_timeout(std::chrono::seconds(30));
+			client.set_url_encode(encode);
 			const httplib::Result result = client.Get(path);
 			if (!result) {
 				return {};
@@ -153,6 +155,14 @@ namespace app::testing {
 			return snapshot.keys.at(static_cast<std::size_t>(key));
 		}
 
+		std::vector<InputEvent::Type> typesOf(const std::vector<InputEvent>& events) {
+			std::vector<InputEvent::Type> types;
+			for (const InputEvent& event : events) {
+				types.push_back(event.type);
+			}
+			return types;
+		}
+
 		class DevServerTest : public AppTest {
 		  protected:
 			static AppConfig served(double requestTimeout = 5.0) {
@@ -171,6 +181,9 @@ namespace app::testing {
 
 			// A route that answers without a frame.
 			Reply get(const std::string& path) const { return fetch(port(), path); }
+
+			// The same, the target sent as written.
+			Reply getRaw(const std::string& path) const { return fetch(port(), path, false); }
 
 			std::future<Reply> send(const std::string& path) const {
 				return std::async(std::launch::async, [served = port(), path] { return fetch(served, path); });
@@ -1037,12 +1050,116 @@ namespace app::testing {
 		EXPECT_TRUE(top<MainScene>().events.empty());
 	}
 
+	// A double click is two identical ev values, which cpp-httplib's own parse of the query would make one.
+	TEST_F(DevServerTest, TwoIdenticalClicksInOneRequestAreTwoClicks) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		const Reply queued = get("/api/input?ev=click,100,100&ev=click,100,100");
+		EXPECT_EQ(queued.status, 200);
+		EXPECT_EQ(queued.body, R"({"status":"ok","queued":2})");
+		frame();
+
+		const MainScene&					scene = top<MainScene>();
+		const std::vector<InputEvent::Type> click{
+			InputEvent::Type::PointerMove, InputEvent::Type::PointerDown, InputEvent::Type::PointerUp
+		};
+		std::vector<InputEvent::Type> expected = click;
+		expected.insert(expected.end(), click.begin(), click.end());
+		EXPECT_EQ(typesOf(scene.events), expected);
+		for (const InputEvent& event : scene.events) {
+			EXPECT_EQ(event.position, glm::vec2(100.0F, 100.0F));
+		}
+		const foundation::ButtonState& left = scene.ticks.back().mouse.at(static_cast<std::size_t>(MouseButton::Left));
+		EXPECT_EQ(left.transitions, 4);
+	}
+
+	TEST_F(DevServerTest, ThreeIdenticalScrollsInOneRequestAreThreeScrolls) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		EXPECT_EQ(get("/api/input?ev=scroll,40,50,-1&ev=scroll,40,50,-1&ev=scroll,40,50,-1").body, R"({"status":"ok","queued":3})");
+		frame();
+
+		const MainScene& scene = top<MainScene>();
+		EXPECT_EQ(typesOf(scene.events), std::vector(3, InputEvent::Type::Scroll));
+		for (const InputEvent& event : scene.events) {
+			EXPECT_EQ(event.scroll, glm::vec2(0.0F, -1.0F));
+			EXPECT_EQ(event.position, glm::vec2(40.0F, 50.0F));
+		}
+		EXPECT_EQ(scene.ticks.back().scroll, glm::vec2(0.0F, -3.0F));
+	}
+
+	// Moves at distinct x tell the order apart; other parameters between them are none of the route's business.
+	TEST_F(DevServerTest, RepeatedAndDistinctEventsKeepTheirOrder) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		const Reply queued =
+			get("/api/input?ev=move,1,0&ev=move,2,0&other=1&ev=move,1,0&ev=move,1,0&other=1&ev=move,3,0&ev=move,2,0&ev=move,1,0");
+		EXPECT_EQ(queued.body, R"({"status":"ok","queued":7})");
+		frame();
+
+		const MainScene&   scene = top<MainScene>();
+		std::vector<float> across;
+		for (const InputEvent& event : scene.events) {
+			EXPECT_EQ(event.type, InputEvent::Type::PointerMove);
+			across.push_back(event.position.x);
+		}
+		EXPECT_EQ(across, (std::vector<float>{1, 2, 1, 1, 3, 2, 1}));
+	}
+
+	// Decoded as the rest of the query is: %2C is a comma, %41 an A, a key may be encoded, and an identical
+	// pair is still two. Sent as written, since the test client would encode the commas and plus signs itself.
+	TEST_F(DevServerTest, PercentEncodedEventsDecodeAsBefore) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		const Reply queued =
+			getRaw("/api/input?ev=click%2C12%2C34&ev=click%2C12%2C34&e%76=click,12,34&ev=char,U%2B0041&ev=char,U%2B0041&ev=keydown,%41");
+		EXPECT_EQ(queued.body, R"({"status":"ok","queued":6})");
+		frame();
+
+		const MainScene& scene = top<MainScene>();
+		ASSERT_EQ(scene.events.size(), 12U);
+		for (std::size_t i = 0; i < 9; ++i) {
+			EXPECT_EQ(scene.events[i].position, glm::vec2(12.0F, 34.0F)) << i;
+		}
+		EXPECT_EQ(scene.events[9].codepoint, U'A');
+		EXPECT_EQ(scene.events[10].codepoint, U'A');
+		EXPECT_EQ(scene.events[11].type, InputEvent::Type::KeyDown);
+		EXPECT_EQ(scene.events[11].key, Key::A);
+
+		// A bare + is a space, so it isn't the U+ of a codepoint.
+		const Reply spaced = getRaw("/api/input?ev=char,U+0041");
+		EXPECT_EQ(spaced.status, 400);
+		EXPECT_EQ(
+			spaced.body, R"json({"error":"a codepoint is a Unicode scalar value, decimal or hex after 0x or U+","ev":"char,U 0041"})json"
+		);
+	}
+
+	// A repeated event is judged in its turn, so a second identical connect is the 400 it always was
+	// for a vpad that is already connected, and the request queues nothing.
+	TEST_F(DevServerTest, RepeatedEventsAreStillAllOrNothing) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		Reply reply = get("/api/input?ev=connect,vpad0&ev=connect,vpad0");
+		EXPECT_EQ(reply.status, 400);
+		EXPECT_EQ(reply.body, R"json({"error":"vpad0 is already connected","ev":"connect,vpad0"})json");
+		reply = get("/api/input?ev=char,65&ev=char,65&ev=bogus&ev=bogus");
+		EXPECT_EQ(reply.status, 400);
+		EXPECT_NE(reply.body.find(R"("ev":"bogus")"), std::string::npos) << reply.body;
+		EXPECT_EQ(get("/api/input?ev=pad,vpad0,a,down").status, 400); // the refused connect left vpad0 unconnected
+		frame();
+		EXPECT_TRUE(top<MainScene>().events.empty());
+	}
+
 	TEST_F(DevServerTest, InputWaitingForAPausedAppIsCapped) {
-		// Each event distinct: cpp-httplib keeps one of a repeated key=value pair.
-		const auto chars = [](int first, int count) {
+		const auto chars = [](int count) {
 			std::string events;
 			for (int i = 0; i < count; ++i) {
-				events += "&ev=char," + std::to_string(first + i);
+				events += "&ev=char,65";
 			}
 			return events;
 		};
@@ -1050,9 +1167,9 @@ namespace app::testing {
 		app->scenes().push<MainScene>();
 		frame();
 		ask("/api/control?action=pause");
-		EXPECT_EQ(get("/api/input?ev=connect,vpad2" + chars(100, 499)).body, R"({"status":"ok","queued":500})");
-		EXPECT_EQ(get("/api/input?ev=char,65" + chars(1000, 499)).body, R"({"status":"ok","queued":500})");
-		const Reply full = get("/api/input?ev=connect,vpad3" + chars(2000, 25));
+		EXPECT_EQ(get("/api/input?ev=connect,vpad2" + chars(499)).body, R"({"status":"ok","queued":500})");
+		EXPECT_EQ(get("/api/input?ev=char,65" + chars(499)).body, R"({"status":"ok","queued":500})");
+		const Reply full = get("/api/input?ev=connect,vpad3" + chars(25));
 		EXPECT_EQ(full.status, 429);
 		EXPECT_EQ(
 			full.body,
