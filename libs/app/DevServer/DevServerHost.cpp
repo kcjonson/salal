@@ -197,8 +197,9 @@ namespace app::detail {
 		return host;
 	}
 
-	// The sink goes first: a thread mid-log must not reach a server that's gone. Exit requests answer
-	// now that the app is torn down, and the rest are let go before the pool joins them.
+	// The sink goes first, and setSink waits out any thread already logging into it, so none reaches
+	// the ring once it's gone. Exit requests answer now that the app is torn down, and the rest are
+	// let go before the pool joins them.
 	DevServerHost::~DevServerHost() {
 		if (!serverThread.joinable()) {
 			return;

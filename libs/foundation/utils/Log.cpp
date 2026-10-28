@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdio>
 #include <ctime>
+#include <thread>
 
 namespace foundation {
 
@@ -13,6 +14,27 @@ namespace foundation {
 #ifdef DEVELOPMENT_BUILD
 	std::atomic<Logger::LogSinkFn> Logger::s_sinkFn{nullptr};
 	std::atomic<void*>			   Logger::s_sinkContext{nullptr};
+	std::atomic<int>			   Logger::s_sinkCalls{0};
+
+	namespace {
+		// Counts one log() call as inside the sink from before it loads the sink until it returns,
+		// however the sink returns.
+		class SinkCall {
+		  public:
+			explicit SinkCall(std::atomic<int>& calls)
+				: count(calls) {
+				count.fetch_add(1);
+			}
+			~SinkCall() { count.fetch_sub(1); }
+			SinkCall(const SinkCall&) = delete;
+			SinkCall& operator=(const SinkCall&) = delete;
+			SinkCall(SinkCall&&) = delete;
+			SinkCall& operator=(SinkCall&&) = delete;
+
+		  private:
+			std::atomic<int>& count;
+		};
+	} // namespace
 #endif
 
 	void Logger::initialize() {
@@ -48,16 +70,19 @@ namespace foundation {
 		s_initialized = false;
 	}
 
+	// The old sink goes first, then the calls already in it finish: log() counts itself in before it
+	// loads the sink, so with every access sequentially consistent, a call this wait misses saw the
+	// null. Only then does the new context go in, before the sink that reads it.
 	void Logger::setSink(LogSinkFn fn, void* context) {
 #ifdef DEVELOPMENT_BUILD
-		if (fn == nullptr) {
-			// Leave the context alone: a thread that already loaded the old fn may still be using it
-			s_sinkFn.store(nullptr, std::memory_order_release);
-			return;
+		s_sinkFn.store(nullptr);
+		while (s_sinkCalls.load() != 0) {
+			std::this_thread::yield();
 		}
-		// The release store of fn publishes the context stored before it (log() pairs it with an acquire)
-		s_sinkContext.store(context, std::memory_order_relaxed);
-		s_sinkFn.store(fn, std::memory_order_release);
+		if (fn != nullptr) {
+			s_sinkContext.store(context);
+			s_sinkFn.store(fn);
+		}
 #else
 		(void)fn;
 		(void)context;
@@ -83,8 +108,11 @@ namespace foundation {
 #ifdef DEVELOPMENT_BUILD
 		// Sink sees every message regardless of the console filter (dev client filters itself).
 		// Call the loaded value, never re-read the atomic: a concurrent clear must not split the check from the call.
-		if (LogSinkFn fn = s_sinkFn.load(std::memory_order_acquire); fn != nullptr) {
-			fn(s_sinkContext.load(std::memory_order_relaxed), LogRecord{category, level, message, file, line});
+		{
+			const SinkCall counted(s_sinkCalls);
+			if (LogSinkFn fn = s_sinkFn.load(); fn != nullptr) {
+				fn(s_sinkContext.load(), LogRecord{category, level, message, file, line});
+			}
 		}
 #endif
 

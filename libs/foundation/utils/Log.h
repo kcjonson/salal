@@ -51,9 +51,9 @@ namespace foundation {
 		// thread logged. Development builds only.
 		using LogSinkFn = void (*)(void* context, const LogRecord& record);
 
-		// Install (fn non-null) before worker threads exist. Clear (fn null) is safe while they
-		// still log: a thread that already loaded the function pointer calls it with the
-		// context, which must outlive the clear (AppLauncher clears before it stops the server).
+		// Install (fn non-null) or clear (fn null) the sink, from any thread but a sink's own call.
+		// Either first waits for calls already inside the old sink to return, so its context may be
+		// destroyed once this returns, while other threads go on logging.
 		static void setSink(LogSinkFn fn, void* context);
 
 	  private:
@@ -63,6 +63,8 @@ namespace foundation {
 #ifdef DEVELOPMENT_BUILD
 		static std::atomic<LogSinkFn> s_sinkFn;		 // NOLINT(readability-identifier-naming)
 		static std::atomic<void*>	  s_sinkContext; // NOLINT(readability-identifier-naming)
+		// log() calls from before they load the sink until they are back from it.
+		static std::atomic<int> s_sinkCalls; // NOLINT(readability-identifier-naming)
 #endif
 	};
 
