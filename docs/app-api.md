@@ -233,9 +233,14 @@ public:
    (`SceneManager.cpp:100-102`, after `Application.cpp:145-202`). While paused
    they wait for resume, as today. When they change the top scene, the tick
    reader is consumed and discarded, so the press that opened a menu or popped
-   one doesn't reach the new top's first tick. A `resume()` asked for during
+   one doesn't reach the new top's first tick. The frame reader isn't, so the
+   new top's first update still sees that press in `FrameContext::input`, as
+   worldsim's polled input does; a scene that should ignore it reacts in
+   `fixedUpdate` or to events. A `resume()` asked for during
    the frame takes effect once the frame is over, so the frame that resumed
-   stays paused and its press is dropped with the rest.
+   stays paused and its press is dropped with the rest. A resume drops steps
+   not run yet, deferred or not, and a `step` asked for after an in-frame
+   resume is dropped at the frame's end, logged.
 7. Fixed ticks, unless paused or (with `freezeTicksOnFocusLoss`) unfocused:
    `accumulator += realDelta`; while `accumulator >= fixedStep` and fewer than
    `maxTicksPerFrame` have run, the top scene's `fixedUpdate(TickContext)` with
@@ -246,7 +251,8 @@ public:
    press made during a pause doesn't fire on resume. A tick that pauses ends
    the frame's ticks, and the whole steps left are dropped as past the cap.
 8. `update(FrameContext)` on the top scene, then the overlays, with
-   `realDelta`, unless paused (worldsim's order).
+   `realDelta`, unless paused (worldsim's order). Its input is the frame
+   reader's, edges included, even for a scene that became top in step 6.
 9. `Primitives::beginFrame`, `clear(clearColor)`, render the stack from the
    topmost opaque scene upward, then overlays, then `Primitives::endFrame`.
    The top scene renders with `alpha = accumulator / fixedStep`; a covered
@@ -484,9 +490,12 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   stack type-erases them itself, so `Args`, `Result` and the callback may be
   move-only (a `std::unique_ptr` in an `Args`), which `std::function` and
   `std::any` couldn't hold. A push with a callback remembers the scene on top
-  when it was asked for and is dropped, logged, if that scene has left the
-  stack by the time it applies (a scene stays on top until step 6, so it can
-  ask to leave and then push), so a callback never outlives its pusher.
+  when it was asked for, whoever asks (an overlay or game code too), and is
+  dropped, logged, if that scene has left the stack by the time it applies (a
+  scene stays on top until step 6, so it can ask to leave and then push), so a
+  callback never outlives its pusher. A push without a callback queues in
+  order regardless, so it can land over a scene that replaced the one that
+  asked.
 - Asteroids' Arena args (`{mode, players[], arenaSeed, spawnTable, pressureCurve, routeEffects?}`)
   and Player setup args become `Args` structs. Dual-deck-builder's four
   continuation shapes (`next`, `returnTo`/`returnData`, `onChoose`/`onDone`,

@@ -40,7 +40,9 @@ namespace app {
 	};
 
 	// What update reads: the frame's real delta in seconds, at most FrameConfig::maxFrameDelta, and the
-	// frame reader's snapshot.
+	// frame reader's snapshot. The frame reader isn't dropped when the top scene changes, as the tick
+	// reader is, so a scene's first update still sees the press that put it on top, as worldsim's polled
+	// input does; a scene that should ignore that press reacts in fixedUpdate or to events.
 	struct FrameContext {
 		double							 dt;
 		const foundation::InputSnapshot& input;

@@ -8,8 +8,10 @@
 //
 // Scenes are built when their change applies, so of two switches in one frame only the last is
 // built. Arguments, results and result callbacks are typed per scene and may be move-only. A push
-// with a result callback remembers the scene on top when it was asked for, and is dropped, logged,
-// if that scene has left the stack by the time it applies, so a callback never outlives its pusher.
+// with a result callback remembers the scene on top when it was asked for, whoever asks (an overlay
+// or game code too), and is dropped, logged, if that scene has left the stack by the time it applies,
+// so a callback never outlives its pusher. A push without a callback queues in order regardless, so
+// it can land over a scene that replaced the one that asked.
 //
 // Names are for the command line, the dev server and reload. A scene added by name has a factory
 // that takes no arguments. A NoArgs scene pushed by type is known by the name its type was added
