@@ -422,6 +422,42 @@ namespace {
 		expectButton(evaluate(released, pressed, up), true, 2);
 	}
 
+	// Of the bindings that start down only the last to let go can release the action, and of those that
+	// end down only the first to make its last press can press it, so the sum counts too many.
+	TEST(ActionMap, ButtonTransitionsAreTheMostAnOrderGives) {
+		ActionMap map;
+		map.bind("fire", key(Key::A));
+		map.bind("fire", padAxis(GamepadAxis::LeftTrigger));
+		map.bind("fire", padAxis(GamepadAxis::RightTrigger));
+		const std::array<DeviceId, 2> devices{kKeyboard, kPad0};
+		InputSnapshot				  snapshot;
+
+		// A let go and pressed again while both triggers are let go: orders give 0 or 2, never 4.
+		keyOf(snapshot, Key::A) = {.down = true, .transitions = 2};
+		setStartAxis(snapshot, 0, GamepadAxis::LeftTrigger, 0.75F);
+		setAxis(snapshot, 0, GamepadAxis::LeftTrigger, 0.25F);
+		setStartAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.75F);
+		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.25F);
+		expectButton(map.evaluate("fire", snapshot, devices), true, 2);
+
+		// Two keys each let go and pressed again: 2, not 4.
+		ActionMap twoKeys;
+		twoKeys.bind("fire", key(Key::A));
+		twoKeys.bind("fire", key(Key::B));
+		keyOf(snapshot, Key::B) = {.down = true, .transitions = 2};
+		expectButton(twoKeys.evaluate("fire", snapshot, kKeyboardOnly), true, 2);
+
+		// Three keys tapped from up: each tap can fall in a gap the others leave, so 6.
+		ActionMap threeKeys;
+		threeKeys.bind("fire", key(Key::A));
+		threeKeys.bind("fire", key(Key::B));
+		threeKeys.bind("fire", key(Key::C));
+		for (const Key tapped : {Key::A, Key::B, Key::C}) {
+			keyOf(snapshot, tapped) = {.down = false, .transitions = 2};
+		}
+		expectButton(threeKeys.evaluate("fire", snapshot, kKeyboardOnly), false, 6);
+	}
+
 	TEST(ActionMap, TransitionsFollowTheReaderTheSnapshotCameFrom) {
 		ActionMap map;
 		map.bind("jump", key(Key::Space));

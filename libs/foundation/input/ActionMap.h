@@ -14,10 +14,10 @@
 // - An axis binding's button went down or came up, once, when its value read through startAxes and
 //   through axes sit on either side of threshold: the snapshot holds where the axis was at the
 //   reader's last read and where it is now, not the path between.
-// - The button is down while any binding is. Its transitions are ones some order of the bindings'
-//   own changes would give: none while a binding was held throughout; one when the bindings only
-//   went down or only came up; otherwise their sum, one fewer when its parity disagrees with how
-//   the action's down state changed. A lone binding passes through exactly.
+// - The button is down while any binding is. Its transitions are the most some order of the
+//   bindings' own changes would give: none while a binding was held throughout; otherwise their
+//   sum, less one for each binding past the first that moved and started down, and one for each
+//   past the first that moved and ended down. A lone binding passes through exactly.
 // - An unbound action, an empty device span, or a control out of range contributes nothing, and a
 //   NaN deadzone reads 0.
 
