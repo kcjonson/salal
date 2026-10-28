@@ -1,6 +1,8 @@
 #pragma once
 
 #include "DevServer/DevServer.h"
+#include "saves/SaveStore.h"
+#include "settings/Settings.h"
 
 #include <backend/Backend.h>
 #include <font/FontRenderer.h>
@@ -23,16 +25,22 @@ namespace app {
 	};
 
 	struct AppConfig {
-		std::string								   organization, applicationName; // the per-user settings directory
+		std::string								   organization, applicationName; // name the per-user directories
 		FrameConfig								   frame;
 		Renderer::backend::ShaderSource			   baseShader;	// the game's base shader with its hooks (salal_base_shader)
 		std::span<const Renderer::FontAtlasSource> fontAtlases; // resource paths; empty: no text, logged once, not a failure
 		Renderer::FontFamily					   defaultFont = Renderer::FontFamily::Default;
 		Foundation::Color clearColor{0.1F, 0.1F, 0.15F, 1.0F}; // through Primitives::clear, each frame before the scenes render
 		std::vector<std::filesystem::path>
-						resourceRoots; // searched before the exe directory and cwd; replaces any set before create, cleared by ~App
-		DevServerConfig devServer;	   // enabled, port, request timeout; a no-op where the server isn't compiled in
-		bool			metrics = false;
+			resourceRoots; // searched before the exe directory and cwd; replaces any set before create, cleared by ~App
+		// Relative paths are under userConfigDir and userDataDir(organization, applicationName); empty is none.
+		std::filesystem::path settingsFile;
+		int					  settingsVersion = 1; // the game's settings format, saved as the file's "version"
+		Settings::Migrate	  migrateSettings;	   // brings a file older than settingsVersion up to it
+		std::filesystem::path savesDirectory;
+		SaveFormat			  saveFormat;
+		DevServerConfig		  devServer; // enabled, port, request timeout; a no-op where the server isn't compiled in
+		bool				  metrics = false;
 	};
 
 } // namespace app

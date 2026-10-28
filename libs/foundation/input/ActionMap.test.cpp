@@ -620,4 +620,47 @@ namespace {
 		EXPECT_EQ(map.evaluate("radial", snapshot, kPad0Only).value, 0.0F);
 	}
 
+	TEST(ActionMap, WhatTheMapHoldsReadsBackActionsInNameOrderAndBindingsInTheOrderBound) {
+		ActionMap map;
+		EXPECT_TRUE(map.actions().empty());
+		map.bind("moveX", {.source = Binding::Source::Key, .control = static_cast<std::uint16_t>(Key::D)});
+		map.bind("jump", {.source = Binding::Source::Key, .control = static_cast<std::uint16_t>(Key::Space)});
+		map.bind("moveX", {.source = Binding::Source::Key, .control = static_cast<std::uint16_t>(Key::A), .scale = -1.0F});
+		map.setStickDeadzone(GamepadAxis::RightX, GamepadAxis::RightY, 0.3F);
+		map.setStickDeadzone(GamepadAxis::LeftX, GamepadAxis::LeftY, 0.2F);
+		map.setStickDeadzone(GamepadAxis::RightY, GamepadAxis::RightX, 0.4F);
+
+		EXPECT_EQ(map.actions(), (std::vector<std::string_view>{"jump", "moveX"}));
+		const std::span<const Binding> moveX = map.bindings("moveX");
+		ASSERT_EQ(moveX.size(), 2U);
+		EXPECT_EQ(moveX[0].control, static_cast<std::uint16_t>(Key::D));
+		EXPECT_EQ(moveX[1].control, static_cast<std::uint16_t>(Key::A));
+		EXPECT_EQ(moveX[1].scale, -1.0F);
+		EXPECT_TRUE(map.bindings("never").empty());
+
+		const std::span<const StickDeadzone> sticks = map.stickDeadzones();
+		ASSERT_EQ(sticks.size(), 2U);
+		EXPECT_EQ(sticks[0].x, GamepadAxis::RightX);
+		EXPECT_EQ(sticks[0].y, GamepadAxis::RightY);
+		EXPECT_EQ(sticks[0].radius, 0.4F);
+		EXPECT_EQ(sticks[1].x, GamepadAxis::LeftX);
+		EXPECT_EQ(sticks[1].radius, 0.2F);
+	}
+
+	TEST(ActionMap, UnbindClearsAnActionAndKeepsItListed) {
+		ActionMap map;
+		map.bind("jump", {.source = Binding::Source::Key, .control = static_cast<std::uint16_t>(Key::Space)});
+		map.unbind("jump");
+		map.unbind("never");
+		EXPECT_EQ(map.actions(), (std::vector<std::string_view>{"jump", "never"}));
+		EXPECT_TRUE(map.bindings("jump").empty());
+
+		InputSnapshot snapshot;
+		snapshot.keys[static_cast<std::size_t>(Key::Space)] = {.down = true, .transitions = 1};
+		EXPECT_FALSE(map.evaluate("jump", snapshot, kKeyboardOnly).button.down);
+
+		map.bind("jump", {.source = Binding::Source::Key, .control = static_cast<std::uint16_t>(Key::Space)});
+		EXPECT_TRUE(map.evaluate("jump", snapshot, kKeyboardOnly).button.down);
+	}
+
 } // namespace

@@ -1,6 +1,7 @@
 #include "application/App.h"
 
 #include "detail/Guard.h"
+#include "storage/UserDirectories.h"
 
 #include <primitives/Primitives.h>
 #include <utils/Log.h>
@@ -103,6 +104,33 @@ namespace app {
 			[[maybe_unused]] bool active;
 		};
 
+		// The App's own keys in the settings.
+		constexpr std::string_view kVsync = "video.vsync";
+		constexpr std::string_view kFullscreenMonitor = "video.fullscreenMonitor";
+		constexpr std::string_view kWindowWidth = "video.windowWidth";
+		constexpr std::string_view kWindowHeight = "video.windowHeight";
+
+		using UserDir = std::filesystem::path (*)(std::string_view organization, std::string_view application);
+
+		// A relative path under the game's per-user directory; an absolute one as it is; empty, and a
+		// relative one with no per-user directory to go under (logged), as none.
+		std::filesystem::path userPath(const std::filesystem::path& path, UserDir userDir, const AppConfig& config, const char* what) {
+			if (path.empty() || path.is_absolute()) {
+				return path;
+			}
+			const std::filesystem::path root = userDir(config.organization, config.applicationName);
+			if (root.empty()) {
+				LOG_ERROR(Engine, "App::create: no per-user directory for the %s (organization and applicationName name it); none", what);
+				return {};
+			}
+			return root / path;
+		}
+
+		bool sameSize(const Renderer::Viewport& a, const Renderer::Viewport& b) {
+			return a.logicalWidth == b.logicalWidth && a.logicalHeight == b.logicalHeight && a.framebufferWidth == b.framebufferWidth &&
+				   a.framebufferHeight == b.framebufferHeight;
+		}
+
 		// A resource path wherever findResource finds it; as given otherwise, so the error names it.
 		std::string resourcePath(const std::string& path) {
 			std::string found = Foundation::findResourceString(path);
@@ -123,6 +151,10 @@ namespace app {
 		if (!validFrame(config.frame)) {
 			return nullptr;
 		}
+		if (config.settingsVersion < 1) {
+			LOG_ERROR(Engine, "App::create: a settingsVersion of %d; versions start at 1", config.settingsVersion);
+			return nullptr;
+		}
 		std::unique_ptr<App> created(new App(std::move(config), std::move(platform)));
 		if (!created->start()) {
 			return nullptr;
@@ -138,6 +170,8 @@ namespace app {
 
 	bool App::start() {
 		Foundation::setResourceRoots(config.resourceRoots);
+		openStorage();
+		applyWindowSettings();
 
 		const Renderer::Viewport window = platform->viewport();
 		coordinates.setViewport(window);
@@ -172,6 +206,37 @@ namespace app {
 			window.framebufferHeight
 		);
 		return true;
+	}
+
+	void App::openStorage() {
+		userSettings = Settings::load(
+			userPath(config.settingsFile, userConfigDir, config, "settings"), config.settingsVersion, config.migrateSettings
+		);
+		saveStore = SaveStore(userPath(config.savesDirectory, userDataDir, config, "saves"), config.saveFormat);
+	}
+
+	// The App's keys applied to the window before anything reads its size: vsync, the monitor, then the
+	// windowed size, which is then where fullscreen returns to. A key that isn't there, or holds the wrong
+	// type, leaves the window as its WindowConfig made it. The window is already showing, so a saved
+	// fullscreen or size is a visible switch at launch.
+	void App::applyWindowSettings() {
+		if (const std::optional<bool> vsync = userSettings.get<std::optional<bool>>(kVsync, std::nullopt)) {
+			platform->setVsync(*vsync);
+		}
+		if (const nlohmann::json* monitor = userSettings.find(kFullscreenMonitor); monitor != nullptr) {
+			if (const auto chosen = detail::fromJson<std::optional<int>>(*monitor)) {
+				platform->setFullscreen(*chosen);
+			} else {
+				LOG_WARNING(
+					Engine, "App: video.fullscreenMonitor is a %s, not a monitor or null; the window stays as it is", monitor->type_name()
+				);
+			}
+		}
+		const int width = userSettings.get<int>(kWindowWidth, 0);
+		const int height = userSettings.get<int>(kWindowHeight, 0);
+		if (width > 0 && height > 0) {
+			platform->setWindowSize(width, height);
+		}
 	}
 
 	bool App::startFonts() {
@@ -322,6 +387,10 @@ namespace app {
 		coordinates.setViewport(newViewport);
 		Renderer::Primitives::setViewport(newViewport.framebufferWidth, newViewport.framebufferHeight);
 		resized = true;
+		if (!platform->fullscreenMonitor()) {
+			userSettings.set(kWindowWidth, newViewport.logicalWidth);
+			userSettings.set(kWindowHeight, newViewport.logicalHeight);
+		}
 	}
 
 	// Control actions, then the game's routes; injected input reaches Input here, through the calls a
@@ -597,6 +666,18 @@ namespace app {
 
 	void App::setVsync(bool enabled) {
 		platform->setVsync(enabled);
+		userSettings.set(kVsync, enabled);
+	}
+
+	// The platform's resize reaches the next poll; where the window has its new size already, the
+	// coordinate system and Primitives follow it now rather than disagree with GL until then.
+	void App::setFullscreen(std::optional<int> monitor) {
+		platform->setFullscreen(monitor);
+		userSettings.set(kFullscreenMonitor, monitor);
+		const Renderer::Viewport window = platform->viewport();
+		if (!sameSize(window, coordinates.viewport())) {
+			framebufferResized(window);
+		}
 	}
 
 	// --- What scenes reach ---
@@ -625,6 +706,18 @@ namespace app {
 
 	Input& App::input() {
 		return inputState;
+	}
+
+	std::optional<int> App::fullscreenMonitor() const {
+		return platform->fullscreenMonitor();
+	}
+
+	Settings& App::settings() {
+		return userSettings;
+	}
+
+	SaveStore& App::saves() {
+		return saveStore;
 	}
 
 	DevServer& App::devServer() {

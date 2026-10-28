@@ -44,6 +44,13 @@ namespace foundation {
 		float		  deadzone = 0.0F;	// per axis; sticks take a radial deadzone over both axes in the map
 	};
 
+	// A radial deadzone over a stick's two axes.
+	struct StickDeadzone {
+		GamepadAxis x = GamepadAxis::LeftX;
+		GamepadAxis y = GamepadAxis::LeftY;
+		float		radius = 0.0F;
+	};
+
 	// The button's transitions follow the reader the snapshot came from, axis bindings' included.
 	struct ActionState {
 		ButtonState button;
@@ -53,17 +60,22 @@ namespace foundation {
 	class ActionMap {
 	  public:
 		void bind(std::string_view action, Binding binding);
+		// Removes the action's bindings. It stays listed, with none, so a map written out (to the
+		// settings, say) records that the player cleared it.
+		void unbind(std::string_view action);
 		// Replaces the radius for a pair already set, in either order.
 		void		setStickDeadzone(GamepadAxis x, GamepadAxis y, float radius);
 		ActionState evaluate(std::string_view action, const InputSnapshot& input, std::span<const DeviceId> devices) const;
 
-	  private:
-		struct Stick {
-			GamepadAxis x = GamepadAxis::LeftX;
-			GamepadAxis y = GamepadAxis::LeftY;
-			float		radius = 0.0F;
-		};
+		// What the map holds, for writing it out and reading it back. The actions bound, and unbound
+		// since, in name order, as views that last while the map does and isn't assigned to.
+		std::vector<std::string_view> actions() const;
+		// The action's bindings in the order bound; none for an action never bound.
+		std::span<const Binding> bindings(std::string_view action) const;
+		// In the order first set.
+		std::span<const StickDeadzone> stickDeadzones() const { return sticks; }
 
+	  private:
 		// A pad's axes or its startAxes.
 		using Axes = std::array<float, static_cast<std::size_t>(GamepadAxis::Count)>;
 
@@ -72,8 +84,8 @@ namespace foundation {
 		// One of the axes, through the deadzones.
 		float axisValue(const Axes& axes, GamepadAxis axis, float deadzone) const;
 
-		std::map<std::string, std::vector<Binding>, std::less<>> actions{};
-		std::vector<Stick>										 sticks{};
+		std::map<std::string, std::vector<Binding>, std::less<>> byAction{};
+		std::vector<StickDeadzone>								 sticks{};
 	};
 
 } // namespace foundation

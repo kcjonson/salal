@@ -1,9 +1,9 @@
 #pragma once
 
 // The application: the window and its frame, input, the scene stack with the overlays above it,
-// and the game's context object. A game's main makes the platform and the App, adds its scenes and
-// pushes the first, then run()s, shutdown()s, tears its own resources down and destroys the App; a
-// test drives tick() on a HeadlessPlatform, advancing its ManualClock.
+// the game's context object, the settings file and saves. A game's main makes the platform and the
+// App, adds its scenes and pushes the first, then run()s, shutdown()s, tears its own resources down
+// and destroys the App; a test drives tick() on a HeadlessPlatform, advancing its ManualClock.
 //
 // One App at a time: the renderer's Primitives are module-static, and the App starts and stops them.
 
@@ -13,8 +13,10 @@
 #include "detail/TypeKey.h"
 #include "input/Input.h"
 #include "platform/Platform.h"
+#include "saves/SaveStore.h"
 #include "scene/Overlay.h"
 #include "scene/SceneStack.h"
+#include "settings/Settings.h"
 
 #include <CoordinateSystem/CoordinateSystem.h>
 #include <font/FontRenderer.h>
@@ -23,6 +25,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <vector>
 
@@ -32,9 +35,9 @@ namespace app {
 	  public:
 		// The App on `platform`, with the renderer started on the platform's backend, the game's fonts
 		// loaded and, when AppConfig::devServer asks, the dev server listening; null, logged, for no
-		// platform, a FrameConfig with a step, delta or tick cap that isn't positive, no backend, font
-		// atlases that don't give the default family, a dev server port that's busy, or an App already
-		// alive. Never exits the process.
+		// platform, a FrameConfig with a step, delta or tick cap that isn't positive, a settingsVersion
+		// below 1, no backend, font atlases that don't give the default family, a dev server port that's
+		// busy, or an App already alive. Never exits the process.
 		static std::unique_ptr<App> create(AppConfig config, std::unique_ptr<Platform> platform);
 
 		// shutdown() if it hasn't run, then the fonts, the renderer and the window, then the dev server,
@@ -78,7 +81,18 @@ namespace app {
 		// Replaces step 5's default dispatch (each event to the overlays, last added first, then the top
 		// scene unless paused). Runs every frame, paused or not; an empty function restores the default.
 		void setDispatch(std::function<void(App&)> dispatch);
+		// The window's settings, applied through the platform and kept in settings() as video.vsync and
+		// video.fullscreenMonitor (null for windowed), which the App reads at create; the game saves them.
+		// The monitor is kept as asked, so one unplugged now is tried again at the next launch.
 		void setVsync(bool enabled);
+		// Fullscreen on the monitor at `monitor` (0 the primary), or windowed. Where the window resizes at
+		// once, the viewport, the coordinate system and Primitives take the new size at once too, as GL's
+		// viewport does, so the frame it's called in draws at that size; scenes and overlays hear of it
+		// through onResize after the next frame's poll, as of any resize.
+		void setFullscreen(std::optional<int> monitor);
+		// The monitor the window is fullscreen on now, which video.fullscreenMonitor needn't be (it keeps
+		// what was asked for); nullopt while windowed.
+		std::optional<int> fullscreenMonitor() const;
 
 		SceneStack& scenes();
 
@@ -96,7 +110,12 @@ namespace app {
 			return *static_cast<T*>(contextFor(detail::typeKey<std::remove_cv_t<T>>()));
 		}
 
+		// settings() are AppConfig::settingsFile's, read at create and never saved by the App; a windowed
+		// resize is kept in them as video.windowWidth and video.windowHeight, the size the next launch
+		// opens at. saves() are over AppConfig::savesDirectory, in AppConfig::saveFormat.
 		Input&						input();
+		Settings&					settings();
+		SaveStore&					saves();
 		DevServer&					devServer(); // always there; its calls do nothing where the server isn't compiled in
 		Clipboard&					clipboard();
 		const Clock&				clock() const;
@@ -125,6 +144,8 @@ namespace app {
 		App(AppConfig appConfig, std::unique_ptr<Platform> appPlatform);
 		bool start();
 		bool startFonts();
+		void openStorage();
+		void applyWindowSettings();
 
 		void inputEvent(const foundation::InputEvent& event) override;
 		void deviceConnected(const DeviceInfo& device, double time) override;
@@ -166,6 +187,8 @@ namespace app {
 		std::vector<std::unique_ptr<Overlay>>		joiningOverlays;
 		std::function<void(App&)>					dispatch;
 		DevServer									devServerState;
+		Settings									userSettings;
+		SaveStore									saveStore;
 		void*										contextValue = nullptr;
 		const void*									contextType = nullptr;
 		foundation::InputSnapshot					tickInput{};
