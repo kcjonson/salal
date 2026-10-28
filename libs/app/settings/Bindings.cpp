@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace app {
 
@@ -115,7 +116,11 @@ namespace app {
 			if (!found->is_number()) {
 				return false;
 			}
-			value = found->get<float>();
+			const auto number = found->get<float>(); // a double past a float's range is infinite here
+			if (!std::isfinite(number)) {
+				return false;
+			}
+			value = number;
 			return true;
 		}
 
@@ -255,13 +260,22 @@ namespace app {
 						skipped("the list", action, list);
 						continue;
 					}
-					map.unbind(action);
+					std::vector<Binding> read;
 					for (const nlohmann::json& entry : list) {
 						if (const std::optional<Binding> binding = bindingFrom(entry)) {
-							map.bind(action, *binding);
+							read.push_back(*binding);
 						} else {
 							skipped("a binding", action, entry);
 						}
+					}
+					// A list with nothing this build can read is a newer build's, not a player's clearing.
+					if (!list.empty() && read.empty()) {
+						LOG_WARNING(Engine, "Bindings: nothing in %s's list could be read; its bindings stay as they were", action.c_str());
+						continue;
+					}
+					map.unbind(action);
+					for (const Binding& binding : read) {
+						map.bind(action, binding);
 					}
 				}
 			}
@@ -274,7 +288,7 @@ namespace app {
 			for (const nlohmann::json& entry : *sticks) {
 				const auto axes = stickAxes(entry);
 				const auto radius = entry.is_object() ? entry.find("radius") : entry.end();
-				if (!axes || radius == entry.end() || !radius->is_number()) {
+				if (!axes || radius == entry.end() || !radius->is_number() || !std::isfinite(radius->get<float>())) {
 					skipped("a stick", "", entry);
 					continue;
 				}

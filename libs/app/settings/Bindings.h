@@ -26,8 +26,10 @@ namespace app {
 	// Each action in "actions" replaces the map's bindings for it ([] clears it), and each stick in
 	// "sticks" sets its deadzone. Actions the section doesn't name keep the map's bindings, so a build
 	// that adds an action gets its default. What this build can't read is skipped, logged: a binding with
-	// no known control or a field of the wrong type (the rest of its action still binds), an action
-	// whose entry isn't a list (it keeps the map's bindings), a malformed stick.
+	// no known control, a field of the wrong type or a number that isn't finite (the rest of its action
+	// still binds), an action whose entry isn't a list or holds nothing readable (it keeps the map's
+	// bindings), a malformed stick. A skipped binding in an action that's read isn't kept: the next
+	// writeBindings writes the action as the map has it.
 	void readBindings(const nlohmann::json& section, foundation::ActionMap& map);
 
 } // namespace app

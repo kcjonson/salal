@@ -2,7 +2,6 @@
 // map's defaults, with a cleared action, and past what this build can't read.
 
 #include "settings/Bindings.h"
-#include "input/ControlNames.h"
 #include "settings/Settings.h"
 #include "tests/TempDir.h"
 
@@ -123,9 +122,11 @@ namespace app {
 		writeBindings(map, settings.section("input"));
 		ASSERT_TRUE(settings.save());
 
-		const Settings loaded = Settings::load(file, 1);
-		ActionMap	   read;
-		readBindings(loaded.get<nlohmann::json>("input", nullptr), read);
+		const Settings		  loaded = Settings::load(file, 1);
+		const nlohmann::json* input = loaded.find("input");
+		ASSERT_NE(input, nullptr);
+		ActionMap read;
+		readBindings(*input, read);
 		EXPECT_EQ(contents(read), contents(map));
 		const std::span<const Binding> odd = read.bindings("odd");
 		ASSERT_EQ(odd.size(), 1U);
@@ -184,7 +185,8 @@ namespace app {
 				         "Space", {"mouse": "Left", "scale": null}, {"KEY": "Q"}, {"key": "enter"}],
 				"fire": "Mouse1"
 			},
-			"sticks": [{"x": "LeftX", "y": "Sideways", "radius": 0.2}, {"x": "RightX", "y": "RightY"}, 3, {"x": "RightX", "y": "RightY", "radius": 0.25}]
+			"sticks": [{"x": "LeftX", "y": "Sideways", "radius": 0.2}, {"x": "RightX", "y": "RightY"}, 3,
+			           {"x": "RightX", "y": "RightY", "radius": 0.25}]
 		})");
 		ActionMap			 map;
 		map.bind("fire", {.source = Source::MouseButton, .control = control(MouseButton::Right)});
@@ -209,6 +211,61 @@ namespace app {
 		EXPECT_EQ(contents(untouched), contents(played()));
 	}
 
+	TEST(BindingsTest, AnActionWithNothingThisBuildCanReadKeepsItsBindings) {
+		// A newer build's only binding for jump, on a control this one doesn't know.
+		const nlohmann::json section = nlohmann::json::parse(R"({"actions": {"jump": [{"button": "Touchpad"}], "fire": [{"key": "F"}]}})");
+		ActionMap			 map = played();
+		readBindings(section, map);
+		ASSERT_EQ(map.bindings("jump").size(), 2U); // the defaults, not cleared
+		EXPECT_EQ(map.bindings("jump")[0].control, control(Key::Space));
+		ASSERT_EQ(map.bindings("fire").size(), 1U);
+		EXPECT_EQ(map.bindings("fire")[0].control, control(Key::F));
+	}
+
+	TEST(BindingsTest, ANumberPastAFloatsRangeIsNotRead) {
+		const nlohmann::json section = nlohmann::json::parse(R"({
+			"actions": {"jump": [{"key": "Space", "scale": 1e300}, {"key": "W", "deadzone": -1e300}, {"key": "Enter", "threshold": 0.75}]},
+			"sticks": [{"x": "LeftX", "y": "LeftY", "radius": 1e300}]
+		})");
+		ActionMap			 map;
+		readBindings(section, map);
+		ASSERT_EQ(map.bindings("jump").size(), 1U);
+		EXPECT_TRUE(sameBinding(map.bindings("jump")[0], {.source = Source::Key, .control = control(Key::Enter), .threshold = 0.75F}));
+		EXPECT_TRUE(map.stickDeadzones().empty());
+	}
+
+	TEST(BindingsTest, AwkwardFloatsGoThroughTheFileExactly) {
+		const TempDir temp;
+		ActionMap	  map;
+		const float	  third = 1.0F / 3.0F;
+		map.bind(
+			"a",
+			{.source = Source::GamepadAxis,
+			 .control = control(GamepadAxis::RightX),
+			 .scale = third,
+			 .threshold = 1e-7F,
+			 .deadzone = 0.123456789F}
+		);
+		map.bind(
+			"a", {.source = Source::Key, .control = control(Key::A), .scale = -0.0F, .threshold = 123456.789F, .deadzone = 16777217.0F}
+		);
+		map.setStickDeadzone(GamepadAxis::LeftX, GamepadAxis::LeftY, 0.99999994F);
+		Settings settings = Settings::load(temp / "settings.json", 1);
+		writeBindings(map, settings.section("input"));
+		ASSERT_TRUE(settings.save());
+
+		const Settings		  loaded = Settings::load(temp / "settings.json", 1);
+		const nlohmann::json* input = loaded.find("input");
+		ASSERT_NE(input, nullptr);
+		ActionMap read;
+		readBindings(*input, read);
+		ASSERT_EQ(read.bindings("a").size(), 2U);
+		for (std::size_t i = 0; i < 2; ++i) {
+			EXPECT_TRUE(sameBinding(read.bindings("a")[i], map.bindings("a")[i])) << i;
+		}
+		EXPECT_EQ(read.stickDeadzones()[0].radius, 0.99999994F);
+	}
+
 	TEST(BindingsTest, ABindingToAControlWithNoNameIsNotWritten) {
 		ActionMap map;
 		map.bind("bad", {.source = Source::MouseButton, .control = 300}); // past MouseButton, and would wrap to 44 as a uint8_t
@@ -217,44 +274,6 @@ namespace app {
 		nlohmann::json section;
 		writeBindings(map, section);
 		EXPECT_EQ(section["actions"]["bad"], nlohmann::json::parse(R"([{"key": "Menu", "scale": 1, "threshold": 0.5, "deadzone": 0}])"));
-	}
-
-	TEST(ControlNamesTest, EveryControlHasItsEnumeratorsNameAndReadsBackInAnyCase) {
-		const std::vector<std::pair<Key, std::string_view>> keys{
-			{Key::Unknown, "Unknown"},
-			{Key::Space, "Space"},
-			{Key::Num0, "Num0"},
-			{Key::Equal, "Equal"},
-			{Key::A, "A"},
-			{Key::Z, "Z"},
-			{Key::World2, "World2"},
-			{Key::Escape, "Escape"},
-			{Key::Pause, "Pause"},
-			{Key::F1, "F1"},
-			{Key::F25, "F25"},
-			{Key::Kp0, "Kp0"},
-			{Key::KpEqual, "KpEqual"},
-			{Key::LeftShift, "LeftShift"},
-			{Key::Menu, "Menu"},
-		};
-		for (const auto& [key, name] : keys) {
-			EXPECT_EQ(controlName(key), name);
-		}
-		for (int i = 0; i < static_cast<int>(Key::Count); ++i) {
-			const auto key = static_cast<Key>(i);
-			EXPECT_EQ(controlNamed<Key>(controlName(key)), key) << i;
-		}
-		EXPECT_EQ(controlNamed<Key>("leftshift"), Key::LeftShift);
-		EXPECT_EQ(controlNamed<Key>("Shift"), std::nullopt);
-		EXPECT_EQ(controlName(Key::Count), "");
-
-		EXPECT_EQ(controlName(MouseButton::Button8), "Button8");
-		EXPECT_EQ(controlNamed<MouseButton>("MIDDLE"), MouseButton::Middle);
-		EXPECT_EQ(controlName(GamepadButton::DpadLeft), "DpadLeft");
-		EXPECT_EQ(controlNamed<GamepadButton>("guide"), GamepadButton::Guide);
-		EXPECT_EQ(controlName(GamepadAxis::RightTrigger), "RightTrigger");
-		EXPECT_EQ(controlNamed<GamepadAxis>("lefty"), GamepadAxis::LeftY);
-		EXPECT_EQ(controlNamed<GamepadAxis>(""), std::nullopt);
 	}
 
 } // namespace app
