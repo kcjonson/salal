@@ -24,6 +24,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <future>
 #include <limits>
 #include <map>
@@ -414,6 +416,33 @@ namespace app::testing {
 		const Reply dropped = route.get();
 		EXPECT_EQ(dropped.status, 404);
 		EXPECT_EQ(dropped.body, R"({"error":"no dev route 'gone'"})");
+	}
+
+	// A scene whose handler is the last owner of something that holds a registration of its own: the
+	// handler dies when its handle resets, and that registration's reset reenters the registry.
+	TEST_F(DevServerTest, AHandlerWhoseCapturesHoldARegistrationCanBeRemoved) {
+		serve();
+		struct Tools {
+			DevServer::Registration sibling;
+		};
+		auto tools = std::make_shared<Tools>();
+		tools->sibling = server().route("sibling", [](const DevRequest&) { return ok(); });
+		DevServer::Registration mine = server().route("mine", [tools](const DevRequest&) { return ok(); });
+		tools.reset();
+
+		std::promise<void> removed;
+		std::future<void>  finished = removed.get_future();
+		std::thread		   remover([&] {
+			   mine.reset();
+			   removed.set_value();
+		   });
+		if (finished.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+			std::fprintf(stderr, "Registration::reset deadlocked removing a handler that owns a registration\n");
+			std::_Exit(1);
+		}
+		remover.join();
+		EXPECT_EQ(get("/api/dev/mine").status, 404);
+		EXPECT_EQ(get("/api/dev/sibling").status, 404);
 	}
 
 	TEST_F(DevServerTest, AHandleThatOutlivesTheAppDoesNothing) {

@@ -6,12 +6,14 @@
 namespace app::detail {
 
 	namespace {
-		template <typename Map>
-		bool removeFrom(Map& entries, std::uint64_t id) {
+		// The entry's callable is swapped into `taken`, so it dies with the caller's local, not here.
+		template <typename Map, typename Callable>
+		bool takeFrom(Map& entries, std::uint64_t id, Callable& taken) {
 			for (auto it = entries.begin(); it != entries.end(); ++it) {
 				auto&	   stack = it->second;
 				const auto found = std::ranges::find(stack, id, [](const auto& entry) { return entry.first; });
 				if (found != stack.end()) {
+					taken.swap(found->second);
 					stack.erase(found);
 					if (stack.empty()) {
 						entries.erase(it);
@@ -48,10 +50,14 @@ namespace app::detail {
 		return id;
 	}
 
+	// The removed callable is destroyed after the lock is let go: its captures may own a Registration,
+	// whose reset comes back here on the same thread.
 	void DevRegistry::remove(std::uint64_t id) {
+		DevServer::Handler	  handler;
+		DevServer::Provider	  provider;
 		const std::lock_guard lock(mutex);
-		if (!removeFrom(routes, id) && !removeFrom(controls, id)) {
-			removeFrom(providers, id);
+		if (!takeFrom(routes, id, handler) && !takeFrom(controls, id, handler)) {
+			takeFrom(providers, id, provider);
 		}
 	}
 
