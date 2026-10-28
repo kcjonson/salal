@@ -275,15 +275,17 @@ consumer's own `ui` or `engine` can't collide, and `SALAL_BUILD_UI`,
 `SALAL_BUILD_APP`, `SALAL_BUILD_SANDBOX` and `SALAL_BUILD_TESTS` (on standalone,
 off as a subproject) switch off what it doesn't link. `SALAL_WITH_DEV_SERVER`
 (on) and `SALAL_DEV_SERVER_IN_RELEASE` (off) hold for a subproject too, so a
-game sets them in its own configure. CI
+game sets them in its own configure; a configuration of the game's own (a
+"Profile") gets no server. CI
 (`.github/workflows/ci.yml`) builds and tests on Windows, macOS and Linux and
 checks clang-format 21.
 
 Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
 `nanosvg`, `cpp-httplib` (app's dev server; a game configured with
-`SALAL_WITH_DEV_SERVER` off needn't have it), `gtest`, `benchmark`, and `glslang` with its `tools`
-feature as a host dependency, whose `glslangValidator` checks the base shader at
-build time (a FetchContent consumer adds it to its own manifest). Worldsim's
+`SALAL_WITH_DEV_SERVER` off needn't have it), `gtest`, `benchmark`, and
+`glslang` with its `tools` feature as a host dependency, whose
+`glslangValidator` checks the base shader at build time (a FetchContent
+consumer adds it to its own manifest). Worldsim's
 `pugixml`, `lua` and `sol2` serve its `assets` target, `msdfgen` its font-atlas
 tool, and all four stay behind. An audio library is proposed and not decided
 (worldsim has none; `miniaudio` is the recommendation).
