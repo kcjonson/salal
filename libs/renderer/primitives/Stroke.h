@@ -50,7 +50,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// overlap. Points closer than a ten-thousandth of a unit to the one before are
 	// dropped, and so are interior points within `tolerance` of the segment that
 	// replaces them, which keeps input noise from leaving segments too short for their
-	// turns. Fewer than two points draw nothing, and a closed line with only two left is
+	// turns; a closed line keeps three points or more, and an open one's end segment
+	// turns no further than moves its cap's corners by the tolerance. Fewer than two
+	// points draw nothing, and a closed line with only two left is
 	// the open segment between them, capped.
 	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out);
 

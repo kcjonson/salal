@@ -395,6 +395,32 @@ namespace Renderer {
 		EXPECT_EQ(gpu->draws()[0].call.indexCount, 2U * (6U + (4U * 6U)));
 	}
 
+	TEST_F(FlushTest, APolylineDropsTheSamePointsAtEveryZoomAndNoneFurtherOffThanAQuarterPixel) {
+		// Drawn at 1x and at 2x, a closed three-point line and a line whose second point turns
+		// its butt cap upload the same pieces; under scale(4, 0.25) a point 0.24 units off the
+		// line, 0.96 pixels across the stretch, stays.
+		const auto pieceVertices =
+			[&](const std::vector<Foundation::Vec2>& points, float width, bool closed, const Foundation::Mat4& transform) {
+				gpu->clearRecord();
+				Primitives::beginFrame();
+				Primitives::PushTransform(transform);
+				Primitives::drawPolyline({.points = points, .width = width, .closed = closed});
+				Primitives::PopTransform();
+				Primitives::endFrame();
+				return gpu->draws().empty() ? size_t{0} : vertices(gpu->draws()[0]).size();
+			};
+		const Foundation::Mat4				one(1.0F);
+		const Foundation::Mat4				two = glm::scale(one, Foundation::Vec3(2.0F, 2.0F, 1.0F));
+		const std::vector<Foundation::Vec2> flat = {{10.0F, 10.0F}, {20.0F, 10.2F}, {30.0F, 10.0F}};
+		EXPECT_EQ(pieceVertices(flat, 10.0F, true, one), pieceVertices(flat, 10.0F, true, two));
+		const std::vector<Foundation::Vec2> hooked = {{10.0F, 50.0F}, {11.0F, 50.2F}, {110.0F, 50.2F}};
+		EXPECT_EQ(pieceVertices(hooked, 40.0F, false, one), pieceVertices(hooked, 40.0F, false, two));
+		const std::vector<Foundation::Vec2> bent = {{10.0F, 10.0F}, {10.24F, 20.0F}, {10.0F, 30.0F}};
+		const Foundation::Mat4				stretched = glm::scale(one, Foundation::Vec3(4.0F, 0.25F, 1.0F));
+		const std::vector<Foundation::Vec2> straight = {{10.0F, 10.0F}, {10.0F, 30.0F}};
+		EXPECT_GT(pieceVertices(bent, 2.0F, false, stretched), pieceVertices(straight, 2.0F, false, stretched));
+	}
+
 	TEST_F(FlushTest, AnOutlineThatRepeatsItsFirstPointStillFeathersInEitherWinding) {
 		// Tessellated with the repeat, the fan held a zero-area triangle whose edge ran the
 		// same way as its neighbour's in one winding, and the fill lost its ring.

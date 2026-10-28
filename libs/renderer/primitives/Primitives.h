@@ -323,7 +323,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// within about 8.6 degrees of a hairpin: there pieces overlap. Points within a
 		// quarter of a device pixel of the line drawn without them are dropped first, so
 		// sub-pixel noise in the input (a hand's jitter, integer mouse samples) leaves no
-		// short segments behind; noise larger than that still can.
+		// short segments behind; noise larger than that still can. A closed line keeps
+		// three points or more, and an end segment turns its cap by no more than that.
 		void drawPolyline(const PolylineArgs& args);
 
 		// Arguments for DrawArc. Angles are radians from +x, and a positive sweep turns

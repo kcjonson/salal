@@ -37,16 +37,29 @@ namespace Renderer {
 		// would replace them, so input noise (integer mouse samples, a hand's jitter) doesn't
 		// leave segments too short for the turns between them. Every dropped point stays
 		// within `tolerance` of the line drawn; a run is at most kMaxDropped points, which
-		// keeps this linear. The first and last points stay.
-		void dropNearlyStraightPoints(std::vector<Foundation::Vec2>& points, float tolerance) {
+		// keeps this linear. The first and last points stay, a closed line keeps at least
+		// three, and an open line's end segment turns only as far as moves its cap's corners,
+		// `halfWidth` out, by the tolerance: the line keeps its shape whatever the zoom.
+		void dropNearlyStraightPoints(std::vector<Foundation::Vec2>& points, bool closed, float halfWidth, float tolerance) {
 			constexpr size_t kMaxDropped = 16;
-			if (!(tolerance > 0.0F) || points.size() < 3) {
+			const size_t	 count = points.size();
+			if (!(tolerance > 0.0F) || count < 3) {
 				return;
 			}
+			const auto capMoves = [halfWidth](const Foundation::Vec2& from, const Foundation::Vec2& to) {
+				return std::atan2(std::abs(cross(from, to)), glm::dot(from, to)) * halfWidth;
+			};
 			size_t kept = 1; // points[0, kept) are the result so far
 			size_t anchor = 0;
-			for (size_t i = 1; i + 1 < points.size(); ++i) {
-				bool drop = i - anchor <= kMaxDropped;
+			for (size_t i = 1; i + 1 < count; ++i) {
+				// Dropping i leaves at most kept + (count - 2 - i) + 1 points.
+				bool drop = i - anchor <= kMaxDropped && (!closed || kept + count - 1 - i >= 3);
+				if (drop && !closed && anchor == 0) {
+					drop = capMoves(points[1] - points[0], points[i + 1] - points[0]) <= tolerance;
+				}
+				if (drop && !closed && i + 2 == count) {
+					drop = capMoves(points[count - 1] - points[count - 2], points[count - 1] - points[anchor]) <= tolerance;
+				}
 				for (size_t j = anchor + 1; drop && j <= i; ++j) {
 					drop = segmentDistance(points[j], points[anchor], points[i + 1]) < tolerance;
 				}
@@ -394,7 +407,7 @@ namespace Renderer {
 		}
 		static thread_local std::vector<Foundation::Vec2> points;
 		distinctPoints(args.points, args.closed, points);
-		dropNearlyStraightPoints(points, tolerance);
+		dropNearlyStraightPoints(points, args.closed, args.width * 0.5F, tolerance);
 		if (points.size() < 2) {
 			return;
 		}

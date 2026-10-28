@@ -691,14 +691,15 @@ TEST(StrokeTest, PointsWithinTheToleranceOfTheLineDrawnWithoutThemAreDropped) {
 	ASSERT_EQ(pieces.size(), 4U);
 	expectAllCut(pieces, false);
 
-	// A straight line sampled every unit with 0.1 of jitter, width 4: no more than one in
-	// 17 points survives, and every joint left is cut.
+	// A straight line sampled every unit with 0.1 of jitter, width 4: besides the two next
+	// to the ends, which would turn the end segments by 0.2 radians, no more than one in 17
+	// points survives, and every joint left is cut.
 	std::vector<Foundation::Vec2> jittered;
 	for (int i = 0; i <= 100; ++i) {
 		jittered.emplace_back(static_cast<float>(i), (i % 2 == 0) ? 0.1F : -0.1F);
 	}
 	strokePolyline({.points = jittered, .width = 4.0F, .cap = LineCap::Round}, 1.0F, 0.25F, pieces);
-	EXPECT_LE(pieces.size(), 7U);
+	EXPECT_LE(pieces.size(), 9U);
 	expectAllCut(pieces, false);
 
 	// A curve whose points stray further than the tolerance keeps them all.
@@ -709,4 +710,23 @@ TEST(StrokeTest, PointsWithinTheToleranceOfTheLineDrawnWithoutThemAreDropped) {
 	}
 	strokePolyline({.points = arc, .width = 4.0F, .cap = LineCap::Round}, 1.0F, 0.25F, pieces);
 	EXPECT_EQ(pieces.size(), 8U);
+}
+
+TEST(StrokeTest, DroppingPointsKeepsAClosedLineClosedAndAnEndSegmentsTurnAtEveryZoom) {
+	// At a pixel of 1 (tolerance 0.25) and of 0.5 (0.125), as drawPolyline asks at 1x and 2x.
+	for (const float pixel : {1.0F, 0.5F}) {
+		const float tolerance = 0.25F * pixel;
+		// Three points closed: dropping the middle one would leave an open, capped segment.
+		const std::vector<Foundation::Vec2> flat = {{0.0F, 0.0F}, {10.0F, 0.2F}, {20.0F, 0.0F}};
+		std::vector<StrokePiece>			pieces;
+		strokePolyline({.points = flat, .width = 10.0F, .closed = true}, pixel, tolerance, pieces);
+		EXPECT_EQ(pieces.size(), 3U) << "pixel " << pixel;
+		// The point after the start is 0.2 off the line drawn without it, but dropping it would
+		// turn the butt cap by 0.2 radians, 4 units at its corners.
+		const std::vector<Foundation::Vec2> hooked = {{0.0F, 0.0F}, {1.0F, 0.2F}, {100.0F, 0.2F}};
+		strokePolyline({.points = hooked, .width = 40.0F}, pixel, tolerance, pieces);
+		std::vector<StrokePiece> unsimplified;
+		strokePolyline({.points = hooked, .width = 40.0F}, pixel, 0.0F, unsimplified);
+		EXPECT_EQ(pieces.size(), unsimplified.size()) << "pixel " << pixel;
+	}
 }
