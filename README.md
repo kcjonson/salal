@@ -16,8 +16,8 @@ PRs 1 to 4 in), with a null backend for headless tests, and the base shader
 takes the hooks a game assembles into it at build time
 ([docs/shader-hooks.md](docs/shader-hooks.md)). Phase 2 is carving `app` out
 of worldsim ([docs/app-api.md](docs/app-api.md)): the input types, the frame,
-the platforms and the scene stack are in; devices, the dev server, settings and
-saves, and the sandbox harness follow. `ui` is a placeholder until phase 3.
+the platforms, the scene stack and the devices are in; the dev server, settings
+and saves, and the sandbox harness follow. `ui` is a placeholder until phase 3.
 CI builds and tests on Windows, macOS and Linux.
 
 The engine is being extracted from [worldsim](https://github.com/kcjonson/worldsim),
