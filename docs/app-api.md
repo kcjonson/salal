@@ -655,9 +655,10 @@ A byte-provider comes back when a consumer packs assets into an archive.
 
 `app::Clipboard` is concrete: GLFW's clipboard, or an in-memory one on the
 headless platform, through `Platform::clipboardText` and `setClipboardText`.
-Its `getText` and `setText` are `UI::IClipboard`'s names. Phase 2 `app` can't implement `UI::IClipboard`, which is
-worldsim's until phase 3, so worldsim keeps a ten-line adapter. In phase 3 the
-interface moves into salal's `ui` and `app` implements it directly.
+Its `getText` and `setText` are `UI::IClipboard`'s names. Phase 2 `app` can't
+implement `UI::IClipboard`, which is worldsim's until phase 3, so worldsim keeps
+a ten-line adapter. In phase 3 the interface moves into salal's `ui` and `app`
+implements it directly.
 
 ## Dev server
 
