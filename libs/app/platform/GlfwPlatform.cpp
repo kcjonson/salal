@@ -182,8 +182,12 @@ namespace app {
 			void setVsync(bool enabled) override { glfwSwapInterval(enabled ? 1 : 0); }
 
 			std::optional<std::string> keyLabel(foundation::Key key) const override {
-				const int	glfwKey = glfw::toGlfwKey(key);
-				const char* label = glfwKey == GLFW_KEY_UNKNOWN ? nullptr : glfwGetKeyName(glfwKey, 0);
+				// A key this keyboard lacks has no scancode, and glfwGetKeyName raises an error for it.
+				const int glfwKey = glfw::toGlfwKey(key);
+				if (glfwKey == GLFW_KEY_UNKNOWN || glfwGetKeyScancode(glfwKey) < 0) {
+					return std::nullopt;
+				}
+				const char* label = glfwGetKeyName(glfwKey, 0);
 				if (label == nullptr) {
 					return std::nullopt;
 				}
