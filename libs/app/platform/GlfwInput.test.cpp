@@ -92,7 +92,7 @@ namespace app {
 		const InputEvent typed = glfw::charEvent(0x00E9, 2.0); // e acute
 		EXPECT_EQ(typed.type, InputEvent::Type::Char);
 		EXPECT_EQ(typed.device, kKeyboard);
-		EXPECT_EQ(typed.codepoint, U'é');
+		EXPECT_EQ(typed.codepoint, U'\u00E9');
 		EXPECT_EQ(typed.mods, 0);
 		EXPECT_EQ(typed.time, 2.0);
 	}

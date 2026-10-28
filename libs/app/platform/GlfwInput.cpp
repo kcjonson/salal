@@ -172,6 +172,7 @@ namespace app::glfw {
 		static_assert(GLFW_GAMEPAD_BUTTON_DPAD_LEFT == static_cast<int>(GamepadButton::DpadLeft));
 		static_assert(GLFW_GAMEPAD_AXIS_LAST + 1 == static_cast<int>(GamepadAxis::Count));
 		static_assert(GLFW_GAMEPAD_AXIS_LEFT_TRIGGER == static_cast<int>(GamepadAxis::LeftTrigger));
+		static_assert(GLFW_JOYSTICK_LAST + 1 == foundation::kMaxRealGamepads);
 
 		std::uint8_t modsOf(int mods) {
 			return static_cast<std::uint8_t>(mods & kModMask);

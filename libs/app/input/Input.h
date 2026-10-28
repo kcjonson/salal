@@ -29,9 +29,6 @@ namespace app {
 
 	class Input {
 	  public:
-		// Key labels come from `platform`, which outlives the Input.
-		explicit Input(const Platform& platform);
-
 		// This frame's state.
 		const foundation::InputSnapshot& frame() const { return frameState; }
 		// This frame's events, in order.
@@ -80,6 +77,9 @@ namespace app {
 
 	  private:
 		friend class App;
+
+		// Key labels come from `platform`, which outlives the Input.
+		explicit Input(const Platform& platform);
 
 		struct Slot {
 			bool				 claimed = false;
