@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <limits>
 
 using namespace foundation;
 
@@ -320,6 +321,132 @@ namespace {
 		EXPECT_TRUE(map.evaluate("jump", firstTick, kKeyboardOnly).button.pressed());
 		expectButton(map.evaluate("jump", secondTick, kKeyboardOnly), true, 0);
 		EXPECT_TRUE(map.evaluate("jump", frame, kKeyboardOnly).button.pressed());
+	}
+
+	TEST(ActionMap, ThresholdIsTheBindings) {
+		ActionMap map;
+		map.bind(
+			"fire",
+			{.source = Binding::Source::GamepadAxis, .control = static_cast<std::uint16_t>(GamepadAxis::RightTrigger), .threshold = 0.25F}
+		);
+		map.bind(
+			"menuLeft",
+			{.source = Binding::Source::GamepadAxis,
+			 .control = static_cast<std::uint16_t>(GamepadAxis::LeftX),
+			 .scale = -1.0F,
+			 .threshold = 0.25F}
+		);
+		InputSnapshot snapshot;
+
+		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.25F);
+		EXPECT_FALSE(map.evaluate("fire", snapshot, kPad0Only).button.down);
+		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.375F);
+		EXPECT_TRUE(map.evaluate("fire", snapshot, kPad0Only).button.down);
+
+		setAxis(snapshot, 0, GamepadAxis::LeftX, -0.25F);
+		EXPECT_FALSE(map.evaluate("menuLeft", snapshot, kPad0Only).button.down);
+		setAxis(snapshot, 0, GamepadAxis::LeftX, -0.375F);
+		const ActionState left = map.evaluate("menuLeft", snapshot, kPad0Only);
+		EXPECT_TRUE(left.button.down);
+		EXPECT_EQ(left.value, 0.375F);
+		setAxis(snapshot, 0, GamepadAxis::LeftX, 0.375F);
+		EXPECT_FALSE(map.evaluate("menuLeft", snapshot, kPad0Only).button.down);
+	}
+
+	// Pads are sampled once a frame, so three players letting go of A land in one poll. The action
+	// came up once; three transitions would read as a press too.
+	TEST(ActionMap, ThreePadsMovingTogetherMoveTheActionOnce) {
+		ActionMap map;
+		map.bind("confirm", padButton(GamepadButton::A));
+		const std::array<DeviceId, 3> pads{kPad0, kPad1, DeviceId{.kind = DeviceKind::Gamepad, .index = 2}};
+		InputAccumulator			  input;
+		for (const DeviceId& pad : pads) {
+			input.push({.type = InputEvent::Type::DeviceConnected, .device = pad});
+		}
+		input.consumeTick();
+
+		for (const DeviceId& pad : pads) {
+			input.push({.type = InputEvent::Type::ButtonDown, .device = pad, .button = GamepadButton::A});
+		}
+		const ActionState pressed = map.evaluate("confirm", input.consumeTick(), pads);
+		expectButton(pressed, true, 1);
+		EXPECT_TRUE(pressed.button.pressed());
+		EXPECT_FALSE(pressed.button.released());
+
+		for (const DeviceId& pad : pads) {
+			input.push({.type = InputEvent::Type::ButtonUp, .device = pad, .button = GamepadButton::A});
+		}
+		const ActionState released = map.evaluate("confirm", input.consumeTick(), pads);
+		expectButton(released, false, 1);
+		EXPECT_FALSE(released.button.pressed());
+		EXPECT_TRUE(released.button.released());
+	}
+
+	TEST(ActionMap, AnAxisHoldingTheActionDownHidesNoPress) {
+		ActionMap map;
+		map.bind("jump", key(Key::Space));
+		map.bind("jump", padAxis(GamepadAxis::LeftY, -1.0F));
+		const std::array<DeviceId, 2> devices{kKeyboard, kPad0};
+		InputSnapshot				  snapshot;
+		setAxis(snapshot, 0, GamepadAxis::LeftY, -0.75F);
+		expectButton(map.evaluate("jump", snapshot, devices), true, 0);
+
+		keyOf(snapshot, Key::Space) = {.down = true, .transitions = 1};
+		const ActionState pressed = map.evaluate("jump", snapshot, devices);
+		expectButton(pressed, true, 1);
+		EXPECT_TRUE(pressed.button.pressed());
+
+		keyOf(snapshot, Key::Space) = {.down = false, .transitions = 2};
+		expectButton(map.evaluate("jump", snapshot, devices), true, 1);
+
+		// Letting go of Space with the stick still up doesn't move the action.
+		keyOf(snapshot, Key::Space) = {.down = false, .transitions = 1};
+		const ActionState letGo = map.evaluate("jump", snapshot, devices);
+		expectButton(letGo, true, 0);
+		EXPECT_FALSE(letGo.button.released());
+	}
+
+	TEST(ActionMap, ActionTransitionsSaturate) {
+		ActionMap map;
+		map.bind("jump", key(Key::Space));
+		map.bind("jump", key(Key::Enter));
+		InputSnapshot snapshot;
+
+		keyOf(snapshot, Key::Space) = {.down = true, .transitions = 201};
+		keyOf(snapshot, Key::Enter) = {.down = false, .transitions = 200};
+		expectButton(map.evaluate("jump", snapshot, kKeyboardOnly), true, 255);
+
+		// 400 saturates to 255, then parity: the action started and ended up.
+		keyOf(snapshot, Key::Space) = {.down = false, .transitions = 200};
+		expectButton(map.evaluate("jump", snapshot, kKeyboardOnly), false, 254);
+	}
+
+	TEST(ActionMap, StickDeadzonePairsMatchInEitherOrder) {
+		ActionMap map;
+		map.bind("moveX", padAxis(GamepadAxis::LeftX));
+		map.setStickDeadzone(GamepadAxis::LeftX, GamepadAxis::LeftY, 0.0F);
+		map.setStickDeadzone(GamepadAxis::LeftY, GamepadAxis::LeftX, 0.5F);
+		InputSnapshot snapshot;
+		setStick(snapshot, 0.75F, 0.0F);
+		EXPECT_EQ(map.evaluate("moveX", snapshot, kPad0Only).value, 0.5F);
+	}
+
+	TEST(ActionMap, NaNDeadzoneReadsZero) {
+		constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
+		ActionMap		map;
+		map.bind("perAxis", padAxis(GamepadAxis::LeftX, 1.0F, kNaN));
+		map.bind("radial", padAxis(GamepadAxis::RightX));
+		map.setStickDeadzone(GamepadAxis::RightX, GamepadAxis::RightY, kNaN);
+		InputSnapshot snapshot;
+
+		setAxis(snapshot, 0, GamepadAxis::LeftX, 0.0F);
+		setAxis(snapshot, 0, GamepadAxis::RightX, 0.0F);
+		EXPECT_EQ(map.evaluate("perAxis", snapshot, kPad0Only).value, 0.0F);
+		EXPECT_EQ(map.evaluate("radial", snapshot, kPad0Only).value, 0.0F);
+		setAxis(snapshot, 0, GamepadAxis::LeftX, 1.0F);
+		setAxis(snapshot, 0, GamepadAxis::RightX, 1.0F);
+		EXPECT_EQ(map.evaluate("perAxis", snapshot, kPad0Only).value, 0.0F);
+		EXPECT_EQ(map.evaluate("radial", snapshot, kPad0Only).value, 0.0F);
 	}
 
 } // namespace
