@@ -20,6 +20,10 @@
 // or its removal takes effect at once, for requests already waiting as well as later ones, even
 // from inside a handler. A handle that outlives the App does nothing when it dies.
 
+#ifndef SALAL_DEV_SERVER
+#include <utils/Log.h>
+#endif
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -169,7 +173,16 @@ namespace app {
 	inline std::size_t DevServer::parkedRequests() const {
 		return 0;
 	}
-	inline bool DevServer::start(const DevServerConfig& /*config*/) {
+	// LOG_ERROR, the one level a Release build keeps, so a profiling run on a build without the server
+	// says why nothing listens.
+	inline bool DevServer::start(const DevServerConfig& config) {
+		if (config.enabled) {
+			LOG_ERROR(
+				Engine,
+				"The dev server is enabled but not compiled into this configuration, so nothing listens (SALAL_WITH_DEV_SERVER, "
+				"SALAL_DEV_SERVER_IN_RELEASE)"
+			);
+		}
 		return true;
 	}
 	inline void DevServer::servePreFrame(App& /*app*/, foundation::InputAccumulator& /*input*/) {}

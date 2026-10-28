@@ -2,7 +2,12 @@ find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 if(SALAL_WITH_DEV_SERVER)
-    find_package(httplib CONFIG REQUIRED)
+    find_package(httplib CONFIG QUIET)
+    if(NOT httplib_FOUND)
+        message(FATAL_ERROR
+            "salal's dev server needs cpp-httplib: add cpp-httplib to your vcpkg manifest, or configure with "
+            "-DSALAL_WITH_DEV_SERVER=OFF for a build with no dev server in any configuration (docs/app-api.md, \"Dev server\").")
+    endif()
     find_package(nlohmann_json CONFIG REQUIRED)
 endif()
 
@@ -38,8 +43,9 @@ target_link_libraries(salal_app
 
 # The dev server, only in the configurations SALAL_DEV_SERVER_GENEX names. SALAL_DEV_SERVER is
 # PUBLIC so a game can #if on it; elsewhere DevServer.h declares the same API as inline no-ops, none
-# of these sources is compiled, and nothing links cpp-httplib (salal_check_layering checks the link
-# carries the same condition as the define).
+# of these sources is compiled, and nothing links cpp-httplib. salal_check_layering is a tripwire on
+# the link alone: it fails an httplib link on salal_app that isn't wrapped in the genex, not one
+# reached through some other target, and it doesn't check the define or the sources.
 if(SALAL_WITH_DEV_SERVER)
     target_compile_definitions(salal_app PUBLIC $<${SALAL_DEV_SERVER_GENEX}:SALAL_DEV_SERVER=1>)
     target_sources(salal_app PRIVATE
