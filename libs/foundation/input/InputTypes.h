@@ -1,14 +1,20 @@
 #pragma once
 
-// Input abstraction types
-// Platform-independent key and mouse button codes. They keep GLFW out of libs/ui and
-// libs/foundation; engine's InputManager is the only place that maps them to GLFW constants.
+// Platform-independent input types. No GLFW here: whatever polls the platform maps its codes
+// onto these, and everything above reads them.
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <glm/vec2.hpp>
 
 namespace foundation {
 
-	// Keyboard key codes (platform-independent)
-	enum class Key {
-		// Printable keys
+	// Physical key positions, GLFW's token set in GLFW's order. A..Z, Num0..Num9 and F1..F25 are
+	// contiguous, and consumers compute keys from those runs.
+	enum class Key : std::uint16_t {
+		Unknown,
+
 		Space,
 		Apostrophe, // '
 		Comma,		// ,
@@ -16,7 +22,6 @@ namespace foundation {
 		Period,		// .
 		Slash,		// /
 
-		// Numbers
 		Num0,
 		Num1,
 		Num2,
@@ -28,7 +33,9 @@ namespace foundation {
 		Num8,
 		Num9,
 
-		// Letters
+		Semicolon, // ;
+		Equal,	   // =
+
 		A,
 		B,
 		C,
@@ -56,25 +63,33 @@ namespace foundation {
 		Y,
 		Z,
 
-		// Special keys
+		LeftBracket,  // [
+		Backslash,	  // backslash
+		RightBracket, // ]
+		GraveAccent,  // `
+		World1,		  // non-US #1
+		World2,		  // non-US #2
+
 		Escape,
 		Enter,
 		Tab,
 		Backspace,
 		Insert,
 		Delete,
-		Home,
-		End,
-		PageUp,
-		PageDown,
-
-		// Arrow keys
 		Right,
 		Left,
 		Down,
 		Up,
+		PageUp,
+		PageDown,
+		Home,
+		End,
+		CapsLock,
+		ScrollLock,
+		NumLock,
+		PrintScreen,
+		Pause,
 
-		// Function keys
 		F1,
 		F2,
 		F3,
@@ -87,18 +102,20 @@ namespace foundation {
 		F10,
 		F11,
 		F12,
+		F13,
+		F14,
+		F15,
+		F16,
+		F17,
+		F18,
+		F19,
+		F20,
+		F21,
+		F22,
+		F23,
+		F24,
+		F25,
 
-		// Modifiers
-		LeftShift,
-		LeftControl,
-		LeftAlt,
-		LeftSuper,
-		RightShift,
-		RightControl,
-		RightAlt,
-		RightSuper,
-
-		// Keypad
 		Kp0,
 		Kp1,
 		Kp2,
@@ -115,10 +132,124 @@ namespace foundation {
 		KpSubtract,
 		KpAdd,
 		KpEnter,
-		KpEqual
+		KpEqual,
+
+		LeftShift,
+		LeftControl,
+		LeftAlt,
+		LeftSuper,
+		RightShift,
+		RightControl,
+		RightAlt,
+		RightSuper,
+		Menu,
+
+		Count
 	};
 
-	// Mouse button codes (platform-independent)
-	enum class MouseButton { Left = 0, Right = 1, Middle = 2, Button4 = 3, Button5 = 4, Button6 = 5, Button7 = 6, Button8 = 7 };
+	// Values are GLFW's button numbers, so a GLFW button casts straight across.
+	enum class MouseButton : std::uint8_t { Left, Right, Middle, Button4, Button5, Button6, Button7, Button8, Count };
+
+	// GLFW's gamepad layout, in GLFW's order.
+	enum class GamepadButton : std::uint8_t {
+		A,
+		B,
+		X,
+		Y,
+		LeftBumper,
+		RightBumper,
+		Back,
+		Start,
+		Guide,
+		LeftThumb,
+		RightThumb,
+		DpadUp,
+		DpadRight,
+		DpadDown,
+		DpadLeft,
+		Count
+	};
+
+	enum class GamepadAxis : std::uint8_t { LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigger, Count };
+
+	enum class DeviceKind : std::uint8_t { Keyboard, Mouse, Gamepad };
+
+	struct DeviceId {
+		DeviceKind	 kind = DeviceKind::Keyboard;
+		std::uint8_t index = 0;
+		bool		 operator==(const DeviceId&) const = default;
+	};
+
+	inline constexpr int kMaxRealGamepads = 16;	  // GLFW joystick ids 0 to 15, pads[0..15]
+	inline constexpr int kMaxVirtualGamepads = 4; // the dev server's vpad0 to vpad3, pads[16..19]
+
+	// GLFW's bit values.
+	enum Mod : std::uint8_t { ModShift = 1, ModControl = 2, ModAlt = 4, ModSuper = 8 };
+
+	// One per platform callback, in order. Positions are in GLFW window coordinates, which are
+	// logical pixels already; PointerMove, PointerDown, PointerUp and Scroll carry the pointer's.
+	struct InputEvent {
+		enum class Type : std::uint8_t {
+			KeyDown,
+			KeyUp,
+			Char,
+			PointerMove,
+			PointerDown,
+			PointerUp,
+			Scroll,
+			PointerEnter,
+			PointerLeave,
+			ButtonDown,
+			ButtonUp,
+			Axis,
+			DeviceConnected,
+			DeviceDisconnected,
+			FocusLost,
+			FocusGained
+		};
+		Type		  type = Type::KeyDown;
+		DeviceId	  device{};
+		double		  time = 0.0; // the app clock when pushed
+		std::uint8_t  mods = 0;
+		bool		  repeat = false;
+		Key			  key = Key::Unknown;
+		char32_t	  codepoint = 0;
+		MouseButton	  mouseButton = MouseButton::Left;
+		GamepadButton button = GamepadButton::A;
+		GamepadAxis	  axis = GamepadAxis::LeftX;
+		float		  value = 0.0F;
+		glm::vec2	  position{};
+		glm::vec2	  scroll{};
+	};
+
+	// Handmade Hero's halfTransitionCount: how many times the control changed since the last read,
+	// saturating at 255.
+	struct ButtonState {
+		bool		 down = false;
+		std::uint8_t transitions = 0;
+
+		// Went down at least once since the last read.
+		bool pressed() const { return transitions >= 2 || (transitions == 1 && down); }
+		// Went up at least once since the last read.
+		bool released() const { return transitions >= 2 || (transitions == 1 && !down); }
+	};
+
+	struct GamepadState {
+		bool																	connected = false;
+		std::array<ButtonState, static_cast<std::size_t>(GamepadButton::Count)> buttons{};
+		std::array<float, static_cast<std::size_t>(GamepadAxis::Count)>			axes{};
+	};
+
+	// Every device's state, about 1.4 KB.
+	struct InputSnapshot {
+		std::array<ButtonState, static_cast<std::size_t>(Key::Count)>		  keys{};
+		std::array<ButtonState, static_cast<std::size_t>(MouseButton::Count)> mouse{};
+		glm::vec2															  pointer{};
+		glm::vec2															  pointerDelta{};
+		glm::vec2															  scroll{};
+		bool																  pointerInWindow = false;
+		std::uint8_t														  mods = 0;
+		std::array<GamepadState, kMaxRealGamepads + kMaxVirtualGamepads>	  pads{};
+	};
 
 } // namespace foundation
