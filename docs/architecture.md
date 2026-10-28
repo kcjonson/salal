@@ -278,10 +278,8 @@ This is how UI is verified without a human watching. Check `lint` is clean
 before trusting a screenshot, and read bounds from `tree` rather than measuring
 by eye.
 
-The flag matters: no listening sockets in a shipped build.
-Worldsim has no such flag today; the server is always compiled into
-`engine` and enabled at runtime by `AppConfig::enableDebugServer` or
-`--http-port`.
+The flag matters: no listening sockets in a shipped build. `app` has it
+(`SALAL_DEV_SERVER`), and worldsim's apps run on that server.
 
 ## Portability, including Rust
 

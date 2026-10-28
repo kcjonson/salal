@@ -9,8 +9,8 @@ frame, input and the scene graph, so the games on top of it only have to be
 games. See [README.md](README.md).
 
 It is being **extracted from worldsim**, which has already implemented this
-architecture and is where the code comes from. `foundation` and `renderer` are
-imported, `app` is arriving PR by PR in phase 2, and `ui` is a placeholder.
+architecture and is where the code comes from. `foundation`, `renderer` and
+`app` are in and worldsim runs on all three; `ui` is a placeholder until phase 3.
 
 ## Project management: Specboard
 
@@ -74,7 +74,8 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 
 The build skeleton is in, with CI on Windows, macOS and Linux. **`foundation`
 and `renderer` are imported** (plain copies of worldsim at `870dd755` and
-`2cc7e40a`, 2026-10-26); `ui` is a placeholder.
+`2cc7e40a`, 2026-10-26); `app` is built from worldsim's `libs/engine` slice
+(phase 2, below); `ui` is a placeholder.
 **Phase 0, the audit, is done** (2026-10-25); findings in
 [docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
@@ -95,16 +96,22 @@ to 4 are in (`v0.2.0` to `v0.5.0`), and after them the base shader takes hooks
 assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which took
 worldsim's grass deform out of the renderer and into a worldsim hook.
 `foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
-ported bit for bit (decision A). Phase 2 carves `app` out of `libs/engine`, in
-the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PRs 1 to 6 are
-in (`v0.10.0` to `v0.15.0`): the input types, the accumulator and `ActionMap` in
+ported bit for bit (decision A).
+
+**Phase 2, carving `app` out of `libs/engine`, is done** (2026-10-28), in the
+seven PRs [docs/app-api.md](docs/app-api.md) sequences. Salal PRs 1 to 6 are
+`v0.10.0` to `v0.15.0`: the input types, the accumulator and `ActionMap` in
 `foundation/input/`, then `app`'s clock, GLFW and headless platforms, frame,
 scene stack, overlays and context object, then the GLFW device layer with
 gamepads, player slots, key names, capture, axis edges and the clipboard, then
 the dev server behind its compile flags, then the settings file and saves, then
 the sandbox harness, a scene picker drawn with `Primitives` over worldsim's
-renderer-level scenes. `ui` is extracted last.
-The extraction doc has the detail and the reasoning for the order.
+renderer-level scenes. Worldsim pinned `v0.15.0` ([worldsim#313](https://github.com/kcjonson/worldsim/pull/313))
+and then converted its three GUI apps onto `app` ([worldsim#314](https://github.com/kcjonson/worldsim/pull/314)),
+which deleted its own application, scene, input, clipboard and debug code. The
+accepted behaviour differences are owned in app-api.md. Next is phase 2b, audio,
+once decision B is settled, then phase 3, `ui`. The extraction doc has the detail
+and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
 consume this repo. Not one giant branch: worldsim is active, and a long-lived
@@ -137,8 +144,9 @@ it is the first thing that quietly breaks if nobody is watching.
   unless `SALAL_WITH_DEV_SERVER` is off, and in Release only with
   `SALAL_DEV_SERVER_IN_RELEASE`; elsewhere `DevServer`'s calls are inline
   no-ops and nothing links cpp-httplib, which the layering check holds to.
-  Worldsim's server has no flag (it is always compiled into `libs/engine` and
-  switched on at runtime) until it converts.
+  Worldsim's apps turn the server on where `app::kDevServerCompiledIn` is true,
+  or for `--http-port`, so a plain Release launch opens no socket and logs
+  nothing.
 
 These are cheap now and expensive once three games depend on the API.
 
