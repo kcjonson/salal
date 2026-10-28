@@ -168,6 +168,9 @@ namespace app {
 	inline std::size_t DevServer::parkedRequests() const {
 		return 0;
 	}
+	inline bool DevServer::start(const DevServerConfig& /*config*/) {
+		return true;
+	}
 	inline void DevServer::servePreFrame(App& /*app*/, foundation::InputAccumulator& /*input*/) {}
 	inline void DevServer::servePostRender(App& /*app*/) {}
 	inline void DevServer::stop() {}
