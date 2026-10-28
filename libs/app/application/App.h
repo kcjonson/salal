@@ -44,9 +44,13 @@ namespace app {
 
 		// One frame, as docs/app-api.md numbers it. False once exit is requested or the window's close
 		// is, after finishing that frame; from then on, and after shutdown(), false with no frame run.
+		// The clock starts at the first frame, whose delta is 0. Called from inside a frame it refuses,
+		// logged, and returns false.
 		bool tick();
 		// The native runner: while (tick()) pace(), pacing being the platform's vsync and, with a
-		// frameCapHz, a sleep then a spin to the cap. The first frame's delta counts from here.
+		// frameCapHz, a sleep then a spin to the cap. A clock that doesn't run in real time (a
+		// HeadlessPlatform's) has nothing to pace against, so run() doesn't wait on it; a minimized
+		// window sleeps a little each frame instead. Refused, logged, from inside a frame.
 		void run();
 		// The scenes exit top down, then the overlays, last added first, and all are destroyed; the
 		// renderer and the window stay up for the game's teardown, until ~App. Inside a frame it asks
@@ -55,8 +59,10 @@ namespace app {
 		void requestExit();
 
 		// Fixed ticks and update stop for scenes and overlays, and scene changes wait; dispatch goes to
-		// overlays only, and render goes on.
+		// overlays only, and render goes on. A pause from inside a fixed tick ends that frame's ticks.
 		void pause();
+		// Inside a frame, takes effect once the frame is over, so that frame stays paused and the press
+		// that resumed doesn't reach a tick.
 		void resume();
 		bool paused() const;
 		// While paused, the next frame runs exactly `ticks` fixed ticks of the top scene, whatever the
@@ -71,16 +77,18 @@ namespace app {
 
 		SceneStack& scenes();
 
-		// The game's state that outlives a scene, set once, before the first scene. A second
-		// setContext, or context<T>() with no context or a T other than the one set, is a programming
-		// error: logged, then the process aborts.
+		// The game's state that outlives a scene, set once, before the first scene, and read as T or
+		// const T. A second setContext, or context<T>() with no context or a T other than the one set,
+		// is a programming error: logged, then the process aborts. The type check holds within one
+		// module, so a scene in a DLL asking for the exe's context type would abort too.
 		template <typename T>
 		void setContext(T& value) {
-			bindContext(const_cast<std::remove_const_t<T>*>(&value), detail::typeKey<T>());
+			static_assert(!std::is_const_v<T>, "setContext takes the context mutable; scenes may read it as const T");
+			bindContext(&value, detail::typeKey<std::remove_cv_t<T>>());
 		}
 		template <typename T>
 		T& context() {
-			return *static_cast<T*>(contextFor(detail::typeKey<T>()));
+			return *static_cast<T*>(contextFor(detail::typeKey<std::remove_cv_t<T>>()));
 		}
 
 		Input&						input();
@@ -95,12 +103,14 @@ namespace app {
 		void addOverlay(std::unique_ptr<Overlay> overlay);
 
 	  private:
-		// Each section's length in the frame metrics times, in milliseconds.
+		// Each section's length in the frame metrics times, in milliseconds. Pacing is in none of them,
+		// only in the frame's time.
 		struct Sections {
-			float poll = 0.0F;	 // step 2
-			float input = 0.0F;	 // steps 3 to 6
-			float update = 0.0F; // steps 7 and 8
-			float render = 0.0F; // steps 9 and 10
+			float poll = 0.0F;	  // step 2
+			float input = 0.0F;	  // steps 3 to 6
+			float update = 0.0F;  // steps 7 and 8
+			float render = 0.0F;  // steps 9 and 10
+			float present = 0.0F; // step 11
 		};
 
 		App(AppConfig appConfig, std::unique_ptr<Platform> appPlatform);
@@ -125,10 +135,10 @@ namespace app {
 		void present();			  // 11
 
 		void  fixedTick();
+		void  finishFrame();
 		void  pace() const;
 		float liveAlpha() const;
 		void  endSection(float& section);
-		void  joinOverlays();
 
 		AppConfig									config;
 		std::unique_ptr<Platform>					platform;
@@ -148,15 +158,17 @@ namespace app {
 		double	 frameDelta = 0.0;		 // this frame's real delta, clamped
 		double	 fixedAccumulator = 0.0; // seconds not yet ticked
 		int		 pendingSteps = 0;
+		bool	 clockStarted = false;
 		bool	 resized = false;
+		bool	 framebufferEmpty = false; // minimized
 		bool	 isPaused = false;
+		bool	 resumeAtFrameEnd = false;
 		bool	 exitRequested = false;
 		bool	 inFrame = false;
 		bool	 shuttingDown = false;
 		bool	 isShutDown = false;
 		bool	 metricsFrameOpen = false;
 		double	 sectionStart = 0.0;
-		double	 presentStart = 0.0;
 		Sections sections;
 	};
 

@@ -47,7 +47,8 @@ namespace app::testing {
 			return snapshot.keys.at(static_cast<std::size_t>(key));
 		}
 
-		// A platform whose window can be closed, which counts its presents and keeps its vsync.
+		// A platform whose window can be closed, which counts its presents, keeps its vsync, can take
+		// time to present and can throw from its poll.
 		class ClosablePlatform final : public Platform {
 		  public:
 			const Clock&								clock() const override { return time; }
@@ -55,16 +56,26 @@ namespace app::testing {
 			std::unique_ptr<Renderer::backend::Backend> createBackend() override {
 				return std::make_unique<Renderer::backend::NullBackend>();
 			}
-			void pollEvents(PlatformEvents& /*events*/) override { closing = closing || closeOnNextPoll; }
+			void pollEvents(PlatformEvents& /*events*/) override {
+				if (throwOnPoll) {
+					throw std::runtime_error("poll");
+				}
+				closing = closing || closeOnNextPoll;
+			}
 			bool focused() const override { return true; }
 			bool closeRequested() const override { return closing; }
-			void present() override { ++presents; }
+			void present() override {
+				++presents;
+				time.advance(presentSeconds);
+			}
 			void setVsync(bool enabled) override { vsync = enabled; }
 
 			ManualClock time;
 			bool		closeOnNextPoll = false;
 			bool		closing = false;
+			bool		throwOnPoll = false;
 			int			presents = 0;
+			double		presentSeconds = 0.0;
 			bool		vsync = true;
 		};
 
@@ -95,11 +106,15 @@ namespace app::testing {
 		}
 	}
 
-	TEST_F(AppTest, TheFirstFrameCountsFromCreate) {
+	TEST_F(AppTest, TheClockStartsAtTheFirstFrameHoweverLongTheLoad) {
 		start();
+		platform->clock().advance(2.0);
 		app->scenes().push<SceneA>();
 		frame(2 * kStep);
-		EXPECT_EQ(count("A.fixedUpdate"), 2);
+		EXPECT_EQ(count("A.fixedUpdate"), 0);
+		EXPECT_EQ(top<SceneA>().frames.back(), 0.0);
+		frame(kStep);
+		EXPECT_EQ(count("A.fixedUpdate"), 1);
 	}
 
 	TEST_F(AppTest, AFrameLongerThanMaxFrameDeltaCountsAsThatLong) {
@@ -133,6 +148,7 @@ namespace app::testing {
 	TEST_F(AppTest, RenderAlphaIsHowFarIntoTheStepTheAccumulatorIs) {
 		start();
 		app->scenes().push<SceneA>();
+		frame(0.0);
 		frame(kStep / 4);
 		EXPECT_EQ(journal().back(), "A.render 0.25");
 		frame(kStep / 2);
@@ -243,6 +259,78 @@ namespace app::testing {
 		EXPECT_EQ(count("A.fixedUpdate"), 0);
 	}
 
+	TEST_F(AppTest, AResumeInsideAFrameTakesEffectOnceTheFrameIsOver) {
+		start();
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		app->pause();
+		take();
+
+		bool pausedAfterResume = false;
+		app->setDispatch([&](App& dispatching) {
+			for (const InputEvent& event : dispatching.input().events()) {
+				if (event.type == InputEvent::Type::KeyDown) {
+					dispatching.resume();
+					pausedAfterResume = dispatching.paused();
+					dispatching.scenes().push<SceneB>();
+				}
+			}
+		});
+		platform->push(keyDown(Key::Escape));
+		frame(kStep);
+		EXPECT_TRUE(pausedAfterResume);
+		EXPECT_FALSE(app->paused());
+		EXPECT_EQ(count("A.fixedUpdate"), 0); // the frame that resumed stayed paused
+		EXPECT_EQ(count("A.update"), 0);
+		EXPECT_EQ(count("B.built"), 0);
+
+		app->setDispatch({});
+		frame(kStep);
+		EXPECT_EQ(count("B.fixedUpdate"), 1);
+		ASSERT_EQ(top<SceneB>().ticks.size(), 1U);
+		EXPECT_TRUE(keyIn(top<SceneB>().ticks[0], Key::Escape).down);
+		EXPECT_FALSE(keyIn(top<SceneB>().ticks[0], Key::Escape).pressed()); // the key that resumed fires nothing
+	}
+
+	TEST_F(AppTest, APauseAndResumeInOneFrameLeaveItPausedForTheFrame) {
+		start();
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		hooks()["A"].update = [](App& running, const FrameContext& /*frame*/) {
+			running.pause();
+			running.resume();
+		};
+		frame(kStep);
+		EXPECT_FALSE(app->paused());
+		hooks()["A"].update = [](App& running, const FrameContext& /*frame*/) {
+			running.resume();
+			running.pause();
+		};
+		frame(kStep);
+		EXPECT_TRUE(app->paused());
+	}
+
+	TEST_F(AppTest, APauseFromATickEndsTheFramesTicks) {
+		start();
+		hooks()["A"].fixedUpdate = [](App& running, const TickContext& tick) {
+			if (tick.tick == 1) {
+				running.pause();
+			}
+		};
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		take();
+		frame((4 * kStep) + (kStep / 2));
+		EXPECT_EQ(count("A.fixedUpdate"), 2);
+		EXPECT_EQ(count("A.update"), 0);
+		EXPECT_EQ(journal().back(), "A.render 0.5"); // the steps left went, the part of one stayed
+
+		app->resume();
+		frame(0.0);
+		EXPECT_EQ(count("A.fixedUpdate"), 2); // nothing replayed on resume
+		EXPECT_EQ(journal().back(), "A.render 0.5");
+	}
+
 	TEST_F(AppTest, ResumeDropsStepsNotRunYet) {
 		start();
 		app->scenes().push<SceneA>();
@@ -328,6 +416,40 @@ namespace app::testing {
 		EXPECT_TRUE(keyIn(top<SceneA>().ticks[0], Key::A).pressed());
 	}
 
+	TEST_F(AppTest, APressThatChangesTheTopDoesNotReachTheNewTopsFirstTick) {
+		start();
+		hooks()["A"].handleEvent = [](App& running, const InputEvent& event) {
+			if (event.key == Key::Space) {
+				running.scenes().push<SceneB>();
+			}
+			return true;
+		};
+		hooks()["B"].handleEvent = [](App& running, const InputEvent& event) {
+			if (event.key == Key::Escape) {
+				running.scenes().pop();
+			}
+			return true;
+		};
+		app->scenes().push<SceneA>();
+		frame(0.0);
+
+		platform->push(keyDown(Key::Space));
+		frame(kStep);
+		ASSERT_EQ(top<SceneB>().ticks.size(), 1U);
+		EXPECT_TRUE(keyIn(top<SceneB>().ticks[0], Key::Space).down);
+		EXPECT_FALSE(keyIn(top<SceneB>().ticks[0], Key::Space).pressed());
+
+		platform->push(keyDown(Key::Escape));
+		frame(kStep);
+		ASSERT_EQ(top<SceneA>().ticks.size(), 1U); // A's first tick since it was uncovered
+		EXPECT_FALSE(keyIn(top<SceneA>().ticks[0], Key::Escape).pressed());
+
+		platform->push(keyDown(Key::A));
+		frame(kStep);
+		ASSERT_EQ(top<SceneA>().ticks.size(), 2U); // with no change of top, a press reaches the tick
+		EXPECT_TRUE(keyIn(top<SceneA>().ticks[1], Key::A).pressed());
+	}
+
 	TEST_F(AppTest, EventsGoToOverlaysLastAddedFirstThenTheTopScene) {
 		start();
 		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
@@ -338,7 +460,7 @@ namespace app::testing {
 		platform->push(keyDown(Key::A));
 		frame(0.0);
 		const std::vector<std::string> expected{"O2.handleEvent", "O1.handleEvent", "A.handleEvent"};
-		EXPECT_EQ(std::vector<std::string>(journal().begin(), journal().begin() + 3), expected);
+		EXPECT_EQ(head(3), expected);
 	}
 
 	TEST_F(AppTest, AConsumingOverlayKeepsTheEventFromWhatIsUnderIt) {
@@ -409,7 +531,7 @@ namespace app::testing {
 		};
 		app->scenes().push<SceneA>();
 		EXPECT_FALSE(frame(kStep));
-		EXPECT_EQ(count("A.fixedUpdate"), 1);
+		EXPECT_EQ(count("A.update"), 1);
 		EXPECT_EQ(count("A.render"), 1);
 		EXPECT_EQ(count("A.onExit"), 0);
 		app->shutdown();
@@ -438,6 +560,66 @@ namespace app::testing {
 		EXPECT_FALSE(window.vsync);
 		app.reset();
 		journal().clear();
+	}
+
+	TEST(AppWindowTest, AThrowOutOfAFrameLeavesTheAppAbleToShutDown) {
+		journal().clear();
+		auto				 owned = std::make_unique<ClosablePlatform>();
+		ClosablePlatform&	 window = *owned;
+		std::unique_ptr<App> app = App::create({}, std::move(owned));
+		ASSERT_NE(app, nullptr);
+		app->scenes().push<SceneA>();
+		EXPECT_TRUE(app->tick());
+
+		window.throwOnPoll = true;
+		EXPECT_THROW(app->tick(), std::runtime_error);
+		app->shutdown();
+		EXPECT_EQ(count("A.onExit"), 1);
+		app.reset();
+		journal().clear();
+	}
+
+	TEST_F(AppTest, ATickOrRunFromInsideAFrameIsRefused) {
+		start();
+		bool innerTick = true;
+		hooks()["A"].update = [&](App& running, const FrameContext& /*frame*/) {
+			innerTick = running.tick();
+			running.run();
+		};
+		app->scenes().push<SceneA>();
+		EXPECT_TRUE(frame(0.0));
+		EXPECT_FALSE(innerTick);
+		EXPECT_EQ(count("A.update"), 1);
+		EXPECT_EQ(count("A.render"), 1);
+		hooks()["A"].update = nullptr;
+		EXPECT_TRUE(frame(0.0)); // and the outer frame left the App as it should
+		EXPECT_EQ(count("A.render"), 2);
+	}
+
+	TEST_F(AppTest, RunWithAFrameCapDoesNotWaitOnAClockThatDoesNotRunInRealTime) {
+		start(config({.fixedStep = kStep, .frameCapHz = 120}));
+		hooks()["A"].update = [](App& running, const FrameContext& /*frame*/) {
+			if (count("A.update") == 3) {
+				running.requestExit();
+			}
+		};
+		app->scenes().push<SceneA>();
+		app->run();
+		EXPECT_EQ(count("A.render"), 3);
+
+		// A clock that moves only when a scene moves it stands still through pace()'s sleep.
+		app.reset();
+		journal().clear();
+		start(config({.fixedStep = kStep, .frameCapHz = 120}));
+		hooks()["A"].update = [this](App& running, const FrameContext& /*frame*/) {
+			platform->clock().advance(kStep / 4);
+			if (count("A.update") == 3) {
+				running.requestExit();
+			}
+		};
+		app->scenes().push<SceneA>();
+		app->run();
+		EXPECT_EQ(count("A.render"), 3);
 	}
 
 	TEST_F(AppTest, RunTicksUntilExit) {
@@ -512,7 +694,7 @@ namespace app::testing {
 		const std::vector<std::string> expected{
 			"O2.onResize 1024x768", "O1.onResize 1024x768", "B.onResize 1024x768", "A.onResize 1024x768"
 		};
-		EXPECT_EQ(std::vector<std::string>(journal().begin(), journal().begin() + 4), expected);
+		EXPECT_EQ(head(4), expected);
 		EXPECT_EQ(count("A.onResize"), 1);
 
 		EXPECT_EQ(app->viewport().logicalWidth, 1024);
@@ -523,6 +705,26 @@ namespace app::testing {
 		Renderer::Primitives::getViewport(width, height);
 		EXPECT_EQ(width, 1024);
 		EXPECT_EQ(height, 768);
+	}
+
+	TEST_F(AppTest, AMinimizedWindowsEmptyFramebufferResizesNothing) {
+		start();
+		app->addOverlay(std::make_unique<RecordingOverlay>("O"));
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		take();
+
+		platform->resize(0, 0);
+		frame(0.0);
+		EXPECT_EQ(count("O.onResize"), 0);
+		EXPECT_EQ(count("A.onResize"), 0);
+		EXPECT_EQ(app->viewport().logicalWidth, 800);
+		EXPECT_EQ(app->viewport().framebufferHeight, 600);
+
+		platform->resize(640, 480);
+		frame(0.0);
+		EXPECT_EQ(count("O.onResize 640x480"), 1);
+		EXPECT_EQ(count("A.onResize 640x480"), 1);
 	}
 
 	// --- Overlays ---
@@ -549,7 +751,7 @@ namespace app::testing {
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		const std::vector<std::string> expected{"A.update", "O1.update", "O2.update", "A.render 0", "O1.render", "O2.render"};
-		EXPECT_EQ(std::vector<std::string>(journal().end() - 6, journal().end()), expected);
+		EXPECT_EQ(tail(6), expected);
 	}
 
 	// --- Exceptions ---
@@ -578,7 +780,7 @@ namespace app::testing {
 		EXPECT_TRUE(frame(kStep));
 		EXPECT_EQ(count("A.handleEvent"), 1);
 		EXPECT_EQ(count("A.render"), 2);
-		EXPECT_EQ(count("A.fixedUpdate"), 2);
+		EXPECT_EQ(count("A.fixedUpdate"), 1);
 		EXPECT_EQ(app->scenes().top()->name(), std::string("A"));
 	}
 
@@ -605,14 +807,26 @@ namespace app::testing {
 
 		platform->push(keyDown(Key::A));
 		frame(0.0);
-		frame(0.008); // the present section runs on to the next frame, pacing included
+		frame(0.008); // pacing between frames is in no section
 
 		const Foundation::PerformanceMetrics metrics = app->metrics()->getCurrentMetrics();
 		EXPECT_FLOAT_EQ(metrics.pollEventsMs, 0.0F);
 		EXPECT_FLOAT_EQ(metrics.inputHandleMs, 1.0F);
 		EXPECT_FLOAT_EQ(metrics.sceneUpdateMs, 4.0F);
 		EXPECT_FLOAT_EQ(metrics.sceneRenderMs, 2.0F);
-		EXPECT_FLOAT_EQ(metrics.swapBuffersMs, 8.0F);
+		EXPECT_FLOAT_EQ(metrics.swapBuffersMs, 0.0F);
+	}
+
+	TEST(AppWindowTest, ThePresentSectionTimesPresentAlone) {
+		auto			  owned = std::make_unique<ClosablePlatform>();
+		ClosablePlatform& window = *owned;
+		window.presentSeconds = 0.003;
+		std::unique_ptr<App> app = App::create({.metrics = true}, std::move(owned));
+		ASSERT_NE(app, nullptr);
+		EXPECT_TRUE(app->tick());
+		window.time.advance(0.008);
+		EXPECT_TRUE(app->tick());
+		EXPECT_FLOAT_EQ(app->metrics()->getCurrentMetrics().swapBuffersMs, 3.0F);
 	}
 
 	TEST_F(AppTest, NoMetricsUnlessAsked) {
@@ -650,8 +864,20 @@ namespace app::testing {
 		withRoots.resourceRoots = {root};
 		start(std::move(withRoots));
 		EXPECT_EQ(Foundation::findResource("probe.txt"), root / "probe.txt");
+		app.reset();
+		EXPECT_EQ(Foundation::findResource("probe.txt"), std::nullopt); // ~App clears them
 
-		Foundation::setResourceRoots({});
+		constexpr Renderer::FontFamily				   kBody{0};
+		const std::array<Renderer::FontAtlasSource, 1> atlases{
+			{{.family = kBody, .pngPath = "missing-atlas.png", .jsonPath = "missing-atlas.json"}}
+		};
+		AppConfig failing = config();
+		failing.resourceRoots = {root};
+		failing.fontAtlases = atlases;
+		failing.defaultFont = kBody;
+		EXPECT_EQ(App::create(std::move(failing), std::make_unique<HeadlessPlatform>(800, 600)), nullptr);
+		EXPECT_EQ(Foundation::findResource("probe.txt"), std::nullopt); // and so does a create that fails
+
 		std::error_code ignored;
 		std::filesystem::remove_all(root, ignored);
 	}
@@ -685,6 +911,7 @@ namespace app::testing {
 		Game game;
 		app->setContext(game);
 		EXPECT_EQ(&app->context<Game>(), &game);
+		EXPECT_EQ(&app->context<const Game>(), &game);
 		hooks()["A"].onEnter = [](App& running) {
 			running.context<Game>().score = 7;
 		};

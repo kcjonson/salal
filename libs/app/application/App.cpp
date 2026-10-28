@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -56,6 +57,51 @@ namespace app {
 			std::fprintf(stderr, "%s\n", message);
 			std::abort();
 		}
+
+		// A flag set for a scope and cleared however the scope ends.
+		class ScopedFlag {
+		  public:
+			explicit ScopedFlag(bool& scoped)
+				: flag(scoped) {
+				flag = true;
+			}
+			~ScopedFlag() { flag = false; }
+			ScopedFlag(const ScopedFlag&) = delete;
+			ScopedFlag& operator=(const ScopedFlag&) = delete;
+			ScopedFlag(ScopedFlag&&) = delete;
+			ScopedFlag& operator=(ScopedFlag&&) = delete;
+
+		  private:
+			bool& flag;
+		};
+
+		// The OS timer at 1 ms while run() paces to a cap, so its sleeps wake on time; the Windows
+		// default of 15.6 ms would hold frames near 60 FPS.
+		class TimerResolution {
+		  public:
+			explicit TimerResolution(bool wanted)
+				: active(wanted) {
+#ifdef _WIN32
+				if (active) {
+					timeBeginPeriod(1);
+				}
+#endif
+			}
+			~TimerResolution() {
+#ifdef _WIN32
+				if (active) {
+					timeEndPeriod(1);
+				}
+#endif
+			}
+			TimerResolution(const TimerResolution&) = delete;
+			TimerResolution& operator=(const TimerResolution&) = delete;
+			TimerResolution(TimerResolution&&) = delete;
+			TimerResolution& operator=(TimerResolution&&) = delete;
+
+		  private:
+			[[maybe_unused]] bool active;
+		};
 
 		// A resource path wherever findResource finds it; as given otherwise, so the error names it.
 		std::string resourcePath(const std::string& path) {
@@ -112,7 +158,6 @@ namespace app {
 			metricsCollector = std::make_unique<Renderer::MetricsCollector>();
 		}
 
-		frameStart = platform->clock().now();
 		LOG_INFO(
 			Engine,
 			"App started%s%s: %dx%d (framebuffer %dx%d)",
@@ -155,6 +200,7 @@ namespace app {
 		Renderer::Primitives::shutdown();
 		metricsCollector.reset();
 		platform.reset();
+		Foundation::setResourceRoots({});
 		g_appAlive = false;
 		LOG_INFO(Engine, "App destroyed");
 	}
@@ -162,30 +208,41 @@ namespace app {
 	// --- The frame ---
 
 	bool App::tick() {
+		if (inFrame) {
+			LOG_ERROR(Engine, "App::tick inside a frame; refused");
+			return false;
+		}
 		if (isShutDown || exitRequested || platform->closeRequested()) {
 			return false;
 		}
-		inFrame = true;
-		beginFrame();
-		pollEvents();
-		endSection(sections.poll);
-		readFrameInput();
-		dispatchEvents();
-		applySceneChanges();
-		endSection(sections.input);
-		runFixedTicks();
-		updateScenes();
-		endSection(sections.update);
-		render();
-		endSection(sections.render);
-		present();
-		inFrame = false;
-		joinOverlays();
+		{
+			const ScopedFlag frame(inFrame);
+			beginFrame();
+			pollEvents();
+			endSection(sections.poll);
+			readFrameInput();
+			dispatchEvents();
+			applySceneChanges();
+			endSection(sections.input);
+			runFixedTicks();
+			updateScenes();
+			endSection(sections.update);
+			render();
+			endSection(sections.render);
+			present();
+			endSection(sections.present);
+		}
+		finishFrame();
 		return !exitRequested && !platform->closeRequested();
 	}
 
+	// The clock starts at the first frame, so the first delta is 0 however long the game took to load.
 	void App::beginFrame() {
 		const double now = platform->clock().now();
+		if (!clockStarted) {
+			frameStart = now;
+			clockStarted = true;
+		}
 		const double elapsed = now - frameStart;
 		frameDelta = std::clamp(elapsed, 0.0, config.frame.maxFrameDelta);
 		if (elapsed > config.frame.maxFrameDelta) {
@@ -193,14 +250,12 @@ namespace app {
 		}
 		frameStart = now;
 
-		// The previous frame closes here, so its time includes its present and pacing.
+		// The previous frame closes here, so its time includes its pacing, which no section does.
 		if (metricsCollector != nullptr) {
 			if (metricsFrameOpen) {
 				const Renderer::Primitives::RenderStats stats = Renderer::Primitives::getStats();
 				metricsCollector->setRenderStats(stats.drawCalls, stats.vertexCount, stats.triangleCount);
-				metricsCollector->setMainLoopTimings(
-					sections.poll, sections.input, sections.update, sections.render, static_cast<float>((now - presentStart) * 1000.0)
-				);
+				metricsCollector->setMainLoopTimings(sections.poll, sections.input, sections.update, sections.render, sections.present);
 				metricsCollector->endFrame();
 			}
 			metricsCollector->beginFrame();
@@ -219,10 +274,7 @@ namespace app {
 		for (auto it = overlays.rbegin(); it != overlays.rend(); ++it) {
 			detail::guard("Overlay", "onResize", [&] { (*it)->onResize(window); });
 		}
-		for (auto it = sceneStack.entries.rbegin(); it != sceneStack.entries.rend(); ++it) {
-			Scene& scene = *it->scene;
-			detail::guard(scene.name(), "onResize", [&] { scene.onResize(window); });
-		}
+		sceneStack.resized(window);
 	}
 
 	void App::inputEvent(const foundation::InputEvent& event) {
@@ -230,7 +282,14 @@ namespace app {
 	}
 
 	// Inside the platform's callback, as worldsim's does; the scenes hear of it once the poll is over.
+	// A minimized window reports an empty framebuffer, which resizes nothing: the scenes keep the size
+	// they had, and run() sleeps rather than spins until a real size comes back.
 	void App::framebufferResized(const Renderer::Viewport& newViewport) {
+		framebufferEmpty = newViewport.framebufferWidth <= 0 || newViewport.framebufferHeight <= 0 || newViewport.logicalWidth <= 0 ||
+						   newViewport.logicalHeight <= 0;
+		if (framebufferEmpty) {
+			return;
+		}
 		coordinates.setViewport(newViewport);
 		Renderer::Primitives::setViewport(newViewport.framebufferWidth, newViewport.framebufferHeight);
 		resized = true;
@@ -259,14 +318,20 @@ namespace app {
 		}
 	}
 
+	// A new top's first tick sees held state only, not the press that put it there.
 	void App::applySceneChanges() {
-		if (!isPaused) {
-			sceneStack.apply(liveAlpha());
+		if (isPaused) {
+			return;
+		}
+		const std::uint64_t topBefore = sceneStack.topId();
+		sceneStack.apply(liveAlpha());
+		if (sceneStack.topId() != topBefore) {
+			inputState.accumulator.consumeTick();
 		}
 	}
 
 	// A paused or frozen frame consumes the tick reader and drops it, so a press made meanwhile
-	// doesn't fire on resume.
+	// doesn't fire on resume. A tick that pauses ends the frame's ticks.
 	void App::runFixedTicks() {
 		const FrameConfig& frame = config.frame;
 		if (isPaused) {
@@ -284,11 +349,12 @@ namespace app {
 			return;
 		}
 		fixedAccumulator += frameDelta;
-		for (int ticks = 0; fixedAccumulator >= frame.fixedStep && ticks < frame.maxTicksPerFrame; ++ticks) {
+		for (int ticks = 0; fixedAccumulator >= frame.fixedStep && ticks < frame.maxTicksPerFrame && !isPaused; ++ticks) {
 			fixedTick();
 			fixedAccumulator -= frame.fixedStep;
 		}
-		// Past the cap the whole steps left go, and the part of a step stays, so alpha runs on smoothly.
+		// Past the cap, or once a tick paused, the whole steps left go and the part of a step stays, so
+		// alpha runs on smoothly and resume doesn't replay them.
 		if (fixedAccumulator >= frame.fixedStep) {
 			fixedAccumulator = std::fmod(fixedAccumulator, frame.fixedStep);
 		}
@@ -319,31 +385,14 @@ namespace app {
 		}
 	}
 
-	// The stack from its topmost opaque scene up, each covered scene at the alpha it had when covered,
-	// then the overlays.
+	// The stack, then the overlays.
 	void App::render() {
 		Renderer::Primitives::beginFrame();
 		if (fontRenderer != nullptr) {
 			fontRenderer->updateFrame();
 		}
 		Renderer::Primitives::clear(config.clearColor);
-
-		const std::vector<SceneStack::Entry>& entries = sceneStack.entries;
-		std::size_t							  first = entries.size();
-		while (first > 0) {
-			Scene& scene = *entries[first - 1].scene;
-			bool   opaque = true;
-			detail::guard(scene.name(), "opaque", [&] { opaque = scene.opaque(); });
-			--first;
-			if (opaque) {
-				break;
-			}
-		}
-		for (std::size_t i = first; i < entries.size(); ++i) {
-			Scene&		scene = *entries[i].scene;
-			const float alpha = i + 1 == entries.size() ? liveAlpha() : entries[i].coveredAlpha;
-			detail::guard(scene.name(), "render", [&] { scene.render(alpha); });
-		}
+		sceneStack.render(liveAlpha());
 		for (const std::unique_ptr<Overlay>& overlay : overlays) {
 			detail::guard("Overlay", "render", [&] { overlay->render(); });
 		}
@@ -352,9 +401,6 @@ namespace app {
 	}
 
 	void App::present() {
-		if (metricsCollector != nullptr) {
-			presentStart = platform->clock().now();
-		}
 		platform->present();
 	}
 
@@ -371,7 +417,12 @@ namespace app {
 		return static_cast<float>(fixedAccumulator / config.frame.fixedStep);
 	}
 
-	void App::joinOverlays() {
+	// What waits for the frame to be over: a resume asked for in it, so the frame stays paused and its
+	// tick reader is dropped, and the overlays added in it.
+	void App::finishFrame() {
+		if (std::exchange(resumeAtFrameEnd, false)) {
+			resume();
+		}
 		for (std::unique_ptr<Overlay>& overlay : joiningOverlays) {
 			overlays.push_back(std::move(overlay));
 		}
@@ -381,39 +432,53 @@ namespace app {
 	// --- Running and stopping ---
 
 	void App::run() {
+		if (inFrame) {
+			LOG_ERROR(Engine, "App::run inside a frame; refused");
+			return;
+		}
 		LOG_INFO(Engine, "Starting the main loop");
-		const bool capped = config.frame.frameCapHz > 0;
-#ifdef _WIN32
-		// Sleeps wake within about 1 ms instead of the default 15.6 ms tick, which would cap frames near 60 FPS.
-		if (capped) {
-			timeBeginPeriod(1);
-		}
-#endif
-		frameStart = platform->clock().now();
+		const TimerResolution timer(config.frame.frameCapHz > 0);
 		while (tick()) {
-			if (capped) {
-				pace();
-			}
+			pace();
 		}
-#ifdef _WIN32
-		if (capped) {
-			timeEndPeriod(1);
-		}
-#endif
 		LOG_INFO(Engine, "Main loop ended");
 	}
 
-	// Sleep coarsely, then spin to the frame's deadline: a sleep alone rounds up to the OS timer tick.
+	// Sleep coarsely, then spin to the cap's deadline: a sleep alone rounds up to the OS timer tick. A
+	// clock that took no time over the frame, or stood still through a sleep, doesn't run in real time
+	// (a ManualClock), so there is no deadline to wait for, and a spin gives up on a clock stuck for
+	// longer than any real one is.
 	void App::pace() const {
+		constexpr auto	 kMinimizedFrame = std::chrono::milliseconds(10);
 		constexpr double kSpinWindow = 0.002;
-		const Clock&	 clock = platform->clock();
-		const double	 deadline = frameStart + (1.0 / config.frame.frameCapHz);
-		const double	 remaining = deadline - clock.now();
-		if (remaining > kSpinWindow + 0.001) {
-			std::this_thread::sleep_for(std::chrono::duration<double>(remaining - kSpinWindow));
+		constexpr int	 kStillReads = 100000;
+		if (framebufferEmpty) {
+			// Minimized: present may not wait for the display, so sleep rather than spin a core.
+			std::this_thread::sleep_for(kMinimizedFrame);
+			return;
 		}
-		while (clock.now() < deadline) {
+		if (config.frame.frameCapHz <= 0) {
+			return;
+		}
+		const Clock& clock = platform->clock();
+		const double deadline = frameStart + (1.0 / config.frame.frameCapHz);
+		double		 now = clock.now();
+		if (now == frameStart) {
+			return;
+		}
+		if (deadline - now > kSpinWindow + 0.001) {
+			std::this_thread::sleep_for(std::chrono::duration<double>(deadline - now - kSpinWindow));
+			const double slept = clock.now();
+			if (slept == now) {
+				return;
+			}
+			now = slept;
+		}
+		for (int still = 0; now < deadline && still < kStillReads;) {
 			std::this_thread::yield();
+			const double later = clock.now();
+			still = later == now ? still + 1 : 0;
+			now = later;
 		}
 	}
 
@@ -452,9 +517,14 @@ namespace app {
 			LOG_INFO(Engine, "Paused");
 		}
 		isPaused = true;
+		resumeAtFrameEnd = false;
 	}
 
 	void App::resume() {
+		if (inFrame) {
+			resumeAtFrameEnd = isPaused;
+			return;
+		}
 		if (isPaused) {
 			LOG_INFO(Engine, "Resumed");
 		}
