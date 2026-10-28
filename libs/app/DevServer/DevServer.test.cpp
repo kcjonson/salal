@@ -934,6 +934,59 @@ namespace app::testing {
 		EXPECT_EQ(top<MainScene>().events.back().type, InputEvent::Type::DeviceDisconnected);
 	}
 
+	// A virtual pad connects through PlatformEvents::deviceConnected, as a real one does, so Input
+	// lists it and a slot can claim it; its model GUID is its own, so it never takes the slot a real
+	// pad's model is waiting on.
+	TEST_F(DevServerTest, AVirtualPadIsADeviceASlotClaims) {
+		serve();
+		app->scenes().push<MainScene>();
+		platform->connectGamepad({.id = padId(0), .name = "Real Pad", .modelGuid = "030000005e040000ea02000000007801"});
+		frame();
+		app->input().claim(0, padId(0));
+		platform->disconnectGamepad(0);
+		frame();
+		ASSERT_FALSE(app->input().slotConnected(0)); // waiting for the real pad's model
+
+		EXPECT_EQ(get("/api/input?ev=connect,vpad1").status, 200);
+		frame();
+		const auto devices = app->input().devices();
+		const auto vpad = std::ranges::find(devices, padId(17), &DeviceInfo::id);
+		ASSERT_NE(vpad, devices.end());
+		EXPECT_EQ(vpad->name, "vpad1");
+		EXPECT_EQ(vpad->modelGuid, "salal-dev-server-vpad1");
+		EXPECT_FALSE(app->input().slotConnected(0));
+
+		app->input().claim(1, padId(17));
+		EXPECT_TRUE(app->input().slotConnected(1));
+		EXPECT_EQ(app->input().deviceForSlot(1), padId(17));
+		EXPECT_EQ(get("/api/input?ev=pad,vpad1,a,down").status, 200);
+		frame();
+		const foundation::GamepadState& pad = top<MainScene>().ticks.back().pads.at(17);
+		EXPECT_TRUE(pad.connected);
+		EXPECT_TRUE(pad.buttons.at(static_cast<std::size_t>(GamepadButton::A)).pressed());
+	}
+
+	TEST_F(DevServerTest, DisconnectingAVirtualPadReleasesWhatItHeld) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		EXPECT_EQ(get("/api/input?ev=connect,vpad0&ev=pad,vpad0,b,down&ev=axis,vpad0,leftx,0.5").status, 200);
+		frame();
+		app->input().claim(0, padId(16));
+		ASSERT_TRUE(top<MainScene>().ticks.back().pads.at(16).buttons.at(static_cast<std::size_t>(GamepadButton::B)).down);
+
+		EXPECT_EQ(get("/api/input?ev=disconnect,vpad0").status, 200);
+		frame();
+		const foundation::GamepadState& pad = top<MainScene>().ticks.back().pads.at(16);
+		const foundation::ButtonState&	b = pad.buttons.at(static_cast<std::size_t>(GamepadButton::B));
+		EXPECT_FALSE(pad.connected);
+		EXPECT_FALSE(b.down);
+		EXPECT_TRUE(b.released());
+		EXPECT_EQ(pad.axes.at(static_cast<std::size_t>(GamepadAxis::LeftX)), 0.0F);
+		EXPECT_EQ(std::ranges::find(app->input().devices(), padId(16), &DeviceInfo::id), app->input().devices().end());
+		EXPECT_FALSE(app->input().slotConnected(0));
+	}
+
 	TEST_F(DevServerTest, InjectedInputWaitsInTheServerWhilePaused) {
 		serve();
 		app->scenes().push<MainScene>();

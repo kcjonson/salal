@@ -31,13 +31,10 @@
 #include <memory>
 #include <string>
 
-namespace foundation {
-	class InputAccumulator;
-}
-
 namespace app {
 
 	class App;
+	class PlatformEvents;
 
 	namespace detail {
 		class DevRegistry;
@@ -125,10 +122,11 @@ namespace app {
 		// From App::create, after the window: listens when the config asks; false, logged, when it
 		// asks for a port that's busy or out of range, or a timeout that isn't positive.
 		bool start(const DevServerConfig& config);
-		// Step 3: control actions, then routes, then the injected input, which joins `input` unless
+		// Step 3: control actions, then routes, then the injected input, which reaches `events` as a
+		// platform's would (a virtual pad's connection through deviceConnected, so Input lists it) unless
 		// the app is paused. Once exit has been asked for, what is left is answered 503 without being
 		// run, and the input stays queued; an exit asked for here ends the frame.
-		void servePreFrame(App& app, foundation::InputAccumulator& input);
+		void servePreFrame(App& app, PlatformEvents& events);
 		// Step 10, before present: the screenshot, then the state providers; the metrics and the top
 		// scene's name for the streams.
 		void servePostRender(App& app);
@@ -185,7 +183,7 @@ namespace app {
 		}
 		return true;
 	}
-	inline void DevServer::servePreFrame(App& /*app*/, foundation::InputAccumulator& /*input*/) {}
+	inline void DevServer::servePreFrame(App& /*app*/, PlatformEvents& /*events*/) {}
 	inline void DevServer::servePostRender(App& /*app*/) {}
 	inline void DevServer::stop() {}
 #endif

@@ -3,10 +3,10 @@
 #include "DevServer/DevRegistry.h"
 #include "DevServer/DevServerHost.h"
 #include "application/App.h"
+#include "platform/Platform.h"
 #include "scene/SceneStack.h"
 
 #include <PngEncoder.h>
-#include <input/InputAccumulator.h>
 #include <primitives/Primitives.h>
 #include <utils/Log.h>
 
@@ -258,7 +258,7 @@ namespace app {
 		}
 	} // namespace
 
-	void DevServer::servePreFrame(App& app, foundation::InputAccumulator& input) {
+	void DevServer::servePreFrame(App& app, PlatformEvents& events) {
 		if (host == nullptr) {
 			return;
 		}
@@ -281,9 +281,18 @@ namespace app {
 		if (app.exitRequested || app.paused()) {
 			return;
 		}
+		// A virtual pad connects as a platform's pad does, with a name and a model GUID of its own, so a
+		// slot waiting for a real pad's model never takes it.
 		for (foundation::InputEvent& event : host->takeInput()) {
 			event.time = app.clock().now();
-			input.push(event);
+			if (event.type == foundation::InputEvent::Type::DeviceConnected) {
+				const std::string vpad = "vpad" + std::to_string(event.device.index - foundation::kMaxRealGamepads);
+				events.deviceConnected({.id = event.device, .name = vpad, .modelGuid = "salal-dev-server-" + vpad}, event.time);
+			} else if (event.type == foundation::InputEvent::Type::DeviceDisconnected) {
+				events.deviceDisconnected(event.device, event.time);
+			} else {
+				events.inputEvent(event);
+			}
 		}
 	}
 

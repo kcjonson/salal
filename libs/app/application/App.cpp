@@ -324,10 +324,10 @@ namespace app {
 		resized = true;
 	}
 
-	// Control actions, then the game's routes; injected input joins the accumulator here unless paused,
-	// and waits in the server until resume otherwise.
+	// Control actions, then the game's routes; injected input reaches Input here, through the calls a
+	// platform makes, unless paused, and waits in the server until resume otherwise.
 	void App::devServerPreFrame() {
-		devServerState.servePreFrame(*this, inputState.accumulator);
+		devServerState.servePreFrame(*this, static_cast<PlatformEvents&>(*this));
 	}
 
 	void App::readFrameInput() {

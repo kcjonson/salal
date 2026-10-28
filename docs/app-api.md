@@ -53,7 +53,7 @@ Not in phase 2:
 | worldsim `libs/engine/clipboard` | `ClipboardManager`, implementing `UI::IClipboard` over GLFW | 62 |
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
 | salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
-| salal `libs/app/DevServer`, `libs/renderer/PngEncoder` | phase 2 PR 4: the dev server behind its flags, its registrations, the input grammar, and the PNG encoder; tests not counted | 1,833 |
+| salal `libs/app/DevServer`, `libs/renderer/PngEncoder` | phase 2 PR 4: the dev server behind its flags, its registrations, the input grammar, and the PNG encoder; tests not counted | 1,914 |
 | salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1, axis edges PR 3) | 768 |
 
 What changed since app-carve-out.md's survey, and matters here:
@@ -777,10 +777,14 @@ What the first version of this design left open, as landed:
 - `/api/input`: a codepoint is decimal, or hex after `0x` or `U+`; pad buttons
   and axes go by `GamepadButton` and `GamepadAxis` names without case, and an
   axis value is -1 to 1. `pad` and `axis` take `vpad0` to `vpad3` only, since
-  real pads are the device layer's. The server tracks which it connected, so
-  input to one that isn't connected, a second connect, a disconnect of one
-  that isn't connected and a vpad past 3 are 400s, as is an unknown key (a
-  200 and a warning today). Injected events carry no modifier bits, as today.
+  real pads are the device layer's. A vpad connects and disconnects through
+  `PlatformEvents::deviceConnected` and `deviceDisconnected`, as `vpad<n>`
+  with the model GUID `salal-dev-server-vpad<n>`, so `Input::devices()` lists
+  it, a slot can claim it, and a slot waiting on a real pad's model never takes
+  it; its buttons and axes go through `inputEvent`. The server tracks which
+  it connected, so input to one that isn't connected, a second connect, a
+  disconnect of one that isn't connected and a vpad past 3 are 400s, as is an
+  unknown key (a 200 and a warning today). Injected events carry no modifier bits, as today.
   At most 1024 events wait for the frame; past that, which only a paused or
   stalled app reaches, a request is a 429 and queues nothing. cpp-httplib
   keeps one of a repeated `key=value` pair, so two identical events in one
