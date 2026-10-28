@@ -32,8 +32,17 @@ namespace app::glfw {
 	foundation::InputEvent mouseButtonEvent(int button, int action, int mods, glm::vec2 cursor, double time);
 	foundation::InputEvent scrollEvent(double x, double y, glm::vec2 cursor, double time);
 
-	// GLFWgamepadstate's arrays as a sample: a button is down at GLFW_PRESS, and the triggers move from
-	// GLFW's -1 to 1 onto 0 to 1.
-	GamepadSample gamepadSample(std::span<const unsigned char, 15> buttons, std::span<const float, 6> axes);
+	// Whether each of a pad's triggers has read below 0 since it connected. GLFW leaves an axis the
+	// pad's mapping lacks at 0, which would read half pulled, and a mapped trigger rests at -1. The
+	// platform keeps one per pad and clears it on disconnect.
+	struct TriggersSeen {
+		bool left = false;
+		bool right = false;
+	};
+
+	// GLFWgamepadstate's arrays as a sample: a button is down at GLFW_PRESS, and a trigger moves from
+	// GLFW's -1 to 1 onto 0 to 1 once `seen` says it has been below 0, reading 0 until then (so one
+	// held as the pad connects reads 0 until it's let go).
+	GamepadSample gamepadSample(std::span<const unsigned char, 15> buttons, std::span<const float, 6> axes, TriggersSeen& seen);
 
 } // namespace app::glfw

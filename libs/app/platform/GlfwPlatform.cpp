@@ -12,6 +12,7 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -169,7 +170,7 @@ namespace app {
 				for (std::uint8_t pad = 0; pad < foundation::kMaxRealGamepads; ++pad) {
 					GLFWgamepadstate state;
 					if (gamepads.connected(pad) && glfwGetGamepadState(pad, &state) == GLFW_TRUE) {
-						gamepads.sample(pad, glfw::gamepadSample(state.buttons, state.axes), now, relay);
+						gamepads.sample(pad, glfw::gamepadSample(state.buttons, state.axes, triggersSeen[pad]), now, relay);
 					}
 				}
 				relay.detach();
@@ -256,6 +257,7 @@ namespace app {
 				if (event == GLFW_CONNECTED) {
 					g_glfwPlatform->joystickConnected(jid);
 				} else if (event == GLFW_DISCONNECTED) {
+					g_glfwPlatform->triggersSeen[static_cast<std::size_t>(jid)] = {};
 					g_glfwPlatform->gamepads.disconnect(
 						static_cast<std::uint8_t>(jid), g_glfwPlatform->glfwClock.now(), g_glfwPlatform->relay
 					);
@@ -282,12 +284,13 @@ namespace app {
 				);
 			}
 
-			GLFWwindow*	   window;
-			GlfwClock	   glfwClock;
-			bool		   hasFocus;
-			glm::vec2	   cursor{};
-			EventRelay	   relay;
-			GamepadTracker gamepads;
+			GLFWwindow*													 window;
+			GlfwClock													 glfwClock;
+			bool														 hasFocus;
+			glm::vec2													 cursor{};
+			EventRelay													 relay;
+			GamepadTracker												 gamepads;
+			std::array<glfw::TriggersSeen, foundation::kMaxRealGamepads> triggersSeen{};
 		};
 
 		// The window's size: sizePercent of the primary monitor's work area, or the whole of a

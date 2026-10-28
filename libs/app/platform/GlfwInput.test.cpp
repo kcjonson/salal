@@ -139,9 +139,10 @@ namespace app {
 		buttons[0] = kPress;  // A
 		buttons[14] = kPress; // DpadLeft
 		buttons[7] = kRelease;
-		const std::array<float, 6> axes{-1.0F, 0.5F, 1.0F, -0.25F, -1.0F, 0.0F};
+		const std::array<float, 6> axes{-1.0F, 0.5F, 1.0F, -0.25F, -1.0F, -1.0F};
 
-		const GamepadSample sample = glfw::gamepadSample(buttons, axes);
+		glfw::TriggersSeen	seen;
+		const GamepadSample sample = glfw::gamepadSample(buttons, axes, seen);
 		EXPECT_TRUE(sample.buttons[static_cast<std::size_t>(GamepadButton::A)]);
 		EXPECT_TRUE(sample.buttons[static_cast<std::size_t>(GamepadButton::DpadLeft)]);
 		EXPECT_FALSE(sample.buttons[static_cast<std::size_t>(GamepadButton::Start)]);
@@ -152,8 +153,30 @@ namespace app {
 		EXPECT_EQ(sample.axes[static_cast<std::size_t>(GamepadAxis::RightY)], -0.25F);
 		// A released trigger reads 0, half pulled 0.5, fully 1.
 		EXPECT_EQ(sample.axes[static_cast<std::size_t>(GamepadAxis::LeftTrigger)], 0.0F);
-		EXPECT_EQ(sample.axes[static_cast<std::size_t>(GamepadAxis::RightTrigger)], 0.5F);
-		EXPECT_EQ(glfw::gamepadSample(buttons, std::array<float, 6>{0, 0, 0, 0, 1.0F, 1.0F}).axes[5], 1.0F);
+		EXPECT_EQ(sample.axes[static_cast<std::size_t>(GamepadAxis::RightTrigger)], 0.0F);
+		EXPECT_EQ(glfw::gamepadSample(buttons, std::array<float, 6>{0, 0, 0, 0, 0.0F, 0.0F}, seen).axes[4], 0.5F);
+		EXPECT_EQ(glfw::gamepadSample(buttons, std::array<float, 6>{0, 0, 0, 0, 1.0F, 1.0F}, seen).axes[5], 1.0F);
+	}
+
+	// GLFW leaves a trigger the pad's mapping lacks at 0, as many SNES-style pads' do; it reads
+	// released, not half pulled. A mapped trigger reads 0 until it has rested at -1 once.
+	TEST(GlfwInputTest, ATriggerReadsReleasedUntilItHasRested) {
+		const std::array<unsigned char, 15> buttons{};
+		glfw::TriggersSeen					seen;
+		for (int poll = 0; poll < 3; ++poll) {
+			const GamepadSample unmapped = glfw::gamepadSample(buttons, std::array<float, 6>{0, 0, 0, 0, 0.0F, 0.0F}, seen);
+			EXPECT_EQ(unmapped.axes[static_cast<std::size_t>(GamepadAxis::LeftTrigger)], 0.0F);
+			EXPECT_EQ(unmapped.axes[static_cast<std::size_t>(GamepadAxis::RightTrigger)], 0.0F);
+		}
+		EXPECT_FALSE(seen.left);
+		EXPECT_FALSE(seen.right);
+
+		// Held past half as the pad arrives, then let go and pulled again.
+		EXPECT_EQ(glfw::gamepadSample(buttons, std::array<float, 6>{0, 0, 0, 0, 0.5F, 0.0F}, seen).axes[4], 0.0F);
+		EXPECT_EQ(glfw::gamepadSample(buttons, std::array<float, 6>{0, 0, 0, 0, -1.0F, 0.0F}, seen).axes[4], 0.0F);
+		EXPECT_TRUE(seen.left);
+		EXPECT_EQ(glfw::gamepadSample(buttons, std::array<float, 6>{0, 0, 0, 0, 0.5F, 0.0F}, seen).axes[4], 0.75F);
+		EXPECT_FALSE(seen.right);
 	}
 
 } // namespace app

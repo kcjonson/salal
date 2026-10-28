@@ -238,7 +238,7 @@ namespace app::glfw {
 		return {.type = InputEvent::Type::Scroll, .device = kMouse, .time = time, .position = cursor, .scroll = pointOf(x, y)};
 	}
 
-	GamepadSample gamepadSample(std::span<const unsigned char, 15> buttons, std::span<const float, 6> axes) {
+	GamepadSample gamepadSample(std::span<const unsigned char, 15> buttons, std::span<const float, 6> axes, TriggersSeen& seen) {
 		GamepadSample sample;
 		for (std::size_t i = 0; i < sample.buttons.size(); ++i) {
 			sample.buttons[i] = buttons[i] == GLFW_PRESS;
@@ -246,10 +246,13 @@ namespace app::glfw {
 		for (std::size_t i = 0; i < sample.axes.size(); ++i) {
 			sample.axes[i] = axes[i];
 		}
-		for (const GamepadAxis trigger : {GamepadAxis::LeftTrigger, GamepadAxis::RightTrigger}) {
+		const auto remap = [&sample](GamepadAxis trigger, bool& rested) {
 			float& value = sample.axes[static_cast<std::size_t>(trigger)];
-			value = (value + 1.0F) * 0.5F;
-		}
+			rested = rested || value < 0.0F;
+			value = rested ? (value + 1.0F) * 0.5F : 0.0F;
+		};
+		remap(GamepadAxis::LeftTrigger, seen.left);
+		remap(GamepadAxis::RightTrigger, seen.right);
 		return sample;
 	}
 
