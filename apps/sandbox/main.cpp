@@ -1,5 +1,6 @@
 // The sandbox: one scene on the GLFW platform, a panel and a dot orbiting over it at the fixed step.
-// Close the window to quit.
+// Where the dev server is compiled in it serves on 127.0.0.1:8090, or --http-port's port; close the
+// window, or ask /api/control?action=exit, to quit.
 
 #include "BaseShader.h"
 
@@ -19,6 +20,8 @@
 #include <utility>
 
 namespace {
+
+	constexpr int kDevServerPort = 8090; // worldsim's ui-sandbox port
 
 	// The dot moves in fixed ticks and is drawn between the last two. The scene logs the frames it drew
 	// and the ticks it ran every few seconds, and once more as it exits, and each resize it hears of.
@@ -94,7 +97,7 @@ namespace {
 int main(int argc, char** argv) {
 	const app::CommandLine commandLine = app::parseCommandLine(argc, argv);
 	if (commandLine.help || !commandLine.valid) {
-		std::printf("Usage: sandbox [--help]\n");
+		std::printf("Usage: sandbox [--http-port <port>] [--help]\n");
 		return commandLine.valid ? 0 : 1;
 	}
 
@@ -103,7 +106,11 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	std::unique_ptr<app::App> app = app::App::create(
-		{.applicationName = "sandbox", .frame = {.fixedStep = 1.0 / 120.0}, .baseShader = base_shader::source(), .metrics = true},
+		{.applicationName = "sandbox",
+		 .frame = {.fixedStep = 1.0 / 120.0},
+		 .baseShader = base_shader::source(),
+		 .devServer = {.enabled = true, .port = commandLine.httpPort.value_or(kDevServerPort)},
+		 .metrics = true},
 		std::move(platform)
 	);
 	if (app == nullptr) {
