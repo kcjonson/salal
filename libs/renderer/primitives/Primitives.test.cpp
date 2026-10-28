@@ -13,10 +13,12 @@
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <glm/geometric.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -271,6 +273,68 @@ namespace Renderer {
 		}
 		EXPECT_LE(most, 129);
 		EXPECT_NEAR(pixel(4, 16)[3], 128, 1);
+	}
+
+	TEST_F(PrimitivesDrawTest, AMiteredJointDrawsNoSeamAcrossTheStroke) {
+		// Opaque white over black: every pixel whose centre is a pixel and a half inside the
+		// stroke is whole. A cut miter's box once ended inside its piece at a gentle turn,
+		// and its end face's ramp drew a darker column across the stroke at the joint.
+		const auto expectWhole = [&](const char* name, const auto& inside) {
+			for (int y = 0; y < kSize; ++y) {
+				for (int x = 0; x < kSize; ++x) {
+					if (inside(static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F)) {
+						EXPECT_GE(pixel(x, y)[0], 254) << name << " at " << x << ", " << y;
+					}
+				}
+			}
+		};
+		const auto mitered = [](const std::vector<Foundation::Vec2>& points, float width) {
+			Primitives::drawPolyline(
+				{.points = points, .width = width, .color = Foundation::Color::white(), .join = Primitives::LineJoin::Miter}
+			);
+		};
+
+		// Straight through a joint on a pixel's centre, then on a pixel's edge, width 10.
+		for (const float joint : {16.5F, 16.0F}) {
+			const std::vector<Foundation::Vec2> line = {{2.0F, 16.5F}, {joint, 16.5F}, {30.0F, 16.5F}};
+			render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { mitered(line, 10.0F); });
+			expectWhole("straight", [](float x, float y) { return x > 3.5F && x < 28.5F && std::abs(y - 16.5F) < 3.5F; });
+		}
+
+		// A 10-degree turn.
+		const float							turn = 10.0F * std::numbers::pi_v<float> / 180.0F;
+		const Foundation::Vec2				direction(std::cos(turn), std::sin(turn));
+		const std::vector<Foundation::Vec2> bend = {{2.0F, 12.5F}, {16.5F, 12.5F}, Foundation::Vec2(16.5F, 12.5F) + (direction * 14.0F)};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { mitered(bend, 10.0F); });
+		expectWhole("10 degrees", [&](float x, float y) {
+			const Foundation::Vec2 p = Foundation::Vec2(x, y) - bend[1];
+			const float			   before = x < bend[1].x && x > 3.5F ? std::abs(p.y) : 99.0F;
+			const float			   along = glm::dot(p, direction);
+			const float			   after = along > 0.0F && along < 12.5F ? std::abs((direction.x * p.y) - (direction.y * p.x)) : 99.0F;
+			return std::min(before, after) < 3.5F;
+		});
+
+		// A 32-gon's border, 3 wide: mitered at every vertex, its band whole all round.
+		std::vector<Foundation::Vec2> gon;
+		for (int k = 0; k < 32; ++k) {
+			const float angle = static_cast<float>(k) * 2.0F * std::numbers::pi_v<float> / 32.0F;
+			gon.emplace_back(16.0F + (9.0F * std::cos(angle)), 16.0F + (9.0F * std::sin(angle)));
+		}
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+			Primitives::drawPolygon(
+				{.vertices = gon,
+				 .style = {
+					 .fill = Foundation::Color::transparent(),
+					 .border = Foundation::LineStyle{.color = Foundation::Color::white(), .width = 3.0F}
+				 }}
+			);
+		});
+		// The band runs from a pixel inside the outline to 3 outside it, about 8 to 12 from the
+		// centre; a pixel in from both its edges is 9 to 11.
+		expectWhole("32-gon border", [](float x, float y) {
+			const float r = std::hypot(x - 16.0F, y - 16.0F);
+			return r > 9.4F && r < 10.9F;
+		});
 	}
 
 	TEST_F(PrimitivesDrawTest, APolygonsFillRampsOverThePixelOutsideItsEdge) {

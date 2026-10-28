@@ -246,16 +246,44 @@ TEST(StrokeTest, ARoundJointCutsAlongItsBisectorAndAButtCapSplitsItsSegment) {
 	expectAllCut(pieces, false);
 }
 
-TEST(StrokeTest, AMiterRunsBothBoxesOnToTheMiterPoint) {
+TEST(StrokeTest, ACutMitersBoxRunsAPixelPastItsPiece) {
 	std::vector<StrokePiece> pieces;
 	strokePolyline({.points = kElbow, .width = 2.0F, .join = LineJoin::Miter}, 1.0F, pieces);
 	ASSERT_EQ(pieces.size(), 2U);
-	// A right angle reaches halfWidth * tan(45) = 1 past the joint: x to 11, y from -1.
+	// The cut reaches reach * tan(45) = 2 past the joint along each segment, and the box a
+	// pixel further, to 3: its end face and that face's ramp stay outside the piece.
 	expectCorners(pieces[0], {{12.0F, -2.0F}, {8.0F, 2.0F}, {-1.0F, 2.0F}, {-1.0F, -2.0F}});
-	expectShape(pieces[0], {5.5F, 0.0F}, {1.0F, 0.0F}, 5.5F, 1.0F, 0.0F);
+	expectShape(pieces[0], {6.5F, 0.0F}, {1.0F, 0.0F}, 6.5F, 1.0F, 0.0F);
 	expectCorners(pieces[1], {{12.0F, 11.0F}, {8.0F, 11.0F}, {8.0F, 2.0F}, {12.0F, -2.0F}});
-	expectShape(pieces[1], {10.0F, 4.5F}, {0.0F, 1.0F}, 5.5F, 1.0F, 0.0F);
+	expectShape(pieces[1], {10.0F, 3.5F}, {0.0F, 1.0F}, 6.5F, 1.0F, 0.0F);
 	expectAllCut(pieces, false);
+}
+
+TEST(StrokeTest, EveryCutMitersBoxEndsAPixelPastItsPiece) {
+	// Turns of 0 to 90 degrees at a pixel of 1 and of 0.4: the box's face at the joint
+	// clears the piece by at least a pixel, so the piece is shaded as the stroke right up
+	// to its cut. The square caps' straight ends sit a pixel past their boxes by design.
+	for (const float pixel : {1.0F, 0.4F}) {
+		for (const float degrees : {0.0F, 3.0F, 10.0F, 30.0F, 60.0F, 90.0F}) {
+			const float							radians = degrees * 3.14159265F / 180.0F;
+			const std::vector<Foundation::Vec2> bend = {
+				{0.0F, 0.0F}, {40.0F, 0.0F}, {40.0F + (40.0F * std::cos(radians)), 40.0F * std::sin(radians)}
+			};
+			std::vector<StrokePiece> pieces;
+			strokePolyline({.points = bend, .width = 10.0F, .cap = LineCap::Square, .join = LineJoin::Miter}, pixel, pieces);
+			ASSERT_EQ(pieces.size(), 2U);
+			expectAllCut(pieces, false);
+			for (const StrokePiece& piece : pieces) {
+				for (uint8_t k = 0; k < piece.cornerCount; ++k) {
+					const float along = std::abs(glm::dot(piece.corners[k] - piece.center, piece.axis));
+					if (std::abs(along - (piece.halfLength + pixel)) < 1e-3F) {
+						continue; // the cap's end
+					}
+					EXPECT_LE(along, piece.halfLength - pixel + 1e-3F) << degrees << " degrees, pixel " << pixel << ", corner " << int{k};
+				}
+			}
+		}
+	}
 }
 
 TEST(StrokeTest, ARoundJointPastARightAngleEndsItsCutOnEachSegmentsSquareExtension) {
@@ -350,12 +378,12 @@ TEST(StrokeTest, AClosedLineCutsEveryJointAndIgnoresCaps) {
 	const std::vector<Foundation::Vec2> square = {{0.0F, 0.0F}, {10.0F, 0.0F}, {10.0F, 10.0F}, {0.0F, 10.0F}, {0.0F, 0.0F}};
 	std::vector<StrokePiece>			pieces;
 	strokePolyline({.points = square, .width = 2.0F, .cap = LineCap::Round, .join = LineJoin::Miter, .closed = true}, 1.0F, pieces);
-	// The repeated first point is dropped: four segments, each a box run on to both
-	// miter points, every joint cut.
+	// The repeated first point is dropped: four segments, each a box run on a pixel past
+	// both its cuts, every joint cut.
 	ASSERT_EQ(pieces.size(), 4U);
 	expectCorners(pieces[0], {{12.0F, -2.0F}, {8.0F, 2.0F}, {2.0F, 2.0F}, {-2.0F, -2.0F}});
-	expectShape(pieces[0], {5.0F, 0.0F}, {1.0F, 0.0F}, 6.0F, 1.0F, 0.0F);
-	expectShape(pieces[3], {0.0F, 5.0F}, {0.0F, -1.0F}, 6.0F, 1.0F, 0.0F);
+	expectShape(pieces[0], {5.0F, 0.0F}, {1.0F, 0.0F}, 8.0F, 1.0F, 0.0F);
+	expectShape(pieces[3], {0.0F, 5.0F}, {0.0F, -1.0F}, 8.0F, 1.0F, 0.0F);
 	expectAllCut(pieces, true);
 }
 

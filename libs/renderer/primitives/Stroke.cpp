@@ -150,9 +150,18 @@ namespace Renderer {
 			const auto mitered = [join](const Joint& joint) {
 				return join == Primitives::LineJoin::Miter && (!joint.pastRightAngle || (joint.exact && joint.cut));
 			};
-			// How far past its point a joint's SDF runs: to the miter point, or a capsule's end.
+			// How far past its point a joint's SDF runs: a capsule's end, or a box's to the miter
+			// point. A cut miter up to a right angle runs its box on to a pixel past where its
+			// piece's cut reaches along the segment, so the box's end face and its edge ramp
+			// stay out of the piece; within the piece the box is the stroke either way. Past a
+			// right angle (a notch) the box stops at the miter point, since a longer one would
+			// show past it along the bisector.
 			const auto extent = [&](const Joint& joint) {
-				return mitered(joint) ? halfWidth * joint.sinHalf / joint.cosHalf : halfWidth;
+				if (!mitered(joint)) {
+					return halfWidth;
+				}
+				const float tanHalf = joint.sinHalf / joint.cosHalf;
+				return joint.cut && !joint.pastRightAngle ? (reach * tanHalf) + pixel : halfWidth * tanHalf;
 			};
 			const bool	capRound = cap == Primitives::LineCap::Round;
 			const float capExtent = cap == Primitives::LineCap::Butt ? 0.0F : halfWidth;
