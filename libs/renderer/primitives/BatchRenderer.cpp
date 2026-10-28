@@ -865,7 +865,7 @@ namespace Renderer {
 	}
 
 	float BatchRenderer::getLocalDevicePixel() const {
-		return pixelPadding / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
+		return 1.0F / (std::max(largestScale, 1e-3F) * (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F));
 	}
 
 	void BatchRenderer::setTransform(const Foundation::Mat4& transform) {
@@ -881,6 +881,10 @@ namespace Renderer {
 		transformTranslation = Foundation::Vec2(transform[3][0], transform[3][1]);
 		const float areaScale = std::sqrt(std::abs((transform[0][0] * transform[1][1]) - (transform[0][1] * transform[1][0])));
 		pixelPadding = 1.0F / std::max(areaScale, 1e-3F);
+		const float squares = (transform[0][0] * transform[0][0]) + (transform[0][1] * transform[0][1]) +
+							  (transform[1][0] * transform[1][0]) + (transform[1][1] * transform[1][1]);
+		const float determinant = areaScale * areaScale;
+		largestScale = std::sqrt(0.5F * (squares + std::sqrt(std::max((squares * squares) - (4.0F * determinant * determinant), 0.0F))));
 		if (!linearIsIdentity || transform[3][2] != 0.0F) {
 			transformClass = TransformClass::kGeneral;
 		} else if (transform[3][0] == 0.0F && transform[3][1] == 0.0F) {

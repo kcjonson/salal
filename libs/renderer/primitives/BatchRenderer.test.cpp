@@ -421,6 +421,26 @@ TEST(BatchFeatherTest, ASharpCornersRingStopsFourPixelsOut) {
 	EXPECT_GT(vertices[4].position.x, 100.0F);
 }
 
+TEST(BatchRendererTest, ALocalDevicePixelSpansAtMostADevicePixelInAnyDirection) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	EXPECT_FLOAT_EQ(batch.getLocalDevicePixel(), 1.0F);
+	// Stretched 4 along x and squashed to a quarter along y: a unit along x is 4 pixels,
+	// so a device pixel is a quarter unit, though the area is unscaled.
+	batch.setTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(4.0F, 0.25F, 1.0F)));
+	EXPECT_FLOAT_EQ(batch.getLocalPixel(), 1.0F);
+	EXPECT_FLOAT_EQ(batch.getLocalDevicePixel(), 0.25F);
+	// Turned and scaled 2, at a pixel ratio of 2.
+	CoordinateSystem coordinates;
+	coordinates.setViewport({.logicalWidth = 100, .logicalHeight = 100, .framebufferWidth = 200, .framebufferHeight = 200});
+	batch.setCoordinateSystem(&coordinates);
+	batch.setTransform(
+		glm::scale(glm::rotate(Foundation::Mat4(1.0F), 0.7F, Foundation::Vec3(0.0F, 0.0F, 1.0F)), Foundation::Vec3(2.0F, 2.0F, 1.0F))
+	);
+	EXPECT_NEAR(batch.getLocalDevicePixel(), 0.25F, 1e-6F);
+	batch.setCoordinateSystem(nullptr);
+}
+
 TEST(BatchFeatherTest, WithoutLoopsTrianglesAddNoRing) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());

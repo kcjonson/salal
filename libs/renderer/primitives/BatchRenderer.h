@@ -248,8 +248,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Local units per logical pixel under the current transform.
 		float getLocalPixel() const { return pixelPadding; }
 
-		// Local units per device pixel under the current transform and the coordinate
-		// system's pixel ratio.
+		// The local length that spans at most a device pixel in any direction under the
+		// current transform (which stretches most along its largest singular value) and the
+		// coordinate system's pixel ratio.
 		float getLocalDevicePixel() const;
 
 		// Rendering statistics structure
@@ -400,6 +401,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Local units per logical pixel under currentTransform (the inverse of its
 		// area scale), the padding SDF quads get so their edge ramp fits.
 		float pixelPadding = 1.0F;
+
+		// currentTransform's largest singular value: how far it stretches a unit at most.
+		float largestScale = 1.0F;
 
 		// Caches addTextQuad's run-origin snap: every glyph of a text run shares the
 		// same {pixelRatio, translation, runOrigin}, so the delta is computed once per
