@@ -1,7 +1,6 @@
 #pragma once
 
-// Performance metrics data structure for observability.
-// Used by ui-sandbox debug server to stream real-time performance data.
+// Performance metrics data structure for observability, which a dev server streams.
 
 #include <cstdint>
 #include <string>

@@ -10,11 +10,15 @@ everything else grows up out of, which is the job this repo has.
 ## Status
 
 **`foundation` and `renderer` are imported** from worldsim as plain copies,
-`v0.1.0` is tagged, and worldsim consumes it through FetchContent; `ui` and
-`app` are placeholders, with a sandbox stub and CI on Windows, macOS and Linux.
-The renderer backend boundary is designed in
-[docs/renderer-boundary.md](docs/renderer-boundary.md), and its first PR is in
-progress.
+and worldsim consumes salal through FetchContent, pinned to a tag. The
+renderer's backend boundary is under way ([docs/renderer-boundary.md](docs/renderer-boundary.md),
+PRs 1 to 4 in), with a null backend for headless tests, and the base shader
+takes the hooks a game assembles into it at build time
+([docs/shader-hooks.md](docs/shader-hooks.md)). Phase 2 is carving `app` out
+of worldsim ([docs/app-api.md](docs/app-api.md)): the input types, the frame,
+the platforms and the scene stack are in; devices, the dev server, settings and
+saves, and the sandbox harness follow. `ui` is a placeholder until phase 3.
+CI builds and tests on Windows, macOS and Linux.
 
 The engine is being extracted from [worldsim](https://github.com/kcjonson/worldsim),
 which has implemented this architecture once already and is where the code comes

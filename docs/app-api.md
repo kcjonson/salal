@@ -52,7 +52,7 @@ Not in phase 2:
 | worldsim `libs/engine/input` | `InputManager` (singleton, six GLFW callbacks, per-frame edge maps) | 903 |
 | worldsim `libs/engine/clipboard` | `ClipboardManager`, implementing `UI::IClipboard` over GLFW | 62 |
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
-| salal `libs/app`, `apps/sandbox` | placeholders: `app::layerDepth()`, a `main` that returns it | |
+| salal `libs/app`, `apps/sandbox` | phase 2 PR 2: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; a sandbox that runs one scene on GLFW; tests not counted | 2,164 (the sandbox 117 of them) |
 | salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1) | 763 |
 
 What changed since app-carve-out.md's survey, and matters here:
@@ -115,7 +115,22 @@ public:
 };
 class ManualClock final : public Clock { public: double now() const override; void advance(double seconds); };
 
-class Platform; // window, context, callbacks into Input, gamepad polling, clipboard, present, vsync, focus; no GLFW type in the header
+class PlatformEvents { // what a platform reports while it polls; the App is the one listener
+public:
+	virtual void inputEvent(const foundation::InputEvent&) = 0;           // arrival order, stamped with the platform's clock
+	virtual void framebufferResized(const Renderer::Viewport&) = 0;
+};
+class Platform { // window, context, callbacks into Input, gamepad polling, clipboard, present, vsync, focus; no GLFW type in the header
+public:
+	virtual const Clock& clock() const = 0;
+	virtual Renderer::Viewport viewport() const = 0;
+	virtual std::unique_ptr<Renderer::backend::Backend> createBackend() = 0; // handed to Primitives; null, logged, on failure
+	virtual void pollEvents(PlatformEvents&) = 0;
+	virtual bool focused() const = 0;
+	virtual bool closeRequested() const = 0;
+	virtual void present() = 0;
+	virtual void setVsync(bool) = 0;
+};
 std::unique_ptr<Platform> createGlfwPlatform(const WindowConfig&); // GLBackend::create() inside
 class HeadlessPlatform final : public Platform { // NullBackend, no window
 public:
@@ -136,7 +151,7 @@ struct WindowConfig {
 struct FrameConfig {
 	double fixedStep = 1.0 / 60.0; // seconds per fixed tick; asteroids sets 1.0 / 120.0
 	double maxFrameDelta = 0.25;   // a longer frame counts as this long (worldsim's clamp today)
-	int maxTicksPerFrame = 8;      // past this the remainder is dropped: the sim runs slower than wall time instead of spiralling
+	int maxTicksPerFrame = 8;      // past this the whole steps left are dropped, the part of a step kept for alpha: the sim runs slower than wall time instead of spiralling
 	int frameCapHz = 0;            // 0 is vsync alone; worldsim sets 120 (its sleep-then-spin pacing, Windows timeBeginPeriod)
 	bool freezeTicksOnFocusLoss = true;
 };
@@ -159,7 +174,7 @@ CommandLine parseCommandLine(int argc, char** argv); // --http-port enables the 
 
 class App {
 public:
-	static std::unique_ptr<App> create(AppConfig, std::unique_ptr<Platform>); // also nullptr when a requested dev-server port is busy
+	static std::unique_ptr<App> create(AppConfig, std::unique_ptr<Platform>); // also nullptr when a requested dev-server port is busy, or while another App lives (Primitives are module-static)
 	bool tick();              // one frame (below); false once exit is requested or the window closes
 	void run();               // the native runner: while (tick()) pace();
 	void shutdown();          // scenes top-down, then overlays, onExit; GL and the server stay up until ~App
@@ -216,7 +231,16 @@ public:
 6. Scene-stack changes requested so far apply here, after dispatch and before
    any update, which is where worldsim's deferred switch applies today
    (`SceneManager.cpp:100-102`, after `Application.cpp:145-202`). While paused
-   they wait for resume, as today.
+   they wait for resume, as today. When they change the top scene, the tick
+   reader is consumed and discarded, so the press that opened a menu or popped
+   one doesn't reach the new top's first tick. The frame reader isn't, so the
+   new top's first update still sees that press in `FrameContext::input`, as
+   worldsim's polled input does; a scene that should ignore it reacts in
+   `fixedUpdate` or to events. A `resume()` asked for during
+   the frame takes effect once the frame is over, so the frame that resumed
+   stays paused and its press is dropped with the rest. A resume drops steps
+   not run yet, deferred or not, and a `step` asked for after an in-frame
+   resume is dropped at the frame's end, logged.
 7. Fixed ticks, unless paused or (with `freezeTicksOnFocusLoss`) unfocused:
    `accumulator += realDelta`; while `accumulator >= fixedStep` and fewer than
    `maxTicksPerFrame` have run, the top scene's `fixedUpdate(TickContext)` with
@@ -224,9 +248,11 @@ public:
    tick of a frame sees every transition since the last tick ran, including a
    frame that had none; later ticks in the same frame see only held state. On
    a paused or frozen frame the tick reader is consumed and discarded, so a
-   press made during a pause doesn't fire on resume.
-8. `update(FrameContext)` on overlays and the top scene with `realDelta`,
-   unless paused.
+   press made during a pause doesn't fire on resume. A tick that pauses ends
+   the frame's ticks, and the whole steps left are dropped as past the cap.
+8. `update(FrameContext)` on the top scene, then the overlays, with
+   `realDelta`, unless paused (worldsim's order). Its input is the frame
+   reader's, edges included, even for a scene that became top in step 6.
 9. `Primitives::beginFrame`, `clear(clearColor)`, render the stack from the
    topmost opaque scene upward, then overlays, then `Primitives::endFrame`.
    The top scene renders with `alpha = accumulator / fixedStep`; a covered
@@ -237,15 +263,20 @@ public:
     providers. Before present (decision 9).
 11. `Platform::present()`.
 
+The frame clock starts at the first `tick()`, whose delta is 0, so a game
+that loads after `create` doesn't open on a burst of ticks.
+
 A scene's `requestExit` (world-sim's Quit) finishes the frame, and `tick()`
 returns false; `glfwWindowShouldClose` the same.
 
 `run()` adds pacing after `tick()`: vsync through the platform, plus the
 optional `frameCapHz` sleep-then-spin worldsim has today. Pacing is not in
 `tick()`, so a test drives `tick()` with the headless platform's `ManualClock`
-and never sleeps. Metrics map today's five sections onto the steps: poll (2),
-input (3 to 6), update (7 and 8), render (9 and 10), present (11, plus
-pacing).
+and never sleeps; nor does `run()` on a clock that doesn't run in real time.
+A minimized window sleeps a little each frame instead of pacing. Metrics map
+today's five sections onto the steps: poll (2), input (3 to 6), update (7 and
+8), render (9 and 10), present (11 alone, so worldsim's client still reads it
+as GPU time); pacing is in the frame's time and in no section.
 
 A fixed tick reads no clock: `TickContext{tick, step, input}` carries the
 scene's own tick count since its `onEnter`, from 0, and the step, which is all
@@ -253,7 +284,9 @@ a deterministic sim may use, and a replay starts from that count. Variable
 update keeps `dt`, for animation and for worldsim, whose scenes are all
 variable-step and stay so until it chooses otherwise. A scene that overrides
 only `update` and `render` behaves exactly as today; the accumulator still runs
-and costs nothing.
+and costs nothing. A discarded tick reader drops release edges as well as
+presses: a key held into a pause and let go during it reads up with no
+`released()`, so a sim reads held state across a pause, not edges.
 
 Pause stops fixed ticks and update, for scenes and overlays, as worldsim's
 pause skips `SceneManager::update` (and with it overlay update) today; render
@@ -421,7 +454,7 @@ protected:
 class SceneStack {
 public:
 	void add(std::string name, std::function<std::unique_ptr<Scene>()> factory); // by name: what worldsim registers (its scene classes live in .cpp files)
-	template <typename S> void add(std::string name);                         // the same, for a complete type whose Args default
+	template <typename S> void add(std::string name);                         // the same, for a complete type whose Args default (built with Args{})
 	template <typename S> void push(typename S::Args = {});
 	template <typename S, typename F> void push(typename S::Args, F onResult); // F(typename S::Result), run on the caller when S finishes
 	template <typename S> void replace(typename S::Args = {});
@@ -433,7 +466,7 @@ public:
 	std::string_view topName() const;
 };
 
-class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today's IOverlay, owned by the App */ };
+class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today's IOverlay, owned by the App; onExit at shutdown */ };
 }
 ```
 
@@ -441,14 +474,28 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   switches scene switches in the same frame, as today. A `replace`, `reset` or
   `switchTo` discards the changes queued before it in that frame, so two
   switches in one frame build and enter only the last scene, as today
-  (`SceneManager.cpp:48`); pushes and pops queue in order.
+  (`SceneManager.cpp:48`); pushes and pops queue in order. A change asked
+  for while changes apply (from an `onEnter` or a result callback, say) waits
+  for the next frame, as a switch from worldsim's `onEnter` does today, so a
+  callback that pushes leaves its pusher uncovered, updated and rendered for
+  one frame before the next scene covers it. The first scene, pushed before
+  the first frame, enters in that frame's step 6, where worldsim enters it
+  inside `AppLauncher::initialize` (`:371`).
 - Only the top scene receives events, fixed ticks and update. Covered scenes
   render, from the topmost opaque one up.
 - Arguments and results are typed per scene and checked at compile time:
   `finish(R)` is how a scene returns, and the caller's callback runs before
-  its `onUncovered`. The stack type-erases them itself, so `Args`, `Result`
-  and the callback may be move-only (a `std::unique_ptr` in an `Args`), which
-  `std::function` and `std::any` couldn't hold.
+  its `onUncovered`, with the finished scene off the stack but not yet
+  destroyed, so a result that points into it is good in the callback. The
+  stack type-erases them itself, so `Args`, `Result` and the callback may be
+  move-only (a `std::unique_ptr` in an `Args`), which `std::function` and
+  `std::any` couldn't hold. A push with a callback remembers the scene on top
+  when it was asked for, whoever asks (an overlay or game code too), and is
+  dropped, logged, if that scene has left the stack by the time it applies (a
+  scene stays on top until step 6, so it can ask to leave and then push), so a
+  callback never outlives its pusher. A push without a callback queues in
+  order regardless, so it can land over a scene that replaced the one that
+  asked.
 - Asteroids' Arena args (`{mode, players[], arenaSeed, spawnTable, pressureCurve, routeEffects?}`)
   and Player setup args become `Args` structs. Dual-deck-builder's four
   continuation shapes (`next`, `returnTo`/`returnData`, `onChoose`/`onDone`,
@@ -461,8 +508,9 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   `NewGameSetup`) lives in the game's context object (under "Game state and
   saves"); `Args` carry what one navigation hands over.
 - Names are for the command line, the dev server and reload: a scene added by
-  name has a factory with no arguments. A scene that needs arguments isn't
-  reachable by name, and `reload` refuses it.
+  name has a factory with no arguments, or is a type whose `Args` default,
+  built with `Args{}`. A scene pushed with arguments has no name, and `reload`
+  refuses it, so it is never rebuilt without them.
 - `exportState` stays, optional. Scenes are the engine's and so is the dev
   server, so every game gets scene state for debugging with no setup: the
   server answers `/api/state?what=scene` with each stacked scene's name and
@@ -565,14 +613,16 @@ No byte-provider in phase 2. WebAssembly was its reason; worldsim's
 `findResource` path search is enough for three native games; and nobody packs
 assets. What phase 2 fixes instead, in `foundation/utils/ResourcePath`:
 
-- Linux has no executable directory (`ResourcePath.cpp:43-45`, a TODO); it
-  reads `/proc/self/exe`.
-- `cwd/build/apps/ui-sandbox`, a worldsim path, leaves the search order.
+- The executable's directory is found on Linux too, from `/proc/self/exe`, and
+  on macOS it resolves links as Linux's does.
+- `cwd/build/apps/ui-sandbox`, a worldsim path, left the search order.
   `Foundation::setResourceRoots` (process-global, set from
-  `AppConfig::resourceRoots`) come first, then the exe directory, then cwd.
-- `TileAtlasBuilder` (`resources/TileAtlasBuilder.cpp:63-64`) hardcodes
-  `assets/tiles/surfaces/<name>/pattern.svg`, a worldsim path inside salal; it
-  takes the path from its caller.
+  `AppConfig::resourceRoots`, which replace any set before `create` and are
+  cleared by `~App`) come first, then the exe directory, then cwd.
+- `TileAtlasBuilder` takes each surface's pattern from its caller, a resource
+  path it finds through `findResource`, where it hardcoded worldsim's
+  `assets/tiles/surfaces/<name>/pattern.svg`; a path it can't find is a
+  warning, and the surface gets the checker.
 
 A byte-provider comes back when a consumer packs assets into an archive.
 

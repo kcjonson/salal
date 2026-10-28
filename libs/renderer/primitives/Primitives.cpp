@@ -42,6 +42,7 @@ namespace Renderer::Primitives {
 	// Internal state
 	static CoordinateSystem*			g_coordinateSystem = nullptr;
 	static FontRenderer*				g_fontRenderer = nullptr;
+	static bool							g_warnedNoFontRenderer = false; // drawText warns once until a font renderer is set
 	static FrameUpdateCallback			g_frameUpdateCallback = nullptr;
 	static TextureHandle				g_tileAtlasTexture;
 	static std::vector<glm::vec4>		g_tileAtlasRects;
@@ -118,6 +119,7 @@ namespace Renderer::Primitives {
 
 	void setFontRenderer(FontRenderer* fontRenderer) {
 		g_fontRenderer = fontRenderer;
+		g_warnedNoFontRenderer = false;
 	}
 
 	FontRenderer* getFontRenderer() {
@@ -569,12 +571,15 @@ namespace Renderer::Primitives {
 
 	void drawText(const TextArgs& args) {
 		if (g_fontRenderer == nullptr || g_batchRenderer == nullptr) {
-			LOG_WARNING(
-				Engine,
-				"drawText called but renderer not initialized (font=%p, batch=%p)",
-				static_cast<void*>(g_fontRenderer),
-				static_cast<void*>(g_batchRenderer.get())
-			);
+			if (!g_warnedNoFontRenderer) {
+				g_warnedNoFontRenderer = true;
+				LOG_WARNING(
+					Engine,
+					"drawText called but renderer not initialized (font=%p, batch=%p); no text until it is",
+					static_cast<void*>(g_fontRenderer),
+					static_cast<void*>(g_batchRenderer.get())
+				);
+			}
 			return;
 		}
 

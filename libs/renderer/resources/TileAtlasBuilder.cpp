@@ -13,7 +13,7 @@ namespace Renderer {
 		: config_(config) {}
 
 	std::vector<glm::vec4>
-	TileAtlasBuilder::buildForSurfaces(int surfaceCount, const SurfaceNameFn& surfaceNameFn, const SurfaceColorFn& surfaceColorFn) {
+	TileAtlasBuilder::buildForSurfaces(int surfaceCount, const SurfacePatternFn& surfacePatternFn, const SurfaceColorFn& surfaceColorFn) {
 
 		atlas_ = std::make_unique<TileTextureAtlas>(config_.atlasSize);
 		std::vector<glm::vec4> rects;
@@ -37,8 +37,7 @@ namespace Renderer {
 			bool				 baked = false;
 
 			// Attempt to bake SVG if present
-			std::string surfaceName = surfaceNameFn(i);
-			baked = loadSvgPattern(surfaceName, pixels);
+			baked = loadSvgPattern(surfacePatternFn(i), pixels);
 
 			if (!baked) {
 				// Fallback checker pattern using surface color
@@ -60,9 +59,13 @@ namespace Renderer {
 		return atlas_ ? atlas_->texture() : TextureHandle{};
 	}
 
-	bool TileAtlasBuilder::loadSvgPattern(const std::string& surfaceName, std::vector<uint8_t>& pixels) {
-		std::string svgPath = Foundation::findResourceString("assets/tiles/surfaces/" + surfaceName + "/pattern.svg");
+	bool TileAtlasBuilder::loadSvgPattern(const std::string& patternPath, std::vector<uint8_t>& pixels) {
+		if (patternPath.empty()) {
+			return false;
+		}
+		std::string svgPath = Foundation::findResourceString(patternPath);
 		if (svgPath.empty()) {
+			LOG_WARNING(Renderer, "Tile pattern %s not found; the surface gets a checker", patternPath.c_str());
 			return false;
 		}
 

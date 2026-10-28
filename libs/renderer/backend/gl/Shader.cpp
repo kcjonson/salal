@@ -44,7 +44,9 @@ namespace Renderer {
 		if (!fullVertexPath || !fullFragmentPath) {
 			std::cerr << "ERROR::SHADER::FILES_NOT_FOUND" << std::endl;
 			std::cerr << "Could not find shaders: " << vertexPath << " and " << fragmentPath << std::endl;
-			std::cerr << "Searched relative to executable dir and current working directory" << std::endl;
+			std::cerr << "Searched the resource roots (Foundation::setResourceRoots), then the executable's directory, then the working "
+						 "directory"
+					  << std::endl;
 			return false;
 		}
 

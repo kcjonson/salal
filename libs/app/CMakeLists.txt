@@ -1,5 +1,13 @@
+find_package(OpenGL REQUIRED)
+find_package(GLEW REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
+
 add_library(salal_app STATIC
-    App.cpp
+    application/App.cpp
+    application/CommandLine.cpp
+    platform/GlfwPlatform.cpp
+    platform/HeadlessPlatform.cpp
+    scene/SceneStack.cpp
 )
 add_library(salal::app ALIAS salal_app)
 
@@ -10,9 +18,18 @@ target_include_directories(salal_app
         $<INSTALL_INTERFACE:include>
 )
 
+# GLFW and GL are the GLFW platform's, in platform/GlfwPlatform.cpp; no app header names them, so
+# they stay private (salal_check_layering checks both). winmm for timeBeginPeriod, which run()'s
+# frame cap needs.
 target_link_libraries(salal_app
     PUBLIC
-        salal::ui
+        salal::renderer
+        salal::foundation
+    PRIVATE
+        glfw
+        OpenGL::GL
+        GLEW::GLEW
+        $<$<PLATFORM_ID:Windows>:winmm>
 )
 
 set_target_properties(salal_app PROPERTIES FOLDER salal)

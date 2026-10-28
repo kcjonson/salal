@@ -10,7 +10,7 @@ games. See [README.md](README.md).
 
 It is being **extracted from worldsim**, which has already implemented this
 architecture and is where the code comes from. `foundation` and `renderer` are
-imported; `ui` and `app` are placeholders.
+imported, `app` is arriving PR by PR in phase 2, and `ui` is a placeholder.
 
 ## Project management: Specboard
 
@@ -74,7 +74,7 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 
 The build skeleton is in, with CI on Windows, macOS and Linux. **`foundation`
 and `renderer` are imported** (plain copies of worldsim at `870dd755` and
-`2cc7e40a`, 2026-10-26); `ui` and `app` are placeholders, as is the sandbox.
+`2cc7e40a`, 2026-10-26); `ui` is a placeholder.
 **Phase 0, the audit, is done** (2026-10-25); findings in
 [docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
@@ -96,9 +96,10 @@ assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which to
 worldsim's grass deform out of the renderer and into a worldsim hook.
 `foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
 ported bit for bit (decision A). Phase 2 carves `app` out of `libs/engine`, in
-the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PR 1 is in
-(`v0.10.0`): the input types, the accumulator and `ActionMap` in
-`foundation/input/`. `ui` is extracted last.
+the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PRs 1 and 2 are
+in (`v0.10.0`, `v0.11.0`): the input types, the accumulator and `ActionMap` in
+`foundation/input/`, then `app`'s clock, GLFW and headless platforms, frame,
+scene stack, overlays and context object. `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -188,8 +189,9 @@ removing legacy code. One way to do each thing.
 ## Verifying changes
 
 There is no game in this repo, so the verification loop is the **sandbox app**
-plus the HTTP dev server. The sandbox is a stub today (`apps/sandbox`, links
-`salal::app` and exits); the real one and the server come across from worldsim.
+plus the HTTP dev server. The sandbox (`apps/sandbox`) runs one scene on the
+GLFW platform today, with no picker and no server; the harness and the server
+come across from worldsim.
 
 Once they are in: `/api/ui/screenshot`, `/api/ui/tree` for element bounds,
 `/api/ui/lint` for layout invariant violations (expect `"count":0` before
@@ -230,11 +232,12 @@ the wrong compiler or vcpkg, or one an older preset broke (it deleted the cache
 and `find_package` has failed since), needs one `cmake --fresh --preset windows`,
 or delete `build/`.
 
-`foundation` and `renderer` are worldsim's code, imported as plain copies. `ui`
-and `app` are placeholders until later phases move their code in: one
-translation unit and one gtest each, there to exercise the wiring. The
-placeholder namespaces (`ui`, `app`, lowercase per the coding-standards doc) are
-not a decision about the namespaces of moved worldsim code; that casing (the
+`foundation` and `renderer` are worldsim's code, imported as plain copies.
+`app` is worldsim's `libs/engine` slice rebuilt to [docs/app-api.md](docs/app-api.md),
+in namespace `app`. `ui` is a placeholder until phase 3 moves its code in: one
+translation unit and one gtest, there to exercise the wiring. Its placeholder
+namespace (`ui`, lowercase per the coding-standards doc) is not a decision
+about the namespaces of moved worldsim code; that casing (the
 imported renderer has both `Renderer` and `renderer`) is an open worldsim
 follow-up. Blame and history for imported code live in worldsim;
 `git remote add worldsim ../worldsim && git fetch worldsim` makes
