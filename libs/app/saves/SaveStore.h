@@ -26,10 +26,11 @@
 // replaces has been copied (the same way) over the backup, so at every moment the save is whole: the
 // last good one, or the new one. What isn't one of this build's good saves never goes over the backup:
 // a damaged save (a disk that lost a write) is copied aside to <slot>.save.corrupt (.corrupt.1 and on
-// after that), one that can't be read is renamed there, and a newer build's save is kept as
-// <slot>.save.v<its version>, which nothing this build does replaces, so an older build's autosaves
-// don't push it out. restoreBackup stages the save it replaces as <slot>.save.swap, and the next call
-// on the slot finishes or undoes a restore a crash interrupted.
+// after that), one that can't be read is hard-linked there (renamed where it can't be linked), and a
+// newer build's save is kept as <slot>.save.v<its version>, which only a copy of that version written
+// later (a higher write counter) replaces, so an older build's autosaves don't push it out.
+// restoreBackup stages the save it replaces as <slot>.save.swap, and the next call on the slot
+// finishes or drops what an interrupted restore left.
 //
 // Not thread-safe. Two stores on one directory (two processes, say) don't tear each other's files,
 // since every write is its own temp file renamed into place, but don't coordinate either: the last
@@ -106,12 +107,13 @@ namespace app {
 		// The backup becomes the save and the save it replaces the backup, so a second call undoes the
 		// first. The save being replaced is staged as <slot>.save.swap, then the backup renamed over the
 		// save, then the swap file over the backup, so the replaced save is on disk under some name
-		// throughout. When the last rename fails the call is false, logged, the save is the backup's, and
-		// the swap file stays for the next call on the slot to finish with; when an earlier step fails,
-		// false and nothing changed. With no save the backup is renamed into place,
-		// leaving none; a damaged save is copied aside first and the backup renamed straight over it, and
-		// one that can't be read is renamed aside. False, logged, with nothing changed, when there's no
-		// backup or the backup is damaged.
+		// throughout. True once the save is the backup's: when only the last rename fails, logged, the
+		// swap file stays for the next call on the slot to make the backup, and a call that finds a restore
+		// interrupted between the renames (a crash, or that failure) finishes it and is true without
+		// swapping again, so a retry doesn't undo it. When an earlier step fails, false and nothing changed.
+		// With no save the backup is renamed into place, leaving none; a damaged save is copied aside and
+		// one that can't be read linked aside, and the backup renamed straight over it. False, logged, with
+		// nothing changed, when there's no backup or the backup is damaged.
 		bool restoreBackup(std::string_view slot);
 
 		// Every file of the slot: the save, the backup, a staged swap, the copies set aside (.corrupt,

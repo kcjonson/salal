@@ -15,6 +15,10 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 namespace app {
 
 	namespace {
@@ -301,6 +305,29 @@ namespace app {
 		EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"slot.save", "slot.save.bak", "slot.save.v5"}));
 	}
 
+	TEST_F(SaveStoreTest, AKeptNewerSaveIsReplacedOnlyByOneWrittenLater) {
+		// A beta at format 5 writes twice, so its save is B and its backup A.
+		SaveStore beta = store(5);
+		ASSERT_TRUE(beta.write("slot", bytesOf("A")));
+		ASSERT_TRUE(beta.write("slot", bytesOf("B")));
+		const std::vector<std::byte> b = readBytes(file("slot.save"));
+		SaveStore					 stable = store(3);
+		ASSERT_TRUE(stable.write("slot", bytesOf("X"))); // B kept as .v5; the backup is still A
+		EXPECT_EQ(readBytes(file("slot.save.v5")), b);
+		ASSERT_TRUE(stable.write("slot", bytesOf("Y"))); // A is a newer build's backup, older than B
+		EXPECT_EQ(readBytes(file("slot.save.v5")), b);
+		EXPECT_EQ(versionIn(readBytes(file("slot.save.bak"))), 3);
+
+		// The beta comes back and saves C, later than B; the stable build keeps C over B.
+		std::vector<int> calls;
+		SaveStore		 back =
+			store(5, {appending("+2", 1, calls), appending("+3", 2, calls), appending("+4", 3, calls), appending("+5", 4, calls)});
+		ASSERT_TRUE(back.write("slot", bytesOf("C")));
+		const std::vector<std::byte> later = readBytes(file("slot.save"));
+		ASSERT_TRUE(stable.write("slot", bytesOf("Z")));
+		EXPECT_EQ(readBytes(file("slot.save.v5")), later);
+	}
+
 	TEST_F(SaveStoreTest, ANewerBuildsBackupIsKeptUnderItsOwnNameBeforeItsReplaced) {
 		ASSERT_TRUE(store(7).write("other", bytesOf("future")));
 		const std::vector<std::byte> future = readBytes(file("other.save"));
@@ -346,6 +373,26 @@ namespace app {
 		EXPECT_TRUE(std::filesystem::is_directory(file("slot.save.corrupt.1") / "again"));
 	}
 
+	TEST_F(SaveStoreTest, AFileThatCannotBeReadIsLinkedAsideSoItsNameAlwaysHoldsASave) {
+#ifdef _WIN32
+		GTEST_SKIP() << "a file this process can't read but can link needs POSIX permissions";
+#else
+		if (geteuid() == 0) {
+			GTEST_SKIP() << "root reads any file";
+		}
+		SaveStore saves = store(1);
+		ASSERT_TRUE(saves.write("slot", bytesOf("locked")));
+		const std::vector<std::byte> locked = readBytes(file("slot.save"));
+		std::filesystem::permissions(file("slot.save"), std::filesystem::perms::none);
+		EXPECT_EQ(saves.read("slot").error(), LoadError::Corrupt);
+		ASSERT_TRUE(saves.write("slot", bytesOf("new")));
+		std::filesystem::permissions(file("slot.save.corrupt"), std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+		EXPECT_EQ(readBytes(file("slot.save.corrupt")), locked); // the same file, linked before the rename
+		EXPECT_EQ(text(saves.read("slot")), "new");
+		EXPECT_FALSE(std::filesystem::exists(file("slot.save.bak")));
+#endif
+	}
+
 	TEST_F(SaveStoreTest, RestoreBackupKeepsTheSaveItReplacesOnDiskWhenTheLastStepFails) {
 		SaveStore saves = store(1);
 		ASSERT_TRUE(saves.write("slot", bytesOf("older")));
@@ -353,20 +400,35 @@ namespace app {
 		ASSERT_TRUE(saves.write("slot", bytesOf("NEWEST")));
 		const std::vector<std::byte> newest = readBytes(file("slot.save"));
 		{
-			// The staged save's rename over the backup fails (a held file, a full disk).
+			// The staged save's rename over the backup fails (a held file, a full disk). The save is the
+			// backup's, which is what was asked for.
 			const Fault fault("slot.save.bak");
-			EXPECT_FALSE(saves.restoreBackup("slot"));
+			EXPECT_TRUE(saves.restoreBackup("slot"));
 		}
 		EXPECT_EQ(readBytes(file("slot.save")), older);
 		EXPECT_EQ(readBytes(file("slot.save.swap")), newest);
 		EXPECT_FALSE(std::filesystem::exists(file("slot.save.bak")));
 
-		// The next call on the slot finishes the restore, and a second restore undoes it.
+		// A retry finishes the restore without undoing it; a restore after that swaps back.
+		EXPECT_TRUE(saves.restoreBackup("slot"));
 		EXPECT_EQ(text(saves.read("slot")), "older");
 		EXPECT_EQ(readBytes(file("slot.save.bak")), newest);
 		EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"slot.save", "slot.save.bak"}));
 		ASSERT_TRUE(saves.restoreBackup("slot"));
 		EXPECT_EQ(text(saves.read("slot")), "NEWEST");
+	}
+
+	TEST_F(SaveStoreTest, RestoreBackupAfterACrashBetweenItsRenamesFinishesItAndDoesNotSwapAgain) {
+		SaveStore saves = store(1);
+		ASSERT_TRUE(saves.write("slot", bytesOf("older")));
+		ASSERT_TRUE(saves.write("slot", bytesOf("newest")));
+		const std::vector<std::byte> newest = readBytes(file("slot.save"));
+		// Staged, the backup renamed over the save, then the crash: the player asks again.
+		std::filesystem::rename(file("slot.save"), file("slot.save.swap"));
+		std::filesystem::rename(file("slot.save.bak"), file("slot.save"));
+		EXPECT_TRUE(saves.restoreBackup("slot"));
+		EXPECT_EQ(text(saves.read("slot")), "older");
+		EXPECT_EQ(readBytes(file("slot.save.bak")), newest);
 	}
 
 	TEST_F(SaveStoreTest, RestoreBackupWhoseEarlierStepsFailChangesNothing) {

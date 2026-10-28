@@ -214,44 +214,86 @@ namespace app {
 			return detail::withSuffix(files.save, ".v" + std::to_string(envelope.version));
 		}
 
+		// Whether a newer build's save, its header `candidate`, takes the place of the copy kept at `kept`:
+		// when there's none, or a damaged one, or the candidate was written later. The write counter says
+		// which is later; where either's can't be read (a later envelope), the slot's save, written after
+		// its backup, is taken as the later.
+		bool replacesKept(const std::filesystem::path& kept, const Envelope& candidate, bool fromSave) {
+			std::error_code error;
+			if (!std::filesystem::exists(kept, error)) {
+				return true;
+			}
+			const Envelope existing = parseHeader(kept);
+			if (existing.status == Envelope::Status::Damaged) {
+				return true;
+			}
+			if (existing.status == Envelope::Status::Intact && candidate.status == Envelope::Status::Intact) {
+				return candidate.writes > existing.writes;
+			}
+			return fromSave;
+		}
+
+		// A save that can't be read, kept aside as <slot>.save.corrupt without reading it: hard-linked, so
+		// its name holds a save until the replacement's rename, and renamed where it can't be linked (a
+		// directory, a filesystem without links).
+		bool setAsideUnreadable(const std::filesystem::path& save) {
+			const std::filesystem::path aside = detail::freeName(save, kCorruptSuffix);
+			std::error_code				error;
+			std::filesystem::create_hard_link(save, aside, error);
+			if (!error) {
+				LOG_WARNING(
+					Engine,
+					"SaveStore: %s can't be read; linked aside to %s",
+					detail::pathText(save).c_str(),
+					detail::pathText(aside).c_str()
+				);
+				return true;
+			}
+			return detail::moveAside(save, kCorruptSuffix).has_value();
+		}
+
+		enum class Recovered : std::uint8_t { Nothing, Finished, Dropped, Kept };
+
 		// What an interrupted restoreBackup left, put right. Its swap file holds the save it was replacing:
-		// with no backup the backup's rename into place had happened, so the swap file becomes the backup;
-		// matching the save, the restore hadn't started replacing anything, so it goes. Anything else is
-		// kept and logged, for remove() or a person to deal with.
-		void recover(const SlotFiles& files) {
+		// with no backup the backup's rename into place had happened, so the restore is finished by the
+		// swap file becoming the backup; matching the save, the restore hadn't started replacing anything,
+		// so it goes. Anything else is kept and logged, for remove() or a person to deal with.
+		Recovered recover(const SlotFiles& files) {
 			const detail::FileRead swap = detail::readFile(files.swap);
 			if (swap.status == detail::FileRead::Status::Missing) {
-				return;
+				return Recovered::Nothing;
 			}
 			const std::string name = detail::pathText(files.swap);
 			std::error_code	  error;
 			if (swap.status == detail::FileRead::Status::Read && !std::filesystem::exists(files.backup, error) && !error) {
 				if (detail::renameReplacing(files.swap, files.backup)) {
 					LOG_WARNING(Engine, "SaveStore: finished an interrupted restore; %s is the backup now", name.c_str());
+					return Recovered::Finished;
 				}
-				return;
+				return Recovered::Kept;
 			}
 			const detail::FileRead save = detail::readFile(files.save);
 			if (swap.status == detail::FileRead::Status::Read && save.status == detail::FileRead::Status::Read &&
 				save.bytes == swap.bytes) {
 				std::filesystem::remove(files.swap, error);
-				return;
+				return Recovered::Dropped;
 			}
 			LOG_WARNING(Engine, "SaveStore: %s, left by an interrupted restore, matches nothing in its slot; kept", name.c_str());
+			return Recovered::Kept;
 		}
 
 		// The save it replaces copied over the backup when it's one of this build's, kept under its own name
-		// when it's a newer build's, or copied aside when it's damaged (renamed aside when it can't be read),
-		// then the new save; each a safe write, so the save is whole throughout. A newer build's backup is
-		// renamed to its own name before it's replaced. The counter goes on from the higher of the save's and
-		// the backup's, the backup's read from its header alone. Stops at the first failure.
+		// when it's a newer build's (unless a copy written later is there already), or copied aside when
+		// it's damaged (linked aside when it can't be read), then the new save; each a safe write, so the
+		// save is whole throughout. A newer build's backup is renamed to its own name the same way before
+		// it's replaced. The counter goes on from the higher of the save's and the backup's, the backup's read
+		// from its header alone. Stops at the first failure.
 		bool writeSave(const SlotFiles& files, int build, std::span<const std::byte> payload) {
 			const detail::FileRead current = detail::readFile(files.save);
 			const Envelope		   backup = parseHeader(files.backup);
 			std::uint64_t		   writes = backup.status == Envelope::Status::Intact ? backup.writes : 0;
 			if (current.status == detail::FileRead::Status::Unreadable) {
-				LOG_WARNING(Engine, "SaveStore: %s can't be read; set aside before it's replaced", detail::pathText(files.save).c_str());
-				if (!detail::moveAside(files.save, kCorruptSuffix)) {
+				if (!setAsideUnreadable(files.save)) {
 					return false;
 				}
 			} else if (current.status == detail::FileRead::Status::Read) {
@@ -264,17 +306,25 @@ namespace app {
 					);
 					keep = detail::freeName(files.save, kCorruptSuffix);
 				} else if (newerThan(envelope, build)) {
-					keep = keptNewer(files, envelope);
-					LOG_WARNING(
-						Engine,
-						"SaveStore: %s is a newer build's; kept as %s",
-						detail::pathText(files.save).c_str(),
-						detail::pathText(keep).c_str()
-					);
-				} else if (newerThan(backup, build) && !detail::renameReplacing(files.backup, keptNewer(files, backup))) {
-					return false;
+					const std::filesystem::path kept = keptNewer(files, envelope);
+					const std::string			saveName = detail::pathText(files.save);
+					const std::string			keptName = detail::pathText(kept);
+					if (replacesKept(kept, envelope, true)) {
+						keep = kept;
+						LOG_WARNING(Engine, "SaveStore: %s is a newer build's; kept as %s", saveName.c_str(), keptName.c_str());
+					} else {
+						keep.clear();
+						LOG_WARNING(
+							Engine, "SaveStore: %s is a newer build's, older than %s; not kept", saveName.c_str(), keptName.c_str()
+						);
+					}
+				} else if (newerThan(backup, build)) {
+					const std::filesystem::path kept = keptNewer(files, backup);
+					if (replacesKept(kept, backup, false) && !detail::renameReplacing(files.backup, kept)) {
+						return false;
+					}
 				}
-				if (!detail::writeFileSafely(keep, current.bytes)) {
+				if (!keep.empty() && !detail::writeFileSafely(keep, current.bytes)) {
 					return false;
 				}
 			}
@@ -442,9 +492,13 @@ namespace app {
 		if (!usable(slot, "restoreBackup")) {
 			return false;
 		}
-		const SlotFiles files = filesFor(root, slot);
-		recover(files);
-		const std::string	   name = detail::pathText(files.save);
+		const SlotFiles	  files = filesFor(root, slot);
+		const std::string name = detail::pathText(files.save);
+		if (recover(files) == Recovered::Finished) {
+			// A restore this call repeats, already done: swapping again would undo it.
+			LOG_INFO(Engine, "SaveStore: %s was restored from its backup by an earlier call; finished", name.c_str());
+			return true;
+		}
 		const detail::FileRead backup = detail::readFile(files.backup);
 		if (backup.status != detail::FileRead::Status::Read || parseWhole(backup.bytes).status == Envelope::Status::Damaged) {
 			LOG_WARNING(Engine, "SaveStore: %s has no backup to restore, or a damaged one", name.c_str());
@@ -455,12 +509,12 @@ namespace app {
 		const bool			   damaged =
 			current.status == detail::FileRead::Status::Read && parseWhole(current.bytes).status == Envelope::Status::Damaged;
 		if (current.status != detail::FileRead::Status::Read || damaged) {
-			// Nothing worth keeping as the backup: a damaged save is copied aside and the backup renamed
-			// straight over it, so there's always a save; one that can't be read is renamed aside first.
+			// Nothing worth keeping as the backup: a damaged save is copied aside, one that can't be read is
+			// linked aside, and the backup renamed straight over it, so there's always a save.
 			if (damaged && !detail::writeFileSafely(detail::freeName(files.save, kCorruptSuffix), current.bytes)) {
 				return false;
 			}
-			if (current.status == detail::FileRead::Status::Unreadable && !detail::moveAside(files.save, kCorruptSuffix)) {
+			if (current.status == detail::FileRead::Status::Unreadable && !setAsideUnreadable(files.save)) {
 				return false;
 			}
 			if (!detail::renameReplacing(files.backup, files.save)) {
@@ -481,13 +535,15 @@ namespace app {
 			return false;
 		}
 		if (!detail::renameReplacing(files.swap, files.backup)) {
+			// The save is the backup's, which is what was asked; the next call on the slot makes the swap
+			// file the backup.
 			LOG_ERROR(
 				Engine,
 				"SaveStore: %s is restored, but the save it replaced is still %s; the next call on the slot finishes it",
 				name.c_str(),
 				detail::pathText(files.swap).c_str()
 			);
-			return false;
+			return true;
 		}
 		LOG_INFO(Engine, "SaveStore: %s and its backup swapped", name.c_str());
 		return true;
