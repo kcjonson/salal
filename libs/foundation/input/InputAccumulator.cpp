@@ -165,6 +165,7 @@ namespace foundation {
 				for (ButtonState& state : pad.buttons) {
 					state.transitions = 0;
 				}
+				pad.startAxes = pad.axes;
 			}
 			reader.pointerDelta = {};
 			reader.scroll = {};

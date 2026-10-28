@@ -41,6 +41,17 @@ namespace {
 		snapshot.pads[pad].axes[static_cast<std::size_t>(axis)] = value;
 	}
 
+	// Where the axis was at the reader's last read.
+	void setStartAxis(InputSnapshot& snapshot, std::uint8_t pad, GamepadAxis axis, float value) {
+		snapshot.pads[pad].startAxes[static_cast<std::size_t>(axis)] = value;
+	}
+
+	// At value since the reader's last read.
+	void holdAxis(InputSnapshot& snapshot, std::uint8_t pad, GamepadAxis axis, float value) {
+		setAxis(snapshot, pad, axis, value);
+		setStartAxis(snapshot, pad, axis, value);
+	}
+
 	void setStick(InputSnapshot& snapshot, float x, float y) {
 		setAxis(snapshot, 0, GamepadAxis::LeftX, x);
 		setAxis(snapshot, 0, GamepadAxis::LeftY, y);
@@ -61,12 +72,10 @@ namespace {
 		expectButton(fire, false, 0);
 		EXPECT_EQ(fire.value, 0.5F);
 
-		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.625F);
+		holdAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.625F);
 		fire = map.evaluate("fire", snapshot, kPad0Only);
 		expectButton(fire, true, 0);
 		EXPECT_EQ(fire.value, 0.625F);
-		// A snapshot holds no axis history, so an axis gives no edge.
-		EXPECT_FALSE(fire.button.pressed());
 	}
 
 	TEST(ActionMap, NegativeScaleReadsTheNegativeHalfOfAnAxisAsAButton) {
@@ -74,15 +83,119 @@ namespace {
 		map.bind("menuLeft", padAxis(GamepadAxis::LeftX, -1.0F));
 		InputSnapshot snapshot;
 
-		setAxis(snapshot, 0, GamepadAxis::LeftX, -0.75F);
+		holdAxis(snapshot, 0, GamepadAxis::LeftX, -0.75F);
 		ActionState left = map.evaluate("menuLeft", snapshot, kPad0Only);
 		expectButton(left, true, 0);
 		EXPECT_EQ(left.value, 0.75F);
 
-		setAxis(snapshot, 0, GamepadAxis::LeftX, 0.75F);
+		holdAxis(snapshot, 0, GamepadAxis::LeftX, 0.75F);
 		left = map.evaluate("menuLeft", snapshot, kPad0Only);
 		expectButton(left, false, 0);
 		EXPECT_EQ(left.value, -0.75F);
+	}
+
+	TEST(ActionMap, AnAxisCrossingItsThresholdSinceTheLastReadIsAnEdge) {
+		ActionMap map;
+		map.bind("fire", padAxis(GamepadAxis::RightTrigger));
+		InputSnapshot snapshot;
+
+		setStartAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.25F);
+		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.75F);
+		const ActionState pulled = map.evaluate("fire", snapshot, kPad0Only);
+		expectButton(pulled, true, 1);
+		EXPECT_TRUE(pulled.button.pressed());
+		EXPECT_FALSE(pulled.button.released());
+
+		setStartAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.75F);
+		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.5F);
+		const ActionState letGo = map.evaluate("fire", snapshot, kPad0Only);
+		expectButton(letGo, false, 1);
+		EXPECT_FALSE(letGo.button.pressed());
+		EXPECT_TRUE(letGo.button.released());
+
+		// Moving on one side of the threshold is no edge.
+		setStartAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.0F);
+		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.5F);
+		expectButton(map.evaluate("fire", snapshot, kPad0Only), false, 0);
+		setStartAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.625F);
+		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 1.0F);
+		expectButton(map.evaluate("fire", snapshot, kPad0Only), true, 0);
+	}
+
+	// The start of the window reads through the same scale, deadzones and threshold as the end.
+	TEST(ActionMap, AxisEdgesReadTheStartThroughTheSameBinding) {
+		ActionMap map;
+		map.bind(
+			"menuUp",
+			{.source = Binding::Source::GamepadAxis,
+			 .control = static_cast<std::uint16_t>(GamepadAxis::LeftY),
+			 .scale = -1.0F,
+			 .threshold = 0.25F,
+			 .deadzone = 0.5F}
+		);
+		map.bind("aimX", padAxis(GamepadAxis::RightX));
+		map.setStickDeadzone(GamepadAxis::RightX, GamepadAxis::RightY, 0.25F);
+		InputSnapshot snapshot;
+
+		// -0.5 is at the per-axis deadzone, 0, and -0.75 past it, 0.5, past the threshold.
+		setStartAxis(snapshot, 0, GamepadAxis::LeftY, -0.5F);
+		setAxis(snapshot, 0, GamepadAxis::LeftY, -0.75F);
+		expectButton(map.evaluate("menuUp", snapshot, kPad0Only), true, 1);
+		// The positive half reads under the threshold at both ends.
+		setAxis(snapshot, 0, GamepadAxis::LeftY, 0.75F);
+		expectButton(map.evaluate("menuUp", snapshot, kPad0Only), false, 0);
+
+		// The radial deadzone reads both of the start's axes: (0.5, 0.5) gives X 0.43 (magnitude 0.71
+		// rescaled to 0.61), under the threshold, and the end's (0.75, 0) gives 0.67, past it.
+		setStartAxis(snapshot, 0, GamepadAxis::RightX, 0.5F);
+		setStartAxis(snapshot, 0, GamepadAxis::RightY, 0.5F);
+		setAxis(snapshot, 0, GamepadAxis::RightX, 0.75F);
+		setAxis(snapshot, 0, GamepadAxis::RightY, 0.0F);
+		expectButton(map.evaluate("aimX", snapshot, kPad0Only), true, 1);
+		// (0.6, 0.8) has magnitude 1 and gives X 0.6, past it, so the stick was held; the start's X beside
+		// the end's Y would give 0.47.
+		setStartAxis(snapshot, 0, GamepadAxis::RightX, 0.6F);
+		setStartAxis(snapshot, 0, GamepadAxis::RightY, 0.8F);
+		expectButton(map.evaluate("aimX", snapshot, kPad0Only), true, 0);
+	}
+
+	// Through the accumulator: each reader sees the crossing once, measured from its own last read.
+	TEST(ActionMap, AxisEdgesFollowEachReader) {
+		ActionMap map;
+		map.bind("fire", padAxis(GamepadAxis::LeftTrigger));
+		InputAccumulator input;
+		input.push({.type = InputEvent::Type::DeviceConnected, .device = kPad0});
+		input.consumeTick();
+		input.consumeFrame();
+
+		// A frame with two ticks: the first tick and the frame see the pull, the second tick holds.
+		input.push({.type = InputEvent::Type::Axis, .device = kPad0, .axis = GamepadAxis::LeftTrigger, .value = 0.75F});
+		const ActionState frame = map.evaluate("fire", input.consumeFrame(), kPad0Only);
+		const ActionState firstTick = map.evaluate("fire", input.consumeTick(), kPad0Only);
+		const ActionState secondTick = map.evaluate("fire", input.consumeTick(), kPad0Only);
+		expectButton(frame, true, 1);
+		expectButton(firstTick, true, 1);
+		expectButton(secondTick, true, 0);
+
+		// A frame with no tick: the frame sees the let-go, and the next frame's tick still does.
+		input.push({.type = InputEvent::Type::Axis, .device = kPad0, .axis = GamepadAxis::LeftTrigger, .value = 0.0F});
+		expectButton(map.evaluate("fire", input.consumeFrame(), kPad0Only), false, 1);
+		expectButton(map.evaluate("fire", input.consumeFrame(), kPad0Only), false, 0);
+		expectButton(map.evaluate("fire", input.consumeTick(), kPad0Only), false, 1);
+
+		// A pull and let-go in two frames with no tick between come back to where the tick last read, so
+		// that tick sees neither: the snapshot keeps an axis's ends, not its path.
+		input.push({.type = InputEvent::Type::Axis, .device = kPad0, .axis = GamepadAxis::LeftTrigger, .value = 1.0F});
+		expectButton(map.evaluate("fire", input.consumeFrame(), kPad0Only), true, 1);
+		input.push({.type = InputEvent::Type::Axis, .device = kPad0, .axis = GamepadAxis::LeftTrigger, .value = 0.0F});
+		expectButton(map.evaluate("fire", input.consumeFrame(), kPad0Only), false, 1);
+		expectButton(map.evaluate("fire", input.consumeTick(), kPad0Only), false, 0);
+
+		// A disconnect zeroes the axis, which lets go of a held trigger.
+		input.push({.type = InputEvent::Type::Axis, .device = kPad0, .axis = GamepadAxis::LeftTrigger, .value = 1.0F});
+		input.consumeTick();
+		input.push({.type = InputEvent::Type::DeviceDisconnected, .device = kPad0});
+		expectButton(map.evaluate("fire", input.consumeTick(), kPad0Only), false, 1);
 	}
 
 	TEST(ActionMap, TwoKeysToOneAxis) {
@@ -309,6 +422,42 @@ namespace {
 		expectButton(evaluate(released, pressed, up), true, 2);
 	}
 
+	// Of the bindings that start down only the last to let go can release the action, and of those that
+	// end down only the first to make its last press can press it, so the sum counts too many.
+	TEST(ActionMap, ButtonTransitionsAreTheMostAnOrderGives) {
+		ActionMap map;
+		map.bind("fire", key(Key::A));
+		map.bind("fire", padAxis(GamepadAxis::LeftTrigger));
+		map.bind("fire", padAxis(GamepadAxis::RightTrigger));
+		const std::array<DeviceId, 2> devices{kKeyboard, kPad0};
+		InputSnapshot				  snapshot;
+
+		// A let go and pressed again while both triggers are let go: orders give 0 or 2, never 4.
+		keyOf(snapshot, Key::A) = {.down = true, .transitions = 2};
+		setStartAxis(snapshot, 0, GamepadAxis::LeftTrigger, 0.75F);
+		setAxis(snapshot, 0, GamepadAxis::LeftTrigger, 0.25F);
+		setStartAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.75F);
+		setAxis(snapshot, 0, GamepadAxis::RightTrigger, 0.25F);
+		expectButton(map.evaluate("fire", snapshot, devices), true, 2);
+
+		// Two keys each let go and pressed again: 2, not 4.
+		ActionMap twoKeys;
+		twoKeys.bind("fire", key(Key::A));
+		twoKeys.bind("fire", key(Key::B));
+		keyOf(snapshot, Key::B) = {.down = true, .transitions = 2};
+		expectButton(twoKeys.evaluate("fire", snapshot, kKeyboardOnly), true, 2);
+
+		// Three keys tapped from up: each tap can fall in a gap the others leave, so 6.
+		ActionMap threeKeys;
+		threeKeys.bind("fire", key(Key::A));
+		threeKeys.bind("fire", key(Key::B));
+		threeKeys.bind("fire", key(Key::C));
+		for (const Key tapped : {Key::A, Key::B, Key::C}) {
+			keyOf(snapshot, tapped) = {.down = false, .transitions = 2};
+		}
+		expectButton(threeKeys.evaluate("fire", snapshot, kKeyboardOnly), false, 6);
+	}
+
 	TEST(ActionMap, TransitionsFollowTheReaderTheSnapshotCameFrom) {
 		ActionMap map;
 		map.bind("jump", key(Key::Space));
@@ -382,28 +531,50 @@ namespace {
 		EXPECT_TRUE(released.button.released());
 	}
 
-	TEST(ActionMap, AnAxisHoldingTheActionDownHidesNoPress) {
+	// An axis past its threshold at both ends of the window held the action down throughout, as a held
+	// button does, so a key's press, tap or release under it is no edge.
+	TEST(ActionMap, AnAxisHeldThroughoutHoldsTheActionAsAButtonWould) {
 		ActionMap map;
 		map.bind("jump", key(Key::Space));
 		map.bind("jump", padAxis(GamepadAxis::LeftY, -1.0F));
 		const std::array<DeviceId, 2> devices{kKeyboard, kPad0};
 		InputSnapshot				  snapshot;
-		setAxis(snapshot, 0, GamepadAxis::LeftY, -0.75F);
+		holdAxis(snapshot, 0, GamepadAxis::LeftY, -0.75F);
 		expectButton(map.evaluate("jump", snapshot, devices), true, 0);
 
 		keyOf(snapshot, Key::Space) = {.down = true, .transitions = 1};
-		const ActionState pressed = map.evaluate("jump", snapshot, devices);
-		expectButton(pressed, true, 1);
-		EXPECT_TRUE(pressed.button.pressed());
-
+		expectButton(map.evaluate("jump", snapshot, devices), true, 0);
 		keyOf(snapshot, Key::Space) = {.down = false, .transitions = 2};
+		expectButton(map.evaluate("jump", snapshot, devices), true, 0);
+		keyOf(snapshot, Key::Space) = {.down = false, .transitions = 1};
+		expectButton(map.evaluate("jump", snapshot, devices), true, 0);
+	}
+
+	TEST(ActionMap, AnAxisEdgeFoldsWithAButtonsAsAnotherButtonWould) {
+		ActionMap map;
+		map.bind("jump", key(Key::Space));
+		map.bind("jump", padAxis(GamepadAxis::LeftY, -1.0F));
+		const std::array<DeviceId, 2> devices{kKeyboard, kPad0};
+		InputSnapshot				  snapshot;
+
+		// Space let go as the stick went up: the action may have dipped in between.
+		keyOf(snapshot, Key::Space) = {.down = false, .transitions = 1};
+		setAxis(snapshot, 0, GamepadAxis::LeftY, -0.75F);
+		expectButton(map.evaluate("jump", snapshot, devices), true, 2);
+
+		// Both going down together are one press.
+		keyOf(snapshot, Key::Space) = {.down = true, .transitions = 1};
 		expectButton(map.evaluate("jump", snapshot, devices), true, 1);
 
-		// Letting go of Space with the stick still up doesn't move the action.
+		// The stick coming back while Space is held throughout moves nothing.
+		keyOf(snapshot, Key::Space) = {.down = true, .transitions = 0};
+		setStartAxis(snapshot, 0, GamepadAxis::LeftY, -0.75F);
+		setAxis(snapshot, 0, GamepadAxis::LeftY, 0.0F);
+		expectButton(map.evaluate("jump", snapshot, devices), true, 0);
+
+		// Both coming up together are one release.
 		keyOf(snapshot, Key::Space) = {.down = false, .transitions = 1};
-		const ActionState letGo = map.evaluate("jump", snapshot, devices);
-		expectButton(letGo, true, 0);
-		EXPECT_FALSE(letGo.button.released());
+		expectButton(map.evaluate("jump", snapshot, devices), false, 1);
 	}
 
 	TEST(ActionMap, ActionTransitionsSaturate) {

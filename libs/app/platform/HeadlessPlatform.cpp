@@ -31,6 +31,32 @@ namespace app {
 		queued.push_back({.kind = Queued::Kind::Focus, .event = {.type = type, .time = manualClock.now()}});
 	}
 
+	void HeadlessPlatform::connectGamepad(const DeviceInfo& pad) {
+		queued.push_back({.kind = Queued::Kind::Connect, .event = {.time = manualClock.now()}, .device = pad});
+	}
+
+	void HeadlessPlatform::disconnectGamepad(std::uint8_t index) {
+		queued.push_back({.kind = Queued::Kind::Disconnect, .event = {.time = manualClock.now()}, .device = {.id = padId(index)}});
+	}
+
+	void HeadlessPlatform::setGamepad(std::uint8_t index, const GamepadSample& state) {
+		if (index < padStates.size()) {
+			padStates[index] = state;
+		}
+	}
+
+	void HeadlessPlatform::setKeyLabel(foundation::Key key, std::string label) {
+		keyLabels[key] = std::move(label);
+	}
+
+	std::optional<std::string> HeadlessPlatform::keyLabel(foundation::Key key) const {
+		const auto found = keyLabels.find(key);
+		if (found == keyLabels.end()) {
+			return std::nullopt;
+		}
+		return found->second;
+	}
+
 	std::unique_ptr<Renderer::backend::Backend> HeadlessPlatform::createBackend() {
 		return std::make_unique<Renderer::backend::NullBackend>();
 	}
@@ -50,7 +76,16 @@ namespace app {
 					hasFocus = item.event.type == foundation::InputEvent::Type::FocusGained;
 					events.inputEvent(item.event);
 					break;
+				case Queued::Kind::Connect:
+					gamepads.connect(item.device, item.event.time, events);
+					break;
+				case Queued::Kind::Disconnect:
+					gamepads.disconnect(item.device.id.index, item.event.time, events);
+					break;
 			}
+		}
+		for (std::uint8_t pad = 0; pad < padStates.size(); ++pad) {
+			gamepads.sample(pad, padStates[pad], manualClock.now(), events);
 		}
 	}
 
