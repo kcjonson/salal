@@ -9,6 +9,7 @@
 #include "primitives/Primitives.h"
 #include "vector/Types.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -349,6 +350,31 @@ namespace Renderer {
 		std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 4), 9);
 		Primitives::readBackbuffer(pixels, width, height);
 		EXPECT_EQ(pixels[0], 0);
+	}
+
+	TEST_F(FlushTest, APolylinesPiecesShareTheirCutsBitForBitThroughTheTransform) {
+		// Under a rotation and scale the cut's two ends, transformed once per piece, land
+		// on the same floats in both pieces.
+		const std::array<Foundation::Vec2, 3> elbow = {{{0.0F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}}};
+		Primitives::beginFrame();
+		Primitives::PushTransform(
+			glm::scale(
+				glm::rotate(glm::translate(Foundation::Mat4(1.0F), {100.3F, 50.7F, 0.0F}), 0.37F, {0.0F, 0.0F, 1.0F}), {1.7F, 1.7F, 1.0F}
+			)
+		);
+		Primitives::drawPolyline({.points = elbow, .width = 9.0F, .color = {1.0F, 1.0F, 1.0F, 0.5F}, .join = Primitives::LineJoin::Miter});
+		Primitives::PopTransform();
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 8U); // two pieces of four corners
+		const auto shared = [&](size_t a, size_t b) {
+			return std::memcmp(&uploaded[a].position, &uploaded[b].position, sizeof(Foundation::Vec2)) == 0;
+		};
+		// The first piece ends outer, inner; the second starts inner, outer.
+		EXPECT_TRUE(shared(0, 7));
+		EXPECT_TRUE(shared(1, 6));
 	}
 
 	// The same through the base shader with the test hook, tests/hooks/offset.vert.glsl.

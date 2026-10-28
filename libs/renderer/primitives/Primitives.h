@@ -284,8 +284,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// closed stroke with miter joins (strokeOutline) whose outer edge runs its width
 		// outside the outline and whose inner edge runs a pixel inside, so its
 		// anti-aliased edge covers the fill's aliased one and no background shows
-		// between them; a notch sharper than a right angle gets a flat wedge into its
-		// corner.
+		// between them; a notch is mitered into its corner.
 		void drawPolygon(const PolygonArgs& args);
 
 		// Arguments for DrawPolyline
@@ -301,9 +300,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			BlendMode	blend = BlendMode::Alpha;
 		};
 
-		// Draw a stroked polyline, anti-aliased: one SDF quad per segment, one per
-		// round or mitered joint, one per round cap. The pieces overlap at joints, so
-		// a translucent or additive stroke is brighter or denser there.
+		// Draw a stroked polyline, anti-aliased: a convex SDF piece per segment, cut
+		// along each joint's bisector so neighbouring pieces share the cut and every
+		// pixel belongs to one of them, round joins and caps exact. A translucent or
+		// additive stroke covers each pixel once, except where the line crosses itself,
+		// where a segment is too short for the cuts its sharp joints need, and at a turn
+		// within about 8.6 degrees of a hairpin: there pieces overlap.
 		void drawPolyline(const PolylineArgs& args);
 
 		// Arguments for DrawArc. Angles are radians from +x, and a positive sweep turns

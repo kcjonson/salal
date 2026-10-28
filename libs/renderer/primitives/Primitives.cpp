@@ -529,10 +529,9 @@ namespace Renderer::Primitives {
 			// The fill is not anti-aliased: a pixel is fill or not by its centre. The
 			// border's inner edge runs a pixel inside the outline, so its edge ramp (a pixel
 			// either side) lies over fill and every pixel outside the fill is fully border.
-			static thread_local std::vector<StrokePiece>	  pieces;
-			static thread_local std::vector<Foundation::Vec2> wedges;
-			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces, wedges);
-			g_batchRenderer->addStroke(pieces, wedges, border.color, zIndex, args.blend);
+			static thread_local std::vector<StrokePiece> pieces;
+			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces);
+			g_batchRenderer->addStroke(pieces, border.color, zIndex, args.blend);
 		}
 	}
 
@@ -541,9 +540,9 @@ namespace Renderer::Primitives {
 			return;
 		}
 		static thread_local std::vector<StrokePiece> pieces;
-		strokePolyline(args, pieces);
+		strokePolyline(args, g_batchRenderer->getLocalPixel(), pieces);
 		if (!pieces.empty()) {
-			g_batchRenderer->addStroke(pieces, {}, args.color, static_cast<float>(args.zIndex), args.blend);
+			g_batchRenderer->addStroke(pieces, args.color, static_cast<float>(args.zIndex), args.blend);
 		}
 	}
 

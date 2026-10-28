@@ -1,5 +1,5 @@
 // polyline: Primitives::drawPolyline. The three caps, round and mitered joins, closed outlines,
-// hairlines, a dense curve, and translucent and additive strokes (whose overlapping joints show).
+// hairlines, a dense curve, and translucent and additive strokes, which cover each pixel once.
 
 #include "DesignCanvas.h"
 #include "Scenes.h"
@@ -93,7 +93,7 @@ namespace {
 			P::clear(kBackground);
 			P::PushTransform(sandbox::designCanvas(kCanvasWidth, kCanvasHeight));
 			P::drawText(
-				{.text = "drawPolyline: an SDF quad per segment, joint and round cap",
+				{.text = "drawPolyline: an SDF piece per segment, cut at each joint's bisector",
 				 .position = {80.0F, 40.0F},
 				 .scale = 2.75F,
 				 .color = Foundation::Color::white()}
@@ -138,7 +138,7 @@ namespace {
 			}
 			label("widths 1, 2 and 3", 500.0F, 1380.0F);
 			P::drawPolyline({.points = translucent, .width = 40.0F, .color = {0.3F, 0.6F, 0.95F, 0.5F}, .cap = LineCap::Round});
-			label("alpha 0.5: joints overlap", 1325.0F, 1380.0F);
+			label("alpha 0.5", 1325.0F, 1380.0F);
 			P::drawPolyline(
 				{.points = additive,
 				 .width = 40.0F,

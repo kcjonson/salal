@@ -3,6 +3,7 @@
 #include "backend/NullBackend.h"
 #include <gtest/gtest.h>
 #include <numbers>
+#include <vector>
 
 // Everything here runs headless: the batch is made on the null backend, which
 // touches no GPU, and adding geometry and planning the draw runs reach no backend
@@ -75,8 +76,14 @@ TEST(RenderModeTest, EveryAddWritesItsModeAndBlend) {
 	batch.addTriangles(triangle, triangleIndices, 3, 3, Foundation::Color::white(), nullptr, 0.0F, BlendMode::Additive);
 	batch.addArc({.center = {0.0F, 0.0F}, .innerRadius = 4.0F, .outerRadius = 8.0F, .blend = BlendMode::Additive});
 	batch.addImageQuad({.texture = kImage, .bounds = {0.0F, 0.0F, 4.0F, 4.0F}, .blend = BlendMode::Additive});
-	const StrokePiece piece{.center = {0.0F, 0.0F}, .halfLength = 2.0F, .halfWidth = 1.0F};
-	batch.addStroke({&piece, 1}, {}, Foundation::Color::white(), 0.0F, BlendMode::Additive);
+	const StrokePiece piece{
+		.center = {0.0F, 0.0F},
+		.halfLength = 2.0F,
+		.halfWidth = 1.0F,
+		.corners = {{{-3.0F, -2.0F}, {3.0F, -2.0F}, {3.0F, 2.0F}, {-3.0F, 2.0F}}},
+		.cornerCount = 4
+	};
+	batch.addStroke({&piece, 1}, Foundation::Color::white(), 0.0F, BlendMode::Additive);
 
 	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 4U + 4U + 4U + 3U + 4U + 4U + 4U);
@@ -256,35 +263,40 @@ TEST(BatchArcTest, SweepClampsToTheFullRingAndEmptyArcsAddNothing) {
 // Stroke pieces
 // ============================================================================
 
-TEST(BatchStrokeTest, PiecesAreOrientedBoxesAndTrianglesFlatInOneGroup) {
+TEST(BatchStrokeTest, PiecesDrawTheirPolygonsAsFansInOneGroup) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
 	const StrokePiece	 pieces[2] = {
-		   {.center = {10.0F, 0.0F}, .axis = {0.0F, 1.0F}, .halfLength = 5.0F, .halfWidth = 2.0F},
-		   {.center = {0.0F, 0.0F}, .axis = {1.0F, 0.0F}, .halfLength = 2.0F, .halfWidth = 2.0F, .cornerRadius = 2.0F},
+		   {.center = {10.0F, 0.0F},
+			.axis = {0.0F, 1.0F},
+			.halfLength = 5.0F,
+			.halfWidth = 2.0F,
+			.corners = {{{13.0F, -6.0F}, {13.0F, 6.0F}, {7.0F, 6.0F}, {6.0F, 0.0F}, {7.0F, -6.0F}}},
+			.cornerCount = 5},
+		   {.center = {0.0F, 0.0F}, .corners = {{{0.0F, 0.0F}, {4.0F, 0.0F}, {0.0F, 4.0F}}}, .cornerCount = 3},
 	   };
-	const Foundation::Vec2 wedge[3] = {{0.0F, 0.0F}, {4.0F, 0.0F}, {0.0F, 4.0F}};
-	batch.addStroke(pieces, wedge, Foundation::Color::white(), 3.0F);
+	batch.addStroke(pieces, Foundation::Color::white(), 3.0F);
 	addRect(batch); // z 0 sorts ahead of the whole stroke
 
 	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
-	ASSERT_EQ(vertices.size(), 8U + 3U + 4U);
-	// Along the axis (down the screen) by halfLength + 1, across it by halfWidth + 1.
-	EXPECT_NEAR(vertices[0].position.x, 13.0F, kTolerance);
-	EXPECT_NEAR(vertices[0].position.y, -6.0F, kTolerance);
+	ASSERT_EQ(vertices.size(), 5U + 3U + 4U);
+	// The corners as given; the SDF's coordinates run along the axis (down the screen)
+	// and along its left normal, (-1, 0).
+	EXPECT_EQ(vertices[0].position, Foundation::Vec2(13.0F, -6.0F));
 	EXPECT_NEAR(vertices[0].texCoord.x, -6.0F, kTolerance);
 	EXPECT_NEAR(vertices[0].texCoord.y, -3.0F, kTolerance);
+	EXPECT_NEAR(vertices[3].texCoord.x, 0.0F, kTolerance);
+	EXPECT_NEAR(vertices[3].texCoord.y, 4.0F, kTolerance);
 	EXPECT_EQ(vertices[0].data2, Foundation::Vec4(5.0F, 2.0F, 0.0F, 1.0F));
-	EXPECT_EQ(vertices[4].data2, Foundation::Vec4(2.0F, 2.0F, 2.0F, 1.0F));
-	// The wedge is a flat triangle: a zero-size shape, positions as given.
-	EXPECT_EQ(vertices[8].data2, Foundation::Vec4(0.0F, 0.0F, 0.0F, 1.0F));
-	EXPECT_EQ(vertices[9].position, Foundation::Vec2(4.0F, 0.0F));
+	// A zero-size box is flat.
+	EXPECT_EQ(vertices[5].data2, Foundation::Vec4(0.0F, 0.0F, 0.0F, 1.0F));
+	EXPECT_EQ(vertices[6].position, Foundation::Vec2(4.0F, 0.0F));
 
-	// One group: the rect sorts in front of it, and the stroke stays together after.
-	const DrawPlan plan = batch.plan();
-	ASSERT_EQ(plan.indices.size(), 6U + 12U + 3U);
-	EXPECT_EQ(plan.indices[0], 11U);
-	EXPECT_EQ(plan.indices[6], 0U);
-	EXPECT_EQ(plan.indices[18], 8U);
+	// One group, each polygon a fan from its first corner: the rect sorts in front of
+	// it, and the stroke stays together after.
+	const DrawPlan				plan = batch.plan();
+	const std::vector<uint32_t> expected = {8, 9, 10, 8, 10, 11, 0, 1, 2, 0, 2, 3, 0, 3, 4, 5, 6, 7};
+	EXPECT_EQ(std::vector<uint32_t>(plan.indices.begin(), plan.indices.end()), expected);
 	ASSERT_EQ(plan.runs.size(), 1U);
 }
+

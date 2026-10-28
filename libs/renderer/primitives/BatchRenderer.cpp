@@ -25,6 +25,7 @@ namespace Renderer {
 
 		constexpr float kTwoPi = 2.0F * std::numbers::pi_v<float>;
 
+
 		// The stream buffers' first size; the backend grows them as a flush needs.
 		constexpr size_t kInitialVertexBytes = 4096 * sizeof(BatchVertex);
 		constexpr size_t kInitialIndexBytes = 6144 * sizeof(uint32_t);
@@ -398,51 +399,39 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::addStroke(
-		std::span<const StrokePiece>	  pieces,
-		std::span<const Foundation::Vec2> triangles,
-		const Foundation::Color&		  color,
-		float							  zIndex,
-		Primitives::BlendMode			  blend
+		std::span<const StrokePiece> pieces,
+		const Foundation::Color&	 color,
+		float						 zIndex,
+		Primitives::BlendMode		 blend
 	) {
 		const uint32_t		   groupStart = static_cast<uint32_t>(indices.size());
 		const Foundation::Vec4 colorVec = color.toVec4();
 		const Foundation::Vec4 noBorder(0.0F, 0.0F, 0.0F, 0.0F);
 		// Border position 1 (center) with a zero border width: a plain filled SDF box.
 		const float mode = renderMode(1.0F, blend);
+		const bool	isIdentity = transformClass == TransformClass::kIdentity;
 		for (const StrokePiece& piece : pieces) {
-			// Box-local x runs along the axis, y along its normal; the quad reaches a
-			// pixel past the box on every side.
+			// Box-local x runs along the axis, y along its normal.
+			const uint32_t		   baseIndex = static_cast<uint32_t>(vertices.size());
 			const Foundation::Vec2 normal(-piece.axis.y, piece.axis.x);
-			const float			   reachX = piece.halfLength + pixelPadding;
-			const float			   reachY = piece.halfWidth + pixelPadding;
-			const Foundation::Vec2 alongX = piece.axis * reachX;
-			const Foundation::Vec2 alongY = normal * reachY;
-			const Foundation::Vec2 corners[4] = {
-				piece.center - alongX - alongY,
-				piece.center + alongX - alongY,
-				piece.center + alongX + alongY,
-				piece.center - alongX + alongY,
-			};
-			const Foundation::Vec2 local[4] = {{-reachX, -reachY}, {reachX, -reachY}, {reachX, reachY}, {-reachX, reachY}};
-			pushQuad(corners, local, colorVec, noBorder, {piece.halfLength, piece.halfWidth, piece.cornerRadius, mode});
-		}
-		// Flat triangles as addTriangles draws them: a zero-size box, so the shape is the
-		// triangle itself.
-		const bool isIdentity = transformClass == TransformClass::kIdentity;
-		for (size_t i = 0; i + 2 < triangles.size(); i += 3) {
-			const uint32_t baseIndex = static_cast<uint32_t>(vertices.size());
-			for (size_t corner = 0; corner < 3; ++corner) {
+			const Foundation::Vec4 shape(piece.halfLength, piece.halfWidth, piece.cornerRadius, mode);
+			for (uint8_t k = 0; k < piece.cornerCount; ++k) {
+				const Foundation::Vec2 local = piece.corners[k] - piece.center;
 				vertices.push_back(
-					{TransformPosition(triangles[i + corner], currentTransform, isIdentity),
-					 Foundation::Vec2(0.0F, 0.0F),
+					{TransformPosition(piece.corners[k], currentTransform, isIdentity),
+					 Foundation::Vec2(glm::dot(local, piece.axis), glm::dot(local, normal)),
 					 colorVec,
 					 noBorder,
-					 Foundation::Vec4(0.0F, 0.0F, 0.0F, mode),
+					 shape,
 					 currentClipBounds}
 				);
-				indices.push_back(baseIndex + static_cast<uint32_t>(corner));
 			}
-			vertexAtlas.insert(vertexAtlas.end(), 3, TextureHandle{});
+			for (uint32_t k = 1; k + 1 < piece.cornerCount; ++k) {
+				indices.push_back(baseIndex);
+				indices.push_back(baseIndex + k);
+				indices.push_back(baseIndex + k + 1);
+			}
+			vertexAtlas.insert(vertexAtlas.end(), piece.cornerCount, TextureHandle{});
 		}
 		recordGroup(groupStart, zIndex, blend);
 	}

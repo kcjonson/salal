@@ -15,6 +15,7 @@
 #include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -198,6 +199,78 @@ namespace Renderer {
 		expectNear(pixel(6, 16), {0, 0, 255, 255});
 		expectNear(pixel(5, 5), {0, 0, 255, 255}); // the mitered corner
 		expectNear(pixel(2, 16), {0, 0, 0, 0});	   // past the border
+	}
+
+	TEST_F(PrimitivesDrawTest, TranslucentAndAdditiveStrokesCoverEachPixelOnce) {
+		// Each stroke alone over transparent, at alpha 0.5: one cover stores 128 in alpha
+		// (or, additive, in the colour), two would store 191. `inside` is a pixel well
+		// within the stroke.
+		struct Case {
+			const char*					  name;
+			std::vector<Foundation::Vec2> points;
+			float						  width;
+			Primitives::LineCap			  cap;
+			Primitives::LineJoin		  join;
+			bool						  closed;
+			std::array<int, 2>			  inside;
+		};
+		const std::vector<Foundation::Vec2> elbow = {{4.0F, 6.0F}, {26.0F, 6.0F}, {26.0F, 28.0F}};
+		const std::vector<Foundation::Vec2> zigzag = {{3.0F, 26.0F}, {10.0F, 8.0F}, {17.0F, 26.0F}, {24.0F, 8.0F}, {30.0F, 26.0F}};
+		const std::vector<Foundation::Vec2> square = {{6.0F, 6.0F}, {26.0F, 6.0F}, {26.0F, 26.0F}, {6.0F, 26.0F}};
+		const std::vector<Foundation::Vec2> triangle = {{4.0F, 27.0F}, {16.0F, 4.0F}, {28.0F, 27.0F}};
+		const std::vector<Case>				cases = {
+			{"round elbow, butt caps", elbow, 6.0F, Primitives::LineCap::Butt, Primitives::LineJoin::Round, false, {15, 6}},
+			{"mitered elbow, square caps", elbow, 6.0F, Primitives::LineCap::Square, Primitives::LineJoin::Miter, false, {26, 15}},
+			{"round zigzag, round caps", zigzag, 4.0F, Primitives::LineCap::Round, Primitives::LineJoin::Round, false, {13, 16}},
+			{"mitered closed square", square, 4.0F, Primitives::LineCap::Butt, Primitives::LineJoin::Miter, true, {16, 6}},
+			{"round closed triangle", triangle, 5.0F, Primitives::LineCap::Butt, Primitives::LineJoin::Round, true, {15, 27}},
+		};
+		for (const Primitives::BlendMode blend : {Primitives::BlendMode::Alpha, Primitives::BlendMode::Additive}) {
+			const int channel = blend == Primitives::BlendMode::Alpha ? 3 : 1;
+			for (const Case& stroke : cases) {
+				render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+					Primitives::drawPolyline(
+						{.points = stroke.points,
+						 .width = stroke.width,
+						 .color = {0.0F, 1.0F, 0.0F, 0.5F},
+						 .cap = stroke.cap,
+						 .join = stroke.join,
+						 .closed = stroke.closed,
+						 .blend = blend}
+					);
+				});
+				int most = 0;
+				for (int y = 0; y < kSize; ++y) {
+					for (int x = 0; x < kSize; ++x) {
+						most = std::max(most, pixel(x, y)[channel]);
+					}
+				}
+				EXPECT_LE(most, 129) << stroke.name << (channel == 3 ? ", alpha" : ", additive");
+				EXPECT_NEAR(pixel(stroke.inside[0], stroke.inside[1])[channel], 128, 1) << stroke.name;
+			}
+		}
+
+		// A border-only polygon at alpha 0.5, its 53-degree notch mitered into the corner.
+		const std::array<Foundation::Vec2, 7> notched = {
+			{{6.0F, 6.0F}, {12.0F, 6.0F}, {16.0F, 14.0F}, {20.0F, 6.0F}, {26.0F, 6.0F}, {26.0F, 26.0F}, {6.0F, 26.0F}}
+		};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			Primitives::drawPolygon(
+				{.vertices = notched,
+				 .style = {
+					 .fill = Foundation::Color::transparent(),
+					 .border = Foundation::LineStyle{.color = {1.0F, 1.0F, 1.0F, 0.5F}, .width = 3.0F}
+				 }}
+			);
+		});
+		int most = 0;
+		for (int y = 0; y < kSize; ++y) {
+			for (int x = 0; x < kSize; ++x) {
+				most = std::max(most, pixel(x, y)[3]);
+			}
+		}
+		EXPECT_LE(most, 129);
+		EXPECT_NEAR(pixel(4, 16)[3], 128, 1);
 	}
 
 	TEST_F(PrimitivesDrawTest, ClearStoresPremultipliedColour) {

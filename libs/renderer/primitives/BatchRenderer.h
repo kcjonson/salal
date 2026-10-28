@@ -137,14 +137,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		);
 
 		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
-		// an SDF box quad padded by a pixel so its edge ramp is not cut off, and its flat
-		// `triangles`, three points each (strokeOutline's wedges).
+		// its polygon as a fan, shaded by its SDF box.
 		void addStroke(
-			std::span<const StrokePiece>	  pieces,
-			std::span<const Foundation::Vec2> triangles,
-			const Foundation::Color&		  color,
-			float							  zIndex = 0.0F,
-			Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha
+			std::span<const StrokePiece> pieces,
+			const Foundation::Color&	 color,
+			float						 zIndex = 0.0F,
+			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
 		);
 
 		// Add a ring, arc or pie as one SDF quad (see Primitives::ArcArgs).
