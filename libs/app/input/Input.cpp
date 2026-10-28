@@ -197,6 +197,11 @@ namespace app {
 			return "device";
 		}
 
+		// The slots a device may back: two halves of the keyboard, one of anything else.
+		int shareOf(DeviceId device) {
+			return device.kind == DeviceKind::Keyboard ? 2 : 1;
+		}
+
 		// The device a press came from: key and pointer events belong to the one keyboard and mouse
 		// whatever their device says, as in the accumulator.
 		std::optional<DeviceId> pressFrom(const InputEvent& event) {
@@ -220,7 +225,7 @@ namespace app {
 
 	std::optional<DeviceId> Input::pressedDevice() const {
 		for (const InputEvent& event : events()) {
-			if (const std::optional<DeviceId> device = pressFrom(event)) {
+			if (const std::optional<DeviceId> device = pressFrom(event); device && backing(*device) < shareOf(*device)) {
 				return device;
 			}
 		}
@@ -241,11 +246,8 @@ namespace app {
 		if (target.claimed && target.connected && target.device == device) {
 			return;
 		}
-		const int  share = device.kind == DeviceKind::Keyboard ? 2 : 1;
-		const auto backing = std::ranges::count_if(slots, [&](const Slot& other) {
-			return &other != &target && other.claimed && other.connected && other.device == device;
-		});
-		if (backing >= share) {
+		const int share = shareOf(device);
+		if (backing(device) >= share) {
 			LOG_WARNING(
 				Engine,
 				"Input::claim: %s %d backs %d slot(s) already; slot %d refused",
@@ -413,6 +415,12 @@ namespace app {
 	void Input::readFrame() {
 		frameState = accumulator.consumeFrame();
 		captured = 0;
+	}
+
+	int Input::backing(DeviceId device) const {
+		return static_cast<int>(std::ranges::count_if(slots, [&](const Slot& slot) {
+			return slot.claimed && slot.connected && slot.device == device;
+		}));
 	}
 
 	const DeviceInfo* Input::find(DeviceId device) const {

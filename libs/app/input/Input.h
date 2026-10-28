@@ -41,8 +41,9 @@ namespace app {
 		std::span<const DeviceInfo> devices() const { return connected; }
 
 		// The device behind this frame's first press, in event order, for "press a button to join": a
-		// key going down (not a repeat), a mouse button or a pad button. A stick or trigger moving isn't
-		// a press, so a stick bumped in passing joins nobody.
+		// key going down (not a repeat), a mouse button or a pad button, from a device that doesn't back
+		// its share of slots already, so a joined player's press doesn't hide a new player's. A stick or
+		// trigger moving isn't a press, so a stick bumped in passing joins nobody.
 		std::optional<foundation::DeviceId> pressedDevice() const;
 
 		// Player slots. A connected device backs a slot: the keyboard up to two (split keyboard), the
@@ -93,6 +94,8 @@ namespace app {
 		void			  disconnect(foundation::DeviceId device, double time);
 		void			  readFrame();
 		const DeviceInfo* find(foundation::DeviceId device) const;
+		// The slots the device backs now, connected.
+		int backing(foundation::DeviceId device) const;
 
 		const Platform&					  platform;
 		foundation::InputAccumulator	  accumulator;

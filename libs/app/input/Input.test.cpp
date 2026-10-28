@@ -151,6 +151,30 @@ namespace app::testing {
 		EXPECT_EQ(input().pressedDevice(), std::nullopt);
 	}
 
+	// A device backing its share of slots is a joined player; its press doesn't hide a new one's.
+	TEST_F(InputTest, PressedDeviceSkipsDevicesThatBackTheirShareOfSlots) {
+		start();
+		platform->connectGamepad(pad(0, "0300"));
+		platform->connectGamepad(pad(1, "0301"));
+		frame();
+		input().claim(0, padId(0));
+
+		platform->setGamepad(0, holding(GamepadButton::A));
+		platform->setGamepad(1, holding(GamepadButton::A));
+		frame();
+		EXPECT_EQ(input().pressedDevice(), padId(1));
+
+		// The keyboard is two players: one half claimed still joins, both claimed doesn't.
+		input().claim(1, kKeyboard);
+		platform->push({.type = InputEvent::Type::KeyDown, .key = Key::Enter});
+		frame();
+		EXPECT_EQ(input().pressedDevice(), kKeyboard);
+		input().claim(2, kKeyboard);
+		platform->push({.type = InputEvent::Type::KeyDown, .key = Key::Space});
+		frame();
+		EXPECT_EQ(input().pressedDevice(), std::nullopt);
+	}
+
 	// --- Slots ---
 
 	TEST_F(InputTest, AClaimedSlotGivesItsDeviceUntilReleased) {
