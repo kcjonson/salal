@@ -1,7 +1,10 @@
 #pragma once
 
 // Folds input events into state for two readers, the fixed tick and the frame. Each reader has
-// its own transition counts, pointer delta and scroll, so consuming one leaves the other alone.
+// its own transition counts, pointer delta, scroll and pad startAxes, so consuming one leaves the
+// other alone. A reader's startAxes are its axes as of its last consume: an axis crossing that
+// came and went between two consumes isn't in them, and pads are sampled once a frame, so only a
+// tick reader spanning frames with no tick, or several virtual pad events in one frame, loses one.
 //
 // What push does with what it's given:
 // - Transitions count changes of state: a repeat KeyDown, a down for a key already down and an up

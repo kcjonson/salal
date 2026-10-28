@@ -243,13 +243,16 @@ namespace foundation {
 		bool released() const { return transitions >= 2 || (transitions == 1 && !down); }
 	};
 
+	// axes are the values now; startAxes are what they were at the reader's last read, so an axis read
+	// as a button can tell it crossed its threshold since.
 	struct GamepadState {
 		bool																	connected = false;
 		std::array<ButtonState, static_cast<std::size_t>(GamepadButton::Count)> buttons{};
 		std::array<float, static_cast<std::size_t>(GamepadAxis::Count)>			axes{};
+		std::array<float, static_cast<std::size_t>(GamepadAxis::Count)>			startAxes{};
 	};
 
-	// Every device's state, about 1.4 KB.
+	// Every device's state, about 1.9 KB.
 	struct InputSnapshot {
 		std::array<ButtonState, static_cast<std::size_t>(Key::Count)>		  keys{};
 		std::array<ButtonState, static_cast<std::size_t>(MouseButton::Count)> mouse{};
