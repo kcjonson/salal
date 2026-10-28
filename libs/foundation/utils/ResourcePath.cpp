@@ -1,6 +1,8 @@
-// Resource Path Utilities implementation
-
 #include "utils/ResourcePath.h"
+
+#include <mutex>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 #ifdef __APPLE__
@@ -18,6 +20,11 @@
 #endif
 
 namespace Foundation {
+
+	namespace {
+		std::mutex						   g_rootsMutex;
+		std::vector<std::filesystem::path> g_roots;
+	} // namespace
 
 	std::filesystem::path getExecutableDir() {
 #ifdef __APPLE__
@@ -40,34 +47,41 @@ namespace Foundation {
 			}
 			buf.resize(buf.size() * 2); // path was truncated; grow and retry
 		}
+#elif defined(__linux__)
+		std::error_code				error;
+		const std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", error);
+		return error ? std::filesystem::path{} : exe.parent_path();
 #else
-		// TODO: Linux implementation: readlink("/proc/self/exe", ...)
 		return {};
 #endif
 	}
 
+	void setResourceRoots(std::vector<std::filesystem::path> roots) {
+		const std::scoped_lock lock(g_rootsMutex);
+		g_roots = std::move(roots);
+	}
+
 	std::optional<std::filesystem::path> findResource(const std::filesystem::path& relativePath) {
 		std::vector<std::filesystem::path> searchPaths;
-
-		// Most reliable: relative to executable directory (works regardless of cwd)
-		auto exeDir = getExecutableDir();
-		if (!exeDir.empty()) {
-			searchPaths.push_back(exeDir);
+		{
+			const std::scoped_lock lock(g_rootsMutex);
+			searchPaths = g_roots;
 		}
 
-		// Try to get current path - may fail if cwd was deleted (common in IDE terminals)
-		try {
-			auto cwd = std::filesystem::current_path();
-			searchPaths.push_back(cwd);
-			searchPaths.push_back(cwd / "build/apps/ui-sandbox"); // From project root
-		} catch (const std::filesystem::filesystem_error& /*e*/) {
-			// Current directory doesn't exist - skip cwd-relative paths
+		if (auto exeDir = getExecutableDir(); !exeDir.empty()) {
+			searchPaths.push_back(std::move(exeDir));
 		}
 
-		// Search each path
+		// The working directory may be gone (common in IDE terminals); then it is skipped.
+		std::error_code cwdError;
+		if (auto cwd = std::filesystem::current_path(cwdError); !cwdError) {
+			searchPaths.push_back(std::move(cwd));
+		}
+
 		for (const auto& searchPath : searchPaths) {
-			auto fullPath = searchPath / relativePath;
-			if (std::filesystem::exists(fullPath)) {
+			auto			fullPath = searchPath / relativePath;
+			std::error_code ignored;
+			if (std::filesystem::exists(fullPath, ignored)) {
 				return fullPath;
 			}
 		}
