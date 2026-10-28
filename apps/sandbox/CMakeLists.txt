@@ -2,6 +2,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(salal_sandbox
     main.cpp
+    Picker.cpp
     scenes/ArcScene.cpp
     scenes/BlendScene.cpp
     scenes/InputTestScene.cpp
@@ -12,7 +13,7 @@ add_executable(salal_sandbox
 
 target_include_directories(salal_sandbox PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-# nlohmann_json for input_test's state JSON.
+# nlohmann_json for the picker's and input_test's state JSON.
 target_link_libraries(salal_sandbox
     PRIVATE
         salal::app

@@ -1,9 +1,11 @@
-// The sandbox: salal's renderer-level test scenes on the GLFW platform. --scene=<name> starts in that
-// scene; without it the first scene runs. Where the dev server is compiled in it serves on 127.0.0.1:8090,
-// or --http-port's port; /api/control?action=scene&scene=<name> switches scene. Close the window, or ask
+// The sandbox: salal's renderer-level test scenes on the GLFW platform, with the scene picker over them
+// (Picker.h). --scene=<name> starts in that scene with the picker closed; without it the first scene
+// runs with the picker open. Where the dev server is compiled in it serves on 127.0.0.1:8090, or
+// --http-port's port; /api/control?action=scene&scene=<name> switches scene. Close the window, or ask
 // /api/control?action=exit, to quit.
 
 #include "BaseShader.h"
+#include "Picker.h"
 #include "Scenes.h"
 
 #include <application/App.h>
@@ -15,7 +17,9 @@
 #include <array>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -28,7 +32,7 @@ namespace {
 		{.family = kMonoFont, .pngPath = "fonts/JetBrainsMono-SDF.png", .jsonPath = "fonts/JetBrainsMono-SDF.json"},
 	}};
 
-	// The first is where the sandbox starts without --scene.
+	// In the picker's order; the first is where the sandbox starts without --scene.
 	const std::array<const sandbox::SceneInfo*, 6> kScenes{
 		&sandbox::kSdfMinimalScene,
 		&sandbox::kPolygonScene,
@@ -79,10 +83,13 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	std::vector<std::string> names;
 	for (const sandbox::SceneInfo* scene : kScenes) {
 		app->scenes().add(scene->name, scene->make);
+		names.emplace_back(scene->name);
 	}
 	app->scenes().switchTo(commandLine.scene.value_or(kScenes.front()->name));
+	app->addOverlay(std::make_unique<sandbox::Picker>(*app, sandbox::Picker::Args{.scenes = std::move(names), .open = !commandLine.scene}));
 
 	app->run();
 	app->shutdown();
