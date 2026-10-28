@@ -306,6 +306,42 @@ namespace Renderer {
 		}
 	}
 
+	TEST_F(FontRendererTest, WrappedTextLaysOutAtTheScaleItWasWrappedAt) {
+		// The result carries the scale, so glyph sizes, alignment and line height all follow it: at a
+		// scale of 1 and at another, each line comes out as generateGlyphQuads draws it directly there.
+		const float		  atlasLineHeight = 1.2F; // The synthetic atlas's, in ems
+		const std::string text = "wrap these words";
+		for (const float scale : {1.0F, 2.5F}) {
+			const float maxWidth = 100.0F * scale;
+			const float containerWidth = 200.0F * scale;
+			const float lineHeight = atlasLineHeight * 16.0F * scale;
+
+			const FontRenderer::WrappedTextResult& wrapped = fontRenderer->wrapText(text, scale, maxWidth, kBody);
+			ASSERT_GE(wrapped.lines.size(), 2U) << "scale=" << scale;
+			EXPECT_FLOAT_EQ(wrapped.scale, scale);
+			EXPECT_FLOAT_EQ(wrapped.lineHeight, lineHeight);
+
+			std::vector<FontRenderer::GlyphQuad> quads;
+			fontRenderer->generateWrappedGlyphQuads(
+				wrapped, glm::vec2(0.0F), glm::vec4(1.0F), Foundation::HorizontalAlign::Right, containerWidth, quads
+			);
+
+			std::vector<FontRenderer::GlyphQuad> expected;
+			for (size_t i = 0; i < wrapped.lines.size(); ++i) {
+				const float		lineWidth = fontRenderer->MeasureText(wrapped.lines[i], scale, kBody).x;
+				const glm::vec2 lineOrigin(containerWidth - lineWidth, static_cast<float>(i) * lineHeight);
+				fontRenderer->generateGlyphQuads(wrapped.lines[i], lineOrigin, scale, glm::vec4(1.0F), expected, kBody);
+			}
+			ASSERT_EQ(quads.size(), expected.size()) << "scale=" << scale;
+			for (size_t i = 0; i < quads.size(); ++i) {
+				EXPECT_NEAR(quads[i].position.x, expected[i].position.x, 1e-3F) << "glyph " << i << " scale=" << scale;
+				EXPECT_NEAR(quads[i].position.y, expected[i].position.y, 1e-3F) << "glyph " << i << " scale=" << scale;
+				EXPECT_NEAR(quads[i].size.x, expected[i].size.x, 1e-3F) << "glyph " << i << " scale=" << scale;
+				EXPECT_NEAR(quads[i].size.y, expected[i].size.y, 1e-3F) << "glyph " << i << " scale=" << scale;
+			}
+		}
+	}
+
 	// --- Initialize's contract ---
 
 	TEST_F(FontRendererInitializeTest, NoSourcesFail) {
@@ -494,9 +530,7 @@ namespace Renderer {
 		EXPECT_FLOAT_EQ(wrapped.lineHeight, 1.5F * 16.0F);
 
 		std::vector<FontRenderer::GlyphQuad> quads;
-		fontRenderer->generateWrappedGlyphQuads(
-			wrapped, glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), Foundation::HorizontalAlign::Left, 0.0F, quads
-		);
+		fontRenderer->generateWrappedGlyphQuads(wrapped, glm::vec2(0.0F), glm::vec4(1.0F), Foundation::HorizontalAlign::Left, 0.0F, quads);
 
 		// Each line as generateGlyphQuads lays it out in mono, a mono line below the one before.
 		std::vector<FontRenderer::GlyphQuad> expected;

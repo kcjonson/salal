@@ -514,6 +514,7 @@ namespace Renderer {
 		// Cache miss - compute wrapped text
 		WrappedTextResult result;
 		result.family = key.family;
+		result.scale = scale;
 
 		constexpr float BASE_FONT_SIZE = 16.0F;
 		float			fontSize = BASE_FONT_SIZE * scale;
@@ -645,13 +646,13 @@ namespace Renderer {
 	void FontRenderer::generateWrappedGlyphQuads(
 		const WrappedTextResult&	wrapped,
 		const glm::vec2&			position,
-		float						scale,
 		const glm::vec4&			color,
 		Foundation::HorizontalAlign hAlign,
 		float						containerWidth,
 		std::vector<GlyphQuad>&		outQuads
 	) const {
 		const FontFamily family = wrapped.family;
+		const float		 scale = wrapped.scale;
 		float			 currentY = position.y;
 
 		for (const std::string& line : wrapped.lines) {
