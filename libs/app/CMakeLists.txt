@@ -41,7 +41,8 @@ target_include_directories(salal_app
 # GLFW and GL are the GLFW platform's, in platform/GlfwPlatform.cpp and GlfwInput.cpp; no app
 # header names them, so they stay private (salal_check_layering checks both). nlohmann-json is in
 # the settings' and saves' headers, so it's public, in every configuration. winmm for
-# timeBeginPeriod, which run()'s frame cap needs.
+# timeBeginPeriod, which run()'s frame cap needs; shell32 and ole32 for the known folders the
+# per-user directories fall back to.
 target_link_libraries(salal_app
     PUBLIC
         salal::renderer
@@ -52,6 +53,8 @@ target_link_libraries(salal_app
         OpenGL::GL
         GLEW::GLEW
         $<$<PLATFORM_ID:Windows>:winmm>
+        $<$<PLATFORM_ID:Windows>:shell32>
+        $<$<PLATFORM_ID:Windows>:ole32>
 )
 
 # The dev server, only in the configurations SALAL_DEV_SERVER_GENEX names. SALAL_DEV_SERVER is

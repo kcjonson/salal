@@ -16,6 +16,7 @@ namespace app {
 	namespace {
 
 		using testing::ScopedEnv;
+		using testing::ScopedUserRoots;
 		using testing::TempDir;
 
 		std::string text(const std::filesystem::path& path) {
@@ -58,6 +59,9 @@ namespace app {
 				 "COM0",
 				 "com9",
 				 "LPT1",
+				 "NUL .x", // Windows drops the spaces and opens the device
+				 "con .a",
+				 "COM1  .b",
 				 "lpt9.bak",
 				 "na\xC3\xAFve", // UTF-8 i diaeresis
 				 std::string(65, 'a'),
@@ -105,19 +109,27 @@ namespace app {
 		EXPECT_FALSE(std::filesystem::exists(data));
 	}
 
-	TEST(UserDirectoriesTest, ANameThatIsNotAFileNameOrNoRootGivesNoDirectory) {
-		const TempDir temp;
-#if defined(_WIN32)
-		const ScopedEnv roaming("APPDATA", temp.path().string());
-		const ScopedEnv local("LOCALAPPDATA", temp.path().string());
-#else
-		const ScopedEnv home("HOME", temp.path().string());
-#endif
+	TEST(UserDirectoriesTest, SlotNamesAreFileNamesInLowerCase) {
+		EXPECT_TRUE(validSlotName("slot 1"));
+		EXPECT_TRUE(validSlotName("auto-save_2.v3"));
+		EXPECT_FALSE(validSlotName("Slot1"));
+		EXPECT_FALSE(validSlotName("kevinK"));
+		EXPECT_FALSE(validSlotName("../slot"));
+		EXPECT_FALSE(validSlotName("con"));
+		EXPECT_TRUE(validFileName("Wasteland Wheels")); // organizations and applications keep their case
+	}
+
+	TEST(UserDirectoriesTest, ANameThatIsNotAFileNameGivesNoDirectory) {
+		const TempDir		  temp;
+		const ScopedUserRoots roots(temp.path());
 		EXPECT_TRUE(userConfigDir("", "Asteroids").empty());
 		EXPECT_TRUE(userConfigDir("kcjonson", "../Asteroids").empty());
 		EXPECT_TRUE(userDataDir("kcjonson", "CON").empty());
 		EXPECT_FALSE(userConfigDir("kcjonson", "Asteroids").empty());
+	}
 
+	TEST(UserDirectoriesTest, WithNoRootInTheEnvironmentTheSystemsAnswerIsUsed) {
+		// The known folders on Windows, the password database's home on POSIX: computed, never created.
 #if defined(_WIN32)
 		const ScopedEnv noRoaming("APPDATA", std::nullopt);
 		const ScopedEnv relativeLocal("LOCALAPPDATA", "relative");
@@ -126,8 +138,15 @@ namespace app {
 		const ScopedEnv noConfig("XDG_CONFIG_HOME", std::nullopt);
 		const ScopedEnv noData("XDG_DATA_HOME", std::nullopt);
 #endif
-		EXPECT_TRUE(userConfigDir("kcjonson", "Asteroids").empty());
-		EXPECT_TRUE(userDataDir("kcjonson", "Asteroids").empty());
+		const std::filesystem::path config = userConfigDir("kcjonson", "Asteroids");
+		const std::filesystem::path data = userDataDir("kcjonson", "Asteroids");
+		ASSERT_FALSE(config.empty());
+		ASSERT_FALSE(data.empty());
+		EXPECT_TRUE(config.is_absolute());
+		EXPECT_TRUE(data.is_absolute());
+		EXPECT_EQ(config.filename(), "Asteroids");
+		EXPECT_EQ(config.parent_path().filename(), "kcjonson");
+		EXPECT_NE(config, data);
 	}
 
 } // namespace app

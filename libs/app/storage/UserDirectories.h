@@ -14,11 +14,16 @@ namespace app {
 	// or before a dot). So no separators, no "." or "..", nothing a filesystem folds or refuses.
 	bool validFileName(std::string_view name);
 
+	// A save slot's name: a valid file name with no upper case, so slots that differ only in case can't be
+	// one file on Windows and macOS and two on Linux.
+	bool validSlotName(std::string_view name);
+
 	// The per-user settings directory: %APPDATA%\<organization>\<application> on Windows,
 	// ~/Library/Application Support/<organization>/<application> on macOS, and
 	// $XDG_CONFIG_HOME/<organization>/<application> on Linux, ~/.config/... when that isn't set to an
-	// absolute path. Empty, logged, for a name validFileName refuses or a root the environment doesn't
-	// give as an absolute path.
+	// absolute path. Where the environment doesn't give the root as an absolute path, the system's own
+	// answer: the known folder on Windows, the user's home from the password database on POSIX. Empty,
+	// logged, for a name validFileName refuses or a root neither gives.
 	std::filesystem::path userConfigDir(std::string_view organization, std::string_view application);
 
 	// The per-user data directory, for saves: beside the settings directory, not inside it, so clearing

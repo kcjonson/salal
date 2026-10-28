@@ -5,8 +5,11 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace app::testing {
 
@@ -57,25 +60,25 @@ namespace app::testing {
 		std::optional<std::string> previous;
 	};
 
-	// Every variable the per-user directories are read from, pointed under `root`.
+	// Every variable the per-user directories are read from, pointed under the root given, and put back after.
 	class ScopedUserRoots {
 	  public:
-	  explicit ScopedUserRoots(const std::filesystem::path& root)
-#ifdef _WIN32
-		  : config("APPDATA", (root / "Roaming").string()),
-			data("LOCALAPPDATA", (root / "Local").string()){}
-#else
-			: config("XDG_CONFIG_HOME", (root / "config").string()),
-			  data("XDG_DATA_HOME", (root / "data").string()),
-			  home("HOME", root.string()) {
+		explicit ScopedUserRoots(const std::filesystem::path& root) {
+			for (const auto& [name, value] : variablesUnder(root)) {
+				variables.push_back(std::make_unique<ScopedEnv>(name, value));
+			}
 		}
-#endif
 
-			private : ScopedEnv config;
-		ScopedEnv data;
-#ifndef _WIN32
-		ScopedEnv home;
+	  private:
+		static std::vector<std::pair<const char*, std::string>> variablesUnder(const std::filesystem::path& root) {
+#ifdef _WIN32
+			return {{"APPDATA", (root / "Roaming").string()}, {"LOCALAPPDATA", (root / "Local").string()}};
+#else
+			return {{"HOME", root.string()}, {"XDG_CONFIG_HOME", (root / "config").string()}, {"XDG_DATA_HOME", (root / "data").string()}};
 #endif
+		}
+
+		std::vector<std::unique_ptr<ScopedEnv>> variables;
 	};
 
 } // namespace app::testing
