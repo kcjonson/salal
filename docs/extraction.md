@@ -6,8 +6,8 @@ surveys. Updated 2026-10-26 with what phase 0.5 landed in worldsim, and again
 with how phase 1 is being executed and what scoping it turned up.
 
 This is the engine repo. `foundation` and `renderer` are imported (plain copies
-of worldsim at `870dd755` and `2cc7e40a`); `ui` and `app` are placeholders until
-their phases land. "Sequencing" below says where each stands.
+of worldsim at `870dd755` and `2cc7e40a`); phase 2 PRs 1 and 2 are in (`v0.10.0`,
+`v0.11.0`), and `ui` is a placeholder until its phase lands. "Sequencing" below says where each stands.
 
 ## Corrections in this revision (2026-10-25)
 
@@ -668,8 +668,10 @@ Follow-ups recorded and kept out of the moves, so the imports stay pure:
 ### Phase 2, carve out `app`
 
 Designed in [app-api.md](app-api.md), which sequences it as seven PRs, each a
-minor tag, with worldsim pinning once at the end. PR 1 is in (`v0.10.0`): the
-input types, the accumulator and `ActionMap` in `foundation/input/`.
+minor tag, with worldsim pinning once at the end. PRs 1 and 2 are in
+(`v0.10.0`, `v0.11.0`): the input types, the accumulator and `ActionMap` in
+`foundation/input/`, then the clock, the GLFW and headless platforms, the
+frame, the scene stack, overlays and the context object in `app`.
 
 The 16-file slice (`application/`, `scene/`, `input/`, `clipboard/`) plus what
 the consumers need from a frame owner and worldsim never built:

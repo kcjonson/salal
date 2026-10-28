@@ -240,8 +240,9 @@ and dropping `engine` from ui's link list were the last of phase 0.5
 the namespace is now `foundation::`), and the rest of the untangle landed on
 2026-10-25/26 ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291)
 through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)). Phase 2
-PR 1 is in (`v0.10.0`): the completed `Key`, the gamepad types, the snapshot,
-the accumulator and `ActionMap` are in `foundation/input/`.
+PRs 1 and 2 are in (`v0.10.0`, `v0.11.0`): the completed `Key`, the gamepad
+types, the snapshot, the accumulator and `ActionMap` are in `foundation/input/`,
+and `app`'s frame feeds the accumulator and hands each fixed tick its snapshot.
 
 ## E. ECS core
 

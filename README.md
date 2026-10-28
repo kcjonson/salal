@@ -10,8 +10,9 @@ everything else grows up out of, which is the job this repo has.
 ## Status
 
 **`foundation` and `renderer` are imported** from worldsim as plain copies,
-`v0.1.0` is tagged, and worldsim consumes it through FetchContent; `ui` and
-`app` are placeholders, with a sandbox stub and CI on Windows, macOS and Linux.
+`v0.1.0` is tagged, and worldsim consumes it through FetchContent; `app` is
+arriving in phase 2 and `ui` is a placeholder, with a one-scene sandbox and CI
+on Windows, macOS and Linux.
 The renderer backend boundary is designed in
 [docs/renderer-boundary.md](docs/renderer-boundary.md), and its first PR is in
 progress.

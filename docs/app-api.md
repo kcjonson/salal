@@ -52,7 +52,7 @@ Not in phase 2:
 | worldsim `libs/engine/input` | `InputManager` (singleton, six GLFW callbacks, per-frame edge maps) | 903 |
 | worldsim `libs/engine/clipboard` | `ClipboardManager`, implementing `UI::IClipboard` over GLFW | 62 |
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
-| salal `libs/app`, `apps/sandbox` | placeholders: `app::layerDepth()`, a `main` that returns it | |
+| salal `libs/app`, `apps/sandbox` | phase 2 PR 2: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; a sandbox that runs one scene on GLFW | 1,878 |
 | salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1) | 763 |
 
 What changed since app-carve-out.md's survey, and matters here:
@@ -115,7 +115,22 @@ public:
 };
 class ManualClock final : public Clock { public: double now() const override; void advance(double seconds); };
 
-class Platform; // window, context, callbacks into Input, gamepad polling, clipboard, present, vsync, focus; no GLFW type in the header
+class PlatformEvents { // what a platform reports while it polls; the App is the one listener
+public:
+	virtual void inputEvent(const foundation::InputEvent&) = 0;           // arrival order, stamped with the platform's clock
+	virtual void framebufferResized(const Renderer::Viewport&) = 0;
+};
+class Platform { // window, context, callbacks into Input, gamepad polling, clipboard, present, vsync, focus; no GLFW type in the header
+public:
+	virtual const Clock& clock() const = 0;
+	virtual Renderer::Viewport viewport() const = 0;
+	virtual std::unique_ptr<Renderer::backend::Backend> createBackend() = 0; // handed to Primitives; null, logged, on failure
+	virtual void pollEvents(PlatformEvents&) = 0;
+	virtual bool focused() const = 0;
+	virtual bool closeRequested() const = 0;
+	virtual void present() = 0;
+	virtual void setVsync(bool) = 0;
+};
 std::unique_ptr<Platform> createGlfwPlatform(const WindowConfig&); // GLBackend::create() inside
 class HeadlessPlatform final : public Platform { // NullBackend, no window
 public:
@@ -136,7 +151,7 @@ struct WindowConfig {
 struct FrameConfig {
 	double fixedStep = 1.0 / 60.0; // seconds per fixed tick; asteroids sets 1.0 / 120.0
 	double maxFrameDelta = 0.25;   // a longer frame counts as this long (worldsim's clamp today)
-	int maxTicksPerFrame = 8;      // past this the remainder is dropped: the sim runs slower than wall time instead of spiralling
+	int maxTicksPerFrame = 8;      // past this the whole steps left are dropped, the part of a step kept for alpha: the sim runs slower than wall time instead of spiralling
 	int frameCapHz = 0;            // 0 is vsync alone; worldsim sets 120 (its sleep-then-spin pacing, Windows timeBeginPeriod)
 	bool freezeTicksOnFocusLoss = true;
 };
@@ -159,7 +174,7 @@ CommandLine parseCommandLine(int argc, char** argv); // --http-port enables the 
 
 class App {
 public:
-	static std::unique_ptr<App> create(AppConfig, std::unique_ptr<Platform>); // also nullptr when a requested dev-server port is busy
+	static std::unique_ptr<App> create(AppConfig, std::unique_ptr<Platform>); // also nullptr when a requested dev-server port is busy, or while another App lives (Primitives are module-static)
 	bool tick();              // one frame (below); false once exit is requested or the window closes
 	void run();               // the native runner: while (tick()) pace();
 	void shutdown();          // scenes top-down, then overlays, onExit; GL and the server stay up until ~App
@@ -225,8 +240,8 @@ public:
    frame that had none; later ticks in the same frame see only held state. On
    a paused or frozen frame the tick reader is consumed and discarded, so a
    press made during a pause doesn't fire on resume.
-8. `update(FrameContext)` on overlays and the top scene with `realDelta`,
-   unless paused.
+8. `update(FrameContext)` on the top scene, then the overlays, with
+   `realDelta`, unless paused (worldsim's order).
 9. `Primitives::beginFrame`, `clear(clearColor)`, render the stack from the
    topmost opaque scene upward, then overlays, then `Primitives::endFrame`.
    The top scene renders with `alpha = accumulator / fixedStep`; a covered
@@ -433,7 +448,7 @@ public:
 	std::string_view topName() const;
 };
 
-class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today's IOverlay, owned by the App */ };
+class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today's IOverlay, owned by the App; onExit at shutdown */ };
 }
 ```
 
@@ -441,7 +456,11 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   switches scene switches in the same frame, as today. A `replace`, `reset` or
   `switchTo` discards the changes queued before it in that frame, so two
   switches in one frame build and enter only the last scene, as today
-  (`SceneManager.cpp:48`); pushes and pops queue in order.
+  (`SceneManager.cpp:48`); pushes and pops queue in order. A change asked
+  for while changes apply (from an `onEnter`, say) waits for the next frame,
+  as a switch from worldsim's `onEnter` does today. The first scene, pushed
+  before the first frame, enters in that frame's step 6, where worldsim enters
+  it inside `AppLauncher::initialize` (`:371`).
 - Only the top scene receives events, fixed ticks and update. Covered scenes
   render, from the topmost opaque one up.
 - Arguments and results are typed per scene and checked at compile time:
