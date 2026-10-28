@@ -1,21 +1,22 @@
 #pragma once
 
-// PNG encoding helpers, centralized so STB_IMAGE_WRITE_IMPLEMENTATION lives in
-// exactly one translation unit (PngEncoder.cpp). Pixels are RGBA8, 4 bytes each.
+// PNG encoding. PngEncoder.cpp is the one STB_IMAGE_WRITE_IMPLEMENTATION in anything that links the
+// renderer, so a game encodes through these rather than compiling stb_image_write itself. Pixels are
+// RGBA8, four bytes each, rows packed.
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
-namespace Foundation { // NOLINT(readability-identifier-naming)
+namespace Renderer {
 
-	// Flip RGBA8 rows vertically (GL bottom-left origin -> image top-left origin).
+	// The rows in reverse order: GL reads the bottom row first, an image starts at the top. Empty for
+	// a size that isn't positive.
 	std::vector<unsigned char> flipRowsRGBA(const unsigned char* rgba, int width, int height);
 
-	// Encode RGBA8 pixels (top-left origin) to PNG bytes in memory. Empty on failure.
+	// PNG bytes for pixels whose first row is the top; empty on failure.
 	std::vector<unsigned char> encodePngToMemory(const unsigned char* rgba, int width, int height);
 
-	// Write RGBA8 pixels (top-left origin) to a PNG file. Returns false on failure.
+	// The same, written to `path`; false on failure.
 	bool writePngToFile(const unsigned char* rgba, int width, int height, const std::string& path);
 
-} // namespace Foundation
+} // namespace Renderer

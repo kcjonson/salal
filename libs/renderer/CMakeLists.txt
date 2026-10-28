@@ -12,6 +12,7 @@ add_library(salal_renderer STATIC
     primitives/Stroke.cpp
     font/FontRenderer.cpp
     stb_image.cpp
+    PngEncoder.cpp
     metrics/MetricsCollector.cpp
     metrics/PerformanceMetrics.cpp
     metrics/GPUTimer.cpp
@@ -79,6 +80,8 @@ set_target_properties(salal_shader_assembly salal_shader_assembler PROPERTIES FO
 salal_add_tests(renderer)
 if(TARGET salal_renderer_tests)
     target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw salal_shader_assembly)
+    # PngEncoder.test.cpp decodes what it encoded with stb_image.
+    target_include_directories(salal_renderer_tests PRIVATE ${Stb_INCLUDE_DIR})
     # The base shader as a consumer with no hooks gets it, for every fixture, and again
     # with the test hook in tests/hooks/, which ShaderHooks.test.cpp draws with (its HEADER in a
     # folder, as a consumer may put it).
