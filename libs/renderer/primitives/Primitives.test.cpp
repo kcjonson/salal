@@ -423,6 +423,39 @@ namespace Renderer {
 		}
 	}
 
+	TEST_F(PrimitivesDrawTest, TwoTranslucentPolygonsSharingAnEdgeShowADenserBandAlongIt) {
+		// The feather's trade: at alpha 0.5 over transparent each fill stores 128, and along
+		// the shared diagonal each one's ring lies over the other's fill, up to
+		// 0.5 + 0.5 * 0.5 = 0.75 (191) where the ring starts. Away from it, one cover.
+		const std::array<Foundation::Vec2, 3> first = {{{8.3F, 8.2F}, {24.7F, 8.2F}, {8.3F, 24.9F}}};
+		const std::array<Foundation::Vec2, 3> second = {{{24.7F, 8.2F}, {24.7F, 24.9F}, {8.3F, 24.9F}}};
+		const Foundation::Color				  fill(1.0F, 1.0F, 1.0F, 0.5F);
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			Primitives::drawPolygon({.vertices = first, .style = {.fill = fill}});
+			Primitives::drawPolygon({.vertices = second, .style = {.fill = fill}});
+		});
+		// Signed distance from the shared diagonal, 16.7 x + 16.4 y = 16.7 * 24.7 + 16.4 * 8.2.
+		const auto fromDiagonal = [](int x, int y) {
+			const float cx = static_cast<float>(x) + 0.5F;
+			const float cy = static_cast<float>(y) + 0.5F;
+			return ((16.7F * cx) + (16.4F * cy) - ((16.7F * 24.7F) + (16.4F * 8.2F))) / std::hypot(16.7F, 16.4F);
+		};
+		int denser = 0;
+		for (int y = 10; y < 23; ++y) {
+			for (int x = 10; x < 23; ++x) {
+				const int	alpha = pixel(x, y)[3];
+				const float away = std::abs(fromDiagonal(x, y));
+				EXPECT_LE(alpha, 192) << x << ", " << y;
+				if (away > 1.5F) {
+					EXPECT_NEAR(alpha, 128, 1) << x << ", " << y;
+				} else if (alpha > 140) {
+					++denser;
+				}
+			}
+		}
+		EXPECT_GT(denser, 8);
+	}
+
 	TEST_F(PrimitivesDrawTest, ClearStoresPremultipliedColour) {
 		RenderTarget half = RenderTarget::create(kSize, kSize);
 		ASSERT_TRUE(half.isValid());

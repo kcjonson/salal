@@ -289,11 +289,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// with its boundary, so a silhouette drawn every frame under PushTransform costs
 		// one tessellation. The fill is anti-aliased by a ring one device pixel wide
 		// outside its boundary, the fill colour fading to transparent across it, so it
-		// covers its area plus about half a pixel along its edge; two opaque polygons that
-		// share an edge show no seam. A border is a closed stroke with miter joins
-		// (strokeOutline) whose outer edge runs its width outside the outline and whose
-		// inner edge runs a pixel inside, over the fill's edge, so no background shows
-		// between them; a notch is mitered into its corner.
+		// covers its area plus about half a pixel along its edge. Two opaque polygons
+		// that share an edge show no seam; two translucent ones show a band about a pixel
+		// wide along it, denser than either, where each one's ring lies over the other's
+		// fill. A fill whose boundary doesn't close into loops, as where the outline
+		// touches itself at a point, is drawn aliased, and a debug log says so once.
+		//
+		// A border is drawPolyline's stroke, closed and mitered (strokeOutline), so its
+		// pieces overlap where drawPolyline's do. Its outer edge runs its width outside the
+		// outline and its inner edge a pixel inside, over the fill's edge, so no background
+		// shows between them. A notch is mitered into its corner, except beside an edge
+		// too short for its cut, where it is round with a flat piece into the corner.
 		void drawPolygon(const PolygonArgs& args);
 
 		// Arguments for DrawPolyline
