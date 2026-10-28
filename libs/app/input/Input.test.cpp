@@ -391,21 +391,29 @@ namespace app::testing {
 		}
 	}
 
-	// The layout's label wins for the main block, ASCII letters uppercased; Space and the keypad keep
+	// The layout's label wins for the main block, small letters capitalised; Space and the keypad keep
 	// their names, and an empty label falls back.
 	TEST_F(InputTest, TheLayoutsLabelNamesTheMainBlock) {
 		start();
 		platform->setKeyLabel(Key::Q, "a");				   // AZERTY
-		platform->setKeyLabel(Key::Semicolon, "\xC3\xB6"); // German o umlaut
+		platform->setKeyLabel(Key::Semicolon, "\xC3\xB6"); // German o umlaut, U+00F6
+		platform->setKeyLabel(Key::Num2, "\xC3\xA9");	   // AZERTY e acute, U+00E9
+		platform->setKeyLabel(Key::A, "\xD1\x84");		   // Cyrillic ef, U+0444
+		platform->setKeyLabel(Key::W, "\xCF\x82");		   // Greek final sigma, U+03C2
+		platform->setKeyLabel(Key::Equal, "\xC3\xB7");	   // division sign, U+00F7, no capital
 		platform->setKeyLabel(Key::Kp1, "1");
 		platform->setKeyLabel(Key::Space, " ");
 		platform->setKeyLabel(Key::Minus, "");
 		EXPECT_EQ(input().keyName(Key::Q), "A");
-		EXPECT_EQ(input().keyName(Key::Semicolon), "\xC3\xB6");
+		EXPECT_EQ(input().keyName(Key::Semicolon), "\xC3\x96"); // U+00D6
+		EXPECT_EQ(input().keyName(Key::Num2), "\xC3\x89");		// U+00C9
+		EXPECT_EQ(input().keyName(Key::A), "\xD0\xA4");			// U+0424
+		EXPECT_EQ(input().keyName(Key::W), "\xCE\xA3");			// U+03A3
+		EXPECT_EQ(input().keyName(Key::Equal), "\xC3\xB7");
 		EXPECT_EQ(input().keyName(Key::Kp1), "Keypad 1");
 		EXPECT_EQ(input().keyName(Key::Space), "Space");
 		EXPECT_EQ(input().keyName(Key::Minus), "-");
-		EXPECT_EQ(input().keyName(Key::W), "W");
+		EXPECT_EQ(input().keyName(Key::E), "E");
 	}
 
 	// --- Capture ---

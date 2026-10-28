@@ -3,11 +3,11 @@
 #include "platform/Platform.h"
 
 #include <utils/Log.h>
+#include <utils/Utf8.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <string_view>
-#include <utility>
 
 namespace app {
 
@@ -159,13 +159,30 @@ namespace app {
 			return key >= Key::Apostrophe && key <= Key::World2;
 		}
 
-		std::string uppercaseAscii(std::string label) {
-			for (char& c : label) {
-				if (c >= 'a' && c <= 'z') {
-					c = static_cast<char>(c - 'a' + 'A');
-				}
+		// The capital of a small letter in ASCII, the Latin-1 Supplement, Greek or Cyrillic, the scripts
+		// most layouts print on their main block; anything else as it is.
+		char32_t capital(char32_t c) {
+			if ((c >= U'a' && c <= U'z') || (c >= 0xE0 && c <= 0xFE && c != 0xF7)) {
+				return c - 0x20;
 			}
-			return label;
+			if (c == 0x3C2) {
+				return 0x3A3; // final sigma
+			}
+			if ((c >= 0x3B1 && c <= 0x3CB) || (c >= 0x430 && c <= 0x44F)) {
+				return c - 0x20;
+			}
+			if (c >= 0x450 && c <= 0x45F) {
+				return c - 0x50;
+			}
+			return c;
+		}
+
+		std::string capitalised(const std::string& label) {
+			std::string capitals;
+			for (const char32_t c : foundation::UTF8::decode(label)) {
+				capitals += foundation::UTF8::encode(capital(c));
+			}
+			return capitals;
 		}
 
 		[[maybe_unused]] const char* kindName(DeviceKind kind) {
@@ -274,7 +291,7 @@ namespace app {
 		}
 		if (layoutLabels(key)) {
 			if (std::optional<std::string> label = platform.keyLabel(key); label && !label->empty()) {
-				return uppercaseAscii(std::move(*label));
+				return capitalised(*label);
 			}
 		}
 		return std::string(kKeyNames[index]);

@@ -65,9 +65,10 @@ namespace app {
 		// Claimed, with its device connected: false for a free slot and for one waiting for its pad.
 		bool slotConnected(int slot) const;
 
-		// What to show for a key: the layout's label for the keys it prints (the main block, ASCII
-		// letters uppercased so they match the table), else a fixed English name ("Left Shift",
-		// "Keypad 0", "Page Up"). "Unknown" for Key::Unknown and anything out of range.
+		// What to show for a key: the layout's label for the keys it prints (the main block), its small
+		// letters capitalised as the table's are (ASCII, Latin-1, Greek and Cyrillic, by range), else a
+		// fixed English name ("Left Shift", "Keypad 0", "Page Up"). "Unknown" for Key::Unknown and
+		// anything out of range.
 		std::string keyName(foundation::Key key) const;
 
 		// The next press this frame that an earlier call this frame hasn't returned, as a binding for a
