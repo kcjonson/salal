@@ -128,15 +128,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		void destroyTexture(TextureHandle handle);
 
-		// Set a callback to update frame counter for FontRenderer cache LRU tracking.
-		//
-		// The application registers FontRenderer::updateFrame() here when it creates
-		// the font renderer.
-		//
-		// The callback will be invoked by BeginFrame() before rendering.
-		using FrameUpdateCallback = void (*)();
-		void setFrameUpdateCallback(FrameUpdateCallback callback);
-
 		// --- Frame Lifecycle ---
 
 		// Clear the bound colour target to one colour, straight alpha like every colour
