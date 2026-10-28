@@ -32,11 +32,9 @@ namespace app {
 		// An hour. Far past it the wait's deadline overflows, and every parked request would 503 at once.
 		constexpr double kMaxRequestTimeout = 3600.0;
 
-		std::string dump(const nlohmann::ordered_json& json) {
-			return json.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
-		}
+		using detail::dump;
 
-		DevResponse okReply(nlohmann::ordered_json fields = nlohmann::ordered_json::object()) {
+		DevResponse okReply(const nlohmann::ordered_json& fields) {
 			nlohmann::ordered_json body{{"status", "ok"}};
 			body.update(fields);
 			return {.body = dump(body)};
@@ -235,12 +233,15 @@ namespace app {
 				return app.scenes().switchTo(scene) ? okReply({{"action", "scene"}, {"scene", scene}})
 													: errorReply(404, "no scene added as '" + scene + "'");
 			}
+			if (action == "reload") {
+				return app.scenes().reload()
+						   ? okReply({{"action", "reload"}})
+						   : errorReply(409, "the top scene can't be reloaded: there is none, or it was pushed with arguments");
+			}
 			if (action == "pause") {
 				app.pause();
 			} else if (action == "resume") {
 				app.resume();
-			} else if (action == "reload" && !app.scenes().reload()) {
-				return errorReply(409, "the top scene can't be reloaded: there is none, or it was pushed with arguments");
 			} else if (action == "vsync") {
 				const bool enabled = request.params.at("value") == "1";
 				app.setVsync(enabled);

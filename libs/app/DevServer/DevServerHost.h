@@ -17,6 +17,8 @@
 #include <metrics/PerformanceMetrics.h>
 #include <utils/Log.h>
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -59,8 +61,12 @@ namespace app::detail {
 		int						line = 0;
 	};
 
-	// The verb in /api/dev/<verb>, lowercased and cut at the next '/'; empty for any other path.
+	// The verb in /api/dev/<verb> (one path segment, as the route matches), lowercased; empty for any
+	// other path.
 	std::string parseDevVerb(const std::string& path);
+
+	// JSON text, with invalid UTF-8 in a log message or a name replaced rather than thrown over.
+	std::string dump(const nlohmann::ordered_json& json);
 
 	// {"error":<message>} with `status`.
 	DevResponse errorReply(int status, std::string_view message);

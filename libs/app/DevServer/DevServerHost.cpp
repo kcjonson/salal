@@ -25,11 +25,6 @@ namespace app::detail {
 		constexpr auto		  kStreamPoll = std::chrono::milliseconds(10);
 		constexpr auto		  kStreamInterval = std::chrono::milliseconds(100); // 10 Hz
 
-		// Invalid UTF-8 in a log message or a name is replaced, never thrown over.
-		std::string dump(const nlohmann::ordered_json& json) {
-			return json.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
-		}
-
 		DevResponse jsonReply(const nlohmann::ordered_json& json) {
 			return {.body = dump(json)};
 		}
@@ -148,15 +143,16 @@ namespace app::detail {
 )HTML";
 	} // namespace
 
+	std::string dump(const nlohmann::ordered_json& json) {
+		return json.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
+	}
+
 	std::string parseDevVerb(const std::string& path) {
 		constexpr std::string_view kPrefix = "/api/dev/";
 		if (path.size() <= kPrefix.size() || !path.starts_with(kPrefix)) {
 			return {};
 		}
 		std::string verb = path.substr(kPrefix.size());
-		if (const auto slash = verb.find('/'); slash != std::string::npos) {
-			verb = verb.substr(0, slash);
-		}
 		std::ranges::transform(verb, verb.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 		return verb;
 	}

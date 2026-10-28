@@ -41,7 +41,7 @@ namespace app {
 	} // namespace detail
 
 	struct DevServerConfig {
-		bool   enabled = false;		  // --http-port turns it on; ignored where the server isn't compiled in
+		bool   enabled = false;		  // the game sets it, from --http-port say; ignored where the server isn't compiled in
 		int	   port = 0;			  // 0 to 65535; 0 takes any free port, which DevServer::port() reports
 		double requestTimeout = 10.0; // seconds a request waits for the frame before it's answered 503 and dropped; at most an hour
 	};

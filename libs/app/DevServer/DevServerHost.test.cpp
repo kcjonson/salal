@@ -34,11 +34,6 @@ namespace app::detail {
 		EXPECT_EQ(parseDevVerb("/api/dev/SPAWN"), "spawn");
 	}
 
-	TEST(DevVerbTest, VerbTrimsExtraPathSegments) {
-		EXPECT_EQ(parseDevVerb("/api/dev/foundation/extra"), "foundation");
-		EXPECT_EQ(parseDevVerb("/api/dev/freebuild/"), "freebuild");
-	}
-
 	TEST(DevVerbTest, RejectsNonDevPaths) {
 		EXPECT_TRUE(parseDevVerb("/api/control").empty());
 		EXPECT_TRUE(parseDevVerb("/api/input").empty());
