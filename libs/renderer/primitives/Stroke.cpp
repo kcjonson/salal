@@ -269,9 +269,20 @@ namespace Renderer {
 						shade(piece, start, t, -startExtent, length + endExtent, startRound);
 						out.push_back(piece);
 					} else {
-						// Each half's SDF runs on a reach past the middle, so its own end is
-						// nowhere near the cut.
-						const float			   middle = length * 0.5F;
+						// The halves meet halfway along the free stretch between how far the
+						// start's cut reaches along the segment and where the end's begins (a
+						// pixel in from a cap or an uncut joint), which gives both cuts the most
+						// room. Each half's SDF runs on a reach past the middle, so its own end
+						// is nowhere near the cut.
+						float from = pixel;
+						float to = length - pixel;
+						if (startJoint != nullptr && startJoint->cut) {
+							from = std::max(glm::dot(startJoint->innerCut - start, t), glm::dot(startJoint->outerCut - start, t));
+						}
+						if (endJoint != nullptr && endJoint->cut) {
+							to = std::min(glm::dot(endJoint->innerCut - start, t), glm::dot(endJoint->outerCut - start, t));
+						}
+						const float			   middle = from < to ? (from + to) * 0.5F : length * 0.5F;
 						const Foundation::Vec2 middleRight = start + (t * middle) - (n * reach);
 						const Foundation::Vec2 middleLeft = start + (t * middle) + (n * reach);
 						StrokePiece			   first;

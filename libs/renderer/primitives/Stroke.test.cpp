@@ -228,16 +228,17 @@ TEST(StrokeTest, ARoundJointCutsAlongItsBisectorAndAButtCapSplitsItsSegment) {
 	ASSERT_EQ(pieces.size(), 4U);
 	// The joint's cut runs from (8, 2) to (12, -2): where strips a pixel wider than the
 	// stroke (reach 2) cross the 45-degree bisector. Butt cap beside round joint: each
-	// segment is a box half and a capsule half, cut across its middle, each SDF running
-	// a reach past it.
-	expectCorners(pieces[0], {{5.0F, -2.0F}, {5.0F, 2.0F}, {-1.0F, 2.0F}, {-1.0F, -2.0F}});
-	expectShape(pieces[0], {3.5F, 0.0F}, {1.0F, 0.0F}, 3.5F, 1.0F, 0.0F);
-	expectCorners(pieces[1], {{12.0F, -2.0F}, {8.0F, 2.0F}, {5.0F, 2.0F}, {5.0F, -2.0F}});
-	expectShape(pieces[1], {6.5F, 0.0F}, {1.0F, 0.0F}, 4.5F, 1.0F, 1.0F);
-	expectCorners(pieces[2], {{12.0F, 5.0F}, {8.0F, 5.0F}, {8.0F, 2.0F}, {12.0F, -2.0F}});
-	expectShape(pieces[2], {10.0F, 3.5F}, {0.0F, 1.0F}, 4.5F, 1.0F, 1.0F);
-	expectCorners(pieces[3], {{12.0F, 11.0F}, {8.0F, 11.0F}, {8.0F, 5.0F}, {12.0F, 5.0F}});
-	expectShape(pieces[3], {10.0F, 6.5F}, {0.0F, 1.0F}, 3.5F, 1.0F, 0.0F);
+	// segment is a box half and a capsule half, cut halfway between a pixel in from the
+	// cap and where the joint's cut begins along the segment, each SDF running a reach
+	// past the cut. Segment 0 splits at (1 + 8) / 2, segment 1 at (2 + 9) / 2.
+	expectCorners(pieces[0], {{4.5F, -2.0F}, {4.5F, 2.0F}, {-1.0F, 2.0F}, {-1.0F, -2.0F}});
+	expectShape(pieces[0], {3.25F, 0.0F}, {1.0F, 0.0F}, 3.25F, 1.0F, 0.0F);
+	expectCorners(pieces[1], {{12.0F, -2.0F}, {8.0F, 2.0F}, {4.5F, 2.0F}, {4.5F, -2.0F}});
+	expectShape(pieces[1], {6.25F, 0.0F}, {1.0F, 0.0F}, 4.75F, 1.0F, 1.0F);
+	expectCorners(pieces[2], {{12.0F, 5.5F}, {8.0F, 5.5F}, {8.0F, 2.0F}, {12.0F, -2.0F}});
+	expectShape(pieces[2], {10.0F, 3.75F}, {0.0F, 1.0F}, 4.75F, 1.0F, 1.0F);
+	expectCorners(pieces[3], {{12.0F, 11.0F}, {8.0F, 11.0F}, {8.0F, 5.5F}, {12.0F, 5.5F}});
+	expectShape(pieces[3], {10.0F, 6.75F}, {0.0F, 1.0F}, 3.25F, 1.0F, 0.0F);
 	// The cut and the middles are the same floats in both pieces.
 	EXPECT_TRUE(sameBits(pieces[1].corners[0], pieces[2].corners[3]));
 	EXPECT_TRUE(sameBits(pieces[1].corners[1], pieces[2].corners[2]));
@@ -582,4 +583,24 @@ TEST(StrokeTest, ABorderFoldedOverAFeatureNarrowerThanItDrawsNoSpike) {
 			}
 		}
 	}
+}
+
+TEST(StrokeTest, ASegmentBesideAButtCapSplitsWhereBothItsEndsFit) {
+	// drawPolyline's defaults on segments a little longer than one round joint's cut
+	// needs: split at their middle, the end segments' cut would not fit in half of them.
+	// Split along the free stretch, every joint stays cut.
+	std::vector<Foundation::Vec2> zigzag;
+	for (int i = 0; i < 12; ++i) {
+		zigzag.emplace_back(static_cast<float>(i) * 8.0F, (i % 2 == 0) ? 8.0F : 0.0F);
+	}
+	std::vector<StrokePiece> pieces;
+	for (const float width : {12.0F, 16.0F}) {
+		strokePolyline({.points = zigzag, .width = width}, 1.0F, pieces);
+		ASSERT_EQ(pieces.size(), 13U) << "width " << width;
+		expectAllCut(pieces, false);
+	}
+	const std::vector<Foundation::Vec2> hook = {{0.0F, 0.0F}, {10.0F, 0.0F}, {10.0F, 40.0F}, {50.0F, 40.0F}, {50.0F, 30.0F}};
+	strokePolyline({.points = hook, .width = 12.0F}, 1.0F, pieces);
+	ASSERT_EQ(pieces.size(), 6U);
+	expectAllCut(pieces, false);
 }
