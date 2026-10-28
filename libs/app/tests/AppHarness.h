@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <concepts>
+#include <cstddef>
 #include <cstdio>
 #include <functional>
 #include <map>
@@ -47,6 +48,18 @@ namespace app::testing {
 	// The journal so far, emptied.
 	inline std::vector<std::string> take() {
 		return std::exchange(journal(), {});
+	}
+
+	// The journal's first and last n entries, or as many as there are, so a short journal fails a comparison
+	// rather than reading past its end.
+	inline std::vector<std::string> head(std::size_t n) {
+		const std::vector<std::string>& all = journal();
+		return {all.begin(), all.begin() + static_cast<std::ptrdiff_t>(std::min(n, all.size()))};
+	}
+
+	inline std::vector<std::string> tail(std::size_t n) {
+		const std::vector<std::string>& all = journal();
+		return {all.end() - static_cast<std::ptrdiff_t>(std::min(n, all.size())), all.end()};
 	}
 
 	// What a test has a scene do, by the scene's name; each runs after the call is recorded.

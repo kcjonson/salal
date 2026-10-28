@@ -3,14 +3,17 @@
 // The App's scenes. Changes are queued and apply together once a frame, after dispatch and before
 // update (step 6 of the frame), in the order they were asked for, except that a replace, reset or
 // switchTo discards whatever was queued before it that frame. Changes asked for while they apply
-// (from an onEnter, say) wait for the next frame; while the App is paused they all wait for resume.
+// (from an onEnter or a result callback, say) wait for the next frame; while the App is paused they
+// all wait for resume.
 //
 // Scenes are built when their change applies, so of two switches in one frame only the last is
-// built. Arguments, results and result callbacks are typed per scene and may be move-only.
+// built. Arguments, results and result callbacks are typed per scene and may be move-only. A push
+// with a result callback remembers the scene on top when it was asked for, and is dropped, logged,
+// if that scene has left the stack by the time it applies, so a callback never outlives its pusher.
 //
 // Names are for the command line, the dev server and reload. A scene added by name has a factory
-// with no arguments; a scene pushed by type is known by the name its type was added under, if any.
-// A scene that needs arguments has no name.
+// that takes no arguments. A NoArgs scene pushed by type is known by the name its type was added
+// under, if any; a scene pushed with arguments has no name, so reload never rebuilds it without them.
 
 #include "detail/TypeKey.h"
 #include "scene/Scene.h"
@@ -93,7 +96,6 @@ namespace app {
 	  public:
 		using Factory = std::function<std::unique_ptr<Scene>()>;
 
-		explicit SceneStack(App& owner);
 		~SceneStack();
 
 		SceneStack(const SceneStack&) = delete;
@@ -104,9 +106,10 @@ namespace app {
 		// By name, for what worldsim registers (its scene classes live in .cpp files). A second add
 		// under one name replaces the first.
 		void add(std::string name, Factory factory);
-		// The same, for a complete type with no arguments; pushed by type, it is known by this name.
+		// The same, for a complete type whose Args default: the name builds it with Args{}. A NoArgs
+		// scene pushed by type is known by this name.
 		template <StackScene S>
-			requires std::same_as<typename S::Args, NoArgs>
+			requires std::default_initializable<typename S::Args>
 		void add(std::string name);
 
 		// Covers the top scene with S.
@@ -128,7 +131,8 @@ namespace app {
 		// Resets to the scene added under `name`; false, logged, with nothing queued or discarded, for a
 		// name nothing was added under.
 		bool switchTo(std::string_view name);
-		// Rebuilds the top scene by its name, as a replace; false for an empty stack or an unnamed scene.
+		// Rebuilds the top scene by its name, as a replace, so a result callback it was pushed with is
+		// dropped without running; false for an empty stack or an unnamed scene.
 		bool reload();
 
 		// The top scene as of the last applied change; null when the stack is empty.
@@ -139,6 +143,8 @@ namespace app {
 		friend class App;
 		friend class Scene;
 
+		explicit SceneStack(App& owner);
+
 		enum class ChangeKind : std::uint8_t { Push, Pop, Finish, Replace, Reset };
 
 		struct Change {
@@ -146,6 +152,7 @@ namespace app {
 			std::unique_ptr<detail::SceneBuilder>	builder;
 			std::string								name;
 			std::unique_ptr<detail::ResultCallback> onResult;
+			std::uint64_t							requester = 0; // a push with a callback: the scene on top when it was asked for
 			std::uint64_t							finisher = 0;
 			std::unique_ptr<detail::ResultBox>		result;
 		};
@@ -163,7 +170,7 @@ namespace app {
 			return {
 				.kind = kind,
 				.builder = std::make_unique<detail::TypedSceneBuilder<S>>(std::move(args)),
-				.name = nameFor(detail::typeKey<S>()),
+				.name = std::same_as<typename S::Args, NoArgs> ? nameFor(detail::typeKey<S>()) : std::string{},
 			};
 		}
 
@@ -172,10 +179,18 @@ namespace app {
 		void		queue(Change change);
 		void		queueFinish(std::uint64_t finisher, std::unique_ptr<detail::ResultBox> result);
 
-		// For the App: step 6, with the top scene's alpha now, which a scene it covers keeps.
+		std::uint64_t topId() const { return entries.empty() ? 0 : entries.back().scene->stackId; }
+		bool		  holds(std::uint64_t id) const;
+
+		// For the App. Step 6, with the top scene's alpha now, which a scene it covers keeps.
 		void   apply(float liveAlpha);
 		Entry* topEntry() { return entries.empty() ? nullptr : &entries.back(); }
-		// For App::shutdown: every scene exits, top down, and nothing queued applies.
+		// Every stacked scene's onResize, top down.
+		void resized(const Renderer::Viewport& viewport);
+		// The stack from its topmost opaque scene up, the top at liveAlpha and each covered scene at the
+		// alpha it had when covered.
+		void render(float liveAlpha);
+		// App::shutdown: every scene exits, top down, and nothing queued applies.
 		void exitAll();
 
 		void				   pushBuilt(Change& change, float liveAlpha);
@@ -197,9 +212,13 @@ namespace app {
 	};
 
 	template <StackScene S>
-		requires std::same_as<typename S::Args, NoArgs>
+		requires std::default_initializable<typename S::Args>
 	void SceneStack::add(std::string name) {
-		addNamed(std::move(name), [] { return std::make_unique<S>(); }, detail::typeKey<S>());
+		if constexpr (std::same_as<typename S::Args, NoArgs>) {
+			addNamed(std::move(name), [] { return std::make_unique<S>(); }, detail::typeKey<S>());
+		} else {
+			addNamed(std::move(name), [] { return std::make_unique<S>(typename S::Args{}); }, nullptr);
+		}
 	}
 
 	template <StackScene S>
@@ -212,6 +231,7 @@ namespace app {
 	void SceneStack::push(typename S::Args args, F onResult) {
 		Change change = buildChange<S>(ChangeKind::Push, std::move(args));
 		change.onResult = std::make_unique<detail::TypedResultCallback<typename S::Result, F>>(std::move(onResult));
+		change.requester = topId();
 		queue(std::move(change));
 	}
 

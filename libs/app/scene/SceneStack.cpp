@@ -5,6 +5,7 @@
 #include <utils/Log.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
 
 namespace app {
@@ -133,15 +134,48 @@ namespace app {
 		}
 	}
 
+	// What scenes ask for as they exit is dropped with the rest.
 	void SceneStack::exitAll() {
-		pending.clear();
 		while (!entries.empty()) {
 			exitTop();
 		}
 		pending.clear();
 	}
 
+	bool SceneStack::holds(std::uint64_t id) const {
+		return std::ranges::any_of(entries, [&](const Entry& entry) { return entry.scene->stackId == id; });
+	}
+
+	void SceneStack::resized(const Renderer::Viewport& viewport) {
+		for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+			Scene& scene = *it->scene;
+			detail::guard(scene.name(), "onResize", [&] { scene.onResize(viewport); });
+		}
+	}
+
+	void SceneStack::render(float liveAlpha) {
+		std::size_t first = entries.size();
+		while (first > 0) {
+			Scene& scene = *entries[first - 1].scene;
+			bool   opaque = true;
+			detail::guard(scene.name(), "opaque", [&] { opaque = scene.opaque(); });
+			--first;
+			if (opaque) {
+				break;
+			}
+		}
+		for (std::size_t i = first; i < entries.size(); ++i) {
+			Scene&		scene = *entries[i].scene;
+			const float alpha = i + 1 == entries.size() ? liveAlpha : entries[i].coveredAlpha;
+			detail::guard(scene.name(), "render", [&] { scene.render(alpha); });
+		}
+	}
+
 	void SceneStack::pushBuilt(Change& change, float liveAlpha) {
+		if (change.requester != 0 && !holds(change.requester)) {
+			LOG_WARNING(Engine, "A push with a result callback was dropped: the scene that asked for it has left the stack");
+			return;
+		}
 		std::unique_ptr<Scene> scene = build(*change.builder, change.name);
 		if (scene == nullptr) {
 			return;
@@ -168,11 +202,13 @@ namespace app {
 			LOG_ERROR(Engine, "A scene finished that isn't the top one; it stays, and its result is dropped");
 			return;
 		}
-		const std::string label = entries.back().scene->name();
-		const Entry		  finished = exitTop();
+		// Off the stack before its callback runs, so top() is the pusher, but alive until after, so a
+		// result that points into the scene is still good in the callback.
+		Entry finished = exitTop();
 		if (finished.onResult != nullptr) {
-			detail::guard(label.c_str(), "onResult", [&] { finished.onResult->deliver(*change.result); });
+			detail::guard(finished.scene->name(), "onResult", [&] { finished.onResult->deliver(*change.result); });
 		}
+		finished.scene.reset();
 		uncoverTop();
 	}
 
@@ -217,15 +253,15 @@ namespace app {
 		detail::guard(entered.name(), "onEnter", [&] { entered.onEnter(app); });
 	}
 
-	// The scene exits while still on top, then leaves the stack and is destroyed; what it was pushed
-	// with comes back for finishTop.
+	// The scene exits while still on top, then leaves the stack; it is destroyed with the entry this
+	// returns, which a caller that ignores it drops at once.
 	SceneStack::Entry SceneStack::exitTop() {
 		Scene& exiting = *entries.back().scene;
 		LOG_INFO(Engine, "Exiting scene: %s", exiting.name());
 		detail::guard(exiting.name(), "onExit", [&] { exiting.onExit(); });
+		exiting.stack = nullptr;
 		Entry entry = std::move(entries.back());
 		entries.pop_back();
-		entry.scene.reset();
 		return entry;
 	}
 

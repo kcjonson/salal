@@ -8,7 +8,9 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -23,6 +25,9 @@ namespace app::testing {
 		inline constexpr char kPicker[] = "Picker";
 		inline constexpr char kArena[] = "Arena";
 		inline constexpr char kMenu[] = "Menu";
+		inline constexpr char kChooser[] = "Chooser";
+		inline constexpr char kMiddle[] = "Middle";
+		inline constexpr char kShop[] = "Shop";
 
 		using SceneA = Recording<kA>;
 		using SceneB = Recording<kB>;
@@ -35,6 +40,31 @@ namespace app::testing {
 			std::unique_ptr<int> ships;
 		};
 		using Arena = Recording<kArena, Loadout>;
+
+		// A chooser owns its options and returns a view into them.
+		struct Options {
+			std::string text;
+		};
+		using Chooser = Recording<kChooser, Options, std::string_view>;
+
+		// A scene between its pusher and a picker, passing the picker's result on.
+		using Middle = Recording<kMiddle, NoArgs, std::unique_ptr<int>>;
+
+		// dual-deck-builder's screen that enters cold, loading the save, when no campaign is handed in.
+		struct Campaign {
+			std::optional<int> campaign;
+		};
+		using Shop = Recording<kShop, Campaign>;
+
+		// Records its own destruction, for a callback that is dropped without running.
+		struct Sentinel {
+			Sentinel() = default;
+			Sentinel(const Sentinel&) = delete;
+			Sentinel& operator=(const Sentinel&) = delete;
+			Sentinel(Sentinel&&) = delete;
+			Sentinel& operator=(Sentinel&&) = delete;
+			~Sentinel() { record("sentinel", "destroyed"); }
+		};
 
 		// What a frame did, less its updates and renders, which most tests here don't look at.
 		std::vector<std::string> changes() {
@@ -127,6 +157,7 @@ namespace app::testing {
 	TEST_F(AppTest, ACoveredSceneRendersWithTheAlphaItHadWhenCovered) {
 		start();
 		app->scenes().push<SceneA>();
+		frame(0.0);
 		frame(kStep / 4);
 		EXPECT_EQ(journal().back(), "A.render 0.25");
 
@@ -135,19 +166,24 @@ namespace app::testing {
 		EXPECT_EQ(count("A.render 0.25"), 2);
 		EXPECT_EQ(journal().back(), "Menu.render 0.75");
 
-		frame(kStep / 2); // the menu ticks once; the arena under it holds still
+		frame(kStep / 8);
 		EXPECT_EQ(count("A.render 0.25"), 3);
+		EXPECT_EQ(journal().back(), "Menu.render 0.875");
+
+		frame(kStep / 2); // the menu ticks once; the arena under it holds still
+		EXPECT_EQ(count("A.render 0.25"), 4);
 		EXPECT_EQ(count("Menu.fixedUpdate 0"), 1);
-		EXPECT_EQ(journal().back(), "Menu.render 0.25");
+		EXPECT_EQ(journal().back(), "Menu.render 0.375");
 
 		app->scenes().pop();
 		frame(kStep / 2);
-		EXPECT_EQ(journal().back(), "A.render 0.75");
+		EXPECT_EQ(journal().back(), "A.render 0.875");
 	}
 
 	TEST_F(AppTest, EachScenesTickCountIsItsOwn) {
 		start();
 		app->scenes().push<SceneA>();
+		frame(0.0);
 		frame(2 * kStep);
 		app->scenes().push<SceneB>();
 		frame(kStep);
@@ -221,10 +257,146 @@ namespace app::testing {
 
 		top<Picker>().finish(std::make_unique<int>(42));
 		frame(0.0);
-		const std::vector<std::string> expected{"Picker.onExit", "Picker.destroyed", "callback.42", "A.onUncovered"};
+		const std::vector<std::string> expected{"Picker.onExit", "callback.42", "Picker.destroyed", "A.onUncovered"};
 		EXPECT_EQ(changes(), expected);
 		ASSERT_NE(got, nullptr);
 		EXPECT_EQ(*got, 42);
+	}
+
+	TEST_F(AppTest, AResultThatPointsIntoTheFinishedSceneIsGoodInTheCallback) {
+		start();
+		app->scenes().push<SceneA>();
+		std::string got;
+		std::string topInCallback;
+		app->scenes().push<Chooser>({.text = "second option"}, [&](std::string_view chosen) {
+			got = std::string(chosen);
+			topInCallback = app->scenes().top()->name();
+			record("callback", got);
+		});
+		frame(0.0);
+		take();
+
+		Chooser& chooser = top<Chooser>();
+		chooser.finish(std::string_view(chooser.args.text));
+		frame(0.0);
+		EXPECT_EQ(got, "second option");
+		EXPECT_EQ(topInCallback, "A"); // off the stack already, so top() is the pusher
+		const std::vector<std::string> expected{"Chooser.onExit", "callback.second option", "Chooser.destroyed", "A.onUncovered"};
+		EXPECT_EQ(changes(), expected);
+	}
+
+	TEST_F(AppTest, APushWithACallbackIsDroppedWhenItsPusherHasLeftTheStack) {
+		start();
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		take();
+
+		// The arena asked to leave, and before that applied, still on top, opened a menu with a callback
+		// into itself: the menu would outlive it.
+		app->scenes().replace<SceneC>();
+		std::unique_ptr<int> got;
+		app->scenes().push<Picker>({}, recordResult(got));
+		frame(0.0);
+		EXPECT_EQ(count("Picker.built"), 0);
+		EXPECT_EQ(app->scenes().top()->name(), std::string("C"));
+		EXPECT_EQ(count("A.destroyed"), 1);
+	}
+
+	TEST_F(AppTest, APushWithACallbackGoesAheadWhileItsPusherIsStillStacked) {
+		start();
+		app->scenes().push<SceneA>();
+		frame(0.0);
+
+		app->scenes().push<SceneB>();
+		std::unique_ptr<int> got;
+		app->scenes().push<Picker>({}, recordResult(got));
+		frame(0.0);
+		ASSERT_EQ(app->scenes().top()->name(), std::string("Picker"));
+		top<Picker>().finish(std::make_unique<int>(9));
+		frame(0.0);
+		ASSERT_NE(got, nullptr);
+		EXPECT_EQ(*got, 9);
+		EXPECT_EQ(app->scenes().top()->name(), std::string("B"));
+	}
+
+	TEST_F(AppTest, ACallbackThatPushesLeavesThePusherOnTopForAFrame) {
+		start();
+		app->scenes().push<SceneA>();
+		app->scenes().push<Picker>({}, [this](std::unique_ptr<int> /*result*/) {
+			record("callback", "pushes B");
+			app->scenes().push<SceneB>();
+		});
+		frame(0.0);
+		top<Picker>().finish(std::make_unique<int>(1));
+		take();
+
+		frame(0.0);
+		const std::vector<std::string> thisFrame{
+			"Picker.onExit", "callback.pushes B", "Picker.destroyed", "A.onUncovered", "A.update", "A.render 0"
+		};
+		EXPECT_EQ(take(), thisFrame);
+		frame(0.0);
+		EXPECT_EQ(head(3), (std::vector<std::string>{"B.built", "A.onCovered", "B.onEnter"}));
+	}
+
+	TEST_F(AppTest, ACallbackThatFinishesItsPusherPassesTheResultOn) {
+		start();
+		app->scenes().push<SceneA>();
+		std::unique_ptr<int> got;
+		app->scenes().push<Middle>({}, recordResult(got));
+		frame(0.0);
+		app->scenes().push<Picker>({}, [this](std::unique_ptr<int> result) {
+			record("middle", "passes " + std::to_string(*result));
+			top<Middle>().finish(std::move(result));
+		});
+		frame(0.0);
+		top<Picker>().finish(std::make_unique<int>(5));
+		take();
+
+		frame(0.0);
+		EXPECT_EQ(count("middle.passes 5"), 1);
+		EXPECT_EQ(count("callback"), 0); // the middle's finish applies next frame
+		EXPECT_EQ(app->scenes().top()->name(), std::string("Middle"));
+		frame(0.0);
+		ASSERT_NE(got, nullptr);
+		EXPECT_EQ(*got, 5);
+		EXPECT_EQ(app->scenes().top()->name(), std::string("A"));
+	}
+
+	TEST_F(AppTest, ASwitchDropsAQueuedPushsCallbackWithoutRunningIt) {
+		start();
+		app->scenes().add<SceneC>("c");
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		take();
+
+		app->scenes().push<Picker>({}, [sentinel = std::make_unique<Sentinel>()](std::unique_ptr<int> /*result*/) {
+			record("callback", "ran");
+		});
+		ASSERT_TRUE(app->scenes().switchTo("c"));
+		EXPECT_EQ(count("sentinel.destroyed"), 1);
+		frame(0.0);
+		EXPECT_EQ(count("Picker.built"), 0);
+		EXPECT_EQ(count("callback"), 0);
+	}
+
+	TEST_F(AppTest, AReplaceOrResetDiscardsWhatWasQueuedBeforeIt) {
+		start();
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		take();
+
+		app->scenes().push<SceneB>();
+		app->scenes().replace<SceneC>();
+		frame(0.0);
+		EXPECT_EQ(count("B.built"), 0);
+		EXPECT_EQ(app->scenes().top()->name(), std::string("C"));
+
+		app->scenes().push<SceneB>();
+		app->scenes().reset<SceneD>();
+		frame(0.0);
+		EXPECT_EQ(count("B.built"), 0);
+		EXPECT_EQ(app->scenes().top()->name(), std::string("D"));
 	}
 
 	TEST_F(AppTest, MoveOnlyArgsReachTheScene) {
@@ -315,7 +487,7 @@ namespace app::testing {
 		ASSERT_TRUE(app->scenes().reload());
 		frame(kStep);
 		const std::vector<std::string> rebuilt{"A.onExit", "A.destroyed", "A.built", "A.onEnter", "A.fixedUpdate 0"};
-		EXPECT_EQ(std::vector<std::string>(journal().begin(), journal().begin() + 5), rebuilt);
+		EXPECT_EQ(head(5), rebuilt);
 
 		app->scenes().push<SceneB>(); // pushed by type, known by the name its type was added under
 		frame(0.0);
@@ -337,15 +509,50 @@ namespace app::testing {
 
 	TEST_F(AppTest, AScenePushedWithArgumentsHasNoNameAndReloadRefusesIt) {
 		start();
+		app->scenes().add<Arena>("arena");
 		app->scenes().push<Arena>({.ships = std::make_unique<int>(1)});
-		app->scenes().push<SceneC>();
 		frame(0.0);
-		EXPECT_TRUE(app->scenes().topName().empty()); // C was never added by name
+		EXPECT_TRUE(app->scenes().topName().empty()); // added by name, but pushed with arguments
 		EXPECT_FALSE(app->scenes().reload());
-		app->scenes().pop();
+		ASSERT_NE(top<Arena>().args.ships, nullptr);
+	}
+
+	TEST_F(AppTest, AScenePushedByTypeAndNeverAddedHasNoName) {
+		start();
+		app->scenes().push<SceneC>();
 		frame(0.0);
 		EXPECT_TRUE(app->scenes().topName().empty());
 		EXPECT_FALSE(app->scenes().reload());
+	}
+
+	TEST_F(AppTest, ASceneWhoseArgsDefaultIsAddedByNameAndBuiltWithThem) {
+		start();
+		app->scenes().add<Shop>("shop");
+		ASSERT_TRUE(app->scenes().switchTo("shop"));
+		frame(0.0);
+		EXPECT_EQ(app->scenes().topName(), "shop");
+		EXPECT_FALSE(top<Shop>().args.campaign.has_value()); // enters cold
+		ASSERT_TRUE(app->scenes().reload());
+		frame(0.0);
+		EXPECT_EQ(count("Shop.built"), 2);
+
+		app->scenes().push<Shop>({.campaign = 3});
+		frame(0.0);
+		EXPECT_EQ(top<Shop>().args.campaign, 3);
+		EXPECT_TRUE(app->scenes().topName().empty()); // so reload can't rebuild it without its campaign
+		EXPECT_FALSE(app->scenes().reload());
+	}
+
+	TEST_F(AppTest, AddingAFactoryUnderATypesNameTakesTheNameFromTheType) {
+		start();
+		app->scenes().add<SceneB>("b");
+		app->scenes().add("b", [] { return std::make_unique<SceneA>(); });
+		app->scenes().push<SceneB>();
+		frame(0.0);
+		EXPECT_TRUE(app->scenes().topName().empty());
+		ASSERT_TRUE(app->scenes().switchTo("b"));
+		frame(0.0);
+		EXPECT_EQ(app->scenes().top()->name(), std::string("A"));
 	}
 
 	TEST_F(AppTest, ALaterAddUnderANameReplacesTheFactory) {
