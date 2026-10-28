@@ -708,8 +708,8 @@ logged, where today the server thread calls `std::exit(1)`
 (`DebugServer.cpp:1016`); port 0 takes any free one, which `port()` reports.
 Enabled in a configuration it isn't compiled into, `start` logs one ERROR, so
 a profiling run says why nothing listens; a game that wants the server on by
-default enables it under `#ifdef SALAL_DEV_SERVER`, or for `--http-port`, as
-the sandbox does, so a shipped build's log stays clean.
+default enables it with `kDevServerCompiledIn`, or for `--http-port`, as the
+sandbox does, so a shipped build's log stays clean.
 
 Routes:
 
@@ -725,6 +725,7 @@ Routes:
 
 ```cpp
 namespace app {
+inline constexpr bool kDevServerCompiledIn = /* SALAL_DEV_SERVER is defined */;
 struct DevServerConfig { bool enabled = false; int port = 0; double requestTimeout = 10.0; }; // port 0: any free port
 struct DevRequest { std::string name; std::map<std::string, std::string> params; };            // the first of a repeated key
 struct DevResponse { int status = 200; std::string contentType = "application/json"; std::string body; };

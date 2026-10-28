@@ -25,14 +25,6 @@ namespace {
 
 	constexpr int kDevServerPort = 8090; // worldsim's ui-sandbox port
 
-	// On by default where the server is compiled in. Elsewhere only --http-port asks for it, so a build
-	// without it logs that nothing listens only when someone asked, and a Release launch logs nothing.
-#ifdef SALAL_DEV_SERVER
-	constexpr bool kDevServerCompiledIn = true;
-#else
-	constexpr bool kDevServerCompiledIn = false;
-#endif
-
 	// The one family the sandbox loads (docs/app-api.md, decision 8), staged beside the exe by
 	// CMakeLists.txt.
 	constexpr Renderer::FontFamily				   kMonoFont{0};
@@ -83,8 +75,11 @@ int main(int argc, char** argv) {
 		 .baseShader = base_shader::source(),
 		 .fontAtlases = kFontAtlases,
 		 .defaultFont = kMonoFont,
+		 // On by default where the server is compiled in; elsewhere only --http-port asks for it, so a
+		 // build without it says nothing listens only when someone asked, and a Release launch logs nothing.
 		 .devServer =
-			 {.enabled = kDevServerCompiledIn || commandLine.httpPort.has_value(), .port = commandLine.httpPort.value_or(kDevServerPort)},
+			 {.enabled = app::kDevServerCompiledIn || commandLine.httpPort.has_value(),
+			  .port = commandLine.httpPort.value_or(kDevServerPort)},
 		 .metrics = true},
 		std::move(platform)
 	);
