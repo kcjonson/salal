@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -350,6 +351,96 @@ namespace Renderer {
 		std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 4), 9);
 		Primitives::readBackbuffer(pixels, width, height);
 		EXPECT_EQ(pixels[0], 0);
+	}
+
+	namespace {
+
+		const std::array<Foundation::Vec2, 4> kSquare = {{{10.0F, 10.0F}, {30.0F, 10.0F}, {30.0F, 30.0F}, {10.0F, 30.0F}}};
+		const std::array<uint16_t, 6>		  kSquareIndices = {0, 1, 2, 0, 2, 3};
+
+		size_t countAlpha(const std::vector<BatchVertex>& vertices, float alpha) {
+			return static_cast<size_t>(std::ranges::count_if(vertices, [alpha](const BatchVertex& v) { return v.color.a == alpha; }));
+		}
+
+	} // namespace
+
+	TEST_F(FlushTest, APolygonsFillCarriesItsFeatherRingInItsGroup) {
+		Primitives::beginFrame();
+		Primitives::drawPolygon({.vertices = kSquare, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 8U);
+		EXPECT_EQ(countAlpha(uploaded, 0.8F), 4U);
+		EXPECT_EQ(countAlpha(uploaded, 0.0F), 4U);
+		// Every outer vertex a pixel out from both edges at its corner.
+		for (const BatchVertex& vertex : uploaded) {
+			if (vertex.color.a == 0.0F) {
+				const bool onX = std::abs(vertex.position.x - 9.0F) < 1e-5F || std::abs(vertex.position.x - 31.0F) < 1e-5F;
+				const bool onY = std::abs(vertex.position.y - 9.0F) < 1e-5F || std::abs(vertex.position.y - 31.0F) < 1e-5F;
+				EXPECT_TRUE(onX && onY) << vertex.position.x << ", " << vertex.position.y;
+			}
+		}
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U + (4U * 6U));
+	}
+
+	TEST_F(FlushTest, DrawTrianglesIsAliasedUnlessItsAskedToAntiAlias) {
+		Primitives::beginFrame();
+		Primitives::drawTriangles(
+			{.vertices = kSquare.data(),
+			 .indices = kSquareIndices.data(),
+			 .vertexCount = 4,
+			 .indexCount = 6,
+			 .color = Foundation::Color::white()}
+		);
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		// Exactly the mesh: its vertices, its indices, a flat zero-size box.
+		const std::vector<BatchVertex> aliased = vertices(gpu->draws()[0]);
+		ASSERT_EQ(aliased.size(), 4U);
+		for (size_t i = 0; i < 4; ++i) {
+			EXPECT_EQ(aliased[i].position, kSquare[i]);
+			EXPECT_EQ(aliased[i].color, Foundation::Vec4(1.0F));
+			EXPECT_EQ(aliased[i].data2, Foundation::Vec4(0.0F, 0.0F, 0.0F, 1.0F));
+		}
+		EXPECT_EQ(indices(gpu->draws()[0]), (std::vector<uint32_t>{0, 1, 2, 0, 2, 3}));
+
+		gpu->clearRecord();
+		Primitives::beginFrame();
+		Primitives::drawTriangles(
+			{.vertices = kSquare.data(),
+			 .indices = kSquareIndices.data(),
+			 .vertexCount = 4,
+			 .indexCount = 6,
+			 .color = Foundation::Color::white(),
+			 .antiAlias = true}
+		);
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> feathered = vertices(gpu->draws()[0]);
+		ASSERT_EQ(feathered.size(), 8U);
+		EXPECT_EQ(feathered[4].position, Foundation::Vec2(9.0F, 9.0F));
+		EXPECT_EQ(feathered[4].color, Foundation::Vec4(1.0F, 1.0F, 1.0F, 0.0F));
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 30U);
+	}
+
+	TEST_F(FlushTest, AMeshWhoseBoundaryPinchesStaysAliasedWhenAskedToAntiAlias) {
+		const std::array<Foundation::Vec2, 5> bowtie = {{{0.0F, 0.0F}, {10.0F, 0.0F}, {5.0F, 5.0F}, {0.0F, 10.0F}, {10.0F, 10.0F}}};
+		const std::array<uint16_t, 6>		  pinched = {0, 1, 2, 2, 4, 3};
+		Primitives::beginFrame();
+		Primitives::drawTriangles(
+			{.vertices = bowtie.data(),
+			 .indices = pinched.data(),
+			 .vertexCount = 5,
+			 .indexCount = 6,
+			 .color = Foundation::Color::white(),
+			 .antiAlias = true}
+		);
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(vertices(gpu->draws()[0]).size(), 5U);
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U);
 	}
 
 	TEST_F(FlushTest, APolylinesPiecesShareTheirCutsBitForBitThroughTheTransform) {

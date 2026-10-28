@@ -1,6 +1,10 @@
 #include "primitives/BatchRenderer.h"
 #include "BaseShader.h"
+#include "CoordinateSystem/CoordinateSystem.h"
 #include "backend/NullBackend.h"
+#include "primitives/BoundaryLoops.h"
+#include <array>
+#include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 #include <numbers>
 #include <vector>
@@ -300,3 +304,125 @@ TEST(BatchStrokeTest, PiecesDrawTheirPolygonsAsFansInOneGroup) {
 	ASSERT_EQ(plan.runs.size(), 1U);
 }
 
+// ============================================================================
+// Feather rings
+// ============================================================================
+
+namespace {
+
+	// A 10 x 10 square as two triangles.
+	const std::array<Foundation::Vec2, 4> kSquare = {{{0.0F, 0.0F}, {10.0F, 0.0F}, {10.0F, 10.0F}, {0.0F, 10.0F}}};
+	const std::array<uint16_t, 6>		  kSquareIndices = {0, 1, 2, 0, 2, 3};
+
+	BoundaryLoops squareLoops() {
+		BoundaryLoops loops;
+		EXPECT_TRUE(findBoundaryLoops(kSquare, kSquareIndices, loops));
+		return loops;
+	}
+
+	void addSquare(BatchRenderer& batch, const BoundaryLoops* feather, const Foundation::Color* colors = nullptr) {
+		batch.addTriangles(kSquare.data(), kSquareIndices.data(), 4, 6, {1.0F, 0.5F, 0.25F, 0.8F}, colors, 0.0F, BlendMode::Alpha, feather);
+	}
+
+	void expectPosition(const BatchVertex& vertex, Foundation::Vec2 position) {
+		EXPECT_NEAR(vertex.position.x, position.x, kTolerance);
+		EXPECT_NEAR(vertex.position.y, position.y, kTolerance);
+	}
+
+} // namespace
+
+TEST(BatchFeatherTest, ARingOneDevicePixelWideRunsOutsideTheBoundaryFadingToTransparent) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	const BoundaryLoops	 loops = squareLoops();
+	addSquare(batch, &loops);
+
+	// The fill's four vertices, then one outer vertex per boundary vertex on its miter,
+	// a pixel from both edges: the corners a pixel out diagonally.
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
+	ASSERT_EQ(vertices.size(), 8U);
+	expectPosition(vertices[4], {-1.0F, -1.0F});
+	expectPosition(vertices[5], {11.0F, -1.0F});
+	expectPosition(vertices[6], {11.0F, 11.0F});
+	expectPosition(vertices[7], {-1.0F, 11.0F});
+	for (size_t i = 0; i < 8; ++i) {
+		const float alpha = i < 4 ? 0.8F : 0.0F;
+		EXPECT_EQ(vertices[i].color, Foundation::Vec4(1.0F, 0.5F, 0.25F, alpha)) << "vertex " << i;
+		EXPECT_EQ(vertices[i].data2, Foundation::Vec4(0.0F, 0.0F, 0.0F, 1.0F)) << "vertex " << i; // flat
+	}
+
+	// A quad per boundary edge, from the fill's own vertices out; one group, one run.
+	const DrawPlan				plan = batch.plan();
+	const std::vector<uint32_t> expected = {0, 1, 2, 0, 2, 3, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7};
+	EXPECT_EQ(std::vector<uint32_t>(plan.indices.begin(), plan.indices.end()), expected);
+	EXPECT_EQ(plan.runs.size(), 1U);
+}
+
+TEST(BatchFeatherTest, TheRingIsOneDevicePixelAtTheCoordinateSystemsRatio) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	CoordinateSystem	 coordinates;
+	coordinates.setViewport({.logicalWidth = 100, .logicalHeight = 100, .framebufferWidth = 200, .framebufferHeight = 200});
+	batch.setCoordinateSystem(&coordinates);
+	const BoundaryLoops loops = squareLoops();
+	addSquare(batch, &loops);
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
+	ASSERT_EQ(vertices.size(), 8U);
+	expectPosition(vertices[4], {-0.5F, -0.5F});
+	expectPosition(vertices[6], {10.5F, 10.5F});
+}
+
+TEST(BatchFeatherTest, TheRingRunsOutwardThroughAMirroringTransform) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	batch.setTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(-2.0F, 1.0F, 1.0F)));
+	const BoundaryLoops loops = squareLoops();
+	addSquare(batch, &loops);
+	// The square lands on x from -20 to 0; a pixel is a pixel on screen.
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
+	ASSERT_EQ(vertices.size(), 8U);
+	expectPosition(vertices[4], {1.0F, -1.0F});
+	expectPosition(vertices[5], {-21.0F, -1.0F});
+	expectPosition(vertices[6], {-21.0F, 11.0F});
+}
+
+TEST(BatchFeatherTest, EachBoundaryVertexFadesItsOwnColour) {
+	backend::NullBackend				   gpu;
+	BatchRenderer						   batch(gpu, base_shader::source());
+	const BoundaryLoops					   loops = squareLoops();
+	const std::array<Foundation::Color, 4> colors = {
+		Foundation::Color::red(), Foundation::Color::green(), Foundation::Color::blue(), Foundation::Color(1.0F, 1.0F, 1.0F, 0.5F)
+	};
+	addSquare(batch, &loops, colors.data());
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
+	ASSERT_EQ(vertices.size(), 8U);
+	for (size_t i = 0; i < 4; ++i) {
+		const Foundation::Vec4 own = colors[i].toVec4();
+		EXPECT_EQ(vertices[4 + i].color, Foundation::Vec4(own.r, own.g, own.b, 0.0F)) << "vertex " << i;
+	}
+}
+
+TEST(BatchFeatherTest, ASharpCornersRingStopsFourPixelsOut) {
+	backend::NullBackend				  gpu;
+	BatchRenderer						  batch(gpu, base_shader::source());
+	const std::array<Foundation::Vec2, 3> spike = {{{0.0F, 0.0F}, {100.0F, 1.0F}, {0.0F, 2.0F}}};
+	const std::array<uint16_t, 3>		  triangle = {0, 1, 2};
+	BoundaryLoops						  loops;
+	ASSERT_TRUE(findBoundaryLoops(spike, triangle, loops));
+	batch.addTriangles(spike.data(), triangle.data(), 3, 3, Foundation::Color::white(), nullptr, 0.0F, BlendMode::Alpha, &loops);
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
+	ASSERT_EQ(vertices.size(), 6U);
+	// The tip's miter would be 100 pixels long.
+	EXPECT_NEAR(glm::length(vertices[4].position - spike[1]), 4.0F, 1e-4F);
+	EXPECT_GT(vertices[4].position.x, 100.0F);
+}
+
+TEST(BatchFeatherTest, WithoutLoopsTrianglesAddNoRing) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	const BoundaryLoops	 none;
+	addSquare(batch, nullptr);
+	addSquare(batch, &none);
+	EXPECT_EQ(batch.getPendingVertices().size(), 8U);
+	EXPECT_EQ(batch.plan().indices.size(), 12U);
+}

@@ -223,6 +223,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const char*				 id = nullptr;		 // Optional: for inspection/debugging
 			int						 zIndex = 0;		 // Optional: explicit draw order
 			BlendMode				 blend = BlendMode::Alpha;
+			bool					 antiAlias = false; // Optional: feather the mesh's boundary (drawTriangles)
 		};
 
 		// Draw a rectangle with optional fill and border
@@ -231,7 +232,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Draw a line
 		void drawLine(const LineArgs& args);
 
-		// Draw triangles from a mesh (for vector graphics tessellation)
+		// Draw triangles from a mesh (for vector graphics tessellation). Aliased unless
+		// `antiAlias`: then a ring one device pixel wide runs outside the mesh's
+		// boundary, each boundary vertex's colour fading to transparent across it, as
+		// drawPolygon's fill has. The boundary is found per call from the indices, which
+		// costs, so leave it off for large per-frame batches; a mesh whose boundary
+		// doesn't close into loops, or pinches (one vertex starting two boundary edges),
+		// draws aliased.
 		void drawTriangles(const TrianglesArgs& args);
 
 		// Arguments for DrawCircle
@@ -279,11 +286,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Draw a filled polygon, convex or not, self-crossing filled by the nonzero
 		// rule. The outline is tessellated once per distinct vertex list and cached,
-		// so a silhouette drawn every frame under PushTransform costs one
-		// tessellation. The fill is not anti-aliased (as drawTriangles). A border is a
-		// closed stroke with miter joins (strokeOutline) whose outer edge runs its width
-		// outside the outline and whose inner edge runs a pixel inside, so its
-		// anti-aliased edge covers the fill's aliased one and no background shows
+		// with its boundary, so a silhouette drawn every frame under PushTransform costs
+		// one tessellation. The fill is anti-aliased by a ring one device pixel wide
+		// outside its boundary, the fill colour fading to transparent across it, so it
+		// covers its area plus about half a pixel along its edge; two opaque polygons that
+		// share an edge show no seam. A border is a closed stroke with miter joins
+		// (strokeOutline) whose outer edge runs its width outside the outline and whose
+		// inner edge runs a pixel inside, over the fill's edge, so no background shows
 		// between them; a notch is mitered into its corner.
 		void drawPolygon(const PolygonArgs& args);
 

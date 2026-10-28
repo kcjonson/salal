@@ -273,6 +273,40 @@ namespace Renderer {
 		EXPECT_NEAR(pixel(4, 16)[3], 128, 1);
 	}
 
+	TEST_F(PrimitivesDrawTest, APolygonsFillRampsOverThePixelOutsideItsEdge) {
+		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			Primitives::drawPolygon({.vertices = square, .style = {.fill = Foundation::Color::white()}});
+		});
+		for (int y = 8; y < 24; ++y) {
+			for (int x = 8; x < 24; ++x) {
+				expectNear(pixel(x, y), {255, 255, 255, 255});
+			}
+		}
+		// Half a pixel out, half the ramp; a pixel and a half out, nothing.
+		expectNear(pixel(7, 16), {128, 128, 128, 128}, 2);
+		expectNear(pixel(24, 16), {128, 128, 128, 128}, 2);
+		expectNear(pixel(16, 7), {128, 128, 128, 128}, 2);
+		expectNear(pixel(6, 16), {0, 0, 0, 0});
+		expectNear(pixel(25, 16), {0, 0, 0, 0});
+	}
+
+	TEST_F(PrimitivesDrawTest, TwoOpaquePolygonsSharingAnEdgeShowNoSeam) {
+		// Off the pixel grid, so the shared diagonal crosses pixels anywhere.
+		const std::array<Foundation::Vec2, 3> first = {{{8.3F, 8.2F}, {24.7F, 8.2F}, {8.3F, 24.9F}}};
+		const std::array<Foundation::Vec2, 3> second = {{{24.7F, 8.2F}, {24.7F, 24.9F}, {8.3F, 24.9F}}};
+		const Foundation::Color				  fill(0.4F, 0.6F, 0.8F, 1.0F);
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+			Primitives::drawPolygon({.vertices = first, .style = {.fill = fill}});
+			Primitives::drawPolygon({.vertices = second, .style = {.fill = fill}});
+		});
+		for (int y = 9; y < 24; ++y) {
+			for (int x = 9; x < 24; ++x) {
+				expectNear(pixel(x, y), {102, 153, 204, 255});
+			}
+		}
+	}
+
 	TEST_F(PrimitivesDrawTest, ClearStoresPremultipliedColour) {
 		RenderTarget half = RenderTarget::create(kSize, kSize);
 		ASSERT_TRUE(half.isValid());

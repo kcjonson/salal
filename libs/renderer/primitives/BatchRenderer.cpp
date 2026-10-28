@@ -25,6 +25,8 @@ namespace Renderer {
 
 		constexpr float kTwoPi = 2.0F * std::numbers::pi_v<float>;
 
+		// How far a feather ring's outer edge may run out at a sharp corner, in pixels.
+		constexpr float kFeatherMiterLimit = 4.0F;
 
 		// The stream buffers' first size; the backend grows them as a flush needs.
 		constexpr size_t kInitialVertexBytes = 4096 * sizeof(BatchVertex);
@@ -359,7 +361,8 @@ namespace Renderer {
 		const Foundation::Color& color,
 		const Foundation::Color* inputColors,
 		float					 zIndex,
-		Primitives::BlendMode	 blend
+		Primitives::BlendMode	 blend,
+		const BoundaryLoops*	 feather
 	) { // NOLINT(readability-convert-member-functions-to-static)
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
@@ -395,7 +398,66 @@ namespace Renderer {
 		// Tessellated shapes ignore the bound atlas; tag every vertex invalid.
 		vertexAtlas.insert(vertexAtlas.end(), vertexCount, TextureHandle{});
 
+		if (feather != nullptr && !feather->empty()) {
+			addFeather(baseIndex, *feather);
+		}
+
 		recordGroup(zGroupStart, zIndex, blend);
+	}
+
+	void BatchRenderer::addFeather(uint32_t meshBase, const BoundaryLoops& loops) {
+		const float pixel = 1.0F / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
+		// The loops keep the mesh on their left; a mirroring transform turns it to the right.
+		const float determinant = (currentTransform[0][0] * currentTransform[1][1]) - (currentTransform[0][1] * currentTransform[1][0]);
+		const float side = determinant < 0.0F ? -1.0F : 1.0F;
+		const auto	outward = [side](const Foundation::Vec2& from, const Foundation::Vec2& to) {
+			 const Foundation::Vec2 direction = to - from;
+			 const float			length = glm::length(direction);
+			 return length > 0.0F ? Foundation::Vec2(direction.y, -direction.x) * (side / length) : Foundation::Vec2(0.0F, 0.0F);
+		};
+
+		// One outer vertex per boundary vertex, the fill's own vertex its inner one.
+		const uint32_t ringBase = static_cast<uint32_t>(vertices.size());
+		for (size_t loop = 0; loop < loops.count(); ++loop) {
+			const uint32_t start = loops.starts[loop];
+			const uint32_t size = loops.starts[loop + 1] - start;
+			for (uint32_t v = 0; v < size; ++v) {
+				const Foundation::Vec2 previous = vertices[meshBase + loops.vertices[start + ((v + size - 1) % size)]].position;
+				const Foundation::Vec2 next = vertices[meshBase + loops.vertices[start + ((v + 1) % size)]].position;
+				BatchVertex			   outer = vertices[meshBase + loops.vertices[start + v]];
+				Foundation::Vec2	   normalIn = outward(previous, outer.position);
+				Foundation::Vec2	   normalOut = outward(outer.position, next);
+				if (normalIn == Foundation::Vec2(0.0F, 0.0F)) {
+					normalIn = normalOut;
+				} else if (normalOut == Foundation::Vec2(0.0F, 0.0F)) {
+					normalOut = normalIn;
+				}
+				// The miter is 1 / cos(half the turn), 2 / |sum|, pixels long; a spike back on
+				// itself has no miter and goes a pixel along its last edge's normal.
+				const Foundation::Vec2 sum = normalIn + normalOut;
+				const float			   sumLength = glm::length(sum);
+				const Foundation::Vec2 offset =
+					sumLength > 1e-6F ? sum * (pixel * std::min(kFeatherMiterLimit, 2.0F / sumLength) / sumLength) : normalOut * pixel;
+				outer.position += offset;
+				outer.color.a = 0.0F;
+				vertices.push_back(outer);
+			}
+		}
+		for (size_t loop = 0; loop < loops.count(); ++loop) {
+			const uint32_t start = loops.starts[loop];
+			const uint32_t size = loops.starts[loop + 1] - start;
+			for (uint32_t v = 0; v < size; ++v) {
+				const uint32_t w = (v + 1) % size;
+				const uint32_t innerA = meshBase + loops.vertices[start + v];
+				const uint32_t innerB = meshBase + loops.vertices[start + w];
+				const uint32_t outerA = ringBase + start + v;
+				const uint32_t outerB = ringBase + start + w;
+				for (const uint32_t corner : {innerA, innerB, outerB, innerA, outerB, outerA}) {
+					indices.push_back(corner);
+				}
+			}
+		}
+		vertexAtlas.insert(vertexAtlas.end(), vertices.size() - ringBase, TextureHandle{});
 	}
 
 	void BatchRenderer::addStroke(
