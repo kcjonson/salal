@@ -31,13 +31,15 @@ namespace sandbox {
 		const Foundation::Color kSelectedFill(0.22F, 0.26F, 0.36F, 1.0F);
 		const Foundation::Color kCurrentMark(0.35F, 0.65F, 1.0F, 1.0F);
 
-		// `text` in `box`, centred on its height, at `x` or centred on its width.
-		void label(const std::string& text, const Foundation::Rect& box, float x, const Foundation::Color& color, bool centred) {
+		// `text` in `box`, centred on its height, and on its width or kTextInset in from its left.
+		void
+		label(const std::string& text, const Foundation::Rect& box, const Foundation::Color& color, Foundation::HorizontalAlign align) {
+			const bool centred = align == Foundation::HorizontalAlign::Center;
 			Renderer::Primitives::drawText(
 				{.text = text,
-				 .position = {x, box.y},
+				 .position = {centred ? box.x : box.x + kTextInset, box.y},
 				 .color = color,
-				 .hAlign = centred ? Foundation::HorizontalAlign::Center : Foundation::HorizontalAlign::Left,
+				 .hAlign = align,
 				 .vAlign = Foundation::VerticalAlign::Middle,
 				 .boxWidth = centred ? box.width : 0.0F,
 				 .boxHeight = box.height}
@@ -81,7 +83,7 @@ namespace sandbox {
 				 .border = Foundation::BorderStyle{.color = kBorder, .width = 1.0F, .cornerRadius = kCorner}
 			 }}
 		);
-		label("F1 scenes", where.tab, where.tab.x, kRowText, true);
+		label("F1 scenes", where.tab, kRowText, Foundation::HorizontalAlign::Center);
 		if (!open) {
 			return;
 		}
@@ -90,7 +92,7 @@ namespace sandbox {
 			{.bounds = where.panel,
 			 .style = {.fill = kPanelFill, .border = Foundation::BorderStyle{.color = kBorder, .width = 1.0F, .cornerRadius = kCorner}}}
 		);
-		label("scenes", {where.panel.x, where.panel.y, where.panel.width, kHeaderHeight}, where.panel.x + kTextInset, kHeaderText, false);
+		label("scenes", {where.panel.x, where.panel.y, where.panel.width, kHeaderHeight}, kHeaderText, Foundation::HorizontalAlign::Left);
 		const std::size_t running = current();
 		for (std::size_t i = 0; i < scenes.size(); ++i) {
 			const Foundation::Rect& row = where.rows[i];
@@ -100,7 +102,7 @@ namespace sandbox {
 			if (i == running) {
 				P::drawRect({.bounds = {row.x, row.y + 5.0F, 3.0F, row.height - 10.0F}, .style = {.fill = kCurrentMark}});
 			}
-			label(scenes[i], row, row.x + kTextInset, i == running ? Foundation::Color::white() : kRowText, false);
+			label(scenes[i], row, i == running ? Foundation::Color::white() : kRowText, Foundation::HorizontalAlign::Left);
 		}
 	}
 
