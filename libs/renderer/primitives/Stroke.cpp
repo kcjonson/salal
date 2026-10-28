@@ -1,6 +1,7 @@
 #include "primitives/Stroke.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <glm/geometric.hpp>
@@ -102,6 +103,7 @@ namespace Renderer {
 		}
 
 		void addCorner(StrokePiece& piece, const Foundation::Vec2& corner) {
+			assert(piece.cornerCount < StrokePiece::kMaxCorners);
 			piece.corners[piece.cornerCount++] = corner;
 		}
 

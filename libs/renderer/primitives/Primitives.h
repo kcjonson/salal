@@ -223,7 +223,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const char*				 id = nullptr;		 // Optional: for inspection/debugging
 			int						 zIndex = 0;		 // Optional: explicit draw order
 			BlendMode				 blend = BlendMode::Alpha;
-			bool					 antiAlias = false; // Optional: feather the mesh's boundary (drawTriangles)
+			bool					 antiAlias = false; // Optional: feather the mesh's boundary
 		};
 
 		// Draw a rectangle with optional fill and border

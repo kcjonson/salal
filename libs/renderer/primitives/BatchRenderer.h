@@ -17,7 +17,6 @@
 #include "graphics/PrimitiveStyles.h"
 #include "graphics/Rect.h"
 #include "math/Types.h"
-#include "primitives/BoundaryLoops.h"
 #include "primitives/InstanceData.h"
 #include "primitives/Primitives.h"
 #include "primitives/Stroke.h"
@@ -29,8 +28,20 @@
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
-	// Forward declaration
 	class CoordinateSystem;
+	struct BoundaryLoops;
+
+	// What addTriangles adds: an indexed mesh, in one colour or a colour per vertex, and
+	// optionally its boundary loops (findBoundaryLoops) for a feather ring.
+	struct TriangleMeshArgs {
+		std::span<const Foundation::Vec2> vertices;
+		std::span<const uint16_t>		  indices;
+		Foundation::Color				  color;			// Every vertex's, without `colors`
+		const Foundation::Color*		  colors = nullptr; // One per vertex
+		float							  zIndex = 0.0F;
+		Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha;
+		const BoundaryLoops*			  feather = nullptr;
+	};
 
 	// BatchVertex, the batch's vertex, is in backend/Backend.h: the backend uploads it.
 	//
@@ -124,24 +135,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
 		);
 
-		// Add raw triangles (for circles, polygons, etc.)
-		// If inputColors is provided, uses per-vertex colors; otherwise uses uniform color.
-		// With `feather`, the mesh's boundary loops (findBoundaryLoops), a ring one device
-		// pixel wide runs outside each loop in the same group: from each boundary vertex,
-		// in its colour, out to that colour at alpha 0, a linear coverage ramp. Its outer
-		// edge sits on the miter of the vertex's two edges, at most 4 pixels out, and
-		// outward follows the loops' winding through the transform, mirrored or not.
-		void addTriangles(
-			const Foundation::Vec2*	 inputVertices,
-			const uint16_t*			 inputIndices,
-			size_t					 vertexCount,
-			size_t					 indexCount,
-			const Foundation::Color& color,
-			const Foundation::Color* inputColors = nullptr,
-			float					 zIndex = 0.0F,
-			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha,
-			const BoundaryLoops*	 feather = nullptr
-		);
+		// Add an indexed triangle mesh as one draw group (drawTriangles, drawLine, a
+		// polygon's fill). With `mesh.feather`, a ring one device pixel wide runs outside
+		// each loop in the same group, each boundary vertex's colour fading to alpha 0
+		// across it, a linear coverage ramp. Its outer edge sits on the miter of the
+		// vertex's two edges, at most 4 pixels out, outward through any transform,
+		// mirrored or not.
+		void addTriangles(const TriangleMeshArgs& mesh);
 
 		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
 		// its polygon as a fan, shaded by its SDF box.

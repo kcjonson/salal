@@ -369,7 +369,13 @@ namespace Renderer::Primitives {
 			args.end - offset,	 // end, left
 		};
 		static constexpr uint16_t kQuadIndices[6] = {0, 1, 2, 0, 2, 3};
-		g_batchRenderer->addTriangles(quad, kQuadIndices, 4, 6, args.style.color, nullptr, static_cast<float>(args.zIndex), args.blend);
+		g_batchRenderer->addTriangles(
+			{.vertices = quad,
+			 .indices = kQuadIndices,
+			 .color = args.style.color,
+			 .zIndex = static_cast<float>(args.zIndex),
+			 .blend = args.blend}
+		);
 	}
 
 	void drawTriangles(const TrianglesArgs& args) {
@@ -381,15 +387,13 @@ namespace Renderer::Primitives {
 		const bool						  feathered =
 			args.antiAlias && findBoundaryLoops({args.vertices, args.vertexCount}, {args.indices, args.indexCount}, boundary);
 		g_batchRenderer->addTriangles(
-			args.vertices,
-			args.indices,
-			args.vertexCount,
-			args.indexCount,
-			args.color,
-			args.colors,
-			static_cast<float>(args.zIndex),
-			args.blend,
-			feathered ? &boundary : nullptr
+			{.vertices = {args.vertices, args.vertexCount},
+			 .indices = {args.indices, args.indexCount},
+			 .color = args.color,
+			 .colors = args.colors,
+			 .zIndex = static_cast<float>(args.zIndex),
+			 .blend = args.blend,
+			 .feather = feathered ? &boundary : nullptr}
 		);
 	}
 
@@ -530,15 +534,12 @@ namespace Renderer::Primitives {
 			const PolygonCacheEntry& fill = polygonFill(args.vertices);
 			if (!fill.mesh.indices.empty()) {
 				g_batchRenderer->addTriangles(
-					fill.mesh.vertices.data(),
-					fill.mesh.indices.data(),
-					fill.mesh.vertices.size(),
-					fill.mesh.indices.size(),
-					args.style.fill,
-					nullptr,
-					zIndex,
-					args.blend,
-					&fill.boundary
+					{.vertices = fill.mesh.vertices,
+					 .indices = fill.mesh.indices,
+					 .color = args.style.fill,
+					 .zIndex = zIndex,
+					 .blend = args.blend,
+					 .feather = &fill.boundary}
 				);
 			}
 		}

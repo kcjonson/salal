@@ -77,7 +77,9 @@ TEST(RenderModeTest, EveryAddWritesItsModeAndBlend) {
 	batch.addShadowQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::BoxShadow{}, 0.0F, 0.0F, BlendMode::Additive);
 	const Foundation::Vec2 triangle[3] = {{0.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, 1.0F}};
 	const uint16_t		   triangleIndices[3] = {0, 1, 2};
-	batch.addTriangles(triangle, triangleIndices, 3, 3, Foundation::Color::white(), nullptr, 0.0F, BlendMode::Additive);
+	batch.addTriangles(
+		{.vertices = triangle, .indices = triangleIndices, .color = Foundation::Color::white(), .blend = BlendMode::Additive}
+	);
 	batch.addArc({.center = {0.0F, 0.0F}, .innerRadius = 4.0F, .outerRadius = 8.0F, .blend = BlendMode::Additive});
 	batch.addImageQuad({.texture = kImage, .bounds = {0.0F, 0.0F, 4.0F, 4.0F}, .blend = BlendMode::Additive});
 	const StrokePiece piece{
@@ -321,7 +323,9 @@ namespace {
 	}
 
 	void addSquare(BatchRenderer& batch, const BoundaryLoops* feather, const Foundation::Color* colors = nullptr) {
-		batch.addTriangles(kSquare.data(), kSquareIndices.data(), 4, 6, {1.0F, 0.5F, 0.25F, 0.8F}, colors, 0.0F, BlendMode::Alpha, feather);
+		batch.addTriangles(
+			{.vertices = kSquare, .indices = kSquareIndices, .color = {1.0F, 0.5F, 0.25F, 0.8F}, .colors = colors, .feather = feather}
+		);
 	}
 
 	void expectPosition(const BatchVertex& vertex, Foundation::Vec2 position) {
@@ -409,7 +413,7 @@ TEST(BatchFeatherTest, ASharpCornersRingStopsFourPixelsOut) {
 	const std::array<uint16_t, 3>		  triangle = {0, 1, 2};
 	BoundaryLoops						  loops;
 	ASSERT_TRUE(findBoundaryLoops(spike, triangle, loops));
-	batch.addTriangles(spike.data(), triangle.data(), 3, 3, Foundation::Color::white(), nullptr, 0.0F, BlendMode::Alpha, &loops);
+	batch.addTriangles({.vertices = spike, .indices = triangle, .color = Foundation::Color::white(), .feather = &loops});
 	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 6U);
 	// The tip's miter would be 100 pixels long.

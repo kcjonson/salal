@@ -3,6 +3,7 @@
 
 #include "primitives/BatchRenderer.h"
 #include "CoordinateSystem/CoordinateSystem.h"
+#include "primitives/BoundaryLoops.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -353,35 +354,25 @@ namespace Renderer {
 		recordGroup(zGroupStart, zIndex, blend);
 	}
 
-	void BatchRenderer::addTriangles( // NOLINT(readability-convert-member-functions-to-static)
-		const Foundation::Vec2*	 inputVertices,
-		const uint16_t*			 inputIndices,
-		size_t					 vertexCount,
-		size_t					 indexCount,
-		const Foundation::Color& color,
-		const Foundation::Color* inputColors,
-		float					 zIndex,
-		Primitives::BlendMode	 blend,
-		const BoundaryLoops*	 feather
-	) { // NOLINT(readability-convert-member-functions-to-static)
+	void BatchRenderer::addTriangles(const TriangleMeshArgs& mesh) {
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
 
-		Foundation::Vec4 uniformColorVec = color.toVec4();
+		Foundation::Vec4 uniformColorVec = mesh.color.toVec4();
 
 		// Default data (not used for tessellated shapes, but required for vertex format)
 		// Use borderPosition=1 (Center) so shader treats these as shapes, not text
 		Foundation::Vec2 zeroVec2(0.0F, 0.0F);
 		Foundation::Vec4 zeroVec4(0.0F, 0.0F, 0.0F, 0.0F);
-		Foundation::Vec4 shapeParams(0.0F, 0.0F, 0.0F, renderMode(1.0F, blend)); // borderPos=1 marks as shape
+		Foundation::Vec4 shapeParams(0.0F, 0.0F, 0.0F, renderMode(1.0F, mesh.blend)); // borderPos=1 marks as shape
 
 		// Add all vertices (positions transformed by currentTransform)
-		for (size_t i = 0; i < vertexCount; ++i) {
+		for (size_t i = 0; i < mesh.vertices.size(); ++i) {
 			// Use per-vertex color if provided, otherwise uniform color
-			Foundation::Vec4 colorVec = (inputColors != nullptr) ? inputColors[i].toVec4() : uniformColorVec;
+			Foundation::Vec4 colorVec = (mesh.colors != nullptr) ? mesh.colors[i].toVec4() : uniformColorVec;
 
 			vertices.push_back({
-				TransformPosition(inputVertices[i], currentTransform, transformClass == TransformClass::kIdentity),
+				TransformPosition(mesh.vertices[i], currentTransform, transformClass == TransformClass::kIdentity),
 				zeroVec2, // texCoord (unused for triangles)
 				colorVec,
 				zeroVec4,		  // data1 (unused)
@@ -391,18 +382,18 @@ namespace Renderer {
 		}
 
 		// Add all indices (offset by baseIndex)
-		for (size_t i = 0; i < indexCount; ++i) {
-			indices.push_back(baseIndex + inputIndices[i]);
+		for (const uint16_t index : mesh.indices) {
+			indices.push_back(baseIndex + index);
 		}
 
 		// Tessellated shapes ignore the bound atlas; tag every vertex invalid.
-		vertexAtlas.insert(vertexAtlas.end(), vertexCount, TextureHandle{});
+		vertexAtlas.insert(vertexAtlas.end(), mesh.vertices.size(), TextureHandle{});
 
-		if (feather != nullptr && !feather->empty()) {
-			addFeather(baseIndex, *feather);
+		if (mesh.feather != nullptr && !mesh.feather->empty()) {
+			addFeather(baseIndex, *mesh.feather);
 		}
 
-		recordGroup(zGroupStart, zIndex, blend);
+		recordGroup(zGroupStart, mesh.zIndex, mesh.blend);
 	}
 
 	void BatchRenderer::addFeather(uint32_t meshBase, const BoundaryLoops& loops) {
