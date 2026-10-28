@@ -314,7 +314,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// pixel belongs to one of them, round joins and caps exact. A translucent or
 		// additive stroke covers each pixel once, except where the line crosses itself,
 		// where a segment is too short for the cuts its sharp joints need, and at a turn
-		// within about 8.6 degrees of a hairpin: there pieces overlap.
+		// within about 8.6 degrees of a hairpin: there pieces overlap. Points within a
+		// quarter of a device pixel of the line drawn without them are dropped first, so
+		// sub-pixel noise in the input (a hand's jitter, integer mouse samples) leaves no
+		// short segments behind; noise larger than that still can.
 		void drawPolyline(const PolylineArgs& args);
 
 		// Arguments for DrawArc. Angles are radians from +x, and a positive sweep turns

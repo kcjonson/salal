@@ -37,15 +37,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// share the cut's two end points as the same floats, so the rasteriser gives each
 	// pixel on it to one of them, and every pixel of the stroke belongs to one piece.
 	// Each piece reaches a pixel past its SDF, so the edge ramp fits: a capsule for a
-	// round joint or cap, a box run on to the miter point for a miter, a box for a butt
-	// or square cap. A segment whose ends differ (a round joint beside a butt cap) is
-	// two pieces, cut across its middle. A segment too short for its joints' cuts
-	// leaves both joints uncut, as does a joint within about 8.6 degrees of a hairpin:
-	// there the pieces end straight at their SDF's reach and overlap. Points closer
-	// than a ten-thousandth of a unit to the one before are dropped; fewer than two
-	// points draw nothing, and a closed line with only two left is the open segment
-	// between them, capped.
-	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, std::vector<StrokePiece>& out);
+	// round joint or cap, a box run on past the miter point for a miter, a box for a
+	// butt or square cap. A segment whose ends differ (a round joint beside a butt cap)
+	// is two pieces, cut across it midway between its ends' cuts. A segment too short
+	// for its joints' cuts leaves both joints uncut, as does a joint within about 8.6
+	// degrees of a hairpin: there the pieces end straight at their SDF's reach and
+	// overlap. Points closer than a ten-thousandth of a unit to the one before are
+	// dropped, and so are interior points within `tolerance` of the segment that
+	// replaces them, which keeps input noise from leaving segments too short for their
+	// turns. Fewer than two points draw nothing, and a closed line with only two left is
+	// the open segment between them, capped.
+	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out);
 
 	// `outline`, a closed polygon of either winding, with every edge moved
 	// `distance` outward and each vertex at its moved edges' meeting point. A convex

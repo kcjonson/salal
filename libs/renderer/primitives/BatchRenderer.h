@@ -248,6 +248,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Local units per logical pixel under the current transform.
 		float getLocalPixel() const { return pixelPadding; }
 
+		// Local units per device pixel under the current transform and the coordinate
+		// system's pixel ratio.
+		float getLocalDevicePixel() const;
+
 		// Rendering statistics structure
 		struct RenderStats {
 			uint32_t drawCalls = 0;

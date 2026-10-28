@@ -294,12 +294,27 @@ namespace Renderer {
 			);
 		};
 
-		// Straight through a joint on a pixel's centre, then on a pixel's edge, width 10.
+		// Straight through a joint on a pixel's centre, then on a pixel's edge, width 10: drawPolyline
+		// drops a point that straight, so a 3-degree turn keeps its joint.
 		for (const float joint : {16.5F, 16.0F}) {
 			const std::vector<Foundation::Vec2> line = {{2.0F, 16.5F}, {joint, 16.5F}, {30.0F, 16.5F}};
 			render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { mitered(line, 10.0F); });
 			expectWhole("straight", [](float x, float y) { return x > 3.5F && x < 28.5F && std::abs(y - 16.5F) < 3.5F; });
 		}
+
+		const float							slight = 3.0F * std::numbers::pi_v<float> / 180.0F;
+		const std::vector<Foundation::Vec2> nearlyStraight = {
+			{2.0F, 16.5F}, {16.5F, 16.5F}, Foundation::Vec2(16.5F, 16.5F) + (Foundation::Vec2(std::cos(slight), std::sin(slight)) * 13.5F)
+		};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] { mitered(nearlyStraight, 10.0F); });
+		expectWhole("3 degrees", [&](float x, float y) {
+			const Foundation::Vec2 p = Foundation::Vec2(x, y) - nearlyStraight[1];
+			const Foundation::Vec2 direction(std::cos(slight), std::sin(slight));
+			const float			   before = x < nearlyStraight[1].x && x > 3.5F ? std::abs(p.y) : 99.0F;
+			const float			   along = glm::dot(p, direction);
+			const float			   after = along > 0.0F && along < 12.0F ? std::abs((direction.x * p.y) - (direction.y * p.x)) : 99.0F;
+			return std::min(before, after) < 3.5F;
+		});
 
 		// A 10-degree turn.
 		const float							turn = 10.0F * std::numbers::pi_v<float> / 180.0F;

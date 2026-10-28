@@ -549,7 +549,9 @@ namespace Renderer::Primitives {
 			return;
 		}
 		static thread_local std::vector<StrokePiece> pieces;
-		strokePolyline(args, g_batchRenderer->getLocalPixel(), pieces);
+		// Points within a quarter of a device pixel of the line drawn without them go, so a
+		// noisy line's near-repeats don't uncut the joints either side.
+		strokePolyline(args, g_batchRenderer->getLocalPixel(), 0.25F * g_batchRenderer->getLocalDevicePixel(), pieces);
 		if (!pieces.empty()) {
 			g_batchRenderer->addStroke(pieces, args.color, static_cast<float>(args.zIndex), args.blend);
 		}

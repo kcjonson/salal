@@ -873,6 +873,10 @@ namespace Renderer {
 		currentClipBounds = Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
 	}
 
+	float BatchRenderer::getLocalDevicePixel() const {
+		return pixelPadding / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
+	}
+
 	void BatchRenderer::setTransform(const Foundation::Mat4& transform) {
 		currentTransform = transform;
 		// Classify once per transform change (expensive to do per-vertex).

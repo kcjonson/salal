@@ -39,6 +39,40 @@ namespace Renderer {
 			}
 		}
 
+		float segmentDistance(const Foundation::Vec2& point, const Foundation::Vec2& from, const Foundation::Vec2& to) {
+			const Foundation::Vec2 along = to - from;
+			const float			   lengthSquared = glm::dot(along, along);
+			const float			   t = lengthSquared > 0.0F ? std::clamp(glm::dot(point - from, along) / lengthSquared, 0.0F, 1.0F) : 0.0F;
+			return glm::length(point - (from + (along * t)));
+		}
+
+		// `points` without the interior points that lie within `tolerance` of the segment that
+		// would replace them, so input noise (integer mouse samples, a hand's jitter) doesn't
+		// leave segments too short for the turns between them. Every dropped point stays
+		// within `tolerance` of the line drawn; a run is at most kMaxDropped points, which
+		// keeps this linear. The first and last points stay.
+		void dropNearlyStraightPoints(std::vector<Foundation::Vec2>& points, float tolerance) {
+			constexpr size_t kMaxDropped = 16;
+			if (!(tolerance > 0.0F) || points.size() < 3) {
+				return;
+			}
+			size_t kept = 1; // points[0, kept) are the result so far
+			size_t anchor = 0;
+			for (size_t i = 1; i + 1 < points.size(); ++i) {
+				bool drop = i - anchor <= kMaxDropped;
+				for (size_t j = anchor + 1; drop && j <= i; ++j) {
+					drop = segmentDistance(points[j], points[anchor], points[i + 1]) < tolerance;
+				}
+				if (!drop) {
+					// The run of dropped points is measured against the original anchor.
+					points[kept++] = points[i];
+					anchor = i;
+				}
+			}
+			points[kept++] = points.back();
+			points.resize(kept);
+		}
+
 		// Where segment j - 1 (arriving along `in`) meets segment j (leaving along `out`).
 		// The cut is the bisector's line, perpendicular to in + out, from `innerCut` to
 		// `outerCut`: where the two strips a pixel wider than the stroke cross it.
@@ -353,13 +387,14 @@ namespace Renderer {
 
 	} // namespace
 
-	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, std::vector<StrokePiece>& out) {
+	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out) {
 		out.clear();
 		if (!(args.width > 0.0F)) {
 			return;
 		}
 		static thread_local std::vector<Foundation::Vec2> points;
 		distinctPoints(args.points, args.closed, points);
+		dropNearlyStraightPoints(points, tolerance);
 		if (points.size() < 2) {
 			return;
 		}

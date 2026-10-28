@@ -227,7 +227,7 @@ namespace {
 
 TEST(StrokeTest, ARoundJointCutsAlongItsBisectorAndAButtCapSplitsItsSegment) {
 	std::vector<StrokePiece> pieces;
-	strokePolyline({.points = kElbow, .width = 2.0F, .cap = LineCap::Butt, .join = LineJoin::Round}, 1.0F, pieces);
+	strokePolyline({.points = kElbow, .width = 2.0F, .cap = LineCap::Butt, .join = LineJoin::Round}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 4U);
 	// The joint's cut runs from (8, 2) to (12, -2): where strips a pixel wider than the
 	// stroke (reach 2) cross the 45-degree bisector. Butt cap beside round joint: each
@@ -252,7 +252,7 @@ TEST(StrokeTest, ARoundJointCutsAlongItsBisectorAndAButtCapSplitsItsSegment) {
 
 TEST(StrokeTest, ACutMitersBoxRunsAPixelPastItsPiece) {
 	std::vector<StrokePiece> pieces;
-	strokePolyline({.points = kElbow, .width = 2.0F, .join = LineJoin::Miter}, 1.0F, pieces);
+	strokePolyline({.points = kElbow, .width = 2.0F, .join = LineJoin::Miter}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 2U);
 	// The cut reaches reach * tan(45) = 2 past the joint along each segment, and the box a
 	// pixel further, to 3: its end face and that face's ramp stay outside the piece.
@@ -274,7 +274,7 @@ TEST(StrokeTest, EveryCutMitersBoxEndsAPixelPastItsPiece) {
 				{0.0F, 0.0F}, {40.0F, 0.0F}, {40.0F + (40.0F * std::cos(radians)), 40.0F * std::sin(radians)}
 			};
 			std::vector<StrokePiece> pieces;
-			strokePolyline({.points = bend, .width = 10.0F, .cap = LineCap::Square, .join = LineJoin::Miter}, pixel, pieces);
+			strokePolyline({.points = bend, .width = 10.0F, .cap = LineCap::Square, .join = LineJoin::Miter}, pixel, 0.0F, pieces);
 			ASSERT_EQ(pieces.size(), 2U);
 			expectAllCut(pieces, false);
 			for (const StrokePiece& piece : pieces) {
@@ -294,7 +294,7 @@ TEST(StrokeTest, ARoundJointPastARightAngleEndsItsCutOnEachSegmentsSquareExtensi
 	// A 120-degree turn, round caps so each segment is one capsule.
 	const std::vector<Foundation::Vec2> bend = {{0.0F, 0.0F}, {10.0F, 0.0F}, {5.0F, 5.0F * kRoot3}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = bend, .width = 2.0F, .cap = LineCap::Round}, 1.0F, pieces);
+	strokePolyline({.points = bend, .width = 2.0F, .cap = LineCap::Round}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 2U);
 	// Inner end at reach / cos 60 along the bisector, outer end at reach / sin 60, on the
 	// edge a reach past the joint; each piece adds the corner of its own extension.
@@ -316,7 +316,7 @@ TEST(StrokeTest, AJointNearAHairpinIsLeftUncutAndItsPiecesOverlap) {
 	// A 174-degree turn: within 8.6 degrees of a hairpin.
 	const std::vector<Foundation::Vec2> hairpin = {{0.0F, 0.0F}, {10.0F, 0.0F}, {0.0F, 1.0F}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = hairpin, .width = 2.0F, .cap = LineCap::Round}, 1.0F, pieces);
+	strokePolyline({.points = hairpin, .width = 2.0F, .cap = LineCap::Round}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 2U);
 	// Each capsule ends straight a pixel past its own round end.
 	expectCorners(pieces[0], {{12.0F, -2.0F}, {12.0F, 2.0F}, {-2.0F, 2.0F}, {-2.0F, -2.0F}});
@@ -329,7 +329,7 @@ TEST(StrokeTest, ASegmentTooShortForItsCutsLeavesExactlyItsJointsUncut) {
 	// it a reach (3) longer at each end. Joint 3, a right turn after a long segment, is cut.
 	const std::vector<Foundation::Vec2> hook = {{0.0F, 0.0F}, {20.0F, 0.0F}, {20.0F, 1.0F}, {0.0F, 1.0F}, {0.0F, 21.0F}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = hook, .width = 4.0F}, 1.0F, pieces);
+	strokePolyline({.points = hook, .width = 4.0F}, 1.0F, 0.0F, pieces);
 	// Segment 0 and 3: a butt cap beside a round joint, two pieces each.
 	ASSERT_EQ(pieces.size(), 6U);
 	EXPECT_EQ(sharedCorners(pieces[0], pieces[1]), 2); // segment 0's middle
@@ -350,7 +350,7 @@ TEST(StrokeTest, AMiterBesideATurnThatRoundsSplitsItsSegment) {
 	// A 27-degree turn, mitered, then a 135-degree one, which rounds.
 	const std::vector<Foundation::Vec2> line = {{0.0F, 0.0F}, {20.0F, 0.0F}, {40.0F, 10.0F}, {25.0F, 15.0F}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = line, .width = 4.0F, .join = LineJoin::Miter}, 1.0F, pieces);
+	strokePolyline({.points = line, .width = 4.0F, .join = LineJoin::Miter}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 5U);
 	expectAllCut(pieces, false);
 	EXPECT_EQ(pieces[1].cornerRadius, 0.0F); // the miter's half
@@ -362,17 +362,17 @@ TEST(StrokeTest, AMiterBesideATurnThatRoundsSplitsItsSegment) {
 TEST(StrokeTest, CapsEndStraightAPixelPastTheirReach) {
 	const std::vector<Foundation::Vec2> line = {{0.0F, 0.0F}, {10.0F, 0.0F}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = line, .width = 2.0F, .cap = LineCap::Butt}, 1.0F, pieces);
+	strokePolyline({.points = line, .width = 2.0F, .cap = LineCap::Butt}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 1U);
 	expectCorners(pieces[0], {{11.0F, -2.0F}, {11.0F, 2.0F}, {-1.0F, 2.0F}, {-1.0F, -2.0F}});
 	expectShape(pieces[0], {5.0F, 0.0F}, {1.0F, 0.0F}, 5.0F, 1.0F, 0.0F);
 
-	strokePolyline({.points = line, .width = 2.0F, .cap = LineCap::Round}, 1.0F, pieces);
+	strokePolyline({.points = line, .width = 2.0F, .cap = LineCap::Round}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 1U);
 	expectCorners(pieces[0], {{12.0F, -2.0F}, {12.0F, 2.0F}, {-2.0F, 2.0F}, {-2.0F, -2.0F}});
 	expectShape(pieces[0], {5.0F, 0.0F}, {1.0F, 0.0F}, 6.0F, 1.0F, 1.0F);
 
-	strokePolyline({.points = line, .width = 2.0F, .cap = LineCap::Square}, 0.5F, pieces);
+	strokePolyline({.points = line, .width = 2.0F, .cap = LineCap::Square}, 0.5F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 1U);
 	expectCorners(pieces[0], {{11.5F, -1.5F}, {11.5F, 1.5F}, {-1.5F, 1.5F}, {-1.5F, -1.5F}});
 	expectShape(pieces[0], {5.0F, 0.0F}, {1.0F, 0.0F}, 6.0F, 1.0F, 0.0F);
@@ -381,7 +381,7 @@ TEST(StrokeTest, CapsEndStraightAPixelPastTheirReach) {
 TEST(StrokeTest, AClosedLineCutsEveryJointAndIgnoresCaps) {
 	const std::vector<Foundation::Vec2> square = {{0.0F, 0.0F}, {10.0F, 0.0F}, {10.0F, 10.0F}, {0.0F, 10.0F}, {0.0F, 0.0F}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = square, .width = 2.0F, .cap = LineCap::Round, .join = LineJoin::Miter, .closed = true}, 1.0F, pieces);
+	strokePolyline({.points = square, .width = 2.0F, .cap = LineCap::Round, .join = LineJoin::Miter, .closed = true}, 1.0F, 0.0F, pieces);
 	// The repeated first point is dropped: four segments, each a box run on a pixel past
 	// both its cuts, every joint cut.
 	ASSERT_EQ(pieces.size(), 4U);
@@ -394,15 +394,15 @@ TEST(StrokeTest, AClosedLineCutsEveryJointAndIgnoresCaps) {
 TEST(StrokeTest, RepeatsAndEmptyInputDrawNothingExtra) {
 	std::vector<StrokePiece>			pieces;
 	const std::vector<Foundation::Vec2> point = {{3.0F, 3.0F}, {3.0F, 3.0F}};
-	strokePolyline({.points = point, .width = 2.0F}, 1.0F, pieces);
+	strokePolyline({.points = point, .width = 2.0F}, 1.0F, 0.0F, pieces);
 	EXPECT_TRUE(pieces.empty());
 
 	const std::vector<Foundation::Vec2> repeated = {{0.0F, 0.0F}, {0.0F, 0.0F}, {5.0F, 0.0F}};
-	strokePolyline({.points = repeated, .width = 2.0F}, 1.0F, pieces);
+	strokePolyline({.points = repeated, .width = 2.0F}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 1U);
 	expectShape(pieces[0], {2.5F, 0.0F}, {1.0F, 0.0F}, 2.5F, 1.0F, 0.0F);
 
-	strokePolyline({.points = kElbow, .width = 0.0F}, 1.0F, pieces);
+	strokePolyline({.points = kElbow, .width = 0.0F}, 1.0F, 0.0F, pieces);
 	EXPECT_TRUE(pieces.empty());
 }
 
@@ -410,17 +410,17 @@ TEST(StrokeTest, EveryPointOfARoundStrokeBelongsToOnePieceShadedByTheStrokesDist
 	// Turns of 67 degrees, then past a right angle, then a closed triangle.
 	const std::vector<Foundation::Vec2> zigzag = {{0.0F, 0.0F}, {30.0F, 20.0F}, {60.0F, 0.0F}, {90.0F, 20.0F}, {120.0F, 0.0F}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = zigzag, .width = 8.0F, .cap = LineCap::Round}, 1.0F, pieces);
+	strokePolyline({.points = zigzag, .width = 8.0F, .cap = LineCap::Round}, 1.0F, 0.0F, pieces);
 	expectAllCut(pieces, false);
 	expectPartition(pieces, 1.0F, {-6.0F, -6.0F}, {126.0F, 26.0F}, roundStroke(zigzag, 4.0F, false));
 
 	const std::vector<Foundation::Vec2> sharp = {{0.0F, 0.0F}, {40.0F, 0.0F}, {5.0F, 15.0F}, {45.0F, 25.0F}};
-	strokePolyline({.points = sharp, .width = 6.0F, .cap = LineCap::Round}, 0.5F, pieces);
+	strokePolyline({.points = sharp, .width = 6.0F, .cap = LineCap::Round}, 0.5F, 0.0F, pieces);
 	expectAllCut(pieces, false);
 	expectPartition(pieces, 0.5F, {-5.0F, -5.0F}, {50.0F, 30.0F}, roundStroke(sharp, 3.0F, false));
 
 	const std::vector<Foundation::Vec2> triangle = {{0.0F, 0.0F}, {40.0F, 0.0F}, {20.0F, 30.0F}};
-	strokePolyline({.points = triangle, .width = 6.0F, .closed = true}, 1.0F, pieces);
+	strokePolyline({.points = triangle, .width = 6.0F, .closed = true}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 3U);
 	expectAllCut(pieces, true);
 	expectPartition(pieces, 1.0F, {-6.0F, -6.0F}, {46.0F, 36.0F}, roundStroke(triangle, 3.0F, true));
@@ -429,7 +429,7 @@ TEST(StrokeTest, EveryPointOfARoundStrokeBelongsToOnePieceShadedByTheStrokesDist
 TEST(StrokeTest, EveryPointOfAMiteredStrokeBelongsToOnePieceShadedByTheOutlinesDistance) {
 	const std::vector<Foundation::Vec2> zigzag = {{0.0F, 0.0F}, {30.0F, 20.0F}, {60.0F, 0.0F}, {90.0F, 20.0F}, {120.0F, 10.0F}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = zigzag, .width = 8.0F, .join = LineJoin::Miter}, 1.0F, pieces);
+	strokePolyline({.points = zigzag, .width = 8.0F, .join = LineJoin::Miter}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 4U);
 	expectAllCut(pieces, false);
 	// Within two pixels of a miter point each box measures to its own end, where the
@@ -598,12 +598,12 @@ TEST(StrokeTest, ASegmentBesideAButtCapSplitsWhereBothItsEndsFit) {
 	}
 	std::vector<StrokePiece> pieces;
 	for (const float width : {12.0F, 16.0F}) {
-		strokePolyline({.points = zigzag, .width = width}, 1.0F, pieces);
+		strokePolyline({.points = zigzag, .width = width}, 1.0F, 0.0F, pieces);
 		ASSERT_EQ(pieces.size(), 13U) << "width " << width;
 		expectAllCut(pieces, false);
 	}
 	const std::vector<Foundation::Vec2> hook = {{0.0F, 0.0F}, {10.0F, 0.0F}, {10.0F, 40.0F}, {50.0F, 40.0F}, {50.0F, 30.0F}};
-	strokePolyline({.points = hook, .width = 12.0F}, 1.0F, pieces);
+	strokePolyline({.points = hook, .width = 12.0F}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 6U);
 	expectAllCut(pieces, false);
 }
@@ -625,7 +625,7 @@ TEST(StrokeTest, StrokesWithManyUncutJointsStillLayOutConvexPieces) {
 		walk.emplace_back(static_cast<float>(i) * 2.0F, height);
 	}
 	std::vector<StrokePiece> pieces;
-	strokePolyline({.points = walk, .width = 2.0F}, 1.0F, pieces);
+	strokePolyline({.points = walk, .width = 2.0F}, 1.0F, 0.0F, pieces);
 	EXPECT_GE(pieces.size(), walk.size() - 1);
 	EXPECT_TRUE(std::ranges::all_of(pieces, isConvex));
 
@@ -640,4 +640,37 @@ TEST(StrokeTest, StrokesWithManyUncutJointsStillLayOutConvexPieces) {
 	strokeOutline(toothed, 4.0F, 1.0F, pieces);
 	EXPECT_GE(pieces.size(), toothed.size());
 	EXPECT_TRUE(std::ranges::all_of(pieces, isConvex));
+}
+
+TEST(StrokeTest, PointsWithinTheToleranceOfTheLineDrawnWithoutThemAreDropped) {
+	// A near-repeat 0.05 off its neighbour leaves a segment too short for either turn:
+	// without the tolerance both joints uncut and their pieces overlap. With a quarter
+	// pixel it goes, and the line is two segments, every joint cut.
+	const std::vector<Foundation::Vec2> nearRepeat = {{0.0F, 0.0F}, {50.0F, 0.0F}, {50.0F, 0.05F}, {100.0F, 30.0F}};
+	std::vector<StrokePiece>			pieces;
+	strokePolyline({.points = nearRepeat, .width = 10.0F}, 1.0F, 0.0F, pieces);
+	EXPECT_EQ(pieces.size(), 5U);
+	EXPECT_LT(sharedCorners(pieces[1], pieces[2]), 2);
+	strokePolyline({.points = nearRepeat, .width = 10.0F}, 1.0F, 0.25F, pieces);
+	ASSERT_EQ(pieces.size(), 4U);
+	expectAllCut(pieces, false);
+
+	// A straight line sampled every unit with 0.1 of jitter, width 4: no more than one in
+	// 17 points survives, and every joint left is cut.
+	std::vector<Foundation::Vec2> jittered;
+	for (int i = 0; i <= 100; ++i) {
+		jittered.emplace_back(static_cast<float>(i), (i % 2 == 0) ? 0.1F : -0.1F);
+	}
+	strokePolyline({.points = jittered, .width = 4.0F, .cap = LineCap::Round}, 1.0F, 0.25F, pieces);
+	EXPECT_LE(pieces.size(), 7U);
+	expectAllCut(pieces, false);
+
+	// A curve whose points stray further than the tolerance keeps them all.
+	std::vector<Foundation::Vec2> arc;
+	for (int i = 0; i <= 8; ++i) {
+		const float angle = static_cast<float>(i) * 0.25F;
+		arc.emplace_back(20.0F * std::cos(angle), 20.0F * std::sin(angle));
+	}
+	strokePolyline({.points = arc, .width = 4.0F, .cap = LineCap::Round}, 1.0F, 0.25F, pieces);
+	EXPECT_EQ(pieces.size(), 8U);
 }
