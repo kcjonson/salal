@@ -786,12 +786,15 @@ time a copy may not keep.
   What isn't one of this build's good saves never goes over the backup: a save
   damaged some other way (a disk that lost a write: a short file, a bad CRC) is
   `Corrupt` to `read` and, when written over, copied aside to `<slot>.save.corrupt`
-  (`.corrupt.1` and on after that); one that can't be read at all is renamed
-  there; and a newer build's save is kept as `<slot>.save.v<its version>`, which
-  nothing this build does replaces, so a player who tried a beta and went back
-  doesn't lose the beta's save to the stable build's autosaves. A newer build's
-  backup is renamed to its own name the same way before it's replaced. No read
-  looks at a `.v<N>` file; it's there to be recovered.
+  (`.corrupt.1` and on after that); one that can't be read at all is hard-linked
+  there, so its name holds a save until the new one's rename (renamed there
+  where it can't be linked: a directory, a filesystem without links); and a
+  newer build's save is kept as `<slot>.save.v<its version>`, which only a copy
+  of that version written later (a higher write counter) replaces, so a player
+  who tried a beta and went back doesn't lose the beta's latest save to the
+  stable build's autosaves. A newer build's backup is renamed to its own name
+  the same way before it's replaced, unless a later copy is there. No read looks
+  at a `.v<N>` file; it's there to be recovered by hand.
 - The safe write: each write's temp file is `<target>.<pid>.<n>.tmp`, created
   exclusively, so two writers never share one, and a later write of the target
   sweeps up ones more than ten minutes old. It's flushed with `F_FULLFSYNC` on
@@ -805,13 +808,15 @@ time a copy may not keep.
 - `restoreBackup` swaps the save and its backup, so a second call undoes it. The
   save being replaced is staged as `<slot>.save.swap` first, then the backup is
   renamed over the save, then the swap file over the backup, so the replaced
-  save is on disk under some name throughout. When the last rename fails the
-  call is false and the swap file stays; the next call on the slot (read, write,
-  restoreBackup) finishes the restore when there's no backup, drops the swap
-  file when it matches the save, and otherwise keeps it, logged, for `remove`.
-  With no save the backup is renamed into place; a damaged save is copied aside
-  and the backup renamed straight over it, so there's never a moment with no
-  save. A missing or damaged backup is refused with nothing changed. A backup
+  save is on disk under some name throughout. The call is true once the save is
+  the backup's: when only the last rename fails, logged, the swap file stays,
+  and the next call on the slot (read, write, restoreBackup) makes it the backup
+  when there's none, drops it when it matches the save, and otherwise keeps it,
+  logged, for `remove`. A restoreBackup that finds and finishes an interrupted
+  restore is true without swapping again, so a retry doesn't undo what it
+  retries. With no save the backup is renamed into place; a damaged save is
+  copied aside, one that can't be read linked aside, and the backup renamed
+  straight over it, so there's never a moment with no save. A missing or damaged backup is refused with nothing changed. A backup
   alone isn't `read` (`Missing`); `slots()` shows its slot, not intact.
 - The write counter goes on from the higher of the save's and the backup's, so
   it never repeats in a slot, a restore included. Nothing on load chooses by it;
