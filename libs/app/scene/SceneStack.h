@@ -143,6 +143,7 @@ namespace app {
 
 	  private:
 		friend class App;
+		friend class DevServer; // /api/state?what=scene reads every entry
 		friend class Scene;
 
 		explicit SceneStack(App& owner);

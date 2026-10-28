@@ -590,6 +590,30 @@ namespace app::testing {
 		EXPECT_EQ(count("A.render"), 1);
 	}
 
+	// Step 2's onResize comes before the dev server's step 3, whose exit alone ends a frame early.
+	TEST_F(AppTest, RequestExitFromAnOnResizeFinishesTheFrame) {
+		class ExitingOverlay final : public Overlay {
+		  public:
+			explicit ExitingOverlay(App& owner)
+				: running(owner) {}
+			void render() override {}
+			void onResize(const Renderer::Viewport& /*viewport*/) override { running.requestExit(); }
+
+		  private:
+			App& running;
+		};
+		start();
+		app->addOverlay(std::make_unique<ExitingOverlay>(*app));
+		app->scenes().push<SceneA>();
+		frame();
+		take();
+		platform->resize(640, 480);
+		EXPECT_FALSE(frame());
+		EXPECT_EQ(count("A.onResize"), 1);
+		EXPECT_EQ(count("A.update"), 1);
+		EXPECT_EQ(count("A.render"), 1);
+	}
+
 	TEST_F(AppTest, RequestExitDuringTheFirstOnEnterFinishesThatFrame) {
 		start();
 		hooks()["A"].onEnter = [](App& running) {

@@ -53,6 +53,7 @@ Not in phase 2:
 | worldsim `libs/engine/clipboard` | `ClipboardManager`, implementing `UI::IClipboard` over GLFW | 62 |
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
 | salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
+| salal `libs/app/DevServer`, `libs/renderer/PngEncoder` | phase 2 PR 4: the dev server behind its flags, its registrations, the input grammar, and the PNG encoder; tests not counted | 1,914 |
 | salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1, axis edges PR 3) | 768 |
 
 What changed since app-carve-out.md's survey, and matters here:
@@ -90,7 +91,7 @@ main()                                  the game's
   the game's own resources, its scenes, the first scene
   app->run()                            native: while (tick()) pace();
   app->shutdown()                       scenes and overlays exit; GL still alive for the game's teardown
-  the game's teardown, then ~App        server, fonts, Primitives, window
+  the game's teardown, then ~App        fonts, Primitives, window, then the server (an exit request answers now)
 ```
 
 The game's `main` owns the order, so worldsim's `initializeResources(hasSceneArg)`
@@ -175,7 +176,7 @@ struct AppConfig {
 	Foundation::Color clearColor{0.1F, 0.1F, 0.15F, 1.0F}; // through Primitives::clear; the glClear in worldsim's loop goes
 	std::vector<std::filesystem::path> resourceRoots;      // searched before the exe directory and cwd
 	std::filesystem::path settingsFile;                     // under the per-user directory; empty for none
-	DevServerConfig devServer;                              // enabled, port; a no-op where the server isn't compiled in
+	DevServerConfig devServer;                              // enabled, port, request timeout; a no-op where the server isn't compiled in
 	bool metrics = false;
 };
 
@@ -687,37 +688,52 @@ Compiled in where `SALAL_DEV_SERVER` is defined: Debug and RelWithDebInfo, the
 configurations that already define `DEVELOPMENT_BUILD`, when the CMake option
 `SALAL_WITH_DEV_SERVER` is on (the default), and Release too only when
 `SALAL_DEV_SERVER_IN_RELEASE` is turned on, for a profiling session (off by
-default). The definition is PUBLIC, so a game can `#if` on it, but needn't:
-`DevServer`'s API is always declared, and where the server is compiled out its
-methods are inline no-ops, so a game's registration code links in every
-configuration. A shipping build links no `cpp-httplib` and opens no socket. It
-binds `127.0.0.1` only, as
-today, and starts after the window, so startup logs before it aren't streamed.
-A requested port that is busy fails `App::create`, logged, where today the
-server thread calls `std::exit(1)` (`DebugServer.cpp:1016`).
+default); MinSizeRel never, nor a configuration a game defines for itself (a
+"Profile", say), which gets neither the server nor `DEVELOPMENT_BUILD`. A
+multi-config generator builds every
+configuration from one configure, so the choice is a generator expression,
+`SALAL_DEV_SERVER_GENEX`, and the define, the server's sources and the
+`cpp-httplib` link all carry it; `salal_check_layering` fails a configure
+where an `app` link names httplib without it, a lower layer links it, or a
+public header reaches `httplib.h`, a tripwire on the link rather than a proof. The definition is PUBLIC, so a game can
+`#if` on it, but needn't: `DevServer`'s API is always declared, and where the
+server is compiled out its methods are inline no-ops, so a game's registration
+code links in every configuration. A shipping build links no `cpp-httplib` and
+opens no socket. A Release build made for profiling serves with an empty log
+stream, since the logger's sink, like `LOG_INFO`, is `DEVELOPMENT_BUILD`'s. It
+binds `127.0.0.1` only, as today, and starts after the window, so startup logs
+before it aren't streamed. A requested port that is busy fails `App::create`,
+logged, where today the server thread calls `std::exit(1)`
+(`DebugServer.cpp:1016`); port 0 takes any free one, which `port()` reports.
 
 Routes:
 
-| route | change |
-|---|---|
-| `/api/ui/tree`, `/api/ui/lint` | answered by providers the game registers (`"ui.tree"`, `"ui.lint"`) until salal's `ui` registers its own in phase 3; with none registered, an empty tree and a zero-count lint, so an app with no ui (the sandbox, the asteroids prototype) still meets the inspector contract |
-| `/api/ui/screenshot` | read before present |
-| `/api/input` | grows `char,<codepoint>`, `pad,<device>,<button>,down\|up`, `axis,<device>,<axis>,<value>`, `connect,vpad<n>`, `disconnect,vpad<n>`; injected events go through the accumulator, so injected keys reach the ui the way typed ones do (today they skip the focus manager, `InputManager.cpp:371-375`) |
-| `/api/control` | `exit`, `scene`, `pause`, `resume`, `reload`, `vsync` as today, plus `step&ticks=<n>`; games register further actions, which is how world-sim keeps `camera` for `scripts/perf-capture.ps1:23` and `docs/testing/README.md:132` |
-| `/api/state?what=` | `scene` answered by the server itself from the stack's `exportState()`; anything else by registered providers, 404 at once for an unregistered `what`, where today it is 503 after 2 s |
-| `/api/dev/<verb>` | the game's registered routes; 404 for an unregistered verb, where today it is queued and answered with an ack |
-| `/api/health`, `/api/metrics`, `/stream/metrics`, `/stream/logs`, `/` | as today |
+| route | answered | change |
+|---|---|---|
+| `/api/ui/tree`, `/api/ui/lint` | step 10 | by providers the game registers (`"ui.tree"`, `"ui.lint"`) until salal's `ui` registers its own in phase 3; with none registered, `{"viewport":{"width":w,"height":h},"roots":[]}` at the logical viewport and `{"count":0,"violations":[]}`, so an app with no ui (the sandbox, the asteroids prototype) still meets the inspector contract |
+| `/api/ui/screenshot` | step 10 | read before present; one readback answers every screenshot parked for the frame; 500 when there is no backbuffer to read |
+| `/api/input` | queued at once, joins at step 3 | grows `char,<codepoint>`, `pad,<device>,<button>,down\|up`, `axis,<device>,<axis>,<value>`, `connect,vpad<n>`, `disconnect,vpad<n>`; a request's events all queue or none do, and a malformed one is a 400 naming it; injected events go through the accumulator, so injected keys reach the ui the way typed ones do (today they skip the focus manager, `InputManager.cpp:371-375`) |
+| `/api/control` | step 3 | `exit`, `scene`, `pause`, `resume`, `reload`, `vsync` as today, plus `step&ticks=<n>` (one tick without `ticks`, 409 unless paused); games register further actions, which is how world-sim keeps `camera` for `scripts/perf-capture.ps1:23` and `docs/testing/README.md:132`; an action answers once it has run, though `scene` and `reload` queue their change, which applies at step 6 (after resume while paused), so they answer before it takes effect, as today; an unknown action is a 404 at once (today a 400), a `scene` nothing was added under a 404 and a `reload` of a scene pushed with arguments a 409 |
+| `/api/state?what=` | step 10 | `scene` answered by the server itself from the stack's `exportState()`; anything else by registered providers, 404 at once for an unregistered `what`, where today it is 503 after 2 s; `what` still defaults to `summary` |
+| `/api/dev/<verb>` | step 3 | the game's registered routes; 404 for an unregistered verb, where today it is queued and answered with an ack |
+| `/api/health`, `/api/metrics`, `/stream/metrics`, `/stream/logs`, `/` | at once | as today; the index page lists every route, without worldsim's developer-client notes |
 
 ```cpp
 namespace app {
-struct DevRequest { std::string name; std::map<std::string, std::string> params; };
+struct DevServerConfig { bool enabled = false; int port = 0; double requestTimeout = 10.0; }; // port 0: any free port
+struct DevRequest { std::string name; std::map<std::string, std::string> params; };            // the first of a repeated key
 struct DevResponse { int status = 200; std::string contentType = "application/json"; std::string body; };
 class DevServer {
 public:
-	class Registration; // move-only; unregisters when destroyed, so a scene can register in onEnter and hold it
-	[[nodiscard]] Registration route(std::string verb, std::function<DevResponse(const DevRequest&)>);   // /api/dev/<verb>, step 3
-	[[nodiscard]] Registration control(std::string action, std::function<DevResponse(const DevRequest&)>); // /api/control?action=<action>, step 3
-	[[nodiscard]] Registration stateProvider(std::string what, std::function<std::string()>);          // /api/state?what=, /api/ui/tree, /api/ui/lint, step 10
+	using Handler = std::function<DevResponse(const DevRequest&)>;
+	using Provider = std::function<std::string()>; // JSON
+	class Registration { public: void reset(); bool active() const; }; // move-only; unregisters when destroyed, so a scene can register in onEnter and hold it
+	[[nodiscard]] Registration route(std::string verb, Handler);          // /api/dev/<verb>, step 3
+	[[nodiscard]] Registration control(std::string action, Handler);      // /api/control?action=<action>, step 3
+	[[nodiscard]] Registration stateProvider(std::string what, Provider); // /api/state?what=, /api/ui/tree, /api/ui/lint, step 10
+	bool serving() const;
+	int port() const;                   // the bound port; 0 when not serving
+	std::size_t parkedRequests() const; // waiting for the frame now
 };
 }
 ```
@@ -725,22 +741,77 @@ public:
 A request parks its HTTP thread until the game thread answers it in the
 frame's drain, as today, so handlers never race the game. Asteroids' "sim
 state, step N ticks, set the seed" are a `stateProvider`, `step`, and a route.
+`/api/input` doesn't park: injected input waits in the server while the app is
+paused, so a request that waited for it would time out.
+
+What the first version of this design left open, as landed:
+
+- A parked request waits `requestTimeout`, 10 s by default (today's
+  screenshot wait) and held to an hour, whatever its route. One the frame
+  hasn't taken by then is answered 503 and dropped; one it has taken is
+  running, and answers when it finishes. An exit waits up to 30 s for `~App`,
+  as today, and says `"shutdown":"timed out"` past that. Requests still parked
+  when the App goes are answered 503, exits `"shutdown":"complete"`, and one
+  taken and never answered (something threw out of a drain) 500.
+- Once exit has been asked for at step 3, or before it in the frame, the
+  actions and routes left in that step are answered 503 without running, and
+  injected input stays queued. Only an exit asked for at step 3 ends the frame
+  there; one from an `onResize` at step 2 finishes it, as a scene's does.
+- Several registrations may hold one name; the newest answers, and when it
+  goes the one before it answers again, so a scene pushed over another can
+  register the verb the other holds and hand it back when it pops.
+- A registration, or a handle going, takes effect at once for every request,
+  parked or not, from inside a drain too: an action that registers a route
+  answers a request for it in that frame's routes, and one that drops a route
+  turns a request parked for it into a 404, since actions run first.
+- Refused, logged, as an inactive handle: an empty handler, a verb with
+  anything but letters, digits, `-` and `_` (verbs match without case, as
+  today), an action or `what` with anything but those and `.`, a built-in
+  action, and `scene`. A handle that outlives the App does nothing when it
+  goes.
+- A handler or provider that throws answers 500 with what it threw, logged as
+  every call into game code is, and the frame goes on.
+- `/api/state?what=scene` is `{"scenes":[{"name":...,"state":...}, ...]}`,
+  top first: each scene's `name()` and its `exportState()` as it gave it,
+  `null` for none, and `null` beside an `"error"` when it threw or isn't JSON.
+- `/api/input`: a codepoint is decimal, or hex after `0x` or `U+`; pad buttons
+  and axes go by `GamepadButton` and `GamepadAxis` names without case, and an
+  axis value is -1 to 1. `pad` and `axis` take `vpad0` to `vpad3` only, since
+  real pads are the device layer's. A vpad connects and disconnects through
+  `PlatformEvents::deviceConnected` and `deviceDisconnected`, as `vpad<n>`
+  with the model GUID `salal-dev-server-vpad<n>`, so `Input::devices()` lists
+  it, a slot can claim it, and a slot waiting on a real pad's model never takes
+  it; its buttons and axes go through `inputEvent`. The server tracks which
+  it connected, so input to one that isn't connected, a second connect, a
+  disconnect of one that isn't connected and a vpad past 3 are 400s, as is an
+  unknown key (a 200 and a warning today). Injected events carry no modifier bits, as today.
+  At most 1024 events wait for the frame; past that, which only a paused or
+  stalled app reaches, a request is a 429 and queues nothing. cpp-httplib
+  keeps one of a repeated `key=value` pair, so two identical events in one
+  request are one, as today; send a double click as two requests.
+
+The log stream needs no singleton of its own: the logger's one sink slot
+(`foundation::Logger::setSink`, module-static as the logger is) holds the
+running server, set once it listens and cleared before it stops. Clearing it
+waits for calls already inside the sink, so a thread still logging as the App
+goes never writes into a server that's gone.
 
 Fixed on the way across, all found in the survey:
 
 - The busy port above.
-- The log ring is single-writer (`LockFreeRingBuffer.h:5`) but the sink is
+- The log ring was single-writer (`LockFreeRingBuffer.h:5`) but the sink is
   called from every thread that logs (`salal/libs/foundation/utils/Log.cpp:83-88`);
   it takes a lock.
-- A dev command whose request timed out stays queued and runs whenever a
-  scene next drains (`DebugServer.cpp:665-667`); it is dropped.
+- A dev command whose request timed out stayed queued and ran whenever a scene
+  next drained (`DebugServer.cpp:665-667`); it is dropped.
 - `signalShutdownComplete` (`AppLauncher.cpp:226`, through `stopDebugServer()`
-  at `:503`) fires before scene exit and GL teardown; it moves to `~App`,
+  at `:503`) fired before scene exit and GL teardown; `~App` answers the exit
   after both.
 
 `PngEncoder` moves with it, but unconditionally and into `renderer` beside
-`stb_image`, since worldsim's `AssetRenderer` (`libs/engine/assets/AssetRenderer.cpp:92`,
-`:100`) and so asset-cli use it in every configuration, and two
+`stb_image`, as `<PngEncoder.h>` in namespace `Renderer`, since worldsim's
+`AssetRenderer` (`libs/engine/assets/AssetRenderer.cpp:92`, `:100`) and so
+asset-cli use it in every configuration, and two
 `STB_IMAGE_WRITE_IMPLEMENTATION` sites can't both link.
 
 ## What worldsim keeps, and what changes there
@@ -788,6 +859,19 @@ What changes where a player or worldsim's tooling can see, owned:
 - The screenshot is read before present (decision 9).
 - `/api/control?action=exit` signals completion after scenes exit and GL is
   torn down, not before.
+- Control actions answer once they have run, at the next frame's step 3,
+  not as they are queued; an unknown action is a 404, not a 400, and a
+  `scene` nothing was added under a 404, not a 200 and a log line.
+- A request the frame doesn't reach in 10 s is a 503 and dropped, whatever
+  its route.
+- Malformed `/api/input` events are 400s: an unknown key, which is a 200 and
+  a warning today; fields past the ones an event takes; a number that doesn't
+  parse whole (`click,10px,20`, which `std::stof` took as 10); and a trailing
+  comma, which is an empty field where today it was dropped (`keydown,R,`).
+  `scene` with an empty `scene=` is a 400.
+- `/api/state?what=scene` is `{"scenes":[{"name":...,"state":...}, ...]}`,
+  top first, where today it is the one scene's `exportState()`; a script
+  reads `scenes[0].state`.
 - Startup logs before the window aren't on `/stream/logs`.
 
 ## Sequencing

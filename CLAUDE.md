@@ -96,12 +96,12 @@ assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which to
 worldsim's grass deform out of the renderer and into a worldsim hook.
 `foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
 ported bit for bit (decision A). Phase 2 carves `app` out of `libs/engine`, in
-the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PRs 1 to 3 are
-in (`v0.10.0` to `v0.12.0`): the input types, the accumulator and `ActionMap` in
+the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PRs 1 to 4 are
+in (`v0.10.0` to `v0.13.0`): the input types, the accumulator and `ActionMap` in
 `foundation/input/`, then `app`'s clock, GLFW and headless platforms, frame,
 scene stack, overlays and context object, then the GLFW device layer with
-gamepads, player slots, key names, capture, axis edges and the clipboard. `ui`
-is extracted last.
+gamepads, player slots, key names, capture, axis edges and the clipboard, then
+the dev server behind its compile flags. `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -131,9 +131,12 @@ it is the first thing that quietly breaks if nobody is watching.
   owns `main()`. A tick function is testable headlessly, and the platform, not
   the engine, owns the frame.
 - The HTTP dev server sits behind a compile flag. No listening sockets in a
-  shipped build. Worldsim has no such flag today (the server is always compiled
-  into `libs/engine` and switched on at runtime), so this is new discipline,
-  added when the server moves into `app`.
+  shipped build. `SALAL_DEV_SERVER` is defined in Debug and RelWithDebInfo
+  unless `SALAL_WITH_DEV_SERVER` is off, and in Release only with
+  `SALAL_DEV_SERVER_IN_RELEASE`; elsewhere `DevServer`'s calls are inline
+  no-ops and nothing links cpp-httplib, which the layering check holds to.
+  Worldsim's server has no flag (it is always compiled into `libs/engine` and
+  switched on at runtime) until it converts.
 
 These are cheap now and expensive once three games depend on the API.
 
@@ -192,16 +195,22 @@ removing legacy code. One way to do each thing.
 
 There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs one scene on the
-GLFW platform today, with no picker and no server; the harness and the server
-come across from worldsim.
+GLFW platform, with no picker yet (the harness comes across in phase 2 PR 6),
+and serves the dev server on 127.0.0.1:8090 in Debug and RelWithDebInfo
+(`--http-port <port>` for another). Run `build/apps/sandbox/Debug/sandbox.exe`
+in the background, and stop it with
+`curl "http://127.0.0.1:8090/api/control?action=exit"`, which answers once the
+app is torn down and the port is free.
 
-Once they are in: `/api/ui/screenshot`, `/api/ui/tree` for element bounds,
-`/api/ui/lint` for layout invariant violations (expect `"count":0` before
-screenshotting anything), `/api/input` for synthetic input, `/api/control` for
-scene switching and shutdown. Those five are the contract every app exposes.
-Worldsim's server has twelve routes today (the others are health, metrics, a
-dev-command bag, a state handshake, two SSE streams and an index page), and
-games will be able to register their own. Don't check coordinates by eye.
+`/api/ui/screenshot`, `/api/ui/tree` for element bounds, `/api/ui/lint` for
+layout invariant violations (expect `"count":0` before screenshotting
+anything), `/api/input` for synthetic input, `/api/control` for scene
+switching, pause, `step&ticks=<n>` and shutdown. Those five are the contract
+every app exposes; an app with no ui answers tree and lint empty. The rest are
+health, metrics, `/api/state?what=` (`scene` is every app's), the game's
+`/api/dev/<verb>` routes, two SSE streams and an index page; games register
+routes, control actions and state providers ([docs/app-api.md](docs/app-api.md),
+"Dev server"). Don't check coordinates by eye.
 
 This is a native app rendering every frame, not a web page. Shut it down as soon
 as you are done with it.
@@ -265,14 +274,19 @@ Each lib's `*.test.cpp` files become `salal_<lib>_tests` through
 Targets are `salal_<lib>` behind `salal::<lib>` aliases, so a FetchContent
 consumer's own `ui` or `engine` can't collide, and `SALAL_BUILD_UI`,
 `SALAL_BUILD_APP`, `SALAL_BUILD_SANDBOX` and `SALAL_BUILD_TESTS` (on standalone,
-off as a subproject) switch off what it doesn't link. CI
+off as a subproject) switch off what it doesn't link. `SALAL_WITH_DEV_SERVER`
+(on) and `SALAL_DEV_SERVER_IN_RELEASE` (off) hold for a subproject too, so a
+game sets them in its own configure; a configuration of the game's own (a
+"Profile") gets no server. CI
 (`.github/workflows/ci.yml`) builds and tests on Windows, macOS and Linux and
 checks clang-format 21.
 
 Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
-`nanosvg`, `cpp-httplib`, `gtest`, `benchmark`, and `glslang` with its `tools`
-feature as a host dependency, whose `glslangValidator` checks the base shader at
-build time (a FetchContent consumer adds it to its own manifest). Worldsim's
+`nanosvg`, `cpp-httplib` (app's dev server; a game configured with
+`SALAL_WITH_DEV_SERVER` off needn't have it), `gtest`, `benchmark`, and
+`glslang` with its `tools` feature as a host dependency, whose
+`glslangValidator` checks the base shader at build time (a FetchContent
+consumer adds it to its own manifest). Worldsim's
 `pugixml`, `lua` and `sol2` serve its `assets` target, `msdfgen` its font-atlas
 tool, and all four stay behind. An audio library is proposed and not decided
 (worldsim has none; `miniaudio` is the recommendation).

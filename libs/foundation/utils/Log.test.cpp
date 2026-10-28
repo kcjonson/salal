@@ -1,6 +1,10 @@
 #include "Log.h"
+#include <array>
+#include <atomic>
+#include <chrono>
 #include <gtest/gtest.h>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace foundation;
@@ -283,5 +287,54 @@ TEST(LoggerTests, SinkReceivesEveryMessageBeforeConsoleFilter) {
 	EXPECT_EQ(captured.messages.size(), 1U);
 
 	Logger::shutdown();
+}
+
+// A thread logs without pause while the sink is installed and cleared, again and again. Each sink
+// takes a moment, so a call is often inside it when the clear comes; the clear must wait for that
+// call, so no call reaches a sink after its setSink(nullptr) returned, which is when its owner may
+// destroy the context. Every context outlives the test, so a late call is counted, not undefined.
+TEST(LoggerTests, AClearedSinkIsNeverCalledAfterTheClearReturns) {
+	struct Sink {
+		std::atomic<int>  calls{0};
+		std::atomic<bool> retired{false};
+		std::atomic<int>  late{0};
+	};
+	constexpr int			  kRounds = 40;
+	std::array<Sink, kRounds> sinks;
+	std::atomic<bool>		  stop{false};
+	const Logger::LogSinkFn	  sinkFn = [](void* context, const LogRecord& /*record*/) {
+		  auto* sink = static_cast<Sink*>(context);
+		  sink->calls.fetch_add(1);
+		  const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(50);
+		  while (std::chrono::steady_clock::now() < until) {}
+		  if (sink->retired.load()) {
+			  sink->late.fetch_add(1);
+		  }
+	};
+
+	Logger::initialize();
+	Logger::setLevel(LogCategory::Foundation, LogLevel::Error);
+	std::thread logger([&stop] {
+		while (!stop.load()) {
+			LOG_DEBUG(Foundation, "hammer");
+		}
+	});
+	for (Sink& sink : sinks) {
+		Logger::setSink(sinkFn, &sink);
+		for (int wait = 0; wait < 100000 && sink.calls.load() < 3; ++wait) {
+			std::this_thread::yield();
+		}
+		Logger::setSink(nullptr, nullptr);
+		sink.retired.store(true);
+	}
+	std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	stop.store(true);
+	logger.join();
+	Logger::shutdown();
+
+	for (std::size_t round = 0; round < sinks.size(); ++round) {
+		EXPECT_GE(sinks[round].calls.load(), 1) << round;
+		EXPECT_EQ(sinks[round].late.load(), 0) << round;
+	}
 }
 #endif

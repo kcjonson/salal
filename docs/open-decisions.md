@@ -17,7 +17,7 @@ Written into the docs as decided, with the reason.
 |---|---|
 | Work is tracked in Specboard | Kevin asked for it; worldsim and dual-deck-builder already are |
 | FontRenderer moves into `renderer` (namespace `ui::` -> `Renderer::`) | removes the renderer -> ui knot (`worldsim/libs/renderer/primitives/Primitives.cpp:12`, `Primitives.h:35`) and gives text below ui, which the prototype's debug overlay needs; FontRenderer depends on nothing else in ui. `Renderer::` rather than the standards doc's lowercase because FontFamily, Primitives, BatchRenderer, Shader, CoordinateSystem, metrics/, gl/ and resources/Tile* are all `namespace Renderer` (only vector/ and two resources/ files are lowercase); a lowercase FontRenderer would force `Renderer::FontFamily` qualifiers and a second namespace block in Primitives.h, the shape being removed |
-| The dev server moves out of `foundation` into `app`, behind a compile flag; tree snapshot, lint and the injection grammar stay as transport-free functions; `Logger::setDebugServer` becomes a sink callback; foundation becomes GL-free | it lived in `worldsim/libs/foundation/debug/DebugServer.cpp` and dragged OpenGL and httplib into foundation; architecture.md already assigns it to app. [worldsim#297](https://github.com/kcjonson/worldsim/pull/297) moved it to `libs/engine/debug` and added the sink; the move into `app` is phase 2 |
+| The dev server moves out of `foundation` into `app`, behind a compile flag; tree snapshot, lint and the injection grammar stay as transport-free functions; `Logger::setDebugServer` becomes a sink callback; foundation becomes GL-free | it lived in `worldsim/libs/foundation/debug/DebugServer.cpp` and dragged OpenGL and httplib into foundation; architecture.md already assigns it to app. [worldsim#297](https://github.com/kcjonson/worldsim/pull/297) moved it to `libs/engine/debug` and added the sink; it moved into `app` in phase 2 PR 4 (`v0.13.0`), behind `SALAL_DEV_SERVER` |
 | `Application::run()` splits into `tick()` plus a native `while (tick())`; the fixed-step accumulator with interpolation is net-new in `app` | the loop body (`worldsim/libs/engine/application/Application.cpp:112-306`) is already one frame's work; the frame contract is normative |
 | `IScene::exportState()` stays on `app::Scene` as an optional method, and the dev server answers `/api/state?what=scene` from it (2026-10-27; this row first said it was deleted) | scenes are the engine's, so scene state for debugging is for every game; world-sim already uses it (`apps/world-sim/scenes/shared/UiStateDrain.cpp:24-26`) for a route the first version of this row called dead; nothing calls it in a build without the server ([app-api.md](app-api.md), decision 1) |
 | Worldsim's `assets`, ECS systems and components, construction, nav, vision and world/* stay in worldsim | game schema and game logic throughout (the classification in app-carve-out.md) |
@@ -240,10 +240,11 @@ and dropping `engine` from ui's link list were the last of phase 0.5
 the namespace is now `foundation::`), and the rest of the untangle landed on
 2026-10-25/26 ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291)
 through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)). Phase 2
-PRs 1 to 3 are in (`v0.10.0` to `v0.12.0`): the completed `Key`, the gamepad
+PRs 1 to 4 are in (`v0.10.0` to `v0.13.0`): the completed `Key`, the gamepad
 types, the snapshot, the accumulator and `ActionMap` are in `foundation/input/`,
-`app`'s frame feeds the accumulator and hands each fixed tick its snapshot, and
-`app`'s device layer polls GLFW's devices into it.
+`app`'s frame feeds the accumulator and hands each fixed tick its snapshot,
+`app`'s device layer polls GLFW's devices into it, and the dev server injects
+into it.
 
 ## E. ECS core
 

@@ -110,6 +110,7 @@ namespace Renderer::backend {
 		[[nodiscard]] int									 frames() const { return frameCount; }
 		[[nodiscard]] int									 invalidations() const { return invalidationCount; }
 		[[nodiscard]] int									 timestampsWritten() const { return timestampCount; }
+		[[nodiscard]] int									 pixelReads() const { return pixelReadCount; } // readPixels() calls
 		// Textures createTexture() made, destroyed since or not.
 		[[nodiscard]] int texturesMade() const { return textureCount; }
 		// beginForeignDraws() calls, the pipeline of the last, and endForeignDraws() calls.
@@ -156,6 +157,7 @@ namespace Renderer::backend {
 		int								frameCount = 0;
 		int								invalidationCount = 0;
 		int								timestampCount = 0;
+		int								pixelReadCount = 0;
 		int								textureCount = 0;
 		int								submissionCount = 0;
 		int								foreignDrawBegins = 0;
