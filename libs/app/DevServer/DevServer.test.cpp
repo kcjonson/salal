@@ -12,6 +12,7 @@
 #include "tests/AppHarness.h"
 
 #include <backend/NullBackend.h>
+#include <primitives/Primitives.h>
 #include <utils/Log.h>
 
 #include <gtest/gtest.h>
@@ -69,6 +70,7 @@ namespace app::testing {
 			std::string contentType;
 			std::string disposition;
 			std::string connection;
+			std::string allowOrigin;
 		};
 
 		Reply fetch(int port, const std::string& path) {
@@ -84,6 +86,7 @@ namespace app::testing {
 				.contentType = result->get_header_value("Content-Type"),
 				.disposition = result->get_header_value("Content-Disposition"),
 				.connection = result->get_header_value("Connection"),
+				.allowOrigin = result->get_header_value("Access-Control-Allow-Origin"),
 			};
 		}
 
@@ -123,7 +126,9 @@ namespace app::testing {
 			const Clock&								clock() const override { return time; }
 			Renderer::Viewport							viewport() const override { return {800, 600, 800, 600}; }
 			std::unique_ptr<Renderer::backend::Backend> createBackend() override {
-				return std::make_unique<Renderer::backend::NullBackend>();
+				auto made = std::make_unique<Renderer::backend::NullBackend>();
+				backend = made.get();
+				return made;
 			}
 			void pollEvents(PlatformEvents& /*events*/) override {}
 			bool focused() const override { return true; }
@@ -131,7 +136,8 @@ namespace app::testing {
 			void present() override { record("platform", "present"); }
 			void setVsync(bool enabled) override { record("platform", enabled ? "vsync on" : "vsync off"); }
 
-			ManualClock time;
+			ManualClock						time;
+			Renderer::backend::NullBackend* backend = nullptr; // the renderer's, alive as long as the App
 		};
 
 		const foundation::ButtonState& keyIn(const foundation::InputSnapshot& snapshot, Key key) {
@@ -192,6 +198,32 @@ namespace app::testing {
 		EXPECT_EQ(health.status, 200);
 		EXPECT_EQ(health.contentType, "application/json");
 		EXPECT_EQ(health.body, R"({"status":"ok","uptime":0})");
+	}
+
+	// The developer client reads the routes and streams from a page of its own origin.
+	TEST_F(DevServerTest, EveryReplyAllowsAnyOrigin) {
+		serve();
+		EXPECT_EQ(get("/api/health").allowOrigin, "*");
+		const Reply missing = get("/api/dev/nothing");
+		EXPECT_EQ(missing.status, 404);
+		EXPECT_EQ(missing.allowOrigin, "*");
+
+		std::string		stream;
+		std::string		origin;
+		httplib::Client client("127.0.0.1", port());
+		client.Get(
+			"/stream/metrics",
+			[&origin](const httplib::Response& response) {
+				origin = response.get_header_value("Access-Control-Allow-Origin");
+				return true;
+			},
+			[&stream](const char* data, std::size_t size) {
+				stream.append(data, size);
+				return false;
+			}
+		);
+		EXPECT_EQ(origin, "*");
+		EXPECT_TRUE(stream.starts_with("event: metric")) << stream;
 	}
 
 	TEST_F(DevServerTest, ServesNothingUnlessEnabled) {
@@ -298,7 +330,8 @@ namespace app::testing {
 	}
 
 #ifdef DEVELOPMENT_BUILD
-	// The logger's sink runs on whichever thread logged; the ring takes a lock for each.
+	// The logger's sink runs on whichever thread logged; the ring takes a lock for each. A smoke test:
+	// an unlocked ring would usually pass it too.
 	TEST_F(DevServerTest, TheLogStreamCarriesLinesFromEveryThread) {
 		serve();
 		std::vector<std::thread> loggers;
@@ -812,6 +845,40 @@ namespace app::testing {
 		};
 		EXPECT_EQ(bigEndian(16), 800U);
 		EXPECT_EQ(bigEndian(20), 600U);
+	}
+
+	TEST_F(DevServerTest, OneReadbackAnswersEveryScreenshotParkedForAFrame) {
+		auto				owned = std::make_unique<PresentingPlatform>();
+		PresentingPlatform& headless = *owned;
+		app = App::create(served(), std::move(owned));
+		ASSERT_NE(app, nullptr);
+		headless.time.advance(kStep);
+		app->tick();
+		const int before = headless.backend->pixelReads();
+
+		std::vector<std::future<Reply>> shots;
+		for (std::size_t i = 0; i < 3; ++i) {
+			shots.push_back(send("/api/ui/screenshot"));
+			waitParked(i + 1);
+		}
+		headless.time.advance(kStep);
+		app->tick();
+		const Reply first = shots[0].get();
+		EXPECT_EQ(first.status, 200);
+		EXPECT_EQ(shots[1].get().body, first.body);
+		EXPECT_EQ(shots[2].get().body, first.body);
+		EXPECT_EQ(headless.backend->pixelReads(), before + 1);
+	}
+
+	TEST_F(DevServerTest, AScreenshotWithNoBackbufferIs500) {
+		serve();
+		frame();
+		// What a minimized window leaves the renderer, which the App itself never passes on.
+		app->coordinateSystem().setViewport({.logicalWidth = 800, .logicalHeight = 600});
+		Renderer::Primitives::setViewport(0, 0);
+		const Reply shot = ask("/api/ui/screenshot");
+		EXPECT_EQ(shot.status, 500);
+		EXPECT_EQ(shot.body, R"json({"error":"no backbuffer to read (0x0)"})json");
 	}
 
 	// --- Input ---

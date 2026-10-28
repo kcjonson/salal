@@ -31,6 +31,7 @@ namespace Renderer::backend {
 	}
 
 	void NullBackend::readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) {
+		++pixelReadCount;
 		// What GL reads, zeroed: the target's texture (the window at its set size), and
 		// nothing for a stale target or a span short of width * height * 4.
 		const TextureHandle* colour = targetTable.find(target);
@@ -159,6 +160,7 @@ namespace Renderer::backend {
 		frameCount = 0;
 		invalidationCount = 0;
 		timestampCount = 0;
+		pixelReadCount = 0;
 		textureCount = 0;
 		submissionCount = 0;
 		foreignDrawBegins = 0;
