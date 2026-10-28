@@ -54,6 +54,7 @@ Not in phase 2:
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
 | salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
 | salal `libs/app/DevServer`, `libs/renderer/PngEncoder` | phase 2 PR 4: the dev server behind its flags, its registrations, the input grammar, and the PNG encoder; tests not counted | 1,914 |
+| salal `apps/sandbox` | phase 2 PR 6: the picker, the six scenes and the atlas staging, in place of the one-scene sandbox above | 1,613 |
 | salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1, axis edges PR 3) | 768 |
 
 What changed since app-carve-out.md's survey, and matters here:
@@ -705,6 +706,10 @@ binds `127.0.0.1` only, as today, and starts after the window, so startup logs
 before it aren't streamed. A requested port that is busy fails `App::create`,
 logged, where today the server thread calls `std::exit(1)`
 (`DebugServer.cpp:1016`); port 0 takes any free one, which `port()` reports.
+Enabled in a configuration it isn't compiled into, `start` logs one ERROR, so
+a profiling run says why nothing listens; a game that wants the server on by
+default enables it under `#ifdef SALAL_DEV_SERVER`, or for `--http-port`, as
+the sandbox does, so a shipped build's log stays clean.
 
 Routes:
 
