@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -410,19 +411,33 @@ namespace app {
 		EXPECT_TRUE(filesIn(temp.path()).empty());
 	}
 
-	TEST_F(SaveStoreTest, ATimeInAHeaderPastWhatTheClockHoldsIsZero) {
+	TEST_F(SaveStoreTest, AHeaderTimeTheClockCannotHoldIsZero) {
 		SaveStore saves = store(1);
 		ASSERT_TRUE(saves.write("slot", bytesOf("x")));
-		std::vector<std::byte> patched = readBytes(file("slot.save"));
-		for (std::size_t i = 24; i < 32; ++i) {
-			patched[i] = std::byte{0xFF};
+		const std::vector<std::byte> good = readBytes(file("slot.save"));
+		const auto					 timeIn = [&](std::uint64_t microseconds) {
+			  std::vector<std::byte> patched = good;
+			  for (std::size_t i = 0; i < 8; ++i) {
+				  patched[24 + i] = static_cast<std::byte>((microseconds >> (8U * i)) & 0xFFU);
+			  }
+			  writeBytes(file("slot.save"), patched);
+			  const std::vector<SlotInfo> slots = saves.slots();
+			  EXPECT_TRUE(slots.at(0).intact); // slots() reads headers alone
+			  return slots.at(0).written;
+		};
+		using std::chrono::system_clock;
+		EXPECT_EQ(timeIn(static_cast<std::uint64_t>(-1)), system_clock::time_point{}); // before 1970: never written
+
+		// The largest i64: past what the clock holds where its ticks are finer than microseconds (Windows,
+		// Linux), the time itself where they're microseconds (macOS); never an overflow.
+		constexpr std::int64_t kLargest = std::numeric_limits<std::int64_t>::max();
+		const auto			   latest = std::chrono::duration_cast<std::chrono::microseconds>(system_clock::duration::max()).count();
+		const system_clock::time_point largest = timeIn(static_cast<std::uint64_t>(kLargest));
+		if (latest < kLargest) {
+			EXPECT_EQ(largest, system_clock::time_point{});
+		} else {
+			EXPECT_EQ(std::chrono::duration_cast<std::chrono::microseconds>(largest.time_since_epoch()).count(), kLargest);
 		}
-		patched[31] = std::byte{0x7F}; // the largest i64
-		writeBytes(file("slot.save"), patched);
-		const std::vector<SlotInfo> slots = saves.slots();
-		ASSERT_EQ(slots.size(), 1U);
-		EXPECT_TRUE(slots[0].intact); // slots() reads headers alone
-		EXPECT_EQ(slots[0].written, std::chrono::system_clock::time_point{});
 	}
 
 	TEST_F(SaveStoreTest, ACrashBetweenTheTempFileAndTheRenameLeavesTheLastGoodSave) {
