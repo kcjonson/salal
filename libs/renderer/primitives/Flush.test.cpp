@@ -383,6 +383,16 @@ namespace Renderer {
 			}
 		}
 		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U + (4U * 6U));
+
+		// Drawn again, from the cache: the same ring.
+		gpu->clearRecord();
+		Primitives::beginFrame();
+		Primitives::drawPolygon({.vertices = kSquare, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
+		Primitives::drawPolygon({.vertices = kSquare, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(countAlpha(vertices(gpu->draws()[0]), 0.0F), 8U);
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 2U * (6U + (4U * 6U)));
 	}
 
 	TEST_F(FlushTest, AnOutlineThatRepeatsItsFirstPointStillFeathersInEitherWinding) {

@@ -318,29 +318,51 @@ TEST(StrokeTest, AJointNearAHairpinIsLeftUncutAndItsPiecesOverlap) {
 	std::vector<StrokePiece>			pieces;
 	strokePolyline({.points = hairpin, .width = 2.0F, .cap = LineCap::Round}, 1.0F, 0.0F, pieces);
 	ASSERT_EQ(pieces.size(), 2U);
-	// Each capsule ends straight a pixel past its own round end.
+	// Each capsule ends straight a pixel past its own round end, and both draw the turn.
 	expectCorners(pieces[0], {{12.0F, -2.0F}, {12.0F, 2.0F}, {-2.0F, 2.0F}, {-2.0F, -2.0F}});
 	EXPECT_EQ(sharedCorners(pieces[0], pieces[1]), 0);
 	EXPECT_TRUE(isConvex(pieces[1]));
+	for (const Foundation::Vec2 point : {Foundation::Vec2(9.5F, 0.3F), Foundation::Vec2(5.0F, 0.5F)}) {
+		EXPECT_TRUE(contains(pieces[0], point) && pieceDistance(pieces[0], point) < 0.0F);
+		EXPECT_TRUE(contains(pieces[1], point) && pieceDistance(pieces[1], point) < 0.0F);
+	}
+}
+
+TEST(StrokeTest, TheHairpinThresholdCutsA168DegreeTurnAndNotA174DegreeOne) {
+	// |in + out| = 2 cos(turn / 2): 0.209 at 168 degrees, 0.105 at 174, either side of 0.15.
+	for (const float degrees : {168.0F, 174.0F}) {
+		const float							back = (180.0F - degrees) * 3.14159265F / 180.0F;
+		const std::vector<Foundation::Vec2> turn = {
+			{0.0F, 0.0F}, {40.0F, 0.0F}, {40.0F - (40.0F * std::cos(back)), 40.0F * std::sin(back)}
+		};
+		std::vector<StrokePiece> pieces;
+		strokePolyline({.points = turn, .width = 2.0F, .cap = LineCap::Round}, 1.0F, 0.0F, pieces);
+		ASSERT_EQ(pieces.size(), 2U);
+		EXPECT_EQ(sharedCorners(pieces[0], pieces[1]), degrees < 170.0F ? 2 : 0) << degrees << " degrees";
+	}
 }
 
 TEST(StrokeTest, ASegmentTooShortForItsCutsLeavesExactlyItsJointsUncut) {
-	// Segment 1 is one unit long between two left turns of 90 degrees, whose cuts need
-	// it a reach (3) longer at each end. Joint 3, a right turn after a long segment, is cut.
-	const std::vector<Foundation::Vec2> hook = {{0.0F, 0.0F}, {20.0F, 0.0F}, {20.0F, 1.0F}, {0.0F, 1.0F}, {0.0F, 21.0F}};
+	// Segment 1 is one unit long between two left turns of 80 degrees, whose cuts need
+	// it 3 tan(40 degrees), 2.5, longer at each end. Joint 3, a right turn of 90 degrees
+	// after a long segment, is cut.
+	const auto at = [](float degrees) {
+		return Foundation::Vec2(std::cos(degrees * 3.14159265F / 180.0F), std::sin(degrees * 3.14159265F / 180.0F));
+	};
+	const Foundation::Vec2				p2 = Foundation::Vec2(20.0F, 0.0F) + at(80.0F);
+	const Foundation::Vec2				p3 = p2 + (at(160.0F) * 20.0F);
+	const std::vector<Foundation::Vec2> hook = {{0.0F, 0.0F}, {20.0F, 0.0F}, p2, p3, p3 + (at(70.0F) * 20.0F)};
 	std::vector<StrokePiece>			pieces;
 	strokePolyline({.points = hook, .width = 4.0F}, 1.0F, 0.0F, pieces);
 	// Segment 0 and 3: a butt cap beside a round joint, two pieces each.
 	ASSERT_EQ(pieces.size(), 6U);
 	EXPECT_EQ(sharedCorners(pieces[0], pieces[1]), 2); // segment 0's middle
-	// Joints 1 and 2, uncut, share no cut; their pieces' square ends meet at one corner.
-	EXPECT_LT(sharedCorners(pieces[1], pieces[2]), 2);
-	EXPECT_LT(sharedCorners(pieces[2], pieces[3]), 2);
+	EXPECT_EQ(sharedCorners(pieces[1], pieces[2]), 0); // joint 1, uncut
+	EXPECT_EQ(sharedCorners(pieces[2], pieces[3]), 0); // joint 2, uncut
 	EXPECT_EQ(sharedCorners(pieces[3], pieces[4]), 2); // joint 3
 	EXPECT_EQ(sharedCorners(pieces[4], pieces[5]), 2); // segment 3's middle
 	// The short segment's capsule ends straight a pixel past its round ends.
-	expectCorners(pieces[2], {{23.0F, 4.0F}, {17.0F, 4.0F}, {17.0F, -3.0F}, {23.0F, -3.0F}});
-	expectShape(pieces[2], {20.0F, 0.5F}, {0.0F, 1.0F}, 2.5F, 2.0F, 2.0F);
+	expectShape(pieces[2], (hook[1] + hook[2]) * 0.5F, at(80.0F), 2.5F, 2.0F, 2.0F);
 	for (const StrokePiece& piece : pieces) {
 		EXPECT_TRUE(isConvex(piece));
 	}
