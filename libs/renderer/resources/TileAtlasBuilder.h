@@ -27,8 +27,9 @@ namespace Renderer {
 		// Default configuration values
 		static constexpr Config kDefaultConfig{512, 2048};
 
-		// Callbacks for surface information (provided by engine layer). The pattern is the resource path
-		// of the surface's SVG pattern, found through Foundation::findResource; empty for none.
+		// Callbacks for surface information, which the game provides. The pattern is the resource path
+		// of the surface's SVG pattern, found through Foundation::findResource; empty for none. A
+		// non-empty path that isn't found is a warning, and the surface gets the checker.
 		using SurfacePatternFn = std::function<std::string(int surfaceId)>;
 		using SurfaceColorFn = std::function<Foundation::Color(int surfaceId)>;
 

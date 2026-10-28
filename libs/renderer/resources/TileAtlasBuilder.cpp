@@ -65,6 +65,7 @@ namespace Renderer {
 		}
 		std::string svgPath = Foundation::findResourceString(patternPath);
 		if (svgPath.empty()) {
+			LOG_WARNING(Renderer, "Tile pattern %s not found; the surface gets a checker", patternPath.c_str());
 			return false;
 		}
 

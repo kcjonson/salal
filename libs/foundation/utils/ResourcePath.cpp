@@ -31,10 +31,14 @@ namespace Foundation {
 		uint32_t bufsize = 0;
 		_NSGetExecutablePath(nullptr, &bufsize);
 		std::vector<char> buf(bufsize);
-		if (_NSGetExecutablePath(buf.data(), &bufsize) == 0) {
-			return std::filesystem::path(buf.data()).parent_path();
+		if (_NSGetExecutablePath(buf.data(), &bufsize) != 0) {
+			return {};
 		}
-		return {};
+		// The path the program was started by, maybe through a link; resolved, as /proc/self/exe is on Linux.
+		const std::filesystem::path invoked(buf.data());
+		std::error_code				error;
+		const std::filesystem::path exe = std::filesystem::weakly_canonical(invoked, error);
+		return (error ? invoked : exe).parent_path();
 #elif defined(_WIN32)
 		std::vector<wchar_t> buf(MAX_PATH);
 		for (;;) {
