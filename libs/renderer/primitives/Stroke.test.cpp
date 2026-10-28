@@ -575,20 +575,34 @@ TEST(StrokeTest, ANotchLeftUncutBesideAShortEdgeIsRoundWithAFlatPieceIntoItsCorn
 	EXPECT_TRUE(contains(*flat, between));
 }
 
-TEST(StrokeTest, AFlatPiecesTipStopsAtTheMiterLimitFromItsJoint) {
-	// A 20-degree notch, its walls 15 long: the centre line doesn't fold, but the walls are
-	// too short for the notch's cut. Its inner edges meet 1 / sin(10 degrees) = 5.8 units
-	// inside the corner, past the miter limit, so the flat piece stops at 4 half widths.
-	const std::vector<Foundation::Vec2> outline = {
+TEST(StrokeTest, AFlatPiecesTipIsWhereTheInnerEdgesMeetAtMostTheMiterLimitFromTheCorner) {
+	// A 20-degree notch, its walls 15 long: the walls are too short for the notch's cut,
+	// and its border's inner edges meet 1 / sin(10 degrees) = 5.8 units inside the corner.
+	const std::vector<Foundation::Vec2> notch = {
 		{0.0F, 0.0F}, {17.4F, 0.0F}, {20.0F, 14.77F}, {22.6F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}, {0.0F, 40.0F}
 	};
-	std::vector<StrokePiece> pieces;
-	strokeOutline(outline, 4.0F, 1.0F, pieces);
+	std::vector<StrokePiece>	  pieces;
+	std::vector<Foundation::Vec2> inset;
+	strokeOutline(notch, 4.0F, 1.0F, pieces);
 	ASSERT_EQ(std::ranges::count_if(pieces, isFlat), 1);
-	const StrokePiece&			  flat = *std::ranges::find_if(pieces, isFlat);
-	std::vector<Foundation::Vec2> centreLine;
-	offsetOutline(outline, 1.5F, centreLine);
-	EXPECT_NEAR(glm::length(flat.corners[0] - centreLine[2]), 4.0F * 2.5F, 1e-4F);
+	offsetOutline(notch, -1.0F, inset);
+	EXPECT_NEAR(glm::length(std::ranges::find_if(pieces, isFlat)->corners[0] - inset[2]), 0.0F, 1e-4F);
+
+	// A slit 30 deep and 4 wide, turning 172 degrees: its inner edges meet 15 units inside
+	// its bottom, (20, 10). At border 4 that is past 4 half widths, 10, so the tip stops
+	// there, measured from the corner; at border 8 (18) it is not.
+	const std::vector<Foundation::Vec2> slit = {
+		{0.0F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}, {22.0F, 40.0F}, {20.0F, 10.0F}, {18.0F, 40.0F}, {0.0F, 40.0F}
+	};
+	offsetOutline(slit, -1.0F, inset);
+	strokeOutline(slit, 4.0F, 1.0F, pieces);
+	ASSERT_EQ(std::ranges::count_if(pieces, isFlat), 1);
+	const Foundation::Vec2 clamped = std::ranges::find_if(pieces, isFlat)->corners[0];
+	EXPECT_NEAR(clamped.x, 20.0F, 1e-4F);
+	EXPECT_NEAR(clamped.y, 0.0F, 1e-4F);
+	strokeOutline(slit, 8.0F, 1.0F, pieces);
+	ASSERT_EQ(std::ranges::count_if(pieces, isFlat), 1);
+	EXPECT_NEAR(glm::length(std::ranges::find_if(pieces, isFlat)->corners[0] - inset[4]), 0.0F, 1e-4F);
 }
 
 TEST(StrokeTest, ABorderFoldedOverAFeatureNarrowerThanItDrawsNoSpike) {

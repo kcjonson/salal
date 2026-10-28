@@ -389,6 +389,84 @@ namespace Renderer {
 		EXPECT_EQ(outside, 0);
 	}
 
+	TEST_F(PrimitivesDrawTest, ASharpNotchsBorderCoversItAllTheWayDown) {
+		// Red fill, white border, over black, into a target of its own: the border's green.
+		constexpr int kLarge = 140;
+		RenderTarget  large = RenderTarget::create(kLarge, kLarge);
+		ASSERT_TRUE(large.isValid());
+		std::vector<uint8_t> read(static_cast<size_t>(kLarge) * kLarge * 4, 0);
+		const auto			 drawBorder = [&](const std::vector<Foundation::Vec2>& outline, float width) {
+			  drawInto(large, Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+				  Primitives::drawPolygon(
+					  {.vertices = outline,
+							   .style = {
+								   .fill = Foundation::Color::red(),
+								   .border = Foundation::LineStyle{.color = Foundation::Color::white(), .width = width}
+					   }}
+				  );
+			  });
+			  large.readPixels(read);
+		};
+		const auto green = [&](int x, int y) {
+			return read[(((static_cast<size_t>(kLarge - 1 - y) * kLarge) + static_cast<size_t>(x)) * 4) + 1];
+		};
+
+		// A slit 30 deep and 4 wide, its axis on the centres of column 32, its bottom at
+		// y 22. It turns 172 degrees, so its joint is left uncut and its centre line runs far
+		// outside it; the flat piece has to reach from there to the slit's bottom. Down the
+		// axis, from inside the fill above the bottom to the mouth, the border is whole.
+		std::vector<Foundation::Vec2> slit = {
+			{0.0F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}, {22.0F, 40.0F}, {20.0F, 10.0F}, {18.0F, 40.0F}, {0.0F, 40.0F}
+		};
+		for (Foundation::Vec2& point : slit) {
+			point += Foundation::Vec2(12.5F, 12.0F);
+		}
+		for (const float width : {4.0F, 8.0F}) {
+			drawBorder(slit, width);
+			for (int y = 16; y < 52; ++y) {
+				EXPECT_GE(green(32, y), 250) << "border " << width << ", y " << y;
+			}
+		}
+
+		// A 24-pointed star, radii 50 and 10, its notches turning 161 degrees, border 6.
+		// Round the notches every pixel outside it by half a pixel to a pixel short of the
+		// border's width is at least half covered; at the tips, which the miter limit cuts
+		// short, at least a quarter, as before the partition.
+		std::vector<Foundation::Vec2> star;
+		for (int k = 0; k < 24; ++k) {
+			const float radius = (k % 2 == 0) ? 50.0F : 10.0F;
+			const float angle = static_cast<float>(k) * 2.0F * std::numbers::pi_v<float> / 24.0F;
+			star.emplace_back(70.0F + (radius * std::cos(angle)), 70.0F + (radius * std::sin(angle)));
+		}
+		drawBorder(star, 6.0F);
+		const auto signedDistance = [&](Foundation::Vec2 p) {
+			float distance = 1e30F;
+			bool  inside = false;
+			for (size_t i = 0, j = star.size() - 1; i < star.size(); j = i++) {
+				const Foundation::Vec2 a = star[j];
+				const Foundation::Vec2 ab = star[i] - a;
+				const float			   t = std::clamp(glm::dot(p - a, ab) / glm::dot(ab, ab), 0.0F, 1.0F);
+				distance = std::min(distance, glm::length(p - (a + (ab * t))));
+				if ((star[i].y > p.y) != (a.y > p.y) && p.x < star[i].x + ((a.x - star[i].x) * (p.y - star[i].y) / (a.y - star[i].y))) {
+					inside = !inside;
+				}
+			}
+			return inside ? -distance : distance;
+		};
+		int band = 0;
+		for (int y = 0; y < kLarge; ++y) {
+			for (int x = 0; x < kLarge; ++x) {
+				const float distance = signedDistance({static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F});
+				if (distance > 0.5F && distance < 5.0F) {
+					++band;
+					const bool nearNotch = std::hypot(static_cast<float>(x) + 0.5F - 70.0F, static_cast<float>(y) + 0.5F - 70.0F) < 40.0F;
+					EXPECT_GE(green(x, y), nearNotch ? 128 : 60) << x << ", " << y;
+				}
+			}
+		}
+		EXPECT_GT(band, 1000);
+	}
+
 	TEST_F(PrimitivesDrawTest, APolygonsFillRampsOverThePixelOutsideItsEdge) {
 		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
 		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {

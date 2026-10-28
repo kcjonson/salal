@@ -554,7 +554,9 @@ namespace Renderer {
 		// A notch sharper than a right angle that no exact miter draws keeps the flat triangle
 		// that carries the border into it, from its two edges' inner corners at the joint to
 		// where the border's inner edges meet, `inset` inside the corner along its miter, but
-		// no further from the joint than the miter limit allows.
+		// no further from the corner than the miter limit allows. Measured from the corner,
+		// not the joint: past the limit a notch's joint lies far outside its corner, and the
+		// wedge has to span from there to the notch's bottom.
 		for (size_t k = 0; k < count; ++k) {
 			if (cornerOf[k] < 0) {
 				continue;
@@ -565,7 +567,7 @@ namespace Renderer {
 			}
 			const Foundation::Vec2& joint = centreLine[k];
 			const float				miterLength = glm::length(corner.miter);
-			const Foundation::Vec2	tip = joint - (corner.miter * (halfWidth * std::min(1.0F, kMiterLimit / miterLength)));
+			const Foundation::Vec2	tip = corner.point - (corner.miter * std::min(inset, kMiterLimit * halfWidth / miterLength));
 			Foundation::Vec2		inCorner = joint - (corner.normalIn * halfWidth);
 			Foundation::Vec2		outCorner = joint - (corner.normalOut * halfWidth);
 			if (cross(inCorner - tip, outCorner - inCorner) < 0.0F) {

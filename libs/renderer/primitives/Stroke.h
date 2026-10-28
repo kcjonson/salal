@@ -70,7 +70,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// joint left uncut (strokePolyline) or its centre line folded back over a feature
 	// narrower than the border, gets a flat piece that carries the border into it: the
 	// triangle from its edges' inner corners at the joint to where the border's inner
-	// edges meet, no further from the joint than 4 times half the stroke's width.
+	// edges meet, no further from the corner than 4 times half the stroke's width.
 	void strokeOutline(std::span<const Foundation::Vec2> outline, float width, float inset, std::vector<StrokePiece>& pieces);
 
 } // namespace Renderer
