@@ -52,8 +52,8 @@ Not in phase 2:
 | worldsim `libs/engine/input` | `InputManager` (singleton, six GLFW callbacks, per-frame edge maps) | 903 |
 | worldsim `libs/engine/clipboard` | `ClipboardManager`, implementing `UI::IClipboard` over GLFW | 62 |
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
-| salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,369 (the sandbox 117 of them) |
-| salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1, axis edges PR 3) | 766 |
+| salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
+| salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1, axis edges PR 3) | 768 |
 
 What changed since app-carve-out.md's survey, and matters here:
 
