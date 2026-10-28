@@ -332,8 +332,8 @@ namespace app {
 				info.intact = true;
 				info.version = envelope.version;
 				info.writes = envelope.writes;
-				info.written = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-					std::chrono::sys_time<std::chrono::microseconds>(std::chrono::microseconds(envelope.written))
+				info.written = std::chrono::system_clock::time_point(
+					std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::microseconds(envelope.written))
 				);
 			}
 			infos.push_back(std::move(info));
