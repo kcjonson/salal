@@ -335,7 +335,8 @@ namespace app {
 	void App::runFixedTicks() {
 		const FrameConfig& frame = config.frame;
 		if (isPaused) {
-			const int steps = std::exchange(pendingSteps, 0);
+			// Steps asked for after an in-frame resume() wait for the frame's end, where it drops them.
+			const int steps = resumeAtFrameEnd ? 0 : std::exchange(pendingSteps, 0);
 			if (steps == 0) {
 				inputState.accumulator.consumeTick();
 			}
@@ -421,6 +422,9 @@ namespace app {
 	// tick reader is dropped, and the overlays added in it.
 	void App::finishFrame() {
 		if (std::exchange(resumeAtFrameEnd, false)) {
+			if (pendingSteps > 0) {
+				LOG_WARNING(Engine, "App::step: %d steps asked for after resume() in the same frame were dropped", pendingSteps);
+			}
 			resume();
 		}
 		for (std::unique_ptr<Overlay>& overlay : joiningOverlays) {
@@ -521,6 +525,7 @@ namespace app {
 	}
 
 	void App::resume() {
+		pendingSteps = 0;
 		if (inFrame) {
 			resumeAtFrameEnd = isPaused;
 			return;

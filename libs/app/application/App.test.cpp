@@ -7,12 +7,14 @@
 
 #include <backend/NullBackend.h>
 #include <primitives/Primitives.h>
+#include <utils/Log.h>
 #include <utils/ResourcePath.h>
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -78,6 +80,14 @@ namespace app::testing {
 			double		presentSeconds = 0.0;
 			bool		vsync = true;
 		};
+
+#ifdef DEVELOPMENT_BUILD
+		void countDroppedSteps(void* context, const foundation::LogRecord& record) {
+			if (record.level == foundation::LogLevel::Warning && std::strstr(record.message, "were dropped") != nullptr) {
+				++*static_cast<int*>(context);
+			}
+		}
+#endif
 
 		struct Game {
 			int score = 0;
@@ -290,6 +300,58 @@ namespace app::testing {
 		ASSERT_EQ(top<SceneB>().ticks.size(), 1U);
 		EXPECT_TRUE(keyIn(top<SceneB>().ticks[0], Key::Escape).down);
 		EXPECT_FALSE(keyIn(top<SceneB>().ticks[0], Key::Escape).pressed()); // the key that resumed fires nothing
+	}
+
+	TEST_F(AppTest, AResumeInsideAFrameDropsStepsNotRunYet) {
+		start();
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		app->pause();
+		app->step(3);
+		app->setDispatch([](App& dispatching) {
+			if (!dispatching.input().events().empty()) {
+				dispatching.resume();
+			}
+		});
+		platform->push(keyDown(Key::Escape));
+		take();
+		frame(0.0);
+		EXPECT_EQ(count("A.fixedUpdate"), 0);
+		EXPECT_FALSE(app->paused());
+
+		app->setDispatch({});
+		frame(0.0);
+		EXPECT_EQ(count("A.fixedUpdate"), 0); // nothing left over for later
+	}
+
+	TEST_F(AppTest, AStepAskedForAfterAnInFrameResumeIsDroppedAtTheFramesEnd) {
+		start();
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		app->pause();
+		app->setDispatch([](App& dispatching) {
+			if (!dispatching.input().events().empty()) {
+				dispatching.resume();
+				dispatching.step(2);
+			}
+		});
+		[[maybe_unused]] int dropped = 0;
+#ifdef DEVELOPMENT_BUILD
+		foundation::Logger::setSink(countDroppedSteps, &dropped);
+#endif
+		platform->push(keyDown(Key::Escape));
+		take();
+		frame(0.0);
+#ifdef DEVELOPMENT_BUILD
+		foundation::Logger::setSink(nullptr, nullptr);
+		EXPECT_EQ(dropped, 1);
+#endif
+		EXPECT_EQ(count("A.fixedUpdate"), 0);
+		EXPECT_FALSE(app->paused());
+
+		app->setDispatch({});
+		frame(0.0);
+		EXPECT_EQ(count("A.fixedUpdate"), 0);
 	}
 
 	TEST_F(AppTest, APauseAndResumeInOneFrameLeaveItPausedForTheFrame) {

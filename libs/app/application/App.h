@@ -61,13 +61,14 @@ namespace app {
 		// Fixed ticks and update stop for scenes and overlays, and scene changes wait; dispatch goes to
 		// overlays only, and render goes on. A pause from inside a fixed tick ends that frame's ticks.
 		void pause();
-		// Inside a frame, takes effect once the frame is over, so that frame stays paused and the press
-		// that resumed doesn't reach a tick.
+		// Drops steps not run yet. Inside a frame, takes effect once the frame is over, so that frame stays
+		// paused and the press that resumed doesn't reach a tick.
 		void resume();
 		bool paused() const;
 		// While paused, the next frame runs exactly `ticks` fixed ticks of the top scene, whatever the
-		// clock did, then renders. Steps asked for before that frame add up; resume() drops them.
-		// Does nothing, logged, while not paused.
+		// clock did, then renders. Steps asked for before that frame add up; resume() drops them, and
+		// steps asked for after an in-frame resume() are dropped at the frame's end, logged. Does
+		// nothing, logged, while not paused.
 		void step(int ticks);
 
 		// Replaces step 5's default dispatch (each event to the overlays, last added first, then the top
