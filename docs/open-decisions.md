@@ -243,7 +243,8 @@ through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)). Phase 2
 PRs 1 to 4 are in (`v0.10.0` to `v0.13.0`): the completed `Key`, the gamepad
 types, the snapshot, the accumulator and `ActionMap` are in `foundation/input/`,
 `app`'s frame feeds the accumulator and hands each fixed tick its snapshot,
-the GLFW device layer feeds it real pads, and the dev server injects into it.
+`app`'s device layer polls GLFW's devices into it, and the dev server injects
+into it.
 
 ## E. ECS core
 

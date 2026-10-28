@@ -97,10 +97,11 @@ worldsim's grass deform out of the renderer and into a worldsim hook.
 `foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
 ported bit for bit (decision A). Phase 2 carves `app` out of `libs/engine`, in
 the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PRs 1 to 4 are
-in (`v0.10.0` to `v0.13.0`): the input types, the accumulator and `ActionMap`
-in `foundation/input/`, then `app`'s clock, GLFW and headless platforms, frame,
-scene stack, overlays and context object, the GLFW device layer and the
-clipboard, and the dev server behind its compile flags. `ui` is extracted last.
+in (`v0.10.0` to `v0.13.0`): the input types, the accumulator and `ActionMap` in
+`foundation/input/`, then `app`'s clock, GLFW and headless platforms, frame,
+scene stack, overlays and context object, then the GLFW device layer with
+gamepads, player slots, key names, capture, axis edges and the clipboard, then
+the dev server behind its compile flags. `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to

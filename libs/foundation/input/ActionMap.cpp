@@ -23,51 +23,42 @@ namespace foundation {
 		}
 
 		// Folds the bindings' button states into the action's, which is down while any binding is. The
-		// snapshot doesn't say in what order the bindings changed, so the transitions reported are ones
-		// some order of those changes would give.
+		// snapshot doesn't say in what order the bindings changed, so the transitions reported are the
+		// most some order of those changes gives. Only the last of the bindings that start down to let go
+		// can release the action, and only the first of those that end down to make its last press can
+		// press it, so each further one hides a transition.
 		class ButtonFold {
 		  public:
-			void addButton(const ButtonState& button) {
+			void add(const ButtonState& button) {
 				down = down || button.down;
-				wasDown = wasDown || (button.down != (button.transitions % 2 == 1));
-				heldThroughout = heldThroughout || (button.down && button.transitions == 0);
-				anyPress = anyPress || button.pressed();
-				anyRelease = anyRelease || button.released();
+				if (button.transitions == 0) {
+					heldThroughout = heldThroughout || button.down;
+					return;
+				}
 				transitions += button.transitions;
+				startDown += button.down != (button.transitions % 2 == 1) ? 1U : 0U;
+				endDown += button.down ? 1U : 0U;
 			}
 
-			// An axis has no history in a snapshot, so it holds the action down without transitions.
-			void addAxis(const ButtonState& button) { axisDown = axisDown || button.down; }
-
 			ButtonState result() const {
-				unsigned count = 0;
+				constexpr unsigned kMax = std::numeric_limits<std::uint8_t>::max();
+				unsigned		   count = 0;
 				if (!heldThroughout && transitions > 0) {
-					if (anyPress && anyRelease) {
-						count = std::min(transitions, unsigned{std::numeric_limits<std::uint8_t>::max()});
-						if ((count % 2 == 1) != (wasDown != down)) {
-							--count;
-						}
-					} else {
-						// Bindings that only went down, or only came up, moved the action once.
-						count = 1;
-					}
+					count = transitions - (startDown > 1 ? startDown - 1 : 0) - (endDown > 1 ? endDown - 1 : 0);
 				}
-				if (axisDown && !down) {
-					// The axis may have come up while a button was down, which makes a button's press the
-					// action's only edge; with a button down before, the axis may have held it throughout.
-					count = anyPress && !wasDown ? 1 : 0;
+				// Saturating keeps the count's parity, which says whether the action's down state changed.
+				if (count > kMax) {
+					count = count % 2 == kMax % 2 ? kMax : kMax - 1;
 				}
-				return {.down = down || axisDown, .transitions = static_cast<std::uint8_t>(count)};
+				return {.down = down, .transitions = static_cast<std::uint8_t>(count)};
 			}
 
 		  private:
 			bool	 down = false;
-			bool	 wasDown = false;
 			bool	 heldThroughout = false;
-			bool	 anyPress = false;
-			bool	 anyRelease = false;
-			bool	 axisDown = false;
-			unsigned transitions = 0;
+			unsigned transitions = 0; // of the bindings that moved
+			unsigned startDown = 0;	  // bindings that moved and started down
+			unsigned endDown = 0;	  // bindings that moved and ended down
 		};
 
 	} // namespace
@@ -106,11 +97,7 @@ namespace foundation {
 					continue;
 				}
 				deviceValue += state->value;
-				if (binding.source == Binding::Source::GamepadAxis) {
-					button.addAxis(state->button);
-				} else {
-					button.addButton(state->button);
-				}
+				button.add(state->button);
 			}
 			deviceValue = std::clamp(deviceValue, -1.0F, 1.0F);
 			if (std::abs(deviceValue) > std::abs(value)) {
@@ -144,20 +131,23 @@ namespace foundation {
 				if (!isPadSlot(device) || binding.control >= indexOf(GamepadAxis::Count)) {
 					return std::nullopt;
 				}
-				const float axis = axisValue(input.pads[device.index], static_cast<GamepadAxis>(binding.control), binding.deadzone);
-				const float scaled = binding.scale * axis;
-				return ActionState{.button = {.down = scaled > binding.threshold}, .value = scaled};
+				const GamepadState& pad = input.pads[device.index];
+				const auto			axis = static_cast<GamepadAxis>(binding.control);
+				const float			scaled = binding.scale * axisValue(pad.axes, axis, binding.deadzone);
+				const bool			down = scaled > binding.threshold;
+				const bool			wasDown = binding.scale * axisValue(pad.startAxes, axis, binding.deadzone) > binding.threshold;
+				return ActionState{.button = {.down = down, .transitions = std::uint8_t{down != wasDown}}, .value = scaled};
 			}
 		}
 		return std::nullopt;
 	}
 
-	float ActionMap::axisValue(const GamepadState& pad, GamepadAxis axis, float deadzone) const {
-		float value = pad.axes[indexOf(axis)];
+	float ActionMap::axisValue(const Axes& axes, GamepadAxis axis, float deadzone) const {
+		float value = axes[indexOf(axis)];
 		for (const Stick& stick : sticks) {
 			if (axis == stick.x || axis == stick.y) {
-				const float x = pad.axes[indexOf(stick.x)];
-				const float y = pad.axes[indexOf(stick.y)];
+				const float x = axes[indexOf(stick.x)];
+				const float y = axes[indexOf(stick.y)];
 				// Not std::hypot, which isn't correctly rounded and differs between standard libraries.
 				const float magnitude = std::sqrt(x * x + y * y);
 				value = magnitude > 0.0F ? value * pastDeadzone(magnitude, stick.radius) / magnitude : 0.0F;

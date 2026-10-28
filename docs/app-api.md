@@ -52,9 +52,9 @@ Not in phase 2:
 | worldsim `libs/engine/input` | `InputManager` (singleton, six GLFW callbacks, per-frame edge maps) | 903 |
 | worldsim `libs/engine/clipboard` | `ClipboardManager`, implementing `UI::IClipboard` over GLFW | 62 |
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
-| salal `libs/app`, `apps/sandbox` | phase 2 PR 2: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; a sandbox that runs one scene on GLFW; tests not counted | 2,164 (the sandbox 117 of them) |
+| salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
 | salal `libs/app/DevServer`, `libs/renderer/PngEncoder` | phase 2 PR 4: the dev server behind its flags, its registrations, the input grammar, and the PNG encoder; tests not counted | 1,833 |
-| salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1) | 763 |
+| salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1, axis edges PR 3) | 768 |
 
 What changed since app-carve-out.md's survey, and matters here:
 
@@ -116,9 +116,11 @@ public:
 };
 class ManualClock final : public Clock { public: double now() const override; void advance(double seconds); };
 
-class PlatformEvents { // what a platform reports while it polls; the App is the one listener
+class PlatformEvents { // what a platform reports while it polls; the App is the one listener, and the dev server injects through it too
 public:
-	virtual void inputEvent(const foundation::InputEvent&) = 0;           // arrival order, stamped with the platform's clock
+	virtual void inputEvent(const foundation::InputEvent&) = 0;           // arrival order, stamped with the platform's clock; not connections
+	virtual void deviceConnected(const DeviceInfo&, double time) = 0;     // a pad with its name and model GUID; its DeviceConnected joins the events in order
+	virtual void deviceDisconnected(foundation::DeviceId, double time) = 0;
 	virtual void framebufferResized(const Renderer::Viewport&) = 0;
 };
 class Platform { // window, context, callbacks into Input, gamepad polling, clipboard, present, vsync, focus; no GLFW type in the header
@@ -131,6 +133,9 @@ public:
 	virtual bool closeRequested() const = 0;
 	virtual void present() = 0;
 	virtual void setVsync(bool) = 0;
+	virtual std::optional<std::string> keyLabel(foundation::Key) const = 0; // the layout's label on a key that prints; glfwGetKeyName
+	virtual std::string clipboardText() const = 0;
+	virtual void setClipboardText(const std::string&) = 0;
 };
 std::unique_ptr<Platform> createGlfwPlatform(const WindowConfig&); // GLBackend::create() inside
 class HeadlessPlatform final : public Platform { // NullBackend, no window
@@ -140,7 +145,12 @@ public:
 	void push(const foundation::InputEvent&); // arrives in the next tick's poll, as a callback would
 	void resize(int width, int height);
 	void setFocused(bool);
+	void connectGamepad(const DeviceInfo&);            // pads are sampled once per poll and diffed, as GLFW's are, through the same GamepadTracker
+	void disconnectGamepad(std::uint8_t index);
+	void setGamepad(std::uint8_t index, const GamepadSample&);
+	void setKeyLabel(foundation::Key, std::string);
 };
+struct GamepadSample { std::array<bool, 15> buttons{}; std::array<float, 6> axes{}; }; // one poll of a pad, triggers 0 to 1
 
 struct WindowConfig {
 	std::string title;
@@ -336,8 +346,9 @@ struct ButtonState {  // Handmade Hero's halfTransitionCount
 	bool pressed() const;  // went down at least once since the last read
 	bool released() const;
 };
-struct GamepadState { bool connected = false; std::array<ButtonState, std::size_t(GamepadButton::Count)> buttons{}; std::array<float, std::size_t(GamepadAxis::Count)> axes{}; };
-struct InputSnapshot { // every device's state, about 1.4 KB
+struct GamepadState { bool connected = false; std::array<ButtonState, std::size_t(GamepadButton::Count)> buttons{}; std::array<float, std::size_t(GamepadAxis::Count)> axes{};
+	std::array<float, std::size_t(GamepadAxis::Count)> startAxes{}; }; // axes at this reader's last read, so an axis read as a button has edges
+struct InputSnapshot { // every device's state, about 1.9 KB
 	std::array<ButtonState, std::size_t(Key::Count)> keys{};
 	std::array<ButtonState, std::size_t(MouseButton::Count)> mouse{};
 	glm::vec2 pointer{}, pointerDelta{}, scroll{};
@@ -363,7 +374,7 @@ struct Binding {
 	float threshold = 0.5F;                // an axis read as a button: down while its value, scale applied, is past this, so -1 reads the negative half
 	float deadzone = 0.0F;                 // per axis; sticks take a radial deadzone over both axes in the map
 };
-struct ActionState { ButtonState button; float value = 0.0F; }; // button transitions follow the reader the snapshot came from; an axis binding has none
+struct ActionState { ButtonState button; float value = 0.0F; }; // button transitions follow the reader the snapshot came from; an axis binding's, from startAxes to axes
 class ActionMap {
 public:
 	void bind(std::string_view action, Binding);
@@ -374,18 +385,19 @@ public:
 
 namespace app {
 struct DeviceInfo { foundation::DeviceId id; std::string name; std::string modelGuid; }; // GLFW's GUID names a model, not a unit
+inline constexpr int kMaxPlayerSlots = 8;
 class Input {
 public:
 	const foundation::InputSnapshot& frame() const;           // this frame's state; replaces InputManager's polled API
 	std::span<const foundation::InputEvent> events() const;   // this frame's events, in order
-	std::span<const DeviceInfo> devices() const;              // connected now
-	std::optional<foundation::DeviceId> pressedDevice() const; // the first device with a press this frame: "press a button to join"
-	void claim(int slot, foundation::DeviceId);               // a keyboard can back two slots
+	std::span<const DeviceInfo> devices() const;              // connected now: keyboard, mouse, then pads by id
+	std::optional<foundation::DeviceId> pressedDevice() const; // the first press this frame, in event order, from a device not backing its share of slots: "press a button to join"
+	void claim(int slot, foundation::DeviceId);               // a keyboard can back two slots, a mouse or pad one; refused, logged, past that
 	void release(int slot);
-	std::optional<foundation::DeviceId> deviceForSlot(int slot) const;
+	std::optional<foundation::DeviceId> deviceForSlot(int slot) const; // a departed pad's id until another device takes it
 	bool slotConnected(int slot) const;
-	std::string keyName(foundation::Key) const;               // glfwGetKeyName for printable keys, a fixed English table for the rest
-	std::optional<Binding> captureNext();                     // the first press of any control this frame, for a rebinding screen
+	std::string keyName(foundation::Key) const;               // the layout's label for the main block's printable keys, capitalised; a fixed English table for the rest
+	std::optional<Binding> captureNext();                     // the next press this frame not yet returned, for a rebinding screen; an axis past half travel binds its half
 };
 }
 ```
@@ -409,9 +421,43 @@ The rules this carries:
   this change. A claimed pad that disconnects keeps its slot, `slotConnected`
   goes false, and the game decides whether to pause. A pad that connects while
   a slot is waiting on the same model GUID takes that slot; anything else
-  arrives unclaimed.
+  arrives unclaimed. Two slots waiting on one model take its pads lowest slot
+  first; a pad with no GUID is taken back by nothing. While a slot waits,
+  `deviceForSlot` still names the departed pad's id, which the accumulator has
+  released and zeroed, so a sim reading it sees the release; once another
+  device connects at that id it's empty. A pad that leaves and comes back at
+  another id in one poll moves the slot before a tick reads the release, so a
+  sim sees a second press with no release between. Releasing a waiting slot
+  ends the wait, and a claim on a claimed slot replaces its device.
+- `pressedDevice` counts a key going down (not a repeat) as the keyboard's,
+  whatever device the event names, a mouse button as the mouse's and a pad
+  button as its pad's. It skips a device that backs its share of slots already,
+  so a joined player's press doesn't hide a new one's. Sticks and triggers
+  don't press.
+- `captureNext` binds a stick or trigger crossing half travel away from rest to
+  that half: scale 1, or -1 for a stick's negative half.
+- An axis read as a button has edges: each reader's snapshot holds the axes at
+  its last read (`startAxes`) beside their values now, and `ActionMap` folds
+  an axis binding's crossing with its button bindings' transitions, reporting
+  the most transitions some order of the bindings' changes gives. Pads are
+  sampled once a frame, so the frame reader sees every crossing but one: a pad
+  that disconnects and reconnects in one poll with a trigger held gives no edge
+  (a held button gives a release and a press). The tick reader's axis edges are
+  sampled at frame rate as well, so a tick spanning frames with no tick sees
+  the net crossing, and a trigger tap shorter than the gap between ticks can be
+  lost at low tick rates; several virtual pad events in one frame give the net
+  one too.
+- A trigger the pad's mapping lacks, which GLFW leaves at 0, reads released: a
+  trigger reads 0 until GLFW has reported it below 0, where mapped ones rest.
+- Connections come through `PlatformEvents::deviceConnected` and
+  `deviceDisconnected`, with the name and model GUID an `InputEvent` can't
+  carry; the dev server registers its virtual pads (`pads[16..19]`) through
+  the same calls.
 - Keys are positions, as decision D settled; `keyName` shows the layout's
-  label, with a fallback because GLFW names only printable keys.
+  label, with a fallback because GLFW names only printable keys. The label is
+  capitalised by codepoint, by range: ASCII, the Latin-1 Supplement (U+00E0 to
+  U+00FE but U+00F7), Greek and Cyrillic. A key the keyboard lacks has no
+  label.
 - A sim never reads `InputSnapshot`. It takes the game's own action struct,
   built from `ActionMap` in the game's `fixedUpdate` with `deviceForSlot`, and
   that struct is the replay log.
@@ -630,9 +676,11 @@ A byte-provider comes back when a consumer packs assets into an archive.
 ## Clipboard
 
 `app::Clipboard` is concrete: GLFW's clipboard, or an in-memory one on the
-headless platform. Phase 2 `app` can't implement `UI::IClipboard`, which is
-worldsim's until phase 3, so worldsim keeps a ten-line adapter. In phase 3 the
-interface moves into salal's `ui` and `app` implements it directly.
+headless platform, through `Platform::clipboardText` and `setClipboardText`.
+Its `getText` and `setText` are `UI::IClipboard`'s names. Phase 2 `app` can't
+implement `UI::IClipboard`, which is worldsim's until phase 3, so worldsim keeps
+a ten-line adapter. In phase 3 the interface moves into salal's `ui` and `app`
+implements it directly.
 
 ## Dev server
 
@@ -831,7 +879,7 @@ slice would leave worldsim with two loops.
 |---|---|---|---|
 | 1. Input types (`v0.10.0`) | `foundation/input/`: `Key` completed to GLFW's token set, dense, with `Unknown` and `Count`; `MouseButton` typed; the gamepad enums, `DeviceId`, `InputEvent`, `ButtonState`, `InputSnapshot`, `InputAccumulator`, `Binding`, `ActionMap` | builds at the new tag, no change | headless tests: transitions inside one tick at 120 Hz under 60 Hz frames, two ticks in a frame, a frame with no tick, the two readers apart, axis thresholds, two keys to an axis, radial and per-axis deadzones, split keyboard as two maps |
 | 2. The frame and scenes (`v0.11.0`) | `Clock`, `ManualClock`, `Platform` with the GLFW and headless implementations, `App::create/tick/run/shutdown`, the accumulator and alpha, pause, focus freeze, `step`, `setDispatch`, `setVsync`, `SceneStack` with typed args and results, overlays, the context object, `parseCommandLine`, metrics sections, empty font atlases as no text, the `ResourcePath` fixes | none | headless tests of exact tick counts, the clamp and the cap, pause, step, a covered scene's frozen alpha, change order within a frame, push, `finish` with a move-only result, replace, reset, by-name switching, resize, the context's type check; the sandbox stub runs one scene on GLFW |
-| 3. Devices (`v0.12.0`) | the GLFW device layer: keyboard, mouse, gamepads, hot-plug, slots and reconnects, key names, capture, `Clipboard` | none | headless tests through the accumulator; a pad and a hot-plug by hand |
+| 3. Devices (`v0.12.0`) | the GLFW device layer: keyboard, mouse, gamepads, hot-plug, slots and reconnects, key names, capture, axis edges in the snapshot and `ActionMap`, `Clipboard` | none | headless tests through the accumulator; a pad and a hot-plug by hand |
 | 4. Dev server (`v0.13.0`) | from worldsim into `app`, behind the flags; registrations with handles, control actions, providers and the empty defaults, `what=scene` from the stack; the new `/api/input` events; `step`; the fixes; `PngEncoder` into `renderer` | none | route tests against an `App` on the headless platform; a Release build links no httplib and opens no socket, and one built with `SALAL_DEV_SERVER_IN_RELEASE` serves |
 | 5. Settings and saves (`v0.14.0`) | `Settings`, `userConfigDir`, migration, `video.*` applied by `App`, `setFullscreen`, `ActionMap` bindings; `SaveStore`, `userDataDir`, envelopes, backups, upgrade chains | none | tests: round trip, unknown keys kept, corrupt file moved aside, migration, a newer file; a save upgraded across three versions, a failed upgrade leaving the original, a newer save refused untouched, a crash between temp and rename |
 | 6. Sandbox (`v0.15.0`) | the harness: a scene picker drawn with `Primitives`, scene by name, the dev server, a committed atlas (decision 8); the renderer-level scenes from worldsim's ui-sandbox (`sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, and `input_test` rewritten on snapshots, drag derived from them) | none | screenshots of each scene through the dev server, the picker's state through a registered provider |

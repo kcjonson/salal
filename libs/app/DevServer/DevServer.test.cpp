@@ -31,6 +31,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -130,11 +131,14 @@ namespace app::testing {
 				backend = made.get();
 				return made;
 			}
-			void pollEvents(PlatformEvents& /*events*/) override {}
-			bool focused() const override { return true; }
-			bool closeRequested() const override { return false; }
-			void present() override { record("platform", "present"); }
-			void setVsync(bool enabled) override { record("platform", enabled ? "vsync on" : "vsync off"); }
+			void					   pollEvents(PlatformEvents& /*events*/) override {}
+			bool					   focused() const override { return true; }
+			bool					   closeRequested() const override { return false; }
+			void					   present() override { record("platform", "present"); }
+			void					   setVsync(bool enabled) override { record("platform", enabled ? "vsync on" : "vsync off"); }
+			std::optional<std::string> keyLabel(foundation::Key /*key*/) const override { return std::nullopt; }
+			std::string				   clipboardText() const override { return {}; }
+			void					   setClipboardText(const std::string& /*text*/) override {}
 
 			ManualClock						time;
 			Renderer::backend::NullBackend* backend = nullptr; // the renderer's, alive as long as the App

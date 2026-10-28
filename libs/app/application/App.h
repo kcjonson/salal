@@ -9,6 +9,7 @@
 
 #include "DevServer/DevServer.h"
 #include "application/AppConfig.h"
+#include "clipboard/Clipboard.h"
 #include "detail/TypeKey.h"
 #include "input/Input.h"
 #include "platform/Platform.h"
@@ -97,6 +98,7 @@ namespace app {
 
 		Input&						input();
 		DevServer&					devServer(); // always there; its calls do nothing where the server isn't compiled in
+		Clipboard&					clipboard();
 		const Clock&				clock() const;
 		const Renderer::Viewport&	viewport() const;
 		Renderer::CoordinateSystem& coordinateSystem();
@@ -125,6 +127,8 @@ namespace app {
 		bool startFonts();
 
 		void inputEvent(const foundation::InputEvent& event) override;
+		void deviceConnected(const DeviceInfo& device, double time) override;
+		void deviceDisconnected(foundation::DeviceId device, double time) override;
 		void framebufferResized(const Renderer::Viewport& newViewport) override;
 
 		void  bindContext(void* value, const void* type);
@@ -155,7 +159,8 @@ namespace app {
 		Renderer::CoordinateSystem					coordinates;
 		std::unique_ptr<Renderer::FontRenderer>		fontRenderer;
 		std::unique_ptr<Renderer::MetricsCollector> metricsCollector;
-		Input										inputState;
+		Input										inputState{*platform};
+		Clipboard									clipboardState{*platform};
 		SceneStack									sceneStack{*this};
 		std::vector<std::unique_ptr<Overlay>>		overlays;
 		std::vector<std::unique_ptr<Overlay>>		joiningOverlays;

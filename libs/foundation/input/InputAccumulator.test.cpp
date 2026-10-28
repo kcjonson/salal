@@ -55,6 +55,10 @@ namespace {
 		return snapshot.pads[index].axes[static_cast<std::size_t>(axis)];
 	}
 
+	float padStartAxisOf(const InputSnapshot& snapshot, std::uint8_t index, GamepadAxis axis) {
+		return snapshot.pads[index].startAxes[static_cast<std::size_t>(axis)];
+	}
+
 	void expectState(const ButtonState& state, bool down, int transitions) {
 		EXPECT_EQ(state.down, down);
 		EXPECT_EQ(int{state.transitions}, transitions);
@@ -452,6 +456,42 @@ namespace {
 		const InputSnapshot tick = input.consumeTick();
 		EXPECT_EQ(padAxisOf(tick, 0, GamepadAxis::LeftX), 1.0F);
 		EXPECT_EQ(padAxisOf(tick, 0, GamepadAxis::LeftY), -1.0F);
+	}
+
+	TEST(InputAccumulator, StartAxesAreEachReadersAxesAtItsLastRead) {
+		InputAccumulator input;
+		input.push(padEvent(Type::DeviceConnected, 0));
+		input.push(padAxis(0, GamepadAxis::LeftTrigger, 0.75F));
+		const InputSnapshot firstTick = input.consumeTick();
+		EXPECT_EQ(padStartAxisOf(firstTick, 0, GamepadAxis::LeftTrigger), 0.0F);
+		EXPECT_EQ(padAxisOf(firstTick, 0, GamepadAxis::LeftTrigger), 0.75F);
+
+		input.push(padAxis(0, GamepadAxis::LeftTrigger, 1.5F));
+		const InputSnapshot secondTick = input.consumeTick();
+		EXPECT_EQ(padStartAxisOf(secondTick, 0, GamepadAxis::LeftTrigger), 0.75F);
+		EXPECT_EQ(padAxisOf(secondTick, 0, GamepadAxis::LeftTrigger), 1.0F);
+
+		// The frame reader hasn't read since the pad connected.
+		const InputSnapshot frame = input.consumeFrame();
+		EXPECT_EQ(padStartAxisOf(frame, 0, GamepadAxis::LeftTrigger), 0.0F);
+		EXPECT_EQ(padAxisOf(frame, 0, GamepadAxis::LeftTrigger), 1.0F);
+
+		const InputSnapshot quietTick = input.consumeTick();
+		EXPECT_EQ(padStartAxisOf(quietTick, 0, GamepadAxis::LeftTrigger), 1.0F);
+		EXPECT_EQ(padAxisOf(quietTick, 0, GamepadAxis::LeftTrigger), 1.0F);
+	}
+
+	TEST(InputAccumulator, DisconnectZeroesAxesAndLeavesStartAxes) {
+		InputAccumulator input;
+		input.push(padEvent(Type::DeviceConnected, 3));
+		input.push(padAxis(3, GamepadAxis::RightY, -0.5F));
+		input.consumeTick();
+
+		input.push(padEvent(Type::DeviceDisconnected, 3));
+		const InputSnapshot gone = input.consumeTick();
+		EXPECT_EQ(padStartAxisOf(gone, 3, GamepadAxis::RightY), -0.5F);
+		EXPECT_EQ(padAxisOf(gone, 3, GamepadAxis::RightY), 0.0F);
+		EXPECT_EQ(padStartAxisOf(input.consumeTick(), 3, GamepadAxis::RightY), 0.0F);
 	}
 
 	TEST(InputAccumulator, TransitionsSaturate) {

@@ -672,8 +672,9 @@ minor tag, with worldsim pinning once at the end. PRs 1 to 4 are in
 (`v0.10.0` to `v0.13.0`): the input types, the accumulator and `ActionMap` in
 `foundation/input/`, then the clock, the GLFW and headless platforms, the
 frame, the scene stack, overlays and the context object in `app`, then the
-GLFW device layer and the clipboard, then the dev server behind its compile
-flags, with `PngEncoder` in `renderer`.
+device layer: GLFW's keyboard, mouse and gamepads, hot-plug, player slots, key
+names, capture, axis edges and the clipboard, then the dev server behind its
+compile flags, with `PngEncoder` in `renderer`.
 
 The 16-file slice (`application/`, `scene/`, `input/`, `clipboard/`) plus what
 the consumers need from a frame owner and worldsim never built:
