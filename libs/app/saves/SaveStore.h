@@ -4,8 +4,10 @@
 // one before it kept as a backup, and brought up to the build's format by the game's own upgrade steps
 // when read. What a save holds is the game's; app never looks inside.
 //
-// A slot is a file, <slot>.save, in the store's directory, with <slot>.save.bak beside it. Each file is
-// an envelope around the game's bytes, little-endian:
+// A slot is a file, <slot>.save, in the store's directory, with <slot>.save.bak beside it. Slot names
+// are file names in lower case (validSlotName, in storage/UserDirectories.h), so two slots can't be
+// one file on a filesystem that folds case. Each file is an envelope around the game's bytes,
+// little-endian:
 //
 //   offset  size  field
 //        0     8  magic, the ASCII "SALALSAV"
@@ -17,20 +19,23 @@
 //       40     n  payload, the game's bytes
 //     40+n     4  CRC-32 (zlib's) of everything before it
 //
-// A later envelope version keeps the first 16 bytes where they are, so an older build can still say
-// which game version a save is, and reports it NewerThanBuild.
+// A later envelope version (2 to 8) keeps the first 16 bytes where they are, so an older build can still
+// say which game version a save is, and reports it NewerThanBuild; past 8 the header is damaged.
 //
 // A write goes to a temp file, flushed to the disk, and is renamed over the save after the save it
 // replaces has been copied (the same way) over the backup, so at every moment the save is whole: the
-// last good one, or the new one. A save damaged in some other way (a disk that lost a write) is copied
-// aside to <slot>.save.corrupt instead of over the backup, so it never replaces a good one.
+// last good one, or the new one. What isn't one of this build's good saves never goes over the backup:
+// a damaged save (a disk that lost a write) is copied aside to <slot>.save.corrupt (.corrupt.1 and on
+// after that), one that can't be read is renamed there, and a newer build's save is kept as
+// <slot>.save.v<its version>, which nothing this build does replaces, so an older build's autosaves
+// don't push it out. restoreBackup stages the save it replaces as <slot>.save.swap, and the next call
+// on the slot finishes or undoes a restore a crash interrupted.
 //
 // Not thread-safe. Two stores on one directory (two processes, say) don't tear each other's files,
-// since every write is a rename, but don't coordinate either: the last write wins, and they share a
-// slot's temp file, so they shouldn't write one slot at once.
+// since every write is its own temp file renamed into place, but don't coordinate either: the last
+// write wins.
 
 #include "saves/Expected.h"
-#include "storage/UserDirectories.h"
 
 #include <nlohmann/json.hpp>
 
@@ -56,7 +61,7 @@ namespace app {
 		std::string							  name;
 		int									  version = 0; // the save's format version; past SaveFormat::version for a newer build's
 		std::uint64_t						  writes = 0;  // the write counter
-		std::chrono::system_clock::time_point written{};
+		std::chrono::system_clock::time_point written{};   // zero for a time past what the clock holds
 		// The save's envelope reads and its length is right (its CRC is read() and restoreBackup()'s to
 		// check). False for a damaged save, and for a slot with only a backup, whose other fields are 0;
 		// restoreBackup may bring either back. A newer envelope gives its version alone.
@@ -66,7 +71,7 @@ namespace app {
 	class SaveStore {
 	  public:
 		enum class LoadError : std::uint8_t {
-			Missing,		// no save in the slot (a backup alone isn't read), or a slot name validFileName refuses
+			Missing,		// no save in the slot (a backup alone isn't read), or a slot name validSlotName refuses
 			Corrupt,		// the file can't be read, its envelope or CRC is wrong, or (readJson) the payload isn't JSON
 			NewerThanBuild, // a newer format version than the build's, or a newer envelope; not read, not touched
 			UpgradeFailed	// an upgrade step returned false or threw, or the format has none for a version
@@ -78,8 +83,9 @@ namespace app {
 		SaveStore(std::filesystem::path directory, SaveFormat format);
 
 		// The bytes as the slot's save, at the format's version, the save it replaces kept as the backup
-		// (a damaged one copied aside instead, a newer build's kept like any other). The write counter goes on from the higher of the
-		// save's and the backup's. False, logged, for a slot name validFileName refuses or a write that fails, and the slot is as it was.
+		// when it's one of this build's (set aside as above when it isn't). The write counter goes on from
+		// the higher of the save's and the backup's. False, logged, for a slot name validSlotName refuses or
+		// a write that fails, and the save is as it was.
 		bool write(std::string_view slot, std::span<const std::byte> bytes);
 
 		// The slot's bytes at the format's version. A save at an older version goes through each upgrade
@@ -98,21 +104,26 @@ namespace app {
 		std::vector<SlotInfo> slots() const;
 
 		// The backup becomes the save and the save it replaces the backup, so a second call undoes the
-		// first. With no save the backup is renamed into place, leaving none; a damaged save is moved aside
-		// to .corrupt first. True once the save is the backup's (logged if the save it replaced couldn't be
-		// kept); false, logged, with nothing changed, when there's no backup or the backup is damaged.
+		// first. The save being replaced is staged as <slot>.save.swap, then the backup renamed over the
+		// save, then the swap file over the backup, so the replaced save is on disk under some name
+		// throughout. When the last rename fails the call is false, logged, the save is the backup's, and
+		// the swap file stays for the next call on the slot to finish with; when an earlier step fails,
+		// false and nothing changed. With no save the backup is renamed into place,
+		// leaving none; a damaged save is copied aside first and the backup renamed straight over it, and
+		// one that can't be read is renamed aside. False, logged, with nothing changed, when there's no
+		// backup or the backup is damaged.
 		bool restoreBackup(std::string_view slot);
 
-		// The slot's files, the backup, a damaged save moved aside and a leftover temp file included. True
-		// when none is left, a slot that had none included; false, logged, for a slot name validFileName
-		// refuses or a file that won't go.
+		// Every file of the slot: the save, the backup, a staged swap, the copies set aside (.corrupt,
+		// .corrupt.N, .vN) and temp files. True when none is left, a slot that had none included; false,
+		// logged, for a slot name validSlotName refuses or a file that won't go.
 		bool remove(std::string_view slot);
 
 		// Empty for a store with no directory.
 		const std::filesystem::path& directory() const { return root; }
 
 	  private:
-		// A directory, and a slot name validFileName takes; logged when not.
+		// A directory, and a slot name validSlotName takes; logged when not.
 		bool usable(std::string_view slot, const char* what) const;
 
 		std::filesystem::path root;

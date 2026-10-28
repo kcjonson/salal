@@ -2,6 +2,7 @@
 
 #include "detail/Guard.h"
 #include "detail/SafeFile.h"
+#include "storage/UserDirectories.h"
 
 #include <utils/Log.h>
 
@@ -21,11 +22,13 @@ namespace app {
 
 		constexpr std::array<char, 8> kMagic{'S', 'A', 'L', 'A', 'L', 'S', 'A', 'V'};
 		constexpr std::uint32_t		  kEnvelopeVersion = 1;
+		constexpr std::uint32_t		  kNewestPlausibleEnvelope = 8; // past it, the header is damaged, not from a later salal
 		constexpr std::size_t		  kHeaderSize = 40;
 		constexpr std::size_t		  kCrcSize = 4;
 		constexpr std::string_view	  kSaveSuffix = ".save";
 		constexpr std::string_view	  kBackupSuffix = ".bak";
 		constexpr std::string_view	  kCorruptSuffix = ".corrupt";
+		constexpr std::string_view	  kSwapSuffix = ".swap";
 
 		// --- CRC-32, the reflected 0x04C11DB7 polynomial zlib, PNG and zip use ---
 
@@ -109,7 +112,8 @@ namespace app {
 			}
 			const auto envelopeVersion = get<std::uint32_t>(head, 8);
 			envelope.version = get<std::int32_t>(head, 12);
-			if (envelopeVersion > kEnvelopeVersion) {
+			// A later salal counts up from 1; a value far past that is a flipped bit, which reads as damaged.
+			if (envelopeVersion > kEnvelopeVersion && envelopeVersion <= kNewestPlausibleEnvelope) {
 				envelope.status = Envelope::Status::Newer;
 				return envelope;
 			}
@@ -161,40 +165,132 @@ namespace app {
 		struct SlotFiles {
 			std::filesystem::path save;
 			std::filesystem::path backup;
-			std::filesystem::path corrupt;
+			std::filesystem::path swap; // the save restoreBackup is replacing, until it's the backup
 		};
 
 		SlotFiles filesFor(const std::filesystem::path& root, std::string_view slot) {
 			const std::filesystem::path save = root / (std::string(slot) + std::string(kSaveSuffix));
-			return {.save = save, .backup = detail::withSuffix(save, kBackupSuffix), .corrupt = detail::withSuffix(save, kCorruptSuffix)};
+			return {.save = save, .backup = detail::withSuffix(save, kBackupSuffix), .swap = detail::withSuffix(save, kSwapSuffix)};
 		}
 
-		std::uint64_t writesIn(const detail::FileRead& file) {
-			if (file.status != detail::FileRead::Status::Read) {
-				return 0;
+		bool allDigits(std::string_view text) {
+			return !text.empty() && std::ranges::all_of(text, [](char c) { return c >= '0' && c <= '9'; });
+		}
+
+		// Whether the file `name` is one of the slot's whose save is `saveName`: the save, its backup, its
+		// staged swap, its copies set aside (.corrupt, .corrupt.N, .vN) and their temp files.
+		bool slotFile(std::string_view name, std::string_view saveName) {
+			if (const std::optional<std::string_view> target = detail::tempTargetOf(name)) {
+				name = *target;
 			}
-			const Envelope envelope = parseWhole(file.bytes);
-			return envelope.status == Envelope::Status::Intact ? envelope.writes : 0;
+			if (!name.starts_with(saveName)) {
+				return false;
+			}
+			std::string_view rest = name.substr(saveName.size());
+			if (rest.empty() || rest == kBackupSuffix || rest == kSwapSuffix) {
+				return true;
+			}
+			if (rest.starts_with(kCorruptSuffix)) {
+				rest.remove_prefix(kCorruptSuffix.size());
+				return rest.empty() || (rest.front() == '.' && allDigits(rest.substr(1)));
+			}
+			if (rest.starts_with(".v")) {
+				rest.remove_prefix(2);
+				if (rest.starts_with('-')) {
+					rest.remove_prefix(1);
+				}
+				return allDigits(rest);
+			}
+			return false;
 		}
 
-		// The save it replaces copied over the backup when it's intact, or aside when it's damaged, then
-		// the new save; each a safe write, so the save is whole throughout. Stops at the first failure.
-		bool writeSave(const SlotFiles& files, int version, std::span<const std::byte> payload) {
+		// A save this build mustn't push out: a later format version, or a later envelope.
+		bool newerThan(const Envelope& envelope, int build) {
+			return envelope.status == Envelope::Status::Newer || (envelope.status == Envelope::Status::Intact && envelope.version > build);
+		}
+
+		// Where a newer build's save is kept: <slot>.save.v<its version>, which no write of this build touches.
+		std::filesystem::path keptNewer(const SlotFiles& files, const Envelope& envelope) {
+			return detail::withSuffix(files.save, ".v" + std::to_string(envelope.version));
+		}
+
+		// What an interrupted restoreBackup left, put right. Its swap file holds the save it was replacing:
+		// with no backup the backup's rename into place had happened, so the swap file becomes the backup;
+		// matching the save, the restore hadn't started replacing anything, so it goes. Anything else is
+		// kept and logged, for remove() or a person to deal with.
+		void recover(const SlotFiles& files) {
+			const detail::FileRead swap = detail::readFile(files.swap);
+			if (swap.status == detail::FileRead::Status::Missing) {
+				return;
+			}
+			const std::string name = detail::pathText(files.swap);
+			std::error_code	  error;
+			if (swap.status == detail::FileRead::Status::Read && !std::filesystem::exists(files.backup, error) && !error) {
+				if (detail::renameReplacing(files.swap, files.backup)) {
+					LOG_WARNING(Engine, "SaveStore: finished an interrupted restore; %s is the backup now", name.c_str());
+				}
+				return;
+			}
+			const detail::FileRead save = detail::readFile(files.save);
+			if (swap.status == detail::FileRead::Status::Read && save.status == detail::FileRead::Status::Read &&
+				save.bytes == swap.bytes) {
+				std::filesystem::remove(files.swap, error);
+				return;
+			}
+			LOG_WARNING(Engine, "SaveStore: %s, left by an interrupted restore, matches nothing in its slot; kept", name.c_str());
+		}
+
+		// The save it replaces copied over the backup when it's one of this build's, kept under its own name
+		// when it's a newer build's, or copied aside when it's damaged (renamed aside when it can't be read),
+		// then the new save; each a safe write, so the save is whole throughout. A newer build's backup is
+		// renamed to its own name before it's replaced. The counter goes on from the higher of the save's and
+		// the backup's, the backup's read from its header alone. Stops at the first failure.
+		bool writeSave(const SlotFiles& files, int build, std::span<const std::byte> payload) {
 			const detail::FileRead current = detail::readFile(files.save);
-			const detail::FileRead backup = detail::readFile(files.backup);
-			const std::uint64_t	   writes = std::max(writesIn(current), writesIn(backup)) + 1;
-			if (current.status == detail::FileRead::Status::Read) {
-				const bool intact = parseWhole(current.bytes).status != Envelope::Status::Damaged;
-				if (!intact) {
+			const Envelope		   backup = parseHeader(files.backup);
+			std::uint64_t		   writes = backup.status == Envelope::Status::Intact ? backup.writes : 0;
+			if (current.status == detail::FileRead::Status::Unreadable) {
+				LOG_WARNING(Engine, "SaveStore: %s can't be read; set aside before it's replaced", detail::pathText(files.save).c_str());
+				if (!detail::moveAside(files.save, kCorruptSuffix)) {
+					return false;
+				}
+			} else if (current.status == detail::FileRead::Status::Read) {
+				const Envelope envelope = parseWhole(current.bytes);
+				writes = std::max(writes, envelope.status == Envelope::Status::Intact ? envelope.writes : 0);
+				std::filesystem::path keep = files.backup;
+				if (envelope.status == Envelope::Status::Damaged) {
 					LOG_WARNING(
 						Engine, "SaveStore: %s is damaged; copied aside, not kept as the backup", detail::pathText(files.save).c_str()
 					);
+					keep = detail::freeName(files.save, kCorruptSuffix);
+				} else if (newerThan(envelope, build)) {
+					keep = keptNewer(files, envelope);
+					LOG_WARNING(
+						Engine,
+						"SaveStore: %s is a newer build's; kept as %s",
+						detail::pathText(files.save).c_str(),
+						detail::pathText(keep).c_str()
+					);
+				} else if (newerThan(backup, build) && !detail::renameReplacing(files.backup, keptNewer(files, backup))) {
+					return false;
 				}
-				if (!detail::writeFileSafely(intact ? files.backup : files.corrupt, current.bytes)) {
+				if (!detail::writeFileSafely(keep, current.bytes)) {
 					return false;
 				}
 			}
-			return detail::writeFileSafely(files.save, encode(version, writes, payload));
+			return detail::writeFileSafely(files.save, encode(build, writes + 1, payload));
+		}
+
+		// A header's time, or zero for one past what the clock can hold.
+		std::chrono::system_clock::time_point timeWritten(std::int64_t microseconds) {
+			constexpr auto kLatest =
+				std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::duration::max()).count();
+			if (microseconds < 0 || microseconds > kLatest) {
+				return {};
+			}
+			return std::chrono::system_clock::time_point(
+				std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::microseconds(microseconds))
+			);
 		}
 
 		std::string_view loadErrorName(LoadError error) {
@@ -226,14 +322,17 @@ namespace app {
 		if (!usable(slot, "write")) {
 			return false;
 		}
-		return writeSave(filesFor(root, slot), format.version, bytes);
+		const SlotFiles files = filesFor(root, slot);
+		recover(files);
+		return writeSave(files, format.version, bytes);
 	}
 
 	Expected<std::vector<std::byte>, SaveStore::LoadError> SaveStore::read(std::string_view slot) {
 		if (!usable(slot, "read")) {
 			return Unexpected(LoadError::Missing);
 		}
-		const SlotFiles		   files = filesFor(root, slot);
+		const SlotFiles files = filesFor(root, slot);
+		recover(files);
 		const std::string	   name = detail::pathText(files.save);
 		const detail::FileRead file = detail::readFile(files.save);
 		const auto			   fail = [&](LoadError error) {
@@ -316,7 +415,7 @@ namespace app {
 			for (const std::string suffix : {std::string(kSaveSuffix), std::string(kSaveSuffix) + std::string(kBackupSuffix)}) {
 				if (file.size() > suffix.size() && file.ends_with(suffix)) {
 					const std::string name = file.substr(0, file.size() - suffix.size());
-					if (validFileName(name)) {
+					if (validSlotName(name)) {
 						names.insert(name);
 					}
 				}
@@ -332,9 +431,7 @@ namespace app {
 				info.intact = true;
 				info.version = envelope.version;
 				info.writes = envelope.writes;
-				info.written = std::chrono::system_clock::time_point(
-					std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::microseconds(envelope.written))
-				);
+				info.written = timeWritten(envelope.written);
 			}
 			infos.push_back(std::move(info));
 		}
@@ -345,7 +442,8 @@ namespace app {
 		if (!usable(slot, "restoreBackup")) {
 			return false;
 		}
-		const SlotFiles		   files = filesFor(root, slot);
+		const SlotFiles files = filesFor(root, slot);
+		recover(files);
 		const std::string	   name = detail::pathText(files.save);
 		const detail::FileRead backup = detail::readFile(files.backup);
 		if (backup.status != detail::FileRead::Status::Read || parseWhole(backup.bytes).status == Envelope::Status::Damaged) {
@@ -354,27 +452,42 @@ namespace app {
 		}
 
 		const detail::FileRead current = detail::readFile(files.save);
-		const bool			   currentIntact =
-			current.status == detail::FileRead::Status::Read && parseWhole(current.bytes).status != Envelope::Status::Damaged;
-		if (!currentIntact) {
-			if (current.status != detail::FileRead::Status::Missing && !detail::moveAside(files.save, kCorruptSuffix)) {
+		const bool			   damaged =
+			current.status == detail::FileRead::Status::Read && parseWhole(current.bytes).status == Envelope::Status::Damaged;
+		if (current.status != detail::FileRead::Status::Read || damaged) {
+			// Nothing worth keeping as the backup: a damaged save is copied aside and the backup renamed
+			// straight over it, so there's always a save; one that can't be read is renamed aside first.
+			if (damaged && !detail::writeFileSafely(detail::freeName(files.save, kCorruptSuffix), current.bytes)) {
 				return false;
 			}
-			std::error_code error;
-			std::filesystem::rename(files.backup, files.save, error);
-			if (error) {
-				LOG_ERROR(Engine, "SaveStore: can't restore %s's backup: %s", name.c_str(), error.message().c_str());
+			if (current.status == detail::FileRead::Status::Unreadable && !detail::moveAside(files.save, kCorruptSuffix)) {
+				return false;
+			}
+			if (!detail::renameReplacing(files.backup, files.save)) {
 				return false;
 			}
 			LOG_INFO(Engine, "SaveStore: %s restored from its backup", name.c_str());
 			return true;
 		}
 
-		if (!detail::writeFileSafely(files.save, backup.bytes)) {
+		// The save being replaced is staged under a third name first, so it's on disk under some name at
+		// every moment; recover() finishes or undoes a restore a crash interrupted.
+		if (!detail::writeFileSafely(files.swap, current.bytes)) {
 			return false;
 		}
-		if (!detail::writeFileSafely(files.backup, current.bytes)) {
-			LOG_ERROR(Engine, "SaveStore: %s is restored, but the save it replaced couldn't be kept as the backup", name.c_str());
+		if (!detail::renameReplacing(files.backup, files.save)) {
+			std::error_code ignored;
+			std::filesystem::remove(files.swap, ignored); // the save is as it was, and the staged copy a duplicate
+			return false;
+		}
+		if (!detail::renameReplacing(files.swap, files.backup)) {
+			LOG_ERROR(
+				Engine,
+				"SaveStore: %s is restored, but the save it replaced is still %s; the next call on the slot finishes it",
+				name.c_str(),
+				detail::pathText(files.swap).c_str()
+			);
+			return false;
 		}
 		LOG_INFO(Engine, "SaveStore: %s and its backup swapped", name.c_str());
 		return true;
@@ -384,19 +497,18 @@ namespace app {
 		if (!usable(slot, "remove")) {
 			return false;
 		}
-		const SlotFiles files = filesFor(root, slot);
-		bool			removed = true;
-		for (const std::filesystem::path& file :
-			 {files.save,
-			  files.backup,
-			  files.corrupt,
-			  detail::tempFor(files.save),
-			  detail::tempFor(files.backup),
-			  detail::tempFor(files.corrupt)}) {
-			std::error_code error;
-			std::filesystem::remove(file, error);
-			if (error) {
-				LOG_ERROR(Engine, "SaveStore: can't remove %s: %s", detail::pathText(file).c_str(), error.message().c_str());
+		const std::string saveName = detail::pathText(filesFor(root, slot).save.filename());
+		bool			  removed = true;
+		std::error_code	  error;
+		for (std::filesystem::directory_iterator it(root, error); !error && it != std::filesystem::directory_iterator();
+			 it.increment(error)) {
+			if (!slotFile(detail::pathText(it->path().filename()), saveName)) {
+				continue;
+			}
+			std::error_code failed;
+			std::filesystem::remove(it->path(), failed);
+			if (failed) {
+				LOG_ERROR(Engine, "SaveStore: can't remove %s: %s", detail::pathText(it->path()).c_str(), failed.message().c_str());
 				removed = false;
 			}
 		}
@@ -408,8 +520,14 @@ namespace app {
 			LOG_ERROR(Engine, "SaveStore::%s: the store has no directory", what);
 			return false;
 		}
-		if (!validFileName(slot)) {
-			LOG_ERROR(Engine, "SaveStore::%s: \"%.*s\" isn't a valid slot name", what, static_cast<int>(slot.size()), slot.data());
+		if (!validSlotName(slot)) {
+			LOG_ERROR(
+				Engine,
+				"SaveStore::%s: \"%.*s\" isn't a valid slot name (lowercase file name)",
+				what,
+				static_cast<int>(slot.size()),
+				slot.data()
+			);
 			return false;
 		}
 		return true;

@@ -84,18 +84,21 @@ namespace app {
 
 	TEST(SettingsTest, AFileThatIsNotJsonOrNotAnObjectOrUnreadableIsMovedAsideAndTheSettingsStartEmpty) {
 		const TempDir temp;
+		int			  run = 0;
 		for (const std::string content : {"{\"video\": {\"vsync\": fals", "[1, 2, 3]", "42", ""}) {
-			const auto file = temp / "settings.json";
+			const std::filesystem::path directory = temp.path() / std::to_string(run++);
+			std::filesystem::create_directory(directory);
+			const auto file = directory / "settings.json";
 			writeText(file, content);
-			writeText(temp / "settings.json.corrupt", "an older one");
+			writeText(directory / "settings.json.corrupt", "an older one"); // never replaced
 			Settings settings = Settings::load(file, 4);
 			EXPECT_EQ(settings.version(), 4) << content;
 			EXPECT_EQ(settings.get("video.vsync", true), true) << content;
-			EXPECT_EQ(filesIn(temp.path()), std::vector<std::string>{"settings.json.corrupt"}) << content;
-			EXPECT_EQ(readText(temp / "settings.json.corrupt"), content);
+			EXPECT_EQ(filesIn(directory), (std::vector<std::string>{"settings.json.corrupt", "settings.json.corrupt.1"})) << content;
+			EXPECT_EQ(readText(directory / "settings.json.corrupt"), "an older one");
+			EXPECT_EQ(readText(directory / "settings.json.corrupt.1"), content);
 			ASSERT_TRUE(settings.save());
 			EXPECT_EQ(fileJson(file), nlohmann::json::parse(R"({"version": 4})"));
-			std::filesystem::remove(file);
 		}
 
 		// A directory where the file should be can't be read either.
@@ -163,7 +166,8 @@ namespace app {
 		writeText(file, R"({"version": 1, "b": 1})");
 		const Settings replaced = Settings::load(file, 2, [](nlohmann::json& values, int /*fromVersion*/) { values = 5; });
 		EXPECT_FALSE(replaced.contains("b"));
-		EXPECT_EQ(readText(temp / "settings.json.corrupt"), R"({"version": 1, "b": 1})");
+		EXPECT_EQ(readText(temp / "settings.json.corrupt"), R"({"version": 1, "a": 1})");
+		EXPECT_EQ(readText(temp / "settings.json.corrupt.1"), R"({"version": 1, "b": 1})");
 	}
 
 	TEST(SettingsTest, ANewerFileLoadsAsItIsAndKeepsItsVersionOnSave) {

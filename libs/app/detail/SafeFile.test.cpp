@@ -1,14 +1,26 @@
-// The safe write the settings file and saves share: through a temp file renamed over the target, its
-// directory made, a stray temp file from a crash replaced; and reads that tell a missing file from one
-// that can't be read.
+// The safe write the settings file and saves share: through a temp file of its own renamed over the
+// target, its directory made, stale temp files swept up and live ones left alone, a held target replaced
+// on Windows; and reads that tell a missing file from one that can't be read.
 
 #include "detail/SafeFile.h"
 #include "tests/TempDir.h"
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace app::detail {
 
@@ -19,6 +31,16 @@ namespace app::detail {
 		using testing::readText;
 		using testing::TempDir;
 		using testing::writeText;
+
+		// Clears the fault a test set, however the test ends.
+		struct FaultReset {
+			FaultReset() = default;
+			FaultReset(const FaultReset&) = delete;
+			FaultReset& operator=(const FaultReset&) = delete;
+			FaultReset(FaultReset&&) = delete;
+			FaultReset& operator=(FaultReset&&) = delete;
+			~FaultReset() { setFaultForTests({}); }
+		};
 
 	} // namespace
 
@@ -38,25 +60,88 @@ namespace app::detail {
 		EXPECT_EQ(readText(file), "x");
 	}
 
-	TEST(SafeFileTest, AStrayTempFileFromACrashIsReplacedAndTheTargetWasNeverTouched) {
+	TEST(SafeFileTest, TempFilesAreNamedForTheirTargetAndOneWrite) {
+		EXPECT_EQ(tempTargetOf("slot.save.123.0.tmp"), "slot.save");
+		EXPECT_EQ(tempTargetOf("slot.save.9.42.tmp"), "slot.save");
+		EXPECT_EQ(tempTargetOf("slot.save.bak.123.0.tmp"), "slot.save.bak");
+		EXPECT_EQ(tempTargetOf("slot.save.tmp"), std::nullopt);
+		EXPECT_EQ(tempTargetOf("slot.save.123.tmp"), std::nullopt);
+		EXPECT_EQ(tempTargetOf("slot.save.1a.0.tmp"), std::nullopt);
+		EXPECT_EQ(tempTargetOf("slot.save.123.0.tmp.x"), std::nullopt);
+		EXPECT_EQ(tempTargetOf(".1.2.tmp"), std::nullopt);
+		EXPECT_EQ(tempTargetOf("settings.json"), std::nullopt);
+	}
+
+	TEST(SafeFileTest, AStaleTempFileFromACrashIsSweptAndALiveOneIsLeftAlone) {
 		const TempDir temp;
 		const auto	  file = temp / "settings.json";
 		writeText(file, "good");
-		writeText(tempFor(file), "half writ"); // a write that died before its rename
+		writeText(temp / "settings.json.4242.0.tmp", "half writ"); // a write that died before its rename
+		writeText(temp / "settings.json.4243.7.tmp", "being written");
+		std::filesystem::last_write_time(
+			temp / "settings.json.4242.0.tmp", std::filesystem::file_time_type::clock::now() - std::chrono::hours(1)
+		);
 		EXPECT_EQ(readText(file), "good");
+
 		ASSERT_TRUE(writeFileSafely(file, bytesOf("new")));
 		EXPECT_EQ(readText(file), "new");
-		EXPECT_FALSE(std::filesystem::exists(tempFor(file)));
+		EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"settings.json", "settings.json.4243.7.tmp"}));
 	}
 
 	TEST(SafeFileTest, AWriteThatCannotHappenIsFalseAndLeavesNoTempFile) {
 		const TempDir temp;
 		const auto	  file = temp / "taken";
-		std::filesystem::create_directories(file / "inside"); // a non-empty directory can't be replaced by a file
+		std::filesystem::create_directories(file / "inside"); // a directory can't be replaced by a file
 		EXPECT_FALSE(writeFileSafely(file, bytesOf("x")));
 		EXPECT_TRUE(std::filesystem::is_directory(file));
-		EXPECT_FALSE(std::filesystem::exists(tempFor(file)));
+		EXPECT_EQ(filesIn(temp.path()), std::vector<std::string>{"taken"});
 	}
+
+	TEST(SafeFileTest, AFaultSetByATestFailsTheWriteOrRenameOfItsTargetAlone) {
+		const TempDir	 temp;
+		const FaultReset reset;
+		writeText(temp / "a", "old a");
+		setFaultForTests([&](const std::filesystem::path& target) { return target.filename() == "a"; });
+		EXPECT_FALSE(writeFileSafely(temp / "a", bytesOf("new")));
+		EXPECT_TRUE(writeFileSafely(temp / "b", bytesOf("b")));
+		writeText(temp / "c", "c");
+		EXPECT_FALSE(renameReplacing(temp / "c", temp / "a"));
+		EXPECT_EQ(readText(temp / "a"), "old a");
+		EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"a", "b", "c"}));
+	}
+
+#ifdef _WIN32
+	TEST(SafeFileTest, OnWindowsATargetAnotherProcessHasOpenIsStillReplaced) {
+		const TempDir temp;
+		const auto	  file = temp / "slot.save";
+		writeText(file, "old");
+		// A scanner or sync client reading it, sharing everything.
+		const HANDLE reader = CreateFileW(
+			file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr
+		);
+		ASSERT_NE(reader, INVALID_HANDLE_VALUE);
+		EXPECT_TRUE(writeFileSafely(file, bytesOf("new")));
+		CloseHandle(reader);
+		EXPECT_EQ(readText(file), "new");
+	}
+
+	TEST(SafeFileTest, OnWindowsAReplaceRefusedWhileAFileIsHeldIsTriedAgain) {
+		const TempDir temp;
+		const auto	  file = temp / "slot.save";
+		writeText(file, "old");
+		// Held with no sharing at all, then let go a little later, as an indexer does.
+		const HANDLE holder = CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+		ASSERT_NE(holder, INVALID_HANDLE_VALUE);
+		std::thread release([holder] {
+			std::this_thread::sleep_for(std::chrono::milliseconds(200));
+			CloseHandle(holder);
+		});
+		const bool	written = writeFileSafely(file, bytesOf("new"));
+		release.join();
+		EXPECT_TRUE(written);
+		EXPECT_EQ(readText(file), "new");
+	}
+#endif
 
 	TEST(SafeFileTest, ReadsTellMissingFromUnreadable) {
 		const TempDir temp;
@@ -75,15 +160,18 @@ namespace app::detail {
 		EXPECT_EQ(read.bytes, bytesOf(large));
 	}
 
-	TEST(SafeFileTest, MoveAsideRenamesOverWhatIsThere) {
+	TEST(SafeFileTest, MoveAsideNeverReplacesAnEarlierCopy) {
 		const TempDir temp;
 		const auto	  file = temp / "settings.json";
-		writeText(file, "bad");
-		writeText(withSuffix(file, ".corrupt"), "older bad");
-		EXPECT_TRUE(moveAside(file, ".corrupt"));
-		EXPECT_EQ(readText(temp / "settings.json.corrupt"), "bad");
-		EXPECT_EQ(filesIn(temp.path()), std::vector<std::string>{"settings.json.corrupt"});
-		EXPECT_FALSE(moveAside(file, ".corrupt"));
+		writeText(withSuffix(file, ".corrupt"), "first bad");
+		writeText(file, "second bad");
+		EXPECT_EQ(moveAside(file, ".corrupt"), temp / "settings.json.corrupt.1");
+		writeText(file, "third bad");
+		EXPECT_EQ(moveAside(file, ".corrupt"), temp / "settings.json.corrupt.2");
+		EXPECT_EQ(readText(temp / "settings.json.corrupt"), "first bad");
+		EXPECT_EQ(readText(temp / "settings.json.corrupt.1"), "second bad");
+		EXPECT_EQ(readText(temp / "settings.json.corrupt.2"), "third bad");
+		EXPECT_EQ(moveAside(file, ".corrupt"), std::nullopt); // nothing there to move
 	}
 
 } // namespace app::detail

@@ -3,6 +3,7 @@
 // the JSON pair, slots(), remove, and which slot names are refused.
 
 #include "saves/SaveStore.h"
+#include "detail/SafeFile.h"
 #include "tests/TempDir.h"
 
 #include <gtest/gtest.h>
@@ -67,6 +68,29 @@ namespace app {
 				bytes.insert(bytes.end(), added.begin(), added.end());
 				return true;
 			};
+		}
+
+		// Sets a SafeFile fault for a test and clears it however the test ends.
+		class Fault {
+		  public:
+			explicit Fault(std::string failing)
+				: name(std::move(failing)) {
+				detail::setFaultForTests([this](const std::filesystem::path& target) { return target.filename().string() == name; });
+			}
+			~Fault() { detail::setFaultForTests({}); }
+			Fault(const Fault&) = delete;
+			Fault& operator=(const Fault&) = delete;
+			Fault(Fault&&) = delete;
+			Fault& operator=(Fault&&) = delete;
+
+		  private:
+			std::string name;
+		};
+
+		// A temp file a write would have left, made old enough to be swept.
+		void staleTemp(const std::filesystem::path& file, std::string_view text) {
+			writeText(file, text);
+			std::filesystem::last_write_time(file, std::filesystem::file_time_type::clock::now() - std::chrono::hours(1));
 		}
 
 		class SaveStoreTest : public ::testing::Test {
@@ -262,18 +286,160 @@ namespace app {
 		EXPECT_EQ(saves.slots()[0].version, 5);
 	}
 
+	TEST_F(SaveStoreTest, AWriteOverANewerBuildsSaveKeepsItUnderItsOwnName) {
+		// A beta at format 5 saved; the stable build, at 3, autosaves twice over it.
+		ASSERT_TRUE(store(5).write("slot", bytesOf("beta")));
+		const std::vector<std::byte> beta = readBytes(file("slot.save"));
+		SaveStore					 stable = store(3);
+		EXPECT_EQ(stable.read("slot").error(), LoadError::NewerThanBuild);
+		ASSERT_TRUE(stable.write("slot", bytesOf("stable 1")));
+		ASSERT_TRUE(stable.write("slot", bytesOf("stable 2")));
+		EXPECT_EQ(readBytes(file("slot.save.v5")), beta);
+		EXPECT_EQ(text(stable.read("slot")), "stable 2");
+		EXPECT_EQ(versionIn(readBytes(file("slot.save.bak"))), 3);
+		EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"slot.save", "slot.save.bak", "slot.save.v5"}));
+	}
+
+	TEST_F(SaveStoreTest, ANewerBuildsBackupIsKeptUnderItsOwnNameBeforeItsReplaced) {
+		ASSERT_TRUE(store(7).write("other", bytesOf("future")));
+		const std::vector<std::byte> future = readBytes(file("other.save"));
+		SaveStore					 saves = store(3);
+		ASSERT_TRUE(saves.write("slot", bytesOf("s1")));
+		const std::vector<std::byte> first = readBytes(file("slot.save"));
+		writeBytes(file("slot.save.bak"), future);
+		ASSERT_TRUE(saves.write("slot", bytesOf("s2")));
+		EXPECT_EQ(readBytes(file("slot.save.v7")), future);
+		EXPECT_EQ(readBytes(file("slot.save.bak")), first);
+	}
+
+	TEST_F(SaveStoreTest, AnEnvelopeVersionFarPastThisOnesIsDamagedNotNewer) {
+		SaveStore saves = store(1);
+		ASSERT_TRUE(saves.write("slot", bytesOf("good")));
+		const std::vector<std::byte> good = readBytes(file("slot.save"));
+		ASSERT_TRUE(saves.write("slot", bytesOf("flipped")));
+		std::vector<std::byte> flipped = readBytes(file("slot.save"));
+		flipped[8] |= std::byte{0x40}; // envelope version 1 becomes 65
+		writeBytes(file("slot.save"), flipped);
+		EXPECT_EQ(saves.read("slot").error(), LoadError::Corrupt);
+		EXPECT_FALSE(saves.slots().at(0).intact);
+		ASSERT_TRUE(saves.write("slot", bytesOf("next")));
+		EXPECT_EQ(readBytes(file("slot.save.bak")), good); // not pushed out by the damaged save
+		EXPECT_EQ(readBytes(file("slot.save.corrupt")), flipped);
+	}
+
+	TEST_F(SaveStoreTest, ASaveThatCannotBeReadIsSetAsideBeforeItsReplaced) {
+		SaveStore saves = store(1);
+		std::filesystem::create_directories(file("slot.save") / "inside"); // nothing can read this as a save
+		EXPECT_EQ(saves.read("slot").error(), LoadError::Corrupt);
+		ASSERT_TRUE(saves.write("slot", bytesOf("new")));
+		EXPECT_EQ(text(saves.read("slot")), "new");
+		EXPECT_TRUE(std::filesystem::is_directory(file("slot.save.corrupt") / "inside"));
+		EXPECT_FALSE(std::filesystem::exists(file("slot.save.bak")));
+
+		// And restoreBackup over one renames it aside the same way.
+		ASSERT_TRUE(saves.write("slot", bytesOf("newer")));
+		std::filesystem::remove(file("slot.save"));
+		std::filesystem::create_directories(file("slot.save") / "again");
+		ASSERT_TRUE(saves.restoreBackup("slot"));
+		EXPECT_EQ(text(saves.read("slot")), "new");
+		EXPECT_TRUE(std::filesystem::is_directory(file("slot.save.corrupt.1") / "again"));
+	}
+
+	TEST_F(SaveStoreTest, RestoreBackupKeepsTheSaveItReplacesOnDiskWhenTheLastStepFails) {
+		SaveStore saves = store(1);
+		ASSERT_TRUE(saves.write("slot", bytesOf("older")));
+		const std::vector<std::byte> older = readBytes(file("slot.save"));
+		ASSERT_TRUE(saves.write("slot", bytesOf("NEWEST")));
+		const std::vector<std::byte> newest = readBytes(file("slot.save"));
+		{
+			// The staged save's rename over the backup fails (a held file, a full disk).
+			const Fault fault("slot.save.bak");
+			EXPECT_FALSE(saves.restoreBackup("slot"));
+		}
+		EXPECT_EQ(readBytes(file("slot.save")), older);
+		EXPECT_EQ(readBytes(file("slot.save.swap")), newest);
+		EXPECT_FALSE(std::filesystem::exists(file("slot.save.bak")));
+
+		// The next call on the slot finishes the restore, and a second restore undoes it.
+		EXPECT_EQ(text(saves.read("slot")), "older");
+		EXPECT_EQ(readBytes(file("slot.save.bak")), newest);
+		EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"slot.save", "slot.save.bak"}));
+		ASSERT_TRUE(saves.restoreBackup("slot"));
+		EXPECT_EQ(text(saves.read("slot")), "NEWEST");
+	}
+
+	TEST_F(SaveStoreTest, RestoreBackupWhoseEarlierStepsFailChangesNothing) {
+		SaveStore saves = store(1);
+		ASSERT_TRUE(saves.write("slot", bytesOf("older")));
+		ASSERT_TRUE(saves.write("slot", bytesOf("newest")));
+		const std::vector<std::byte> save = readBytes(file("slot.save"));
+		const std::vector<std::byte> backup = readBytes(file("slot.save.bak"));
+		for (const char* failing : {"slot.save.swap", "slot.save"}) {
+			const Fault fault(failing);
+			EXPECT_FALSE(saves.restoreBackup("slot")) << failing;
+			EXPECT_EQ(readBytes(file("slot.save")), save) << failing;
+			EXPECT_EQ(readBytes(file("slot.save.bak")), backup) << failing;
+			EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"slot.save", "slot.save.bak"})) << failing;
+		}
+	}
+
+	TEST_F(SaveStoreTest, ASwapFileACrashLeftIsFinishedOrDroppedOrKept) {
+		SaveStore saves = store(1);
+		ASSERT_TRUE(saves.write("slot", bytesOf("older")));
+		ASSERT_TRUE(saves.write("slot", bytesOf("newest")));
+		const std::vector<std::byte> save = readBytes(file("slot.save"));
+		const std::vector<std::byte> backup = readBytes(file("slot.save.bak"));
+
+		// Staged, then the crash: the swap file is a copy of the save, and goes.
+		writeBytes(file("slot.save.swap"), save);
+		EXPECT_EQ(text(saves.read("slot")), "newest");
+		EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"slot.save", "slot.save.bak"}));
+
+		// The backup renamed over the save, then the crash: the swap file becomes the backup.
+		std::filesystem::rename(file("slot.save.bak"), file("slot.save"));
+		writeBytes(file("slot.save.swap"), save);
+		ASSERT_TRUE(saves.write("slot", bytesOf("after")));
+		EXPECT_EQ(readBytes(file("slot.save.bak")), backup); // the restored save, kept as the write's backup
+		EXPECT_FALSE(std::filesystem::exists(file("slot.save.swap")));
+
+		// One that matches nothing is kept, and remove() takes it.
+		writeText(file("slot.save.swap"), "who knows");
+		EXPECT_EQ(text(saves.read("slot")), "after");
+		EXPECT_TRUE(std::filesystem::exists(file("slot.save.swap")));
+		EXPECT_TRUE(saves.remove("slot"));
+		EXPECT_TRUE(filesIn(temp.path()).empty());
+	}
+
+	TEST_F(SaveStoreTest, ATimeInAHeaderPastWhatTheClockHoldsIsZero) {
+		SaveStore saves = store(1);
+		ASSERT_TRUE(saves.write("slot", bytesOf("x")));
+		std::vector<std::byte> patched = readBytes(file("slot.save"));
+		for (std::size_t i = 24; i < 32; ++i) {
+			patched[i] = std::byte{0xFF};
+		}
+		patched[31] = std::byte{0x7F}; // the largest i64
+		writeBytes(file("slot.save"), patched);
+		const std::vector<SlotInfo> slots = saves.slots();
+		ASSERT_EQ(slots.size(), 1U);
+		EXPECT_TRUE(slots[0].intact); // slots() reads headers alone
+		EXPECT_EQ(slots[0].written, std::chrono::system_clock::time_point{});
+	}
+
 	TEST_F(SaveStoreTest, ACrashBetweenTheTempFileAndTheRenameLeavesTheLastGoodSave) {
 		SaveStore saves = store(1);
 		ASSERT_TRUE(saves.write("slot", bytesOf("good")));
 		const std::vector<std::byte> good = readBytes(file("slot.save"));
 
 		// Died writing the temp file: a partial one beside an untouched save.
-		writeText(file("slot.save.tmp"), "SALALSAV\x01");
+		staleTemp(file("slot.save.4242.0.tmp"), "SALALSAV\x01");
 		EXPECT_EQ(text(saves.read("slot")), "good");
 
 		// Died after the backup was copied and the new save flushed, before its rename.
 		ASSERT_TRUE(store(1).write("other", bytesOf("newer")));
-		std::filesystem::rename(file("other.save"), file("slot.save.tmp"));
+		std::filesystem::rename(file("other.save"), file("slot.save.4242.1.tmp"));
+		std::filesystem::last_write_time(
+			file("slot.save.4242.1.tmp"), std::filesystem::file_time_type::clock::now() - std::chrono::hours(1)
+		);
 		writeBytes(file("slot.save.bak"), good);
 		EXPECT_EQ(text(saves.read("slot")), "good");
 		const std::vector<SlotInfo> slots = saves.slots();
@@ -377,10 +543,21 @@ namespace app {
 		ASSERT_TRUE(saves.write("slot", bytesOf("a")));
 		ASSERT_TRUE(saves.write("slot", bytesOf("b")));
 		ASSERT_TRUE(saves.write("keep", bytesOf("k")));
-		writeText(file("slot.save.tmp"), "x");
-		writeText(file("slot.save.corrupt"), "x");
+		for (const char* leftover :
+			 {"slot.save.77.3.tmp",
+			  "slot.save.bak.77.4.tmp",
+			  "slot.save.swap",
+			  "slot.save.corrupt",
+			  "slot.save.corrupt.1",
+			  "slot.save.corrupt.1.77.5.tmp",
+			  "slot.save.v9",
+			  "keep.save.v9"}) {
+			writeText(file(leftover), "x");
+		}
+		writeText(file("slot.savex"), "not the slot's");
+		writeText(file("slot.save.notes"), "not the slot's");
 		EXPECT_TRUE(saves.remove("slot"));
-		EXPECT_EQ(filesIn(temp.path()), std::vector<std::string>{"keep.save"});
+		EXPECT_EQ(filesIn(temp.path()), (std::vector<std::string>{"keep.save", "keep.save.v9", "slot.save.notes", "slot.savex"}));
 		EXPECT_EQ(saves.read("slot").error(), LoadError::Missing);
 		EXPECT_FALSE(saves.restoreBackup("slot"));
 		EXPECT_TRUE(saves.remove("slot")); // nothing left to remove is still gone
@@ -401,6 +578,9 @@ namespace app {
 				 " lead",
 				 "CON",
 				 "lpt1.x",
+				 "nul .x",
+				 "Kevin",
+				 "slotA",
 				 std::string(65, 's'),
 				 std::string("nul\0x", 5)
 			 }) {
@@ -414,6 +594,17 @@ namespace app {
 		EXPECT_TRUE(filesIn(temp.path()).empty());
 		EXPECT_FALSE(std::filesystem::exists(temp.path().parent_path() / "escape.save"));
 		EXPECT_TRUE(saves.write(std::string(64, 's'), bytesOf("x")));
+	}
+
+	TEST_F(SaveStoreTest, SlotsThatDifferOnlyInCaseCannotExist) {
+		SaveStore saves = store(1);
+		EXPECT_TRUE(saves.write("kevin", bytesOf("kevin's")));
+		EXPECT_FALSE(saves.write("Kevin", bytesOf("Kevin's")));
+		EXPECT_EQ(saves.read("Kevin").error(), LoadError::Missing);
+		EXPECT_EQ(text(saves.read("kevin")), "kevin's");
+		writeText(file("Upper.save"), "copied from elsewhere");
+		ASSERT_EQ(saves.slots().size(), 1U);
+		EXPECT_EQ(saves.slots()[0].name, "kevin");
 	}
 
 	TEST_F(SaveStoreTest, AStoreWithNoDirectoryWritesNothingAndReadsNothing) {
