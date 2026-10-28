@@ -19,7 +19,7 @@ project(salal VERSION 0.1.0 LANGUAGES CXX)
 # Everything on for the standalone build, everything off when a game pulls salal
 # in through FetchContent, so a consumer builds only the layers it links.
 option(SALAL_BUILD_UI "Build salal_ui" ${PROJECT_IS_TOP_LEVEL})
-option(SALAL_BUILD_APP "Build salal_app (implies SALAL_BUILD_UI)" ${PROJECT_IS_TOP_LEVEL})
+option(SALAL_BUILD_APP "Build salal_app" ${PROJECT_IS_TOP_LEVEL})
 option(SALAL_BUILD_SANDBOX "Build the sandbox app (implies SALAL_BUILD_APP)" ${PROJECT_IS_TOP_LEVEL})
 option(SALAL_BUILD_TESTS "Build salal's tests and benchmarks" ${PROJECT_IS_TOP_LEVEL})
 
@@ -54,7 +54,7 @@ include(cmake/SalalBaseShader.cmake)
 
 add_subdirectory(libs/foundation)
 add_subdirectory(libs/renderer)
-if(SALAL_BUILD_UI OR SALAL_BUILD_APP OR SALAL_BUILD_SANDBOX)
+if(SALAL_BUILD_UI)
     add_subdirectory(libs/ui)
 endif()
 if(SALAL_BUILD_APP OR SALAL_BUILD_SANDBOX)
