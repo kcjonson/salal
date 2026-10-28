@@ -114,6 +114,29 @@ jobs:
     - name: Test
       run: ctest --test-dir build -C Debug --output-on-failure
 
+    # The dev server's flags in a single-config Release build: compiled out by default, so the
+    # app's tests are the compiled-out set, then back in with SALAL_DEV_SERVER_IN_RELEASE, so the
+    # route tests run optimised. vcpkg installs from the cache above; only the app's tests and the
+    # sandbox build, and the second configure rebuilds just what the option changes.
+    - name: Test the dev server compiled out of Release
+      if: runner.os == 'Linux'
+      run: |
+        cmake --preset default -B build-release -DCMAKE_BUILD_TYPE=Release
+        cmake --build build-release --target salal_app_tests salal_sandbox
+        build-release/libs/app/salal_app_tests --gtest_list_tests > app-tests.txt
+        grep -q WithoutTheServerTheApiIsThereAndDoesNothing app-tests.txt
+        if grep -q DevServerTest app-tests.txt; then echo "the route tests built without the server"; exit 1; fi
+        ctest --test-dir build-release -R salal_app_tests --output-on-failure
+
+    - name: Test the dev server in Release with SALAL_DEV_SERVER_IN_RELEASE
+      if: runner.os == 'Linux'
+      run: |
+        cmake --preset default -B build-release -DCMAKE_BUILD_TYPE=Release -DSALAL_DEV_SERVER_IN_RELEASE=ON
+        cmake --build build-release --target salal_app_tests salal_sandbox
+        build-release/libs/app/salal_app_tests --gtest_list_tests > app-tests.txt
+        grep -q DevServerTest app-tests.txt
+        ctest --test-dir build-release -R salal_app_tests --output-on-failure
+
     # foundation's goldens optimised on arm64, with NDEBUG, so the checks that
     # stay on in a release build run too. vcpkg installs from the cache above.
     - name: Test foundation optimised
