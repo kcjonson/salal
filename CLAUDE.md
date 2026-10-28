@@ -96,13 +96,14 @@ assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which to
 worldsim's grass deform out of the renderer and into a worldsim hook.
 `foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
 ported bit for bit (decision A). Phase 2 carves `app` out of `libs/engine`, in
-the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PRs 1 to 5 are
-in (`v0.10.0` to `v0.14.0`): the input types, the accumulator and `ActionMap` in
+the seven PRs [docs/app-api.md](docs/app-api.md) sequences; PRs 1 to 6 are
+in (`v0.10.0` to `v0.15.0`): the input types, the accumulator and `ActionMap` in
 `foundation/input/`, then `app`'s clock, GLFW and headless platforms, frame,
 scene stack, overlays and context object, then the GLFW device layer with
 gamepads, player slots, key names, capture, axis edges and the clipboard, then
-the dev server behind its compile flags, then the settings file and saves.
-`ui` is extracted last.
+the dev server behind its compile flags, then the settings file and saves, then
+the sandbox harness, a scene picker drawn with `Primitives` over worldsim's
+renderer-level scenes. `ui` is extracted last.
 The extraction doc has the detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
@@ -195,11 +196,14 @@ removing legacy code. One way to do each thing.
 ## Verifying changes
 
 There is no game in this repo, so the verification loop is the **sandbox app**
-plus the HTTP dev server. The sandbox (`apps/sandbox`) runs one scene on the
-GLFW platform, with no picker yet (the harness comes across in phase 2 PR 6),
-and serves the dev server on 127.0.0.1:8090 in Debug and RelWithDebInfo
-(`--http-port <port>` for another). Run `build/apps/sandbox/Debug/sandbox.exe`
-in the background, and stop it with
+plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
+renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
+`blend` and `input_test`) on the GLFW platform, under a scene picker drawn with
+`Primitives` (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
+has its state and the tab's and rows' bounds). It serves the dev server on
+127.0.0.1:8090 in Debug and RelWithDebInfo (`--http-port <port>` for another).
+Run `build/apps/sandbox/Debug/sandbox.exe --scene=<name>` in the background,
+which starts in that scene with the picker closed, and stop it with
 `curl "http://127.0.0.1:8090/api/control?action=exit"`, which answers once the
 app is torn down and the port is free.
 

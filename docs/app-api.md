@@ -55,6 +55,7 @@ Not in phase 2:
 | salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
 | salal `libs/app/DevServer`, `libs/renderer/PngEncoder` | phase 2 PR 4: the dev server behind its flags, its registrations, the input grammar, and the PNG encoder; tests not counted | 1,914 |
 | salal `libs/app/settings`, `saves`, `storage` | phase 2 PR 5: the settings file and `ActionMap` bindings through it, saves, the per-user directories, control names, and the safe write the settings and saves share; tests not counted | 2,460 |
+| salal `apps/sandbox` | phase 2 PR 6: the picker, the six scenes and the atlas staging, in place of the one-scene sandbox above | 1,759 |
 | salal `libs/foundation/input/` | the `namespace foundation` block under "Input": the types, `InputAccumulator` and `ActionMap` (phase 2 PR 1, axis edges PR 3) | 768 |
 
 What changed since app-carve-out.md's survey, and matters here:
@@ -900,6 +901,10 @@ binds `127.0.0.1` only, as today, and starts after the window, so startup logs
 before it aren't streamed. A requested port that is busy fails `App::create`,
 logged, where today the server thread calls `std::exit(1)`
 (`DebugServer.cpp:1016`); port 0 takes any free one, which `port()` reports.
+Enabled in a configuration it isn't compiled into, `start` logs one ERROR, so
+a profiling run says why nothing listens; a game that wants the server on by
+default enables it with `kDevServerCompiledIn`, or for `--http-port`, as the
+sandbox does, so a shipped build's log stays clean.
 
 Routes:
 
@@ -915,6 +920,7 @@ Routes:
 
 ```cpp
 namespace app {
+inline constexpr bool kDevServerCompiledIn = /* SALAL_DEV_SERVER is defined */;
 struct DevServerConfig { bool enabled = false; int port = 0; double requestTimeout = 10.0; }; // port 0: any free port
 struct DevRequest { std::string name; std::map<std::string, std::string> params; };            // the first of a repeated key
 struct DevResponse { int status = 200; std::string contentType = "application/json"; std::string body; };
@@ -1081,7 +1087,7 @@ slice would leave worldsim with two loops.
 | 3. Devices (`v0.12.0`) | the GLFW device layer: keyboard, mouse, gamepads, hot-plug, slots and reconnects, key names, capture, axis edges in the snapshot and `ActionMap`, `Clipboard` | none | headless tests through the accumulator; a pad and a hot-plug by hand |
 | 4. Dev server (`v0.13.0`) | from worldsim into `app`, behind the flags; registrations with handles, control actions, providers and the empty defaults, `what=scene` from the stack; the new `/api/input` events; `step`; the fixes; `PngEncoder` into `renderer` | none | route tests against an `App` on the headless platform; a Release build links no httplib and opens no socket, and one built with `SALAL_DEV_SERVER_IN_RELEASE` serves |
 | 5. Settings and saves (`v0.14.0`) | `Settings`, `userConfigDir`, migration, `video.*` applied by `App`, `setFullscreen`, `ActionMap` bindings; `SaveStore`, `userDataDir`, envelopes, backups, upgrade chains | none | tests: round trip, unknown keys kept, corrupt file moved aside, migration, a newer file; a save upgraded across three versions, a failed upgrade leaving the original, a newer save refused untouched, a crash between temp and rename |
-| 6. Sandbox (`v0.15.0`) | the harness: a scene picker drawn with `Primitives`, scene by name, the dev server, a committed atlas (decision 8); the renderer-level scenes from worldsim's ui-sandbox (`sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, and `input_test` rewritten on snapshots, drag derived from them) | none | screenshots of each scene through the dev server, the picker's state through a registered provider |
+| 6. Sandbox (`v0.15.0`) | the harness: a scene picker drawn with `Primitives`, scene by name, the dev server, a committed atlas (decision 8); the renderer-level scenes from worldsim's ui-sandbox (`sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, and `input_test` rewritten on snapshots, the drag's start from the frame's events and its end from the snapshot) | none | screenshots of each scene through the dev server, the picker's state through a registered provider |
 | 7. Worldsim converts | pin | delete `libs/engine/{application,scene,input,clipboard,debug}`, `graphics/PngEncoder`, and its copies of the six scenes the sandbox took; the table above | every scene through the dev server, screenshots identical; scripted `/api/input` runs before and after: a click that switches scene, Tab and typing into a field, scrolling a list in the game ui (no zoom), input while paused, the camera action; asset-cli PNGs; ctest; the three ports |
 
 PR 5 depends on nothing after PR 2 and can go anywhere after it; PR 6 needs

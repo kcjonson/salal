@@ -41,6 +41,14 @@ namespace app {
 		class DevServerHost;
 	} // namespace detail
 
+	// Whether this configuration has the server (SALAL_DEV_SERVER), for a game that turns it on by default
+	// where it can: enabling it where it isn't compiled in logs an ERROR, so a shipped build would log one.
+#ifdef SALAL_DEV_SERVER
+	inline constexpr bool kDevServerCompiledIn = true;
+#else
+	inline constexpr bool kDevServerCompiledIn = false;
+#endif
+
 	struct DevServerConfig {
 		bool   enabled = false;		  // the game sets it, from --http-port say; ignored where the server isn't compiled in
 		int	   port = 0;			  // 0 to 65535; 0 takes any free port, which DevServer::port() reports

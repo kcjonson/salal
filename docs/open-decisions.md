@@ -22,7 +22,7 @@ Written into the docs as decided, with the reason.
 | `IScene::exportState()` stays on `app::Scene` as an optional method, and the dev server answers `/api/state?what=scene` from it (2026-10-27; this row first said it was deleted) | scenes are the engine's, so scene state for debugging is for every game; world-sim already uses it (`apps/world-sim/scenes/shared/UiStateDrain.cpp:24-26`) for a route the first version of this row called dead; nothing calls it in a build without the server ([app-api.md](app-api.md), decision 1) |
 | Worldsim's `assets`, ECS systems and components, construction, nav, vision and world/* stay in worldsim | game schema and game logic throughout (the classification in app-carve-out.md) |
 | Phase 0 is complete; an "untangle worldsim" step precedes phase 1 | both ui -> engine and renderer -> ui must be cut before phase 1 can leave worldsim building |
-| The ui-sandbox harness moves in two steps: renderer-level scenes and a `Primitives` picker in phase 2, the pure-UI scenes and the harness's ui in phase 3; game-flavoured scenes stay (amended 2026-10-27) | the harness is generic; Planet, Grass, Tree and Salvage* link planet-view, world and assets; the ui the other scenes need is extracted in phase 3 ([app-api.md](app-api.md), decision 8) |
+| The ui-sandbox harness moves in two steps: renderer-level scenes and a `Primitives` picker in phase 2, the pure-UI scenes and the harness's ui in phase 3; game-flavoured scenes stay (amended 2026-10-27; the first step landed in phase 2 PR 6, `v0.15.0`) | the harness is generic; Planet, Grass, Tree and Salvage* link planet-view, world and assets; the ui the other scenes need is extracted in phase 3 ([app-api.md](app-api.md), decision 8) |
 | The phase 2 `app` API is [app-api.md](app-api.md) (2026-10-27) | its eleven decisions: optional scene state for the dev server; a user settings file; no byte-provider; the dev server by build type with a profiling override; typed scene arguments, a game context object and versioned saves; no ui type in `app` until phase 3; a concrete clipboard; a renderer-level sandbox; screenshots before present; the listed worldsim differences; pause and focus semantics |
 | The TileAtlasBuilder bootstrap and asset-system init move out of AppLauncher into the game | `AppLauncher.cpp:209-226` and `:231-264` hardcode terrain surfaces and asset paths |
 | Input types live in `foundation/input/`, the device poller in `app`, and there is no separate `input` library (decision D, 2026-10-26) | every surveyed engine keeps input types in a leaf module below UI and gameplay with the platform layer depending on it (design and evidence under D below) |
@@ -240,11 +240,12 @@ and dropping `engine` from ui's link list were the last of phase 0.5
 the namespace is now `foundation::`), and the rest of the untangle landed on
 2026-10-25/26 ([worldsim#291](https://github.com/kcjonson/worldsim/pull/291)
 through [worldsim#297](https://github.com/kcjonson/worldsim/pull/297)). Phase 2
-PRs 1 to 5 are in (`v0.10.0` to `v0.14.0`): the completed `Key`, the gamepad
+PRs 1 to 6 are in (`v0.10.0` to `v0.15.0`): the completed `Key`, the gamepad
 types, the snapshot, the accumulator and `ActionMap` are in `foundation/input/`,
 `app`'s frame feeds the accumulator and hands each fixed tick its snapshot,
 `app`'s device layer polls GLFW's devices into it, the dev server injects into
-it, and `ActionMap`'s bindings go through the settings file by control name.
+it, `ActionMap`'s bindings go through the settings file by control name, and the
+sandbox's `input_test` scene reads the frame's snapshot and events.
 
 ## E. ECS core
 

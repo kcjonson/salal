@@ -56,6 +56,8 @@ namespace app::testing {
 
 #ifdef SALAL_DEV_SERVER
 
+	static_assert(kDevServerCompiledIn);
+
 	namespace {
 
 		using foundation::DeviceKind;
@@ -1067,6 +1069,8 @@ namespace app::testing {
 	}
 
 #else
+
+	static_assert(!kDevServerCompiledIn);
 
 	// Compiled out: the API is there, every call does nothing, and an enabled config is ignored.
 	TEST_F(AppTest, WithoutTheServerTheApiIsThereAndDoesNothing) {
