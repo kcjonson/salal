@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstddef>
 #include <glm/geometric.hpp>
-#include <initializer_list>
 #include <utility>
 
 namespace Renderer {
@@ -243,77 +242,107 @@ namespace Renderer {
 					piece.cornerRadius = round ? halfWidth : 0.0F;
 				};
 
-			// A piece that comes out concave, its segment too short for its joints' cuts,
-			// uncuts both joints and the stroke is laid out again. A pass that changes
-			// anything uncuts a joint, so this settles within one pass per joint.
-			for (size_t pass = 0; pass <= count; ++pass) {
-				out.clear();
-				bool changed = false;
-				for (size_t i = 0; i < segmentCount; ++i) {
-					const Foundation::Vec2& start = points[i];
-					const Foundation::Vec2& t = directions[i];
-					const Foundation::Vec2	n = leftNormal(t);
-					const float				length = lengths[i];
-					Joint*					startJoint = (!closed && i == 0) ? nullptr : &joints[i];
-					Joint*					endJoint = (!closed && i + 1 == segmentCount) ? nullptr : &joints[(i + 1) % count];
-					const bool				startRound = startJoint != nullptr ? !mitered(*startJoint) : capRound;
-					const bool				endRound = endJoint != nullptr ? !mitered(*endJoint) : capRound;
-					const float				startExtent = startJoint != nullptr ? extent(*startJoint) : capExtent;
-					const float				endExtent = endJoint != nullptr ? extent(*endJoint) : capExtent;
+			// Each segment's pieces, laid out into its own slot. A segment whose pieces come out
+			// concave, too short for its joints' cuts, uncuts both joints and is laid out again,
+			// and so is the segment on the other side of each. A joint uncuts once, so no segment
+			// is laid out more than three times, however the uncutting spreads.
+			static thread_local std::vector<std::array<StrokePiece, 2>> slots;
+			static thread_local std::vector<uint8_t>					slotCounts;
+			static thread_local std::vector<uint8_t>					queued;
+			static thread_local std::vector<size_t>						pending;
+			slots.resize(segmentCount);
+			slotCounts.assign(segmentCount, 0);
+			queued.assign(segmentCount, 1);
+			pending.clear();
+			for (size_t i = segmentCount; i-- > 0;) {
+				pending.push_back(i);
+			}
+			const auto enqueue = [&](size_t i) {
+				if (queued[i] == 0) {
+					queued[i] = 1;
+					pending.push_back(i);
+				}
+			};
+			// Lays segment i into its slot; true when a piece came out concave.
+			const auto lay = [&](size_t i) {
+				const Foundation::Vec2& start = points[i];
+				const Foundation::Vec2& t = directions[i];
+				const Foundation::Vec2	n = leftNormal(t);
+				const float				length = lengths[i];
+				Joint*					startJoint = (!closed && i == 0) ? nullptr : &joints[i];
+				Joint*					endJoint = (!closed && i + 1 == segmentCount) ? nullptr : &joints[(i + 1) % count];
+				const bool				startRound = startJoint != nullptr ? !mitered(*startJoint) : capRound;
+				const bool				endRound = endJoint != nullptr ? !mitered(*endJoint) : capRound;
+				const float				startExtent = startJoint != nullptr ? extent(*startJoint) : capExtent;
+				const float				endExtent = endJoint != nullptr ? extent(*endJoint) : capExtent;
 
-					const size_t firstPiece = out.size();
-					if (startRound == endRound) {
-						StrokePiece piece;
-						addEnd(piece, start, t, n, length, endJoint, endExtent);
-						addStart(piece, start, t, n, startJoint, startExtent);
-						shade(piece, start, t, -startExtent, length + endExtent, startRound);
-						out.push_back(piece);
-					} else {
-						// The halves meet halfway along the free stretch between how far the
-						// start's cut reaches along the segment and where the end's begins (a
-						// pixel in from a cap or an uncut joint), which gives both cuts the most
-						// room. Each half's SDF runs on a reach past the middle, so its own end
-						// is nowhere near the cut.
-						float from = pixel;
-						float to = length - pixel;
-						if (startJoint != nullptr && startJoint->cut) {
-							from = std::max(glm::dot(startJoint->innerCut - start, t), glm::dot(startJoint->outerCut - start, t));
-						}
-						if (endJoint != nullptr && endJoint->cut) {
-							to = std::min(glm::dot(endJoint->innerCut - start, t), glm::dot(endJoint->outerCut - start, t));
-						}
-						const float			   middle = from < to ? (from + to) * 0.5F : length * 0.5F;
-						const Foundation::Vec2 middleRight = start + (t * middle) - (n * reach);
-						const Foundation::Vec2 middleLeft = start + (t * middle) + (n * reach);
-						StrokePiece			   first;
-						addCorner(first, middleRight);
-						addCorner(first, middleLeft);
-						addStart(first, start, t, n, startJoint, startExtent);
-						shade(first, start, t, -startExtent, middle + reach + (startRound ? halfWidth : 0.0F), startRound);
-						StrokePiece second;
-						addEnd(second, start, t, n, length, endJoint, endExtent);
-						addCorner(second, middleLeft);
-						addCorner(second, middleRight);
-						shade(second, start, t, middle - reach - (endRound ? halfWidth : 0.0F), length + endExtent, endRound);
-						out.push_back(first);
-						out.push_back(second);
+				uint8_t& laid = slotCounts[i];
+				laid = 0;
+				if (startRound == endRound) {
+					StrokePiece piece;
+					addEnd(piece, start, t, n, length, endJoint, endExtent);
+					addStart(piece, start, t, n, startJoint, startExtent);
+					shade(piece, start, t, -startExtent, length + endExtent, startRound);
+					slots[i][laid++] = piece;
+				} else {
+					// The halves meet halfway along the free stretch between how far the
+					// start's cut reaches along the segment and where the end's begins (a
+					// pixel in from a cap or an uncut joint), which gives both cuts the most
+					// room. Each half's SDF runs on a reach past the middle, so its own end
+					// is nowhere near the cut.
+					float from = pixel;
+					float to = length - pixel;
+					if (startJoint != nullptr && startJoint->cut) {
+						from = std::max(glm::dot(startJoint->innerCut - start, t), glm::dot(startJoint->outerCut - start, t));
 					}
-					const bool concave =
-						std::any_of(out.begin() + static_cast<std::ptrdiff_t>(firstPiece), out.end(), [&](const StrokePiece& piece) {
-							return !convex(piece, start, t, reach);
-						});
-					if (concave) {
-						for (Joint* joint : {startJoint, endJoint}) {
-							if (joint != nullptr && joint->cut) {
-								joint->cut = false;
-								changed = true;
-							}
-						}
+					if (endJoint != nullptr && endJoint->cut) {
+						to = std::min(glm::dot(endJoint->innerCut - start, t), glm::dot(endJoint->outerCut - start, t));
 					}
+					const float			   middle = from < to ? (from + to) * 0.5F : length * 0.5F;
+					const Foundation::Vec2 middleRight = start + (t * middle) - (n * reach);
+					const Foundation::Vec2 middleLeft = start + (t * middle) + (n * reach);
+					StrokePiece			   first;
+					addCorner(first, middleRight);
+					addCorner(first, middleLeft);
+					addStart(first, start, t, n, startJoint, startExtent);
+					shade(first, start, t, -startExtent, middle + reach + (startRound ? halfWidth : 0.0F), startRound);
+					StrokePiece second;
+					addEnd(second, start, t, n, length, endJoint, endExtent);
+					addCorner(second, middleLeft);
+					addCorner(second, middleRight);
+					shade(second, start, t, middle - reach - (endRound ? halfWidth : 0.0F), length + endExtent, endRound);
+					slots[i][laid++] = first;
+					slots[i][laid++] = second;
 				}
-				if (!changed) {
-					break;
+				return std::any_of(slots[i].begin(), slots[i].begin() + laid, [&](const StrokePiece& piece) {
+					return !convex(piece, start, t, reach);
+				});
+			};
+			while (!pending.empty()) {
+				const size_t i = pending.back();
+				pending.pop_back();
+				queued[i] = 0;
+				if (!lay(i)) {
+					continue;
 				}
+				// Joint i is between segments i - 1 and i, joint i + 1 between i and i + 1.
+				const size_t previous = (i + segmentCount - 1) % segmentCount;
+				const size_t next = (i + 1) % segmentCount;
+				const bool	 hasStart = closed || i > 0;
+				const bool	 hasEnd = closed || i + 1 < segmentCount;
+				if (hasStart && joints[i].cut) {
+					joints[i].cut = false;
+					enqueue(i);
+					enqueue(previous);
+				}
+				if (hasEnd && joints[(i + 1) % count].cut) {
+					joints[(i + 1) % count].cut = false;
+					enqueue(i);
+					enqueue(next);
+				}
+			}
+			for (size_t i = 0; i < segmentCount; ++i) {
+				out.insert(out.end(), slots[i].begin(), slots[i].begin() + slotCounts[i]);
 			}
 
 			cut.assign(count, 0);

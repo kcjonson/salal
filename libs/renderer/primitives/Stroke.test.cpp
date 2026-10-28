@@ -54,19 +54,22 @@ namespace {
 		return shared;
 	}
 
-	// Convex with positive winding, in double precision.
+	// Convex with positive winding, in double precision, to the layout's own tolerance: a
+	// turn back no larger than a thousandth of the reach squared, which far from the origin
+	// is what float rounding leaves where two corners all but coincide.
 	bool isConvex(const StrokePiece& piece) {
 		if (piece.cornerCount < 3) {
 			return false;
 		}
-		double twiceArea = 0.0;
+		const double reach = static_cast<double>(piece.halfWidth) + 1.0;
+		double		 twiceArea = 0.0;
 		for (uint8_t i = 0; i < piece.cornerCount; ++i) {
 			const Foundation::Vec2 a = piece.corners[i];
 			const Foundation::Vec2 b = piece.corners[(i + 1) % piece.cornerCount];
 			const Foundation::Vec2 c = piece.corners[(i + 2) % piece.cornerCount];
 			const double		   turn = ((static_cast<double>(b.x) - a.x) * (static_cast<double>(c.y) - b.y)) -
 								((static_cast<double>(b.y) - a.y) * (static_cast<double>(c.x) - b.x));
-			if (turn < -1e-6) {
+			if (turn < -1e-3 * reach * reach) {
 				return false;
 			}
 			twiceArea += (static_cast<double>(a.x) * b.y) - (static_cast<double>(a.y) * b.x);
@@ -603,4 +606,38 @@ TEST(StrokeTest, ASegmentBesideAButtCapSplitsWhereBothItsEndsFit) {
 	strokePolyline({.points = hook, .width = 12.0F}, 1.0F, pieces);
 	ASSERT_EQ(pieces.size(), 6U);
 	expectAllCut(pieces, false);
+}
+
+TEST(StrokeTest, StrokesWithManyUncutJointsStillLayOutConvexPieces) {
+	// A random walk of 20,000 points two units apart, rising and falling up to 20 a step:
+	// most joints too sharp for their short segments. And a border round a circle with 800
+	// deep teeth, its notches past a right angle beside edges too short for their cuts,
+	// where uncutting one joint can spread to the next. Every piece comes out convex.
+	uint32_t   seed = 12345U;
+	const auto next = [&seed]() {
+		seed = (seed * 1664525U) + 1013904223U;
+		return static_cast<float>(seed >> 8U) / 16777216.0F;
+	};
+	std::vector<Foundation::Vec2> walk;
+	float						  height = 0.0F;
+	for (int i = 0; i < 20000; ++i) {
+		height += (next() * 40.0F) - 20.0F;
+		walk.emplace_back(static_cast<float>(i) * 2.0F, height);
+	}
+	std::vector<StrokePiece> pieces;
+	strokePolyline({.points = walk, .width = 2.0F}, 1.0F, pieces);
+	EXPECT_GE(pieces.size(), walk.size() - 1);
+	EXPECT_TRUE(std::ranges::all_of(pieces, isConvex));
+
+	std::vector<Foundation::Vec2> toothed;
+	for (int k = 0; k < 800; ++k) {
+		const float a0 = static_cast<float>(k) * 2.0F * 3.14159265F / 800.0F;
+		const float a1 = (static_cast<float>(k) + 0.5F) * 2.0F * 3.14159265F / 800.0F;
+		toothed.emplace_back(2000.0F * std::cos(a0), 2000.0F * std::sin(a0));
+		toothed.emplace_back(1200.0F * std::cos(a1 - 0.0002F), 1200.0F * std::sin(a1 - 0.0002F));
+		toothed.emplace_back(1200.0F * std::cos(a1 + 0.0002F), 1200.0F * std::sin(a1 + 0.0002F));
+	}
+	strokeOutline(toothed, 4.0F, 1.0F, pieces);
+	EXPECT_GE(pieces.size(), toothed.size());
+	EXPECT_TRUE(std::ranges::all_of(pieces, isConvex));
 }
