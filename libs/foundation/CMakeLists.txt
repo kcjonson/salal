@@ -2,6 +2,7 @@ find_package(glm CONFIG REQUIRED)
 
 add_library(salal_foundation STATIC
     debug/Tunables.cpp
+    input/ActionMap.cpp
     input/InputAccumulator.cpp
     metrics/SystemResources.cpp
     threading/TaskPool.cpp
