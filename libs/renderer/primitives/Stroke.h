@@ -59,9 +59,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// edge, so no background shows between fill and border. `inset` is a pixel, which
 	// is also how far its pieces reach past their SDF. Its joints are mitered up to a
 	// right-angle turn and round past it on the outside, and a notch is mitered into
-	// its corner whatever its turn. A notch sharper than a right angle whose joint is
-	// left uncut (strokePolyline) is round instead, and a flat piece, the triangle
-	// between the two segments' inner corners and the notch's, carries it in.
+	// its corner whatever its turn. A notch sharper than a right angle that isn't, its
+	// joint left uncut (strokePolyline) or its centre line folded back over a feature
+	// narrower than the border, gets a flat piece that carries the border into it: the
+	// triangle from its edges' inner corners at the joint to where the border's inner
+	// edges meet, no further from the joint than 4 times half the stroke's width.
 	void strokeOutline(std::span<const Foundation::Vec2> outline, float width, float inset, std::vector<StrokePiece>& pieces);
 
 } // namespace Renderer

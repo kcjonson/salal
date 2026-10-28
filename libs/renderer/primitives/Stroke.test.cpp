@@ -548,3 +548,38 @@ TEST(StrokeTest, ANotchLeftUncutBesideAShortEdgeIsRoundWithAFlatPieceIntoItsCorn
 	EXPECT_TRUE(covered(pieces, between));
 	EXPECT_TRUE(contains(*flat, between));
 }
+
+TEST(StrokeTest, AFlatPiecesTipStopsAtTheMiterLimitFromItsJoint) {
+	// A 20-degree notch, its walls 15 long: the centre line doesn't fold, but the walls are
+	// too short for the notch's cut. Its inner edges meet 1 / sin(10 degrees) = 5.8 units
+	// inside the corner, past the miter limit, so the flat piece stops at 4 half widths.
+	const std::vector<Foundation::Vec2> outline = {
+		{0.0F, 0.0F}, {17.4F, 0.0F}, {20.0F, 14.77F}, {22.6F, 0.0F}, {40.0F, 0.0F}, {40.0F, 40.0F}, {0.0F, 40.0F}
+	};
+	std::vector<StrokePiece> pieces;
+	strokeOutline(outline, 4.0F, 1.0F, pieces);
+	ASSERT_EQ(std::ranges::count_if(pieces, isFlat), 1);
+	const StrokePiece&			  flat = *std::ranges::find_if(pieces, isFlat);
+	std::vector<Foundation::Vec2> centreLine;
+	offsetOutline(outline, 1.5F, centreLine);
+	EXPECT_NEAR(glm::length(flat.corners[0] - centreLine[2]), 4.0F * 2.5F, 1e-4F);
+}
+
+TEST(StrokeTest, ABorderFoldedOverAFeatureNarrowerThanItDrawsNoSpike) {
+	// A bump smaller than the border's width folds its centre line back over itself. The
+	// joint at (27, 4) is a notch of 65 degrees, which needs no flat piece, and nothing
+	// the border draws lies further from the outline than the square corners' miters, 8 root 2.
+	const std::vector<Foundation::Vec2> outline = {
+		{0.0F, 0.0F}, {20.0F, 0.0F}, {25.0F, 3.0F}, {27.0F, 4.0F}, {32.0F, 0.0F}, {60.0F, 0.0F}, {60.0F, 60.0F}, {0.0F, 60.0F}
+	};
+	std::vector<StrokePiece> pieces;
+	strokeOutline(outline, 8.0F, 1.0F, pieces);
+	EXPECT_EQ(std::ranges::count_if(pieces, isFlat), 0);
+	for (float y = -12.0F + 0.0371F; y < 72.0F; y += 0.5F) {
+		for (float x = -12.0F + 0.0213F; x < 72.0F; x += 0.5F) {
+			if (covered(pieces, {x, y})) {
+				ASSERT_LT(polygonDistance(outline, {x, y}), (8.0F * std::sqrt(2.0F)) + 1e-3F) << "at " << x << ", " << y;
+			}
+		}
+	}
+}

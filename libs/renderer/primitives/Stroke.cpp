@@ -86,23 +86,32 @@ namespace Renderer {
 			piece.corners[piece.cornerCount++] = corner;
 		}
 
-		// The pieces for distinct `points` (at least two, and more than two when closed).
-		// `exact`, empty or one flag per point, marks the joints mitered whatever their turn.
-		void partition(
-			std::span<const Foundation::Vec2> points,
-			std::span<const uint8_t>		  exact,
-			bool							  closed,
-			float							  width,
-			Primitives::LineCap				  cap,
-			Primitives::LineJoin			  join,
-			float							  pixel,
-			std::vector<StrokePiece>&		  out
-		) {
+		// A stroke to lay out: distinct points, at least two and more than two when closed,
+		// and when `exact` isn't empty a flag per point, its joint mitered whatever its turn
+		// while it is cut.
+		struct Layout {
+			std::span<const Foundation::Vec2> points;
+			std::span<const uint8_t>		  exact;
+			bool							  closed = false;
+			float							  width = 0.0F;
+			Primitives::LineCap				  cap = Primitives::LineCap::Butt;
+			Primitives::LineJoin			  join = Primitives::LineJoin::Round;
+			float							  pixel = 1.0F;
+		};
+
+		// The pieces for `layout`, and in `cut` a flag per point: whether its joint ended up cut.
+		void partition(const Layout& layout, std::vector<StrokePiece>& out, std::vector<uint8_t>& cut) {
 			out.clear();
-			const float	 halfWidth = width * 0.5F;
-			const float	 reach = halfWidth + pixel;
-			const size_t count = points.size();
-			const size_t segmentCount = closed ? count : count - 1;
+			const std::span<const Foundation::Vec2> points = layout.points;
+			const std::span<const uint8_t>			exact = layout.exact;
+			const bool								closed = layout.closed;
+			const Primitives::LineCap				cap = layout.cap;
+			const Primitives::LineJoin				join = layout.join;
+			const float								pixel = layout.pixel;
+			const float								halfWidth = layout.width * 0.5F;
+			const float								reach = halfWidth + pixel;
+			const size_t							count = points.size();
+			const size_t							segmentCount = closed ? count : count - 1;
 
 			static thread_local std::vector<Foundation::Vec2> directions;
 			static thread_local std::vector<float>			  lengths;
@@ -296,27 +305,9 @@ namespace Renderer {
 				}
 			}
 
-			// An uncut joint that would miter past a right angle is round instead, since a
-			// box run on that far pokes out of the turn's inside; a flat triangle covers what
-			// the miter would have, between both segments' outer corners and the miter point.
+			cut.assign(count, 0);
 			for (size_t j = firstJoint; j < jointEnd; ++j) {
-				const Joint& joint = joints[j];
-				if (joint.cut || !joint.exact || !joint.pastRightAngle || join != Primitives::LineJoin::Miter ||
-					joint.inner == Foundation::Vec2(0.0F, 0.0F)) {
-					continue;
-				}
-				const float			   side = joint.innerLeft ? -halfWidth : halfWidth;
-				const Foundation::Vec2 miterPoint = joint.point - (joint.inner * (halfWidth / joint.cosHalf));
-				Foundation::Vec2	   inCorner = joint.point + (leftNormal(joint.in) * side);
-				Foundation::Vec2	   outCorner = joint.point + (leftNormal(joint.out) * side);
-				if (cross(inCorner - miterPoint, outCorner - inCorner) < 0.0F) {
-					std::swap(inCorner, outCorner);
-				}
-				StrokePiece wedge{.center = joint.point};
-				addCorner(wedge, miterPoint);
-				addCorner(wedge, inCorner);
-				addCorner(wedge, outCorner);
-				out.push_back(wedge);
+				cut[j] = joints[j].cut ? 1 : 0;
 			}
 		}
 
@@ -333,7 +324,17 @@ namespace Renderer {
 			return;
 		}
 		// Two points closed are one segment there and back: draw the segment.
-		partition(points, {}, args.closed && points.size() > 2, args.width, args.cap, args.join, pixel, out);
+		static thread_local std::vector<uint8_t> cut;
+		partition(
+			{.points = points,
+			 .closed = args.closed && points.size() > 2,
+			 .width = args.width,
+			 .cap = args.cap,
+			 .join = args.join,
+			 .pixel = pixel},
+			out,
+			cut
+		);
 	}
 
 	namespace {
@@ -420,33 +421,87 @@ namespace Renderer {
 		}
 
 		// The stroke's centre line runs halfway between its outer edge, `width` out, and
-		// its inner edge, `inset` in, through each corner moved along its miter, and a
-		// notch's joint is mitered exactly. Corners that move onto one point are one joint.
+		// its inner edge, `inset` in, through each corner moved along its miter. Corners
+		// that move onto one point are one joint, and no corner's: -1 in `cornerOf`.
 		const float										  centre = (width - inset) * 0.5F;
+		const float										  halfWidth = (width + inset) * 0.5F;
 		static thread_local std::vector<Foundation::Vec2> centreLine;
-		static thread_local std::vector<uint8_t>		  notches;
+		static thread_local std::vector<int32_t>		  cornerOf;
 		centreLine.clear();
-		notches.clear();
-		for (const OutlineCorner& corner : corners) {
-			const Foundation::Vec2 joint = corner.point + (corner.miter * centre);
+		cornerOf.clear();
+		for (size_t i = 0; i < corners.size(); ++i) {
+			const Foundation::Vec2 joint = corners[i].point + (corners[i].miter * centre);
 			if (!centreLine.empty() && glm::length(joint - centreLine.back()) < kMinSegment) {
-				notches.back() = std::max(notches.back(), static_cast<uint8_t>(corner.notch ? 1 : 0));
+				cornerOf.back() = -1;
 				continue;
 			}
 			centreLine.push_back(joint);
-			notches.push_back(corner.notch ? 1 : 0);
+			cornerOf.push_back(static_cast<int32_t>(i));
 		}
 		if (centreLine.size() > 1 && glm::length(centreLine.back() - centreLine.front()) < kMinSegment) {
-			notches.front() = std::max(notches.front(), notches.back());
+			cornerOf.front() = -1;
 			centreLine.pop_back();
-			notches.pop_back();
+			cornerOf.pop_back();
 		}
-		if (centreLine.size() < 2) {
+		const size_t count = centreLine.size();
+		if (count < 2) {
 			return;
 		}
+
+		// A notch's joint is mitered into its corner whatever its turn where the centre line
+		// runs the outline's way on both sides of it. Where it doesn't, the outline's feature
+		// is narrower than the border, the centre line folds back over it, and the joint is
+		// drawn as any other.
+		static thread_local std::vector<uint8_t> exact;
+		exact.assign(count, 0);
+		for (size_t k = 0; count > 2 && k < count; ++k) {
+			if (cornerOf[k] < 0 || !corners[static_cast<size_t>(cornerOf[k])].notch) {
+				continue;
+			}
+			const OutlineCorner&   corner = corners[static_cast<size_t>(cornerOf[k])];
+			const Foundation::Vec2 before = centreLine[k] - centreLine[(k + count - 1) % count];
+			const Foundation::Vec2 after = centreLine[(k + 1) % count] - centreLine[k];
+			exact[k] = glm::dot(before, corner.incoming) > 0.0F && glm::dot(after, corner.outgoing) > 0.0F ? 1 : 0;
+		}
+		static thread_local std::vector<uint8_t> cut;
 		partition(
-			centreLine, notches, centreLine.size() > 2, width + inset, Primitives::LineCap::Butt, Primitives::LineJoin::Miter, inset, pieces
+			{.points = centreLine,
+			 .exact = exact,
+			 .closed = count > 2,
+			 .width = width + inset,
+			 .cap = Primitives::LineCap::Butt,
+			 .join = Primitives::LineJoin::Miter,
+			 .pixel = inset},
+			pieces,
+			cut
 		);
+
+		// A notch sharper than a right angle that no exact miter draws keeps the flat triangle
+		// that carries the border into it, from its two edges' inner corners at the joint to
+		// where the border's inner edges meet, `inset` inside the corner along its miter, but
+		// no further from the joint than the miter limit allows.
+		for (size_t k = 0; k < count; ++k) {
+			if (cornerOf[k] < 0) {
+				continue;
+			}
+			const OutlineCorner& corner = corners[static_cast<size_t>(cornerOf[k])];
+			if (!corner.notch || glm::dot(corner.incoming, corner.outgoing) >= 0.0F || (exact[k] != 0 && cut[k] != 0)) {
+				continue;
+			}
+			const Foundation::Vec2& joint = centreLine[k];
+			const float				miterLength = glm::length(corner.miter);
+			const Foundation::Vec2	tip = joint - (corner.miter * (halfWidth * std::min(1.0F, kMiterLimit / miterLength)));
+			Foundation::Vec2		inCorner = joint - (corner.normalIn * halfWidth);
+			Foundation::Vec2		outCorner = joint - (corner.normalOut * halfWidth);
+			if (cross(inCorner - tip, outCorner - inCorner) < 0.0F) {
+				std::swap(inCorner, outCorner);
+			}
+			StrokePiece wedge{.center = joint};
+			addCorner(wedge, tip);
+			addCorner(wedge, inCorner);
+			addCorner(wedge, outCorner);
+			pieces.push_back(wedge);
+		}
 	}
 
 } // namespace Renderer

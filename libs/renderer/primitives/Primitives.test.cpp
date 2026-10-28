@@ -337,6 +337,43 @@ namespace Renderer {
 		});
 	}
 
+	TEST_F(PrimitivesDrawTest, ABorderFoldedOverASmallBumpDrawsNothingPastItsWidth) {
+		// A 60 x 60 square at (10, 10) with a bump on one edge smaller than its 8-wide border.
+		// The border's centre line folds over the bump; a flat piece once took its tip from
+		// that fold and ran a solid spike some 60 pixels out of the square.
+		constexpr int kLarge = 160;
+		RenderTarget  large = RenderTarget::create(kLarge, kLarge);
+		ASSERT_TRUE(large.isValid());
+		std::vector<Foundation::Vec2> bump = {
+			{0.0F, 0.0F}, {20.0F, 0.0F}, {25.0F, 3.0F}, {27.0F, 4.0F}, {32.0F, 0.0F}, {60.0F, 0.0F}, {60.0F, 60.0F}, {0.0F, 60.0F}
+		};
+		for (Foundation::Vec2& point : bump) {
+			point += Foundation::Vec2(10.0F, 10.0F);
+		}
+		drawInto(large, Foundation::Color(0.0F, 0.0F, 0.0F, 1.0F), [&] {
+			Primitives::drawPolygon(
+				{.vertices = bump,
+				 .style = {
+					 .fill = Foundation::Color::transparent(),
+					 .border = Foundation::LineStyle{.color = Foundation::Color::white(), .width = 8.0F}
+				 }}
+			);
+		});
+		std::vector<uint8_t> read(static_cast<size_t>(kLarge) * kLarge * 4, 0);
+		large.readPixels(read);
+		// The border's outer edge is at 78 on the far sides; nothing lit two pixels past it.
+		int outside = 0;
+		for (int y = 0; y < kLarge; ++y) {
+			for (int x = 0; x < kLarge; ++x) {
+				const uint8_t red = read[((static_cast<size_t>(kLarge - 1 - y) * kLarge) + static_cast<size_t>(x)) * 4];
+				if (red > 0 && (x >= 80 || y >= 80)) {
+					++outside;
+				}
+			}
+		}
+		EXPECT_EQ(outside, 0);
+	}
+
 	TEST_F(PrimitivesDrawTest, APolygonsFillRampsOverThePixelOutsideItsEdge) {
 		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
 		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
