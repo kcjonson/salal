@@ -32,7 +32,12 @@ namespace app {
 			double now() const override { return glfwGetTime(); }
 		};
 
+		// An empty clipboard, or one holding no text, is normal, though GLFW reports it as an error.
 		void errorCallback(int error, const char* description) {
+			if (error == GLFW_FORMAT_UNAVAILABLE) {
+				LOG_DEBUG(Engine, "GLFW (%d): %s", error, description);
+				return;
+			}
 			LOG_ERROR(Engine, "GLFW Error (%d): %s", error, description);
 		}
 
