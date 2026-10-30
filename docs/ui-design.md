@@ -5,7 +5,8 @@ Phase 3's design of `ui`, decided rule by rule against dual-deck-builder's
 each rule is revisited on native merits, and anything justified by WebGL, the
 browser or sharing code with the TypeScript engine is re-decided or dropped.
 This file records where salal departs from the spec and why. Until the review
-is finished, a rule this file doesn't mention is the spec's, unreviewed.
+is finished, a rule this file doesn't mention is the spec's, unreviewed. The
+order it lands in is [ui-plan.md](ui-plan.md).
 
 ## Ordering
 

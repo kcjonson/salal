@@ -730,7 +730,9 @@ the feel prototype wants audible thrust and nothing in `ui` depends on it.
 Largest and least certain, and nothing upstream waits on it. Against the
 adopted spec (decision C), with multi-device focus (I) and the storage model
 (F) settled on the way, and the spec's conformance scorecard as the acceptance
-test.
+test. Designed in [ui-design.md](ui-design.md) and sequenced in
+[ui-plan.md](ui-plan.md): four renderer PRs, ten that build `ui` in salal, then
+worldsim's conversion in three.
 
 ### Phase 4, dual-deck-builder Job B
 
