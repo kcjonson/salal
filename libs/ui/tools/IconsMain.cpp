@@ -7,7 +7,7 @@
 // name table. A problem goes to stderr naming the file, line and element, with exit status 1,
 // which fails the build. A file is written only when its contents change.
 
-#include "ui/icons/build/IconAtlasBuilder.h"
+#include "ui/iconbuild/IconAtlasBuilder.h"
 
 #include <cstdlib>
 #include <filesystem>

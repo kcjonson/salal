@@ -1,4 +1,4 @@
-# The icon build step (ui/icons/build/) on msdfgen, nanosvg and stb_image_write, which salal_icons()
+# The icon build step (ui/iconbuild/) on msdfgen, nanosvg and stb_image_write, which salal_icons()
 # (cmake/SalalIcons.cmake) runs through salal_icons_tool. Built where msdfgen is found, a host
 # dependency a game that builds no icons needn't have.
 find_package(msdfgen CONFIG QUIET)
@@ -7,8 +7,8 @@ if(msdfgen_FOUND)
     find_package(Stb REQUIRED)
     find_package(nlohmann_json CONFIG REQUIRED)
     add_library(salal_ui_iconbuild STATIC
-        ui/icons/build/SvgCheck.cpp
-        ui/icons/build/IconAtlasBuilder.cpp
+        ui/iconbuild/SvgCheck.cpp
+        ui/iconbuild/IconAtlasBuilder.cpp
     )
     target_compile_features(salal_ui_iconbuild PUBLIC cxx_std_20)
     target_include_directories(salal_ui_iconbuild
