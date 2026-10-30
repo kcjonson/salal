@@ -91,7 +91,9 @@ namespace Renderer {
 	void BatchRenderer::recordGroup(uint32_t groupStart, float zIndex, Primitives::BlendMode blend) {
 		const uint32_t end = static_cast<uint32_t>(indices.size());
 		if (end > groupStart) {
-			drawGroups.push_back({.indexStart = groupStart, .indexCount = end - groupStart, .zIndex = zIndex, .blend = blend});
+			drawGroups.push_back(
+				{.indexStart = groupStart, .indexCount = end - groupStart, .domain = sortDomain, .zIndex = zIndex, .blend = blend}
+			);
 			if (zIndex != 0.0F) {
 				anyExplicitZ = true;
 			}
@@ -681,13 +683,15 @@ namespace Renderer {
 	DrawPlan BatchRenderer::plan() {
 		// Resolve draw order. Submission ("organic") order is kept unless some draw
 		// carried an explicit (non-zero) z; then the per-draw-call groups are
-		// stable-sorted by z and the emit-order index list is rebuilt (groups, not
-		// triangles). The zIndex came from the component layer; the renderer only
-		// orders by it. The fast path costs nothing beyond the group records.
+		// stable-sorted by sort domain, then z, and the emit-order index list is
+		// rebuilt (groups, not triangles). Domains rise in submission order, so the
+		// fast path already has them in order. The zIndex came from the component
+		// layer; the renderer only orders by it. The fast path costs nothing beyond
+		// the group records.
 		std::span<const uint32_t> emit = indices;
 		if (anyExplicitZ) {
 			std::stable_sort(drawGroups.begin(), drawGroups.end(), [](const DrawGroup& a, const DrawGroup& b) {
-				return a.zIndex < b.zIndex;
+				return a.domain != b.domain ? a.domain < b.domain : a.zIndex < b.zIndex;
 			});
 			sortedIndices.clear();
 			sortedIndices.reserve(indices.size());
@@ -814,6 +818,7 @@ namespace Renderer {
 		vertexAtlas.clear();
 		drawGroups.clear();
 		anyExplicitZ = false;
+		sortDomain = 0;
 	}
 
 	void BatchRenderer::beginFrame() {
@@ -825,6 +830,7 @@ namespace Renderer {
 		vertexAtlas.clear();
 		drawGroups.clear();
 		anyExplicitZ = false;
+		sortDomain = 0;
 	}
 
 	void BatchRenderer::endFrame() {

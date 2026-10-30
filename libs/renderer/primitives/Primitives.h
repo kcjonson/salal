@@ -152,10 +152,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// between flushes.
 		void invalidateState();
 
-		// Draw-order barrier: flush pending batched primitives now. Groups only
-		// z-sort against each other within one flush, so flushing between two
-		// passes (e.g. world drawing vs UI) keeps their zIndex spaces independent
-		// and guarantees the later pass paints on top.
+		// Draw-order barrier without a flush: every draw from here sorts after every
+		// draw before it, whatever their zIndex, so two passes (a covered scene and
+		// the one over it, the scenes and an overlay) keep their zIndex spaces apart
+		// and the later pass paints on top. It costs no draw call: the batch sorts on
+		// the barrier count ahead of z. The app sets one before each stacked scene
+		// and each overlay renders.
+		void sortBarrier();
+
+		// Flush pending batched primitives now: upload them and submit their draw
+		// calls. GPU work of a caller's own that must land over what was drawn so
+		// far needs it; for draw order alone, sortBarrier() is enough.
 		void flush();
 
 		// Size of the bound target in pixels: the projection for batched drawing.

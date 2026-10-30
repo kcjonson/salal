@@ -216,6 +216,12 @@ namespace Renderer::Primitives {
 		}
 	}
 
+	void sortBarrier() {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->sortBarrier();
+		}
+	}
+
 	void flush() {
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->flush();

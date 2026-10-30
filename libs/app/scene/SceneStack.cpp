@@ -2,6 +2,7 @@
 
 #include "detail/Guard.h"
 
+#include <primitives/Primitives.h>
 #include <utils/Log.h>
 
 #include <algorithm>
@@ -153,6 +154,8 @@ namespace app {
 		}
 	}
 
+	// Each scene is its own sort domain, so what a covered scene draws at a high z stays under the
+	// scene over it.
 	void SceneStack::render(float liveAlpha) {
 		std::size_t first = entries.size();
 		while (first > 0) {
@@ -167,6 +170,7 @@ namespace app {
 		for (std::size_t i = first; i < entries.size(); ++i) {
 			Scene&		scene = *entries[i].scene;
 			const float alpha = i + 1 == entries.size() ? liveAlpha : entries[i].coveredAlpha;
+			Renderer::Primitives::sortBarrier();
 			detail::guard(scene.name(), "render", [&] { scene.render(alpha); });
 		}
 	}

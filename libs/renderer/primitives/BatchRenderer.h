@@ -197,12 +197,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// --- Rendering ---
 
 		// The emit order and draw runs of what has been added; flush() submits
-		// exactly this. Groups are stable-sorted by z when any carries an explicit z
-		// (submission order otherwise), and the emit order is cut into a new run
-		// wherever a triangle needs a texture other than the bound one or a group's
-		// GPU blend state differs. Shapes, arcs and the like need no texture and
-		// never split.
+		// exactly this. Groups are stable-sorted by sort domain, then z, when any
+		// carries an explicit z (submission order otherwise), and the emit order is
+		// cut into a new run wherever a triangle needs a texture other than the bound
+		// one or a group's GPU blend state differs. Shapes, arcs and the like need no
+		// texture and never split.
 		DrawPlan plan();
+
+		// Start a new sort domain: everything added from here sorts after everything
+		// added before, whatever its z. No flush, and no run is cut for it.
+		void sortBarrier() { ++sortDomain; }
 
 		// Upload the vertices and the planned indices, set the uniforms and submit
 		// one draw call per run.
@@ -317,18 +321,21 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// texture an image vertex samples. plan() splits runs on these.
 		std::vector<TextureHandle> vertexAtlas;
 
-		// Per-draw-call groups. Each add* records one {indexStart, indexCount, zIndex,
-		// blend}. plan() keeps submission order unless some group carries an explicit
-		// (non-zero) z, in which case groups are stable-sorted by z and the emit-order
-		// index list is rebuilt. zIndex originates in the component layer.
+		// Per-draw-call groups. Each add* records one {indexStart, indexCount, domain,
+		// zIndex, blend}. plan() keeps submission order unless some group carries an
+		// explicit (non-zero) z, in which case groups are stable-sorted by domain, then
+		// z, and the emit-order index list is rebuilt. zIndex originates in the
+		// component layer; the domain counts sortBarrier() calls since the last flush.
 		struct DrawGroup {
 			uint32_t			  indexStart;
 			uint32_t			  indexCount;
+			uint32_t			  domain;
 			float				  zIndex;
 			Primitives::BlendMode blend;
 		};
 		std::vector<DrawGroup> drawGroups;
 		bool				   anyExplicitZ = false;
+		uint32_t			   sortDomain = 0;
 
 		// plan()'s output, reused across flushes: the z-sorted index list (unused in
 		// submission order) and the runs.

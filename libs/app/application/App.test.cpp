@@ -14,11 +14,14 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -31,9 +34,29 @@ namespace app::testing {
 
 		inline constexpr char kA[] = "A";
 		inline constexpr char kB[] = "B";
+		inline constexpr char kPause[] = "Pause";
 
 		using SceneA = Recording<kA>;
 		using SceneB = Recording<kB>;
+		using PauseScene = Recording<kPause, NoArgs, NoResult, false>;
+
+		void rectAt(float x, int zIndex) {
+			Renderer::Primitives::drawRect(
+				{.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::white()}, .zIndex = zIndex}
+			);
+		}
+
+		class RectOverlay final : public Overlay {
+		  public:
+			RectOverlay(float rectX, int rectZ)
+				: x(rectX),
+				  z(rectZ) {}
+			void render() override { rectAt(x, z); }
+
+		  private:
+			float x;
+			int	  z;
+		};
 
 		using foundation::InputEvent;
 		using foundation::Key;
@@ -845,6 +868,43 @@ namespace app::testing {
 		frame(0.0);
 		const std::vector<std::string> expected{"A.update", "O1.update", "O2.update", "A.render 0", "O1.render", "O2.render"};
 		EXPECT_EQ(tail(6), expected);
+	}
+
+	TEST_F(AppTest, EachStackedSceneAndEachOverlayDrawsOverWhatCameBeforeWhateverItsZ) {
+		start();
+		hooks()["A"].render = [](App& /*running*/) {
+			rectAt(0.0F, 5);
+		};
+		hooks()["Pause"].render = [](App& /*running*/) {
+			rectAt(20.0F, 0);
+		};
+		app->addOverlay(std::make_unique<RectOverlay>(40.0F, -5));
+		app->addOverlay(std::make_unique<RectOverlay>(60.0F, -10));
+		app->scenes().push<SceneA>();
+		app->scenes().push<PauseScene>();
+		frame(0.0);
+
+		auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
+		ASSERT_NE(gpu, nullptr);
+		gpu->clearRecord();
+		frame(0.0);
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const Renderer::backend::GeometryDesc* geometry = gpu->geometry(gpu->draws()[0].call.geometry);
+		ASSERT_NE(geometry, nullptr);
+		const std::span<const uint8_t>	   vertexBytes = gpu->bufferContents(geometry->vertices);
+		const std::span<const uint8_t>	   indexBytes = gpu->bufferContents(geometry->indices);
+		std::vector<Renderer::BatchVertex> vertices(vertexBytes.size() / sizeof(Renderer::BatchVertex));
+		std::vector<uint32_t>			   indices(indexBytes.size() / sizeof(uint32_t));
+		std::memcpy(vertices.data(), vertexBytes.data(), vertices.size() * sizeof(Renderer::BatchVertex));
+		std::memcpy(indices.data(), indexBytes.data(), indices.size() * sizeof(uint32_t));
+		ASSERT_EQ(indices.size(), 24U);
+
+		// The covered scene's z 5, the pause scene's z 0, then each overlay's lower z still over them.
+		std::vector<float> drawn;
+		for (size_t i = 0; i < indices.size(); i += 6) {
+			drawn.push_back(vertices.at(indices[i]).position.x);
+		}
+		EXPECT_EQ(drawn, (std::vector<float>{0.0F, 20.0F, 40.0F, 60.0F}));
 	}
 
 	// --- Exceptions ---

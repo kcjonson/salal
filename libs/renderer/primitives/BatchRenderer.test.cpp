@@ -214,6 +214,26 @@ TEST(BatchPlanTest, ExplicitZSortsGroupsStablyBeforeSplitting) {
 	EXPECT_EQ(plan.runs[1].indexCount, 12U);
 }
 
+TEST(BatchPlanTest, ASortBarrierKeepsEarlierDrawsUnderLaterOnesWhateverTheirZ) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	batch.setFontAtlas(kAtlasA);
+	addRect(batch, BlendMode::Alpha, 5.0F); // vertices 0-3
+	addRect(batch, BlendMode::Alpha, 1.0F); // vertices 4-7
+	batch.sortBarrier();
+	addRect(batch, BlendMode::Alpha, -3.0F); // vertices 8-11
+	addRect(batch, BlendMode::Alpha, -4.0F); // vertices 12-15
+
+	// Each side z-sorted, the first side wholly under the second; still one run.
+	const DrawPlan plan = batch.plan();
+	ASSERT_EQ(plan.indices.size(), 24U);
+	EXPECT_EQ(plan.indices[0], 4U);
+	EXPECT_EQ(plan.indices[6], 0U);
+	EXPECT_EQ(plan.indices[12], 12U);
+	EXPECT_EQ(plan.indices[18], 8U);
+	EXPECT_EQ(plan.runs.size(), 1U);
+}
+
 // ============================================================================
 // Arcs
 // ============================================================================
