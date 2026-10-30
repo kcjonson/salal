@@ -1,6 +1,7 @@
 #include "ui/shapes/Text.h"
 
 #include "ui/detail/Snapshot.h"
+#include "ui/theme/Tokens.h"
 
 #include <primitives/Primitives.h>
 
@@ -64,6 +65,10 @@ namespace ui {
 		hugHeight = value.y <= 0.0F;
 		Component::setSize(value);
 		measure();
+	}
+
+	StyleId Text::themeStyle() const {
+		return styles::text::body.theme;
 	}
 
 	void Text::setStyle(const Style& value) {

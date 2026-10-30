@@ -53,7 +53,8 @@ TEST(TokensCodegen, StylesAreGroupsOfStyleFields) {
 
 	const CodegenOutput out = generate(catalogue, {.nameSpace = "game", .header = "Tokens.h", .origin = "tokens"}, diagnostics);
 	EXPECT_NE(
-		out.header.find("inline constexpr ::ui::StyleId pane{.table = &::game::tokens_detail::kTable, .index = 1};"), std::string::npos
+		out.header.find("inline constexpr ::ui::Style pane{.theme = {.table = &::game::tokens_detail::kTable, .index = 1}};"),
+		std::string::npos
 	);
 	EXPECT_NE(out.header.find("namespace hud {"), std::string::npos);
 	EXPECT_NE(out.header.find("inline constexpr ::ui::DimensionToken md{"), std::string::npos);

@@ -23,9 +23,15 @@ namespace ui {
 		position = args.position;
 		size = args.size;
 		transform = args.transform;
+		declaredStyle = args.style;
 		style = args.style;
 		zIndex = args.zIndex;
 		isolation = args.isolation;
+	}
+
+	void Component::setStyle(const Style& value) {
+		declaredStyle = value;
+		style = context != nullptr ? context->getTheme().resolve(value, themeStyle()) : value;
 	}
 
 	ComponentId Component::adopt(std::unique_ptr<Component> child) {
@@ -45,6 +51,7 @@ namespace ui {
 		children.push_back(childId);
 		context->geometryDirty = true;
 		context->orderDirty = true;
+		added.setStyle(added.declaredStyle);
 		{
 			const Registry::DispatchScope scope(context->registry);
 			added.onMount();

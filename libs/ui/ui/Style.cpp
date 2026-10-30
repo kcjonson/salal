@@ -26,6 +26,11 @@ namespace ui {
 		over(out.verticalAlign, overrides.verticalAlign);
 		over(out.letterSpacing, overrides.letterSpacing);
 		over(out.textTransform, overrides.textTransform);
+		over(out.fontWeight, overrides.fontWeight);
+		over(out.lineHeight, overrides.lineHeight);
+		if (overrides.theme.table != nullptr) {
+			out.theme = overrides.theme;
+		}
 		return out;
 	}
 
