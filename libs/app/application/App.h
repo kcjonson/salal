@@ -187,6 +187,8 @@ namespace app {
 		std::vector<std::unique_ptr<Overlay>>		joiningOverlays;
 		std::function<void(App&)>					dispatch;
 		DevServer									devServerState;
+		DevServer::Registration						uiTreeProvider;
+		DevServer::Registration						uiLintProvider;
 		Settings									userSettings;
 		SaveStore									saveStore;
 		void*										contextValue = nullptr;
