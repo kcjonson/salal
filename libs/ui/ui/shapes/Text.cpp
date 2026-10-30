@@ -142,7 +142,7 @@ namespace ui {
 			layOut();
 		}
 		if (!glyphs.empty()) {
-			Renderer::Primitives::drawGlyphs(glyphs.data(), glyphs.size(), static_cast<float>(drawKey()));
+			Renderer::Primitives::drawGlyphs(glyphs.data(), glyphs.size(), drawKey());
 		}
 	}
 

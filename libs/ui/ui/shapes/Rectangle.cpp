@@ -54,7 +54,7 @@ namespace ui {
 			.style =
 				{.fill = detail::withOpacity(style.backgroundColor.value_or(kBackground), alpha), .border = border, .boxShadow = shadow},
 			.id = getId().empty() ? nullptr : getId().c_str(),
-			.zIndex = drawKey(),
+			.key = drawKey(),
 		});
 	}
 

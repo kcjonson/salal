@@ -38,7 +38,7 @@ namespace ui {
 			.radius = std::min(size.x, size.y) * 0.5F,
 			.style = {.fill = detail::withOpacity(style.backgroundColor.value_or(kBackground), alpha), .border = border},
 			.id = getId().empty() ? nullptr : getId().c_str(),
-			.zIndex = drawKey(),
+			.key = drawKey(),
 		});
 	}
 
