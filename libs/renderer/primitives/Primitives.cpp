@@ -619,8 +619,8 @@ namespace Renderer::Primitives {
 		}
 
 		// Each glyph samples the atlas its UVs were laid out in, at that atlas's range,
-		// both of which the quad carries; the batch splits draws where the atlas
-		// changes (see BatchRenderer::plan).
+		// both of which the quad carries; the batch binds up to eight atlases a draw
+		// (see BatchRenderer::plan).
 		for (size_t i = 0; i < count; ++i) {
 			const FontRenderer::GlyphQuad& quad = quads[i];
 			g_batchRenderer->addTextQuad(

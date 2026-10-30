@@ -12,6 +12,7 @@
 #include "Texture.h"
 #include "graphics/Color.h"
 #include "math/Types.h"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -32,7 +33,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		uint32_t		 border = 0; // rgba8, or a stroke's corner radius as a float
 		uint32_t		 shape[2];	 // NOLINT(modernize-avoid-c-arrays): four halves, or a stroke's half size as two floats
 		uint8_t			 mode = 0;
-		uint8_t			 slot = 0; // the texture slot, 0 until a run binds more than one
+		uint8_t			 slot = 0; // which of its draw's textures it samples, 0 to kTextureSlots - 1
 		uint8_t			 flags = 0;
 		uint8_t			 roundedClip = 0; // reserved for a rounded clip's entry, 0 for none
 	};
@@ -108,19 +109,22 @@ namespace Renderer::backend {
 		BufferHandle instances;
 	};
 
+	// How many textures one draw binds: base.frag's u_textures, one a texture unit.
+	constexpr size_t kTextureSlots = 8;
+
 	// One draw. Batched: `instanceCount` quads from `firstInstance`. InstancedMesh:
 	// `indexCount` indices from `indexOffset` (counted in indices), triangles,
-	// `instanceCount` times. `texture` is bound to unit 0, which u_atlas samples; an
-	// invalid one binds nothing.
+	// `instanceCount` times. `textures[i]` is bound to unit i, which u_textures[i]
+	// samples; an invalid one binds nothing.
 	struct DrawCall {
-		PipelineHandle pipeline;
-		GeometryHandle geometry;
-		BlendState	   blend = BlendState::Alpha;
-		TextureHandle  texture;
-		uint32_t	   indexOffset = 0;
-		uint32_t	   indexCount = 0;
-		uint32_t	   firstInstance = 0;
-		uint32_t	   instanceCount = 0;
+		PipelineHandle							 pipeline;
+		GeometryHandle							 geometry;
+		BlendState								 blend = BlendState::Alpha;
+		std::array<TextureHandle, kTextureSlots> textures{};
+		uint32_t								 indexOffset = 0;
+		uint32_t								 indexCount = 0;
+		uint32_t								 firstInstance = 0;
+		uint32_t								 instanceCount = 0;
 	};
 
 	// The uniform block's name in the shaders.
@@ -233,7 +237,7 @@ namespace Renderer::backend {
 
 		// The program compiled and linked from `source`'s text: its DrawUniforms block
 		// bound to the buffer setUniforms() writes, each hook block to its binding point
-		// (zeroed until the first setHookUniforms() there), and u_atlas to unit 0. A hook
+		// (zeroed until the first setHookUniforms() there), and u_textures[i] to unit i. A hook
 		// block the linked program has inactive is logged and skipped, and writes to its
 		// point are ignored. Invalid, logged, when the program does not build or a block's
 		// size or a member's offset is not what the C++ side has; then it makes nothing for

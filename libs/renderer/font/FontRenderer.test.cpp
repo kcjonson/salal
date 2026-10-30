@@ -475,12 +475,12 @@ namespace Renderer {
 		Primitives::drawGlyphs(quads.data(), quads.size());
 		Primitives::endFrame();
 
+		// One draw with both atlases bound, each glyph sampling its own.
 		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
-		ASSERT_EQ(draws.size(), 2U);
-		EXPECT_EQ(draws[0].call.texture, mono);
-		EXPECT_EQ(draws[0].call.instanceCount, 4U); // four glyphs, a quad each
-		EXPECT_EQ(draws[1].call.texture, body);
-		EXPECT_EQ(draws[1].call.instanceCount, 4U);
+		ASSERT_EQ(draws.size(), 1U);
+		EXPECT_EQ(draws[0].call.textures[0], mono);
+		EXPECT_EQ(draws[0].call.textures[1], body);
+		EXPECT_EQ(draws[0].call.instanceCount, 8U); // eight glyphs, a quad each
 	}
 
 	TEST_F(FontRendererInitializeTest, EachQuadDrawsAtItsOwnAtlassDistanceRange) {
