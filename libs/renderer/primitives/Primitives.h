@@ -471,7 +471,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// ride on each vertex and the fragment shader discards outside them, so a clip
 		// costs no draw call and no GL state. A rect with no area, or one that misses
 		// the clip it is pushed in, is the empty clip: nothing draws under it, whatever
-		// is pushed over it, until it is popped.
+		// is pushed over it, until it is popped. Instanced and baked draws ignore clips.
 		void pushClip(const Foundation::Rect& bounds);
 
 		// Pop the most recent clip, restoring the one it was pushed in, if any.
