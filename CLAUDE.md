@@ -55,6 +55,12 @@ repo's `specboard.md`.
 - **[docs/app-api.md](docs/app-api.md)** is the phase 2 design of `app`: the
   frame, input and the per-tick snapshot, scenes, settings and saves, the dev
   server, and the seven PRs that land it.
+- **[docs/ui-design.md](docs/ui-design.md)** is the phase 3 design of `ui`,
+  decided rule by rule against dual-deck-builder's ui-rendering-spec: where
+  salal departs from the spec and why, starting with the ordering model.
+- **[docs/testing/README.md](docs/testing/README.md)** is the testing strategy:
+  happy-path scripts run by cheap subagent fleets, local scene diffs for
+  rendering code, the strict perf suite, and bounded unit tests.
 
 For how the first consumer intends to use this engine, see `tech-stack.md` in
 `../asteroids-roguelike/docs/`. Its layer diagram, PRNG choice and primitive
@@ -301,23 +307,37 @@ Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
 `glslangValidator` checks the base shader at build time (a FetchContent
 consumer adds it to its own manifest). Worldsim's
 `pugixml`, `lua` and `sol2` serve its `assets` target, `msdfgen` its font-atlas
-tool, and all four stay behind. An audio library is proposed and not decided
+tool, and all four stay behind; `msdfgen` comes back in phase 3 as a host
+dependency for the icon build step (`salal_icons()`, [docs/ui-design.md](docs/ui-design.md)).
+An audio library is proposed and not decided
 (worldsim has none; `miniaudio` is the recommendation).
 
 ## Testing
 
-gtest. Unit tests on anything with real math. Headless tests where a library
-allows them, which is most of `foundation` and parts of `renderer`.
+[docs/testing/README.md](docs/testing/README.md) is the strategy. In short:
+look for actual regressions, since every game's art is prototype and nothing
+is protected pixel for pixel.
 
-No tests on feel, and no screenshot baselines or pixel comparisons.
+- Before committing, run the relevant happy-path scripts
+  (`docs/testing/happy-path/`) as a manual regression pass with the cheapest
+  subagent fleet that can, using judgement, not exact comparison. A feature
+  adds its lines.
+- Drawing or rendering changes also diff the sandbox scenes against `main`,
+  locally, never in CI, with no baselines committed.
+- Batching, shader, ui walk or app frame changes run the perf suite against
+  `main`. Performance is strict.
+- Unit tests (gtest) on real math, bounded: check for duplicates first. GL
+  tests assert computed values, never stored images.
+
+No tests on feel.
 
 ## Open decisions
 
 Don't guess at these; ask. The live list, each with a recommendation and the
 phase that needs the answer, is
 [docs/open-decisions.md](docs/open-decisions.md), mirrored as items on the
-board: audio, adopting dual-deck-builder's UI spec, the `ui` storage model,
-vector/SVG conventions, multi-device focus, and the dual-deck-builder golden
+board: audio, dual-deck-builder's UI spec (being decided rule by rule in
+[docs/ui-design.md](docs/ui-design.md), not adopted wholesale), vector/SVG conventions, multi-device focus, and the dual-deck-builder golden
 corpus.
 
 Resolved since the first version of this file: work is tracked in Specboard

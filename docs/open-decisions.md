@@ -28,7 +28,7 @@ Written into the docs as decided, with the reason.
 | Input types live in `foundation/input/`, the device poller in `app`, and there is no separate `input` library (decision D, 2026-10-26) | every surveyed engine keeps input types in a leaf module below UI and gameplay with the platform layer depending on it (design and evidence under D below) |
 | WebAssembly is not an engine target (2026-10-26) | a temporary playtest idea for dual-deck-builder's migration that had started shaping the engine (the GL ES 3.0 subset rule pushed decision G to LDR-only render targets, the Emscripten CI job cost two vcpkg commits); dual-deck-builder's TypeScript build stays the playtest URL |
 | Imports are plain copies at a named worldsim commit, one commit per library, with the formatting pass in its own commit (2026-10-26) | history stays in worldsim, where blame for an imported file is `git log 870dd755 -- libs/foundation`; a byte-identical copy can be checked against its source, and formatting stays out of that diff (24 of foundation's 38 files were out of line with the shared `.clang-format`). No filter-repo. Foundation arrived this way in [salal#8](https://github.com/kcjonson/salal/pull/8) |
-| Fonts, the font files and the atlas tool stay game-side (2026-10-26); this narrows decision H | worldsim keeps `fonts/`, `tools/generate_sdf_atlas` and the font-atlas target, salal ships no fonts, and `msdfgen` leaves salal's `vcpkg.json`. `FontRenderer` itself is in `renderer` (above) and moves as it is. What remains of H is an API that takes atlas sources and stops calling `std::exit`, not whether salal ships fonts |
+| Fonts, the font files and the atlas tool stay game-side (2026-10-26); this narrows decision H | worldsim keeps `fonts/`, `tools/generate_sdf_atlas` and the font-atlas target, salal ships no fonts, and `msdfgen` leaves salal's `vcpkg.json` (it returns in phase 3 as a build-time host dependency for icons, decided 2026-10-30, [ui-design.md](ui-design.md)). `FontRenderer` itself is in `renderer` (above) and moves as it is. What remains of H is an API that takes atlas sources and stops calling `std::exit`, not whether salal ships fonts |
 | `FontRenderer::Initialize` takes the game's atlases (2026-10-27); the font half of decision H | a span of `{FontFamily, pngPath, jsonPath}` and the default family. `FontFamily` is a small id the game defines (0 to 254; `FontFamily::Default` stands for the game's default), so salal names no families and fixes no count, and a game's constants stay `constexpr` with no lookup per draw. Any other family that fails to load is logged and skipped and draws with the default, as does an id never given. `false` with nothing loaded, never `std::exit`, for no sources, a family twice, `FontFamily::Default` given as a family, a default that isn't among the sources, or a default that fails to load |
 | `-ffp-contract=off` is an engine-wide rule (2026-10-26) | set PUBLIC on `salal_foundation` for GCC, Clang and AppleClang (not clang-cl), so every consumer inherits it. The first macOS arm64 run failed three golden-bit tests by one ULP (`DeterministicMath` cos, `HashNoise` value and gradient noise) because Clang fuses `a*b+c` into an FMA there; worldsim's headers claim bit-identical results across x64, ARM and WASM; that had never been tested on ARM |
 | The renderer sits behind a backend boundary; OpenGL 3.3 core is the first backend, Vulkan possible later (direction settled 2026-10-26; the design is merged as [renderer-boundary.md](renderer-boundary.md)) | worldsim's renderer is OpenGL throughout: 19 GL or GLFW leaks in 16 public headers and 182 direct GL calls in twelve renderer files (measured at worldsim `2cc7e40a`), and `BatchRenderer.h` and `FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. Four PRs tagged `v0.2.0` through `v0.5.0`, with a worldsim pin after each, are sequenced in [renderer-boundary.md](renderer-boundary.md); PRs 1 to 4 are in (`v0.2.0` to `v0.5.0`), and worldsim's grass deform has since moved out of the base shader into a worldsim hook ([shader-hooks.md](shader-hooks.md)) |
@@ -133,6 +133,16 @@ choice as well as a checklist.
 Recommendation. Yes. It is the only artefact that describes both existing
 implementations against the same rules, and the conformance scorecard is a
 ready-made acceptance test for phase 3.
+
+Changed 2026-10-30: not wholesale. Kevin wants each rule revisited on native
+merits, with no WebGL, browser or shared-TypeScript reasoning slipping into
+salal. A rule-by-rule triage (366 rules) found most of them improvements that
+came from worldsim's own incidents and the reviews; the rest are being decided
+one at a time in phase 3, and [ui-design.md](ui-design.md) records each
+departure with its reason. The spec stays the reference and the gap list the
+worklist. Decided so far: the ordering model, the node model, texture
+residency, per-draw data, the theme (design tokens), icons, testing and
+gates, services and input routing, and the component API.
 
 Needed by. Phase 3 design. Phases 1 and 2 are unaffected, except that the
 batch sort key (G) and the settled input types (D) should not contradict it.
@@ -296,6 +306,14 @@ Needed by. Phase 3 design. Nothing earlier.
 
 If deferred. Phase 3 inherits whichever model is there, unexamined, and
 architecture.md keeps hedging about worldsim's own code.
+
+Decided 2026-10-30. Worldsim follows neither recorded decision: since
+2025-11-28 each `Component` placement-news its children, as polymorphic
+objects, into its own fixed 64 KB bump arena with position-based 16+16-bit
+handles, after a first `std::variant` LayerManager was dropped over its closed
+type set; there is no `shared_ptr` graph, no per-child removal and no parent
+pointer. Salal's `ui` stores each scene's tree in a slot map with generational
+ids instead, for the reasons in [ui-design.md](ui-design.md), "Component API".
 
 ## G. Render targets, additive blending, particles
 
