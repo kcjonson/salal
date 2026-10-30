@@ -666,29 +666,38 @@ namespace Renderer {
 	}
 
 #ifdef DEVELOPMENT_BUILD
-	TEST_F(FontRendererInitializeTest, LoadingWarnsOncePerCrampedAtlasNamingItsGlyphs) {
-		struct Captured {
-			std::vector<std::string> warnings;
-		} captured;
-		// Declared after captured, so the sink is cleared before captured goes, however the test ends.
-		struct SinkReset {
-			~SinkReset() { foundation::Logger::setSink(nullptr, nullptr); }
-		} reset;
-		foundation::Logger::setSink(
-			[](void* context, const foundation::LogRecord& record) {
-				if (record.category == foundation::LogCategory::UI && record.level == foundation::LogLevel::Warning) {
-					static_cast<Captured*>(context)->warnings.emplace_back(record.message);
-				}
-			},
-			&captured
-		);
+	// The UI warnings logged while it lives.
+	class UiWarnings {
+	  public:
+		UiWarnings() {
+			foundation::Logger::setSink(
+				[](void* context, const foundation::LogRecord& record) {
+					if (record.category == foundation::LogCategory::UI && record.level == foundation::LogLevel::Warning) {
+						static_cast<UiWarnings*>(context)->warnings.emplace_back(record.message);
+					}
+				},
+				this
+			);
+		}
+		~UiWarnings() { foundation::Logger::setSink(nullptr, nullptr); }
 
-		// Two cramped atlases and a roomy one between them.
+		UiWarnings(const UiWarnings&) = delete;
+		UiWarnings& operator=(const UiWarnings&) = delete;
+		UiWarnings(UiWarnings&&) = delete;
+		UiWarnings& operator=(UiWarnings&&) = delete;
+
+		std::vector<std::string> warnings;
+	};
+
+	TEST_F(FontRendererInitializeTest, LoadingWarnsOncePerCrampedAtlasNamingItsGlyphs) {
+		const UiWarnings captured;
+
+		// Two cramped atlases and a roomy one between them, at a range wide enough for small text.
 		constexpr FontFamily kDisplay{5};
 		const std::array	 sources{
-			folder.write(kBody, "body", {.room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}}}),
-			folder.write(kMono, "mono"),
-			folder.write(kDisplay, "display", {.room = {{'[', roomAround(1.0F)}}}),
+			folder.write(kBody, "body", {.distanceRange = 6.0F, .room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}}}),
+			folder.write(kMono, "mono", {.distanceRange = 6.0F}),
+			folder.write(kDisplay, "display", {.distanceRange = 6.0F, .room = {{'[', roomAround(1.0F)}}}),
 		};
 		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody));
 		ASSERT_EQ(captured.warnings.size(), 2U);
@@ -696,6 +705,21 @@ namespace Renderer {
 		EXPECT_TRUE(captured.warnings[0].ends_with(": ()")) << captured.warnings[0];
 		EXPECT_TRUE(captured.warnings[1].starts_with("SDF atlas display.json: ")) << captured.warnings[1];
 		EXPECT_TRUE(captured.warnings[1].ends_with(": [")) << captured.warnings[1];
+	}
+
+	TEST_F(FontRendererInitializeTest, AnAtlasWhoseRangeIsUnderASixthOfItsEmWarns) {
+		const UiWarnings captured;
+
+		// The test atlases' em is 32 texels: a range of 4 is under a sixth of it, 6 is not.
+		ASSERT_TRUE(
+			fontRenderer->Initialize(std::array{folder.write(kBody, "body", {.distanceRange = 6.0F}), folder.write(kMono, "mono")}, kBody)
+		);
+		ASSERT_EQ(captured.warnings.size(), 1U);
+		EXPECT_EQ(
+			captured.warnings[0],
+			"SDF atlas mono.json: a distance range of 4.0 texels is under a sixth of its 32-texel em, too thin for small text; generate "
+			"it with 6 or more"
+		);
 	}
 #endif
 

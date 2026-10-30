@@ -147,7 +147,8 @@ namespace Renderer {
 
 	TEST_F(PrimitivesDrawTest, ImageSamplesPremultipliedTexelsUnderItsTint) {
 		const std::array<uint8_t, 16> texels = {100, 50, 0, 200, 100, 50, 0, 200, 100, 50, 0, 200, 100, 50, 0, 200};
-		const TextureHandle			  texture = Primitives::createTexture({.width = 2, .height = 2, .pixels = texels.data()});
+		const Texture				  owner = Primitives::createTexture({.width = 2, .height = 2, .pixels = texels.data()});
+		const TextureHandle			  texture = owner.handle();
 		ASSERT_TRUE(texture.isValid());
 		const Foundation::Rect bounds{0.0F, 0.0F, static_cast<float>(kSize), static_cast<float>(kSize)};
 
@@ -158,7 +159,42 @@ namespace Renderer {
 			Primitives::drawImage({.texture = texture, .bounds = bounds, .tint = {1.0F, 1.0F, 1.0F, 0.5F}});
 		});
 		expectNear(pixel(16, 16), {50, 25, 0, 100});
-		Primitives::destroyTexture(texture);
+	}
+
+	TEST_F(PrimitivesDrawTest, AFreedTextureDrawsNothingAfterTheDrawsBeforeItsFree) {
+		const std::array<uint8_t, 4> white = {255, 255, 255, 255};
+		Texture						 texture = Primitives::createTexture({.width = 1, .height = 1, .pixels = white.data()});
+		const TextureHandle			 handle = texture.handle();
+		const Foundation::Color		 transparent(0.0F, 0.0F, 0.0F, 0.0F);
+		const Foundation::Rect		 left{0.0F, 0.0F, 16.0F, 32.0F};
+		const Foundation::Rect		 right{16.0F, 0.0F, 16.0F, 32.0F};
+
+		// Freed mid-frame: the draw before the free still samples it, the one after draws nothing.
+		render(transparent, [&] {
+			Primitives::drawImage({.texture = handle, .bounds = left});
+			texture = {};
+			Primitives::drawImage({.texture = handle, .bounds = right});
+		});
+		expectNear(pixel(8, 16), {255, 255, 255, 255});
+		expectNear(pixel(24, 16), {0, 0, 0, 0});
+
+		// Gone: an image and glyphs with it as their atlas draw nothing, where unbound it sampled black.
+		render(transparent, [&] {
+			Primitives::drawImage({.texture = handle, .bounds = left});
+			const FontRenderer::GlyphQuad quad{
+				.position = {16.0F, 0.0F},
+				.size = {16.0F, 32.0F},
+				.uvMin = {0.0F, 0.0F},
+				.uvMax = {1.0F, 1.0F},
+				.color = {1.0F, 1.0F, 1.0F, 1.0F},
+				.runOrigin = {16.0F, 32.0F},
+				.atlas = handle,
+				.pixelRange = 4.0F
+			};
+			Primitives::drawGlyphs(&quad, 1);
+		});
+		expectNear(pixel(8, 16), {0, 0, 0, 0});
+		expectNear(pixel(24, 16), {0, 0, 0, 0});
 	}
 
 	TEST_F(PrimitivesDrawTest, ArcCoversItsBandAndSweepOnly) {

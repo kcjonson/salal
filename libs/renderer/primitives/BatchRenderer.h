@@ -167,7 +167,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void addArc(const Primitives::ArcArgs& args);
 
 		// Add a textured quad sampling args.texture (see Primitives::ImageArgs). An
-		// invalid texture adds nothing.
+		// invalid texture adds nothing, and so does a stale one, warned once.
 		void addImageQuad(const Primitives::ImageArgs& args);
 
 		// --- Text rendering (MSDF) ---
@@ -185,7 +185,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// atlas: MSDF atlas this glyph samples from. An invalid handle selects the
 		//   default atlas set via setFontAtlas(), the game's default family's. A
 		//   frame may mix multiple atlases; flush() splits draws by atlas so each
-		//   glyph samples the right texture.
+		//   glyph samples the right texture. A stale atlas adds nothing, warned once.
 		// pixelRange: that atlas's distance range in texels, which the shader turns
 		//   into the edge width. With an invalid atlas, setFontAtlas()'s range instead.
 		void addTextQuad(
@@ -204,6 +204,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Set the default MSDF font atlas and its distance range, which text quads
 		// added with an invalid atlas handle sample.
 		void setFontAtlas(TextureHandle atlas, float pixelRange = 4.0F);
+
+		// --- Textures ---
+
+		// Free a texture its owner let go. Draws added from here that sample it add
+		// nothing; one already added still samples it, so with any draw pending the
+		// free waits for the end of the next flush.
+		void releaseTexture(TextureHandle texture);
 
 		// --- Rendering ---
 
@@ -356,6 +363,22 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Record the index range [groupStart, current end) as one draw group.
 		void recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend);
+
+		// Whether a draw may sample `texture`, a valid handle: false, warned once, when
+		// it is stale or waiting to be freed.
+		bool sampleable(TextureHandle texture);
+
+		// Destroy the textures whose frees waited for a flush.
+		void freePending();
+
+		// Textures released while draws were pending, freed at the end of the next flush.
+		std::vector<TextureHandle> pendingFrees;
+
+		// The last texture sampleable() found live; releaseTexture() forgets it, so a
+		// text run checks its atlas with the backend once.
+		TextureHandle liveTexture;
+
+		bool warnedStale = false;
 
 		// addTriangles' feather ring along `loops`, whose indices count from `meshBase`,
 		// the mesh's first vertex in the batch.
