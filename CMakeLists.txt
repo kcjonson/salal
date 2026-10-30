@@ -88,6 +88,7 @@ endif()
 include(cmake/SalalTesting.cmake)
 include(cmake/SalalBaseShader.cmake)
 include(cmake/SalalIcons.cmake)
+include(cmake/SalalTokens.cmake)
 
 add_subdirectory(libs/foundation)
 add_subdirectory(libs/renderer)

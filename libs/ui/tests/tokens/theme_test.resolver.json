@@ -1,0 +1,18 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/resolver.json",
+  "version": "2025.10",
+  "description": "A game's theme as the theme tests load it: its own palette, ui's semantic tokens pointed at it, a style of its own, and a light mode over the dark default.",
+  "sets": {
+    "game": { "sources": [{ "$ref": "game.tokens.json" }] }
+  },
+  "modifiers": {
+    "theme": {
+      "contexts": {
+        "dark": [],
+        "light": [{ "$ref": "modes/light.tokens.json" }]
+      },
+      "default": "dark"
+    }
+  },
+  "resolutionOrder": [{ "$ref": "#/sets/game" }, { "$ref": "#/modifiers/theme" }]
+}

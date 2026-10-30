@@ -88,27 +88,25 @@ namespace Renderer {
 		gpu.destroyPipeline(pipeline);
 	}
 
-	void BatchRenderer::recordGroup(uint32_t groupStart, float zIndex, Primitives::BlendMode blend) {
+	void BatchRenderer::recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend) {
 		const uint32_t end = static_cast<uint32_t>(indices.size());
 		if (end <= groupStart) {
 			return;
 		}
-		// Straight after a group with the same domain, z and blend, an add joins it: the
+		const uint64_t order = (static_cast<uint64_t>(sortDomain) << 32U) | (static_cast<uint32_t>(key) ^ 0x80000000U);
+		// Straight after a group with the same order and blend, an add joins it: the
 		// stable sort would keep the two together anyway, and a text run, a glyph an add,
 		// stays one group.
 		if (!drawGroups.empty()) {
 			DrawGroup& last = drawGroups.back();
-			if (last.indexStart + last.indexCount == groupStart && last.domain == sortDomain && last.zIndex == zIndex &&
-				last.blend == blend) {
+			if (last.indexStart + last.indexCount == groupStart && last.order == order && last.blend == blend) {
 				last.indexCount = end - last.indexStart;
 				return;
 			}
 		}
-		drawGroups.push_back(
-			{.indexStart = groupStart, .indexCount = end - groupStart, .domain = sortDomain, .zIndex = zIndex, .blend = blend}
-		);
-		if (zIndex != 0.0F) {
-			anyExplicitZ = true;
+		drawGroups.push_back({.indexStart = groupStart, .indexCount = end - groupStart, .order = order, .blend = blend});
+		if (key != 0) {
+			anyKey = true;
 		}
 	}
 
@@ -139,13 +137,13 @@ namespace Renderer {
 		const std::optional<Foundation::BorderStyle>&	 border,
 		float											 cornerRadius,
 		const std::optional<Foundation::LinearGradient>& gradient,
-		float											 zIndex,
+		int32_t											 key,
 		Primitives::BlendMode							 blend
 	) { // NOLINT(readability-convert-member-functions-to-static)
 		if (clipEmpty) {
 			return;
 		}
-		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
+		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
 
 		// Calculate rect center and half-dimensions for SDF
@@ -296,17 +294,17 @@ namespace Renderer {
 		// Shapes ignore the bound atlas (shader branches on data2.w); tag invalid.
 		vertexAtlas.insert(vertexAtlas.end(), 4, TextureHandle{});
 
-		recordGroup(zGroupStart, zIndex, blend);
+		recordGroup(groupStart, key, blend);
 	}
 
 	void BatchRenderer::addShadowQuad(
 		const Foundation::Rect&		 bounds,
 		const Foundation::BoxShadow& shadow,
 		float						 cornerRadius,
-		float						 zIndex,
+		int32_t						 key,
 		Primitives::BlendMode		 blend
 	) {
-		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
+		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
 		// The shadow's SDF shape is the rect grown by `spread`; the quad is grown a
 		// further `blur` so the shader has room to fade the falloff to zero.
 		const float halfW = (bounds.width * 0.5F) + shadow.spread;
@@ -370,14 +368,14 @@ namespace Renderer {
 
 		vertexAtlas.insert(vertexAtlas.end(), 4, TextureHandle{});
 
-		recordGroup(zGroupStart, zIndex, blend);
+		recordGroup(groupStart, key, blend);
 	}
 
 	void BatchRenderer::addTriangles(const TriangleMeshArgs& mesh) {
 		if (clipEmpty) {
 			return;
 		}
-		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
+		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
 
 		Foundation::Vec4 uniformColorVec = mesh.color.toVec4();
@@ -415,7 +413,7 @@ namespace Renderer {
 			addFeather(baseIndex, *mesh.feather);
 		}
 
-		recordGroup(zGroupStart, mesh.zIndex, mesh.blend);
+		recordGroup(groupStart, mesh.key, mesh.blend);
 	}
 
 	void BatchRenderer::addFeather(uint32_t meshBase, const BoundaryLoops& loops) {
@@ -476,7 +474,7 @@ namespace Renderer {
 	void BatchRenderer::addStroke(
 		std::span<const StrokePiece> pieces,
 		const Foundation::Color&	 color,
-		float						 zIndex,
+		int32_t						 key,
 		Primitives::BlendMode		 blend
 	) {
 		if (clipEmpty) {
@@ -511,7 +509,7 @@ namespace Renderer {
 			}
 			vertexAtlas.insert(vertexAtlas.end(), piece.cornerCount, TextureHandle{});
 		}
-		recordGroup(groupStart, zIndex, blend);
+		recordGroup(groupStart, key, blend);
 	}
 
 	void BatchRenderer::addArc(const Primitives::ArcArgs& args) {
@@ -551,7 +549,7 @@ namespace Renderer {
 			{0.0F, 0.0F, 0.0F, 0.0F},
 			{innerRadius, args.outerRadius, halfSweep, renderMode(kRenderModeArc, args.blend)}
 		);
-		recordGroup(groupStart, static_cast<float>(args.zIndex), args.blend);
+		recordGroup(groupStart, args.key, args.blend);
 	}
 
 	void BatchRenderer::addImageQuad(const Primitives::ImageArgs& args) {
@@ -573,7 +571,7 @@ namespace Renderer {
 			{0.0F, 0.0F, 0.0F, renderMode(kRenderModeImage, args.blend)},
 			args.texture
 		);
-		recordGroup(groupStart, static_cast<float>(args.zIndex), args.blend);
+		recordGroup(groupStart, args.key, args.blend);
 	}
 
 	void BatchRenderer::addTextQuad(
@@ -585,13 +583,13 @@ namespace Renderer {
 		const Foundation::Vec2&	 runOrigin,
 		TextureHandle			 atlas,
 		float					 pixelRange,
-		float					 zIndex,
+		int32_t					 key,
 		Primitives::BlendMode	 blend
 	) {
 		if (clipEmpty) {
 			return;
 		}
-		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
+		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
 		// Resolve the atlas this glyph samples, and its range. An invalid handle
 		// means the default atlas (the game's default family's, set via setFontAtlas)
 		// at the default's range.
@@ -698,7 +696,7 @@ namespace Renderer {
 		// this glyph into the matching per-atlas draw run.
 		vertexAtlas.insert(vertexAtlas.end(), 4, resolvedAtlas);
 
-		recordGroup(zGroupStart, zIndex, blend);
+		recordGroup(groupStart, key, blend);
 	}
 
 	void BatchRenderer::setFontAtlas(TextureHandle atlas, float pixelRange) {
@@ -708,16 +706,14 @@ namespace Renderer {
 
 	DrawPlan BatchRenderer::plan() {
 		// Resolve draw order. Submission ("organic") order is kept unless some draw
-		// carried an explicit (non-zero) z; then the per-draw-call groups are
-		// stable-sorted by sort domain, then z, and the emit-order index list is
-		// rebuilt (groups, not triangles). Domains rise in submission order, so the
-		// fast path already has them in order. The zIndex came from the component
-		// layer; the renderer only orders by it. The fast path costs nothing beyond
-		// the group records.
+		// carried a non-zero key; then the per-draw-call groups are stable-sorted by
+		// sort domain, then key, and the emit-order index list is rebuilt (groups, not
+		// triangles). Domains rise in submission order, so the fast path already has
+		// them in order, and costs nothing beyond the group records.
 		std::span<const uint32_t> emit = indices;
-		if (anyExplicitZ) {
+		if (anyKey) {
 			std::stable_sort(drawGroups.begin(), drawGroups.end(), [](const DrawGroup& a, const DrawGroup& b) {
-				return a.domain != b.domain ? a.domain < b.domain : a.zIndex < b.zIndex;
+				return a.order < b.order;
 			});
 			sortedIndices.clear();
 			sortedIndices.reserve(indices.size());
@@ -735,7 +731,7 @@ namespace Renderer {
 		// data2.w). Walking the groups in emit order, a new run starts where a
 		// triangle needs a texture other than the bound one, or where a group's GL
 		// blend state differs from the run's. Triangles are never reordered, so
-		// z-order is exact, and with one texture and one blend state (all text from
+		// key order is exact, and with one texture and one blend state (all text from
 		// the default atlas, any mix of Alpha and Additive) the frame is one run.
 		runs.clear();
 		DrawRun	   current{.indexStart = 0, .indexCount = 0, .texture = defaultFontAtlas, .blendState = backend::BlendState::Alpha};
@@ -843,7 +839,7 @@ namespace Renderer {
 		indices.clear();
 		vertexAtlas.clear();
 		drawGroups.clear();
-		anyExplicitZ = false;
+		anyKey = false;
 		sortDomain = 0;
 	}
 
@@ -855,7 +851,7 @@ namespace Renderer {
 		indices.clear();
 		vertexAtlas.clear();
 		drawGroups.clear();
-		anyExplicitZ = false;
+		anyKey = false;
 		sortDomain = 0;
 		clearClipBounds();
 	}

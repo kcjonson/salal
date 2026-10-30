@@ -1,0 +1,9 @@
+{
+  "palette": {
+    "$type": "color",
+    "slate": {
+      "900": { "$value": { "colorSpace": "srgb", "components": [0.96, 0.97, 0.98] } },
+      "100": { "$value": { "colorSpace": "srgb", "components": [0.08, 0.09, 0.11] } }
+    }
+  }
+}

@@ -40,10 +40,8 @@ namespace app::testing {
 		using SceneB = Recording<kB>;
 		using PauseScene = Recording<kPause, NoArgs, NoResult, false>;
 
-		void rectAt(float x, int zIndex) {
-			Renderer::Primitives::drawRect(
-				{.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::white()}, .zIndex = zIndex}
-			);
+		void rectAt(float x, int32_t key) {
+			Renderer::Primitives::drawRect({.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::white()}, .key = key});
 		}
 
 		class RectOverlay final : public Overlay {

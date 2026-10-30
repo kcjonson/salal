@@ -285,6 +285,14 @@ whose atlas cell is too small for what its quad samples is a warning at load.
 Glyph quads carry their atlas and its range, so `drawGlyphs` takes no family,
 and wrapped text carries the family and scale it was wrapped in.
 
+A theme is Design Tokens (2025.10, with the Resolver module) loaded at run time
+into `ui::Theme` ([docs/ui-design.md](docs/ui-design.md), "Theme"). ui's own
+tokens are `libs/ui/tokens/ui.tokens.json`, three tiers, always the bottom
+layer. `salal_tokens(<target> <dir>)` (`cmake/SalalTokens.cmake`) runs
+`salal_tokens_tool`, a host tool built in-tree on nlohmann-json, which checks
+the folder over ui's tokens in every mode, embeds it, and generates typed
+`<ns>::styles` and `<ns>::tokens` handles, so a misspelt style doesn't compile.
+
 Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
 The deterministic math and hash noise are header-inline polynomials; Clang fuses
 `a*b+c` into an FMA on arm64 and the golden bit patterns, computed on x64,
