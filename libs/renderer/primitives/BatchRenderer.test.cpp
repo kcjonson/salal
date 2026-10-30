@@ -20,9 +20,14 @@ namespace {
 
 	constexpr float kTolerance = 1e-4F;
 
-	const TextureHandle kAtlasA = TextureHandle::make(1, 0);
-	const TextureHandle kAtlasB = TextureHandle::make(2, 0);
-	const TextureHandle kImage = TextureHandle::make(3, 0);
+	// Two atlases and an image on `gpu`, which the batch checks a draw's texture against.
+	std::array<TextureHandle, 3> textures(backend::NullBackend& gpu) {
+		return {
+			gpu.createTexture({.width = 1, .height = 1}),
+			gpu.createTexture({.width = 1, .height = 1}),
+			gpu.createTexture({.width = 1, .height = 1})
+		};
+	}
 
 	void addGlyph(BatchRenderer& batch, TextureHandle atlas, BlendMode blend = BlendMode::Alpha, int32_t key = 0) {
 		batch.addTextQuad(
@@ -74,7 +79,7 @@ TEST(RenderModeTest, AShapesBorderAlphaRidesInItsModesFractionAsTransparency) {
 			  Foundation::BorderStyle{.color = {1.0F, 1.0F, 1.0F, alpha}, .width = 2.0F, .position = position},
 			  0.0F,
 			  std::nullopt,
-			  0.0F,
+			  0,
 			  blend
 		  );
 	};
@@ -100,9 +105,10 @@ TEST(RenderModeTest, AdditiveSharesAlphasBlendState) {
 TEST(RenderModeTest, EveryAddWritesItsModeAndBlend) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	addRect(batch, BlendMode::Additive);
 	addGlyph(batch, kAtlasA, BlendMode::Additive);
-	batch.addShadowQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::BoxShadow{}, 0.0F, 0.0F, BlendMode::Additive);
+	batch.addShadowQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::BoxShadow{}, 0.0F, 0, BlendMode::Additive);
 	const Foundation::Vec2 triangle[3] = {{0.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, 1.0F}};
 	const uint16_t		   triangleIndices[3] = {0, 1, 2};
 	batch.addTriangles(
@@ -117,7 +123,7 @@ TEST(RenderModeTest, EveryAddWritesItsModeAndBlend) {
 		.corners = {{{-3.0F, -2.0F}, {3.0F, -2.0F}, {3.0F, 2.0F}, {-3.0F, 2.0F}}},
 		.cornerCount = 4
 	};
-	batch.addStroke({&piece, 1}, Foundation::Color::white(), 0.0F, BlendMode::Additive);
+	batch.addStroke({&piece, 1}, Foundation::Color::white(), 0, BlendMode::Additive);
 
 	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 4U + 4U + 4U + 3U + 4U + 4U + 4U);
@@ -145,6 +151,7 @@ TEST(BatchPlanTest, EmptyBatchHasNoRuns) {
 TEST(BatchPlanTest, InterleavedAlphaAndAdditiveOnOneAtlasIsOneRun) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	batch.setFontAtlas(kAtlasA);
 	addRect(batch, BlendMode::Alpha);
 	addGlyph(batch, kAtlasA, BlendMode::Additive);
@@ -165,6 +172,7 @@ TEST(BatchPlanTest, InterleavedAlphaAndAdditiveOnOneAtlasIsOneRun) {
 TEST(BatchPlanTest, AtlasChangeStillSplits) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	batch.setFontAtlas(kAtlasA);
 	addGlyph(batch, kAtlasA);
 	addRect(batch, BlendMode::Additive);
@@ -189,6 +197,7 @@ TEST(BatchPlanTest, AtlasChangeStillSplits) {
 TEST(BatchPlanTest, ShapesOnlyAreOneRunOnTheDefaultAtlas) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	batch.setFontAtlas(kAtlasA);
 	addRect(batch);
 	addRect(batch, BlendMode::Additive);
@@ -202,6 +211,7 @@ TEST(BatchPlanTest, ShapesOnlyAreOneRunOnTheDefaultAtlas) {
 TEST(BatchPlanTest, AnImageSplitsOnItsTexture) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	batch.setFontAtlas(kAtlasA);
 	addGlyph(batch, kAtlasA);
 	batch.addImageQuad({.texture = kImage, .bounds = {0.0F, 0.0F, 16.0F, 16.0F}});
@@ -221,6 +231,7 @@ TEST(BatchPlanTest, AnImageSplitsOnItsTexture) {
 TEST(BatchPlanTest, KeysSortGroupsStablyBeforeSplitting) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	batch.setFontAtlas(kAtlasA);
 	addGlyph(batch, kAtlasA, BlendMode::Alpha, 1);	  // vertices 0-3
 	addGlyph(batch, kAtlasB, BlendMode::Additive, 0); // vertices 4-7
@@ -245,6 +256,7 @@ TEST(BatchPlanTest, KeysSortGroupsStablyBeforeSplitting) {
 TEST(BatchPlanTest, ATextRunIsOneGroupHoweverManyGlyphs) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	batch.setFontAtlas(kAtlasA);
 	addRect(batch, BlendMode::Alpha, 2); // vertices 0-3
 	for (int glyph = 0; glyph < 40; ++glyph) {
@@ -277,6 +289,7 @@ TEST(BatchPlanTest, ATextRunIsOneGroupHoweverManyGlyphs) {
 TEST(BatchPlanTest, ASortBarrierKeepsEarlierDrawsUnderLaterOnesWhateverTheirKeys) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	batch.setFontAtlas(kAtlasA);
 	addRect(batch, BlendMode::Alpha, 5); // vertices 0-3
 	addRect(batch, BlendMode::Alpha, 1); // vertices 4-7
@@ -361,8 +374,8 @@ TEST(BatchStrokeTest, PiecesDrawTheirPolygonsAsFansInOneGroup) {
 			.cornerCount = 5},
 		   {.center = {0.0F, 0.0F}, .corners = {{{0.0F, 0.0F}, {4.0F, 0.0F}, {0.0F, 4.0F}}}, .cornerCount = 3},
 	   };
-	batch.addStroke(pieces, Foundation::Color::white(), 3.0F);
-	addRect(batch); // z 0 sorts ahead of the whole stroke
+	batch.addStroke(pieces, Foundation::Color::white(), 3);
+	addRect(batch); // key 0 sorts ahead of the whole stroke
 
 	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
 	ASSERT_EQ(vertices.size(), 5U + 3U + 4U);

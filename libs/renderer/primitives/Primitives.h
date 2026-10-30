@@ -112,19 +112,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Textures ---
 		//
-		// Every texture the renderer samples lives in its texture table, keyed by
-		// TextureHandle; the handle is the texture to every caller outside the
-		// renderer. A destroyed handle is stale: later calls with it do nothing, and
-		// a draw that samples it gets no texture (warned once).
+		// Every texture the renderer samples lives in its texture table, owned by a
+		// Texture (Texture.h) and keyed by the TextureHandle draws carry. A freed
+		// handle is stale: later calls with it do nothing, and a draw that samples it
+		// draws nothing (warned once).
 
 		// A new texture from `desc`, uploaded from desc.pixels when given; invalid,
 		// with an error logged, if it could not be made.
-		TextureHandle createTexture(const TextureDesc& desc);
+		Texture createTexture(const TextureDesc& desc);
 
 		// Replace a rectangle of the texture with `pixels`, in the texture's format.
 		void updateTexture(TextureHandle handle, int x, int y, int width, int height, const void* pixels);
-
-		void destroyTexture(TextureHandle handle);
 
 		// --- Frame Lifecycle ---
 
