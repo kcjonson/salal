@@ -608,6 +608,45 @@ namespace Renderer {
 		EXPECT_GT(denser, 8);
 	}
 
+	TEST_F(PrimitivesDrawTest, AClipKeepsItsWidthInColumnsWhereverItsEdgesFall) {
+		// Half-open: a pixel survives when its centre is at or past the left and top edges
+		// and before the right and bottom ones, so a 10 by 8 clip keeps 10 columns and 8
+		// rows, even with its edges on pixel centres, where a closed test kept 11 by 9.
+		struct Case {
+			Foundation::Rect clip;
+			int				 left;
+			int				 top;
+		};
+		for (const Case& c : {Case{{4.0F, 6.0F, 10.0F, 8.0F}, 4, 6}, Case{{4.5F, 6.5F, 10.0F, 8.0F}, 4, 6}}) {
+			render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+				Primitives::pushClip(c.clip);
+				fill(Foundation::Color::red(), Primitives::BlendMode::Alpha);
+				Primitives::popClip();
+			});
+			int lit = 0;
+			int minX = kSize;
+			int maxX = -1;
+			int minY = kSize;
+			int maxY = -1;
+			for (int y = 0; y < kSize; ++y) {
+				for (int x = 0; x < kSize; ++x) {
+					if (pixel(x, y)[3] != 0) {
+						++lit;
+						minX = std::min(minX, x);
+						maxX = std::max(maxX, x);
+						minY = std::min(minY, y);
+						maxY = std::max(maxY, y);
+					}
+				}
+			}
+			EXPECT_EQ(lit, 80) << c.clip.x;
+			EXPECT_EQ(minX, c.left) << c.clip.x;
+			EXPECT_EQ(maxX, c.left + 9) << c.clip.x;
+			EXPECT_EQ(minY, c.top) << c.clip.x;
+			EXPECT_EQ(maxY, c.top + 7) << c.clip.x;
+		}
+	}
+
 	TEST_F(PrimitivesDrawTest, ClearStoresPremultipliedColour) {
 		RenderTarget half = RenderTarget::create(kSize, kSize);
 		ASSERT_TRUE(half.isValid());

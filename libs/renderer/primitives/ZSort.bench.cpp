@@ -1,15 +1,15 @@
-// Z-order draw-queue performance benchmarks.
+// Draw-order queue performance benchmarks.
 //
-// Measures the CPU cost that the per-draw-call group queue + z-sort adds to the
+// Measures the CPU cost that the per-draw-call group queue + key sort adds to the
 // batch flush, in isolation (no GL; the actual glDrawElements work is unchanged
 // by reordering). Three cases at 10k / 20k draw calls:
 //   - Baseline: current behaviour (build indices, upload as-is, no groups/sort).
-//   - FastPath: new common case (build one group record per draw; no explicit z,
+//   - FastPath: new common case (build one group record per draw; every key 0,
 //     so no sort and indices are used as-is).
-//   - Sorted:   new worst-ish case (groups built; ~2% carry an explicit z, so the
+//   - Sorted:   new worst-ish case (groups built; ~2% carry a non-zero key, so the
 //     groups are stable-sorted and the emit-order index list is rebuilt).
 // The Baseline-vs-FastPath gap is the always-on cost; Baseline-vs-Sorted is the
-// cost only paid on frames where a popup (explicit z) is open.
+// cost only paid on frames where a popup (a non-zero key) is open.
 
 #include <algorithm>
 #include <cstdint>
@@ -22,7 +22,7 @@ namespace {
 	struct Group {
 		std::uint32_t indexStart;
 		std::uint32_t indexCount;
-		float		  zIndex;
+		std::uint64_t order; // the domain, then the key with its sign bit flipped, as BatchRenderer packs it
 	};
 
 	inline void pushQuad(std::vector<std::uint32_t>& indices, std::uint32_t base) {
@@ -56,7 +56,7 @@ static void BM_ZQueue_Baseline(benchmark::State& state) {
 }
 BENCHMARK(BM_ZQueue_Baseline)->Arg(10000)->Arg(20000);
 
-// New, common case: one POD group per draw; no explicit z -> fast path, no sort,
+// New, common case: one POD group per draw; every key 0 -> fast path, no sort,
 // indices used as-is. Delta vs Baseline = the group records.
 static void BM_ZQueue_FastPath(benchmark::State& state) {
 	const int				   n = static_cast<int>(state.range(0));
@@ -68,17 +68,17 @@ static void BM_ZQueue_FastPath(benchmark::State& state) {
 	for (auto _ : state) {
 		indices.clear();
 		groups.clear();
-		bool		  anyExplicitZ = false;
+		bool		  anyKey = false;
 		std::uint32_t base = 0;
 		for (int i = 0; i < n; ++i) {
 			const auto start = static_cast<std::uint32_t>(indices.size());
 			pushQuad(indices, base);
-			groups.push_back({start, 6, 0.0F});
+			groups.push_back({start, 6, 0x80000000U});
 			base += 4;
 		}
-		// Flush fast path: nothing explicit -> upload indices unchanged.
-		if (anyExplicitZ) {
-			std::stable_sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) { return a.zIndex < b.zIndex; });
+		// Flush fast path: every key 0 -> upload indices unchanged.
+		if (anyKey) {
+			std::stable_sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) { return a.order < b.order; });
 		}
 		benchmark::DoNotOptimize(indices.data());
 		benchmark::DoNotOptimize(groups.data());
@@ -88,7 +88,7 @@ static void BM_ZQueue_FastPath(benchmark::State& state) {
 }
 BENCHMARK(BM_ZQueue_FastPath)->Arg(10000)->Arg(20000);
 
-// New, popup-open case: ~2% of draws carry an explicit z, so groups are
+// New, popup-open case: ~2% of draws carry a non-zero key, so groups are
 // stable-sorted and the emit-order index list is rebuilt.
 static void BM_ZQueue_Sorted(benchmark::State& state) {
 	const int				   n = static_cast<int>(state.range(0));
@@ -107,11 +107,11 @@ static void BM_ZQueue_Sorted(benchmark::State& state) {
 		for (int i = 0; i < n; ++i) {
 			const auto start = static_cast<std::uint32_t>(indices.size());
 			pushQuad(indices, base);
-			const float z = (i % 50 == 0) ? 1000.0F : 0.0F; // ~2% explicit
-			groups.push_back({start, 6, z});
+			const std::uint64_t key = (i % 50 == 0) ? 1000U : 0U; // ~2% non-zero
+			groups.push_back({start, 6, key ^ 0x80000000U});
 			base += 4;
 		}
-		std::stable_sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) { return a.zIndex < b.zIndex; });
+		std::stable_sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) { return a.order < b.order; });
 		for (const Group& g : groups) {
 			for (std::uint32_t k = 0; k < g.indexCount; ++k) {
 				emit.push_back(indices[g.indexStart + k]);
