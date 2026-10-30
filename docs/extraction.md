@@ -727,7 +727,8 @@ the feel prototype wants audible thrust and nothing in `ui` depends on it.
 
 ### Phase 3, extract `ui`
 
-Largest and least certain, and nothing upstream waits on it. Against the
+Largest and least certain, and since 2026-10-30 it blocks feature work on every
+game until it lands. Against the
 adopted spec (decision C), with multi-device focus (I) and the storage model
 (F) settled on the way, and the spec's conformance scorecard as the acceptance
 test. Designed in [ui-design.md](ui-design.md) and sequenced in
@@ -770,7 +771,8 @@ test and a harder one, since it is UI-heavy where asteroids is
 simulation-heavy.
 
 **Extraction stalls every game and ships nothing.** The sequencing exists for
-this. Phases 0.5 and 1 are small PRs, phase 3 is optional for a long time,
+this. Phases 0.5 and 1 are small PRs, phase 3 runs as parallel tracks because
+every game's feature work waits on it,
 phase 4 is its own project, and the prototype runs throughout.
 
 **Versioning.** Three consumers, one developer, pinned tags. Manageable now,

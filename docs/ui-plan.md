@@ -138,9 +138,11 @@ list.
 | 13. Controls | ported onto the core: Button and ListRow (the icon a child, gap 30; `size` setting the font, gap 19), Slider, ProgressBar, TextInput (app's clipboard through the context), TabBar, SegmentedControl (interactive now), TreeView, Badge, Stat, KeyCap, Divider, and Panel's structure, a title and an actions slot (gap 17); new: Checkbox and Toggle (R12.9), RadioGroup (R12.35). Each with its worldsim suite. The sandbox's picker rebuilt on ListRow and its `Primitives` picker deleted | none | the ported suites through the dispatcher; sandbox scenes from worldsim's button, tab bar, text input and tree view scenes; happy-path lines for each control; scene diff; perf suite | 4, 8, 9, 10, 11 |
 | 14. Popups | Menu, Select (its caret an icon, gap 19), DropdownButton, ContextMenu, Dialog (its focus scope its subtree), Tooltip (any component as content, measured, gap 19), and Toast, ported onto the popup stack with their suites; `TooltipManager` becomes the tooltip tier and `ToastStack` the stack's toast entries (gap 30) | none | the ported suites; sandbox scenes from worldsim's context menu, dialog, dropdown, toast and tooltip scenes; happy-path lines; perf suite | 12, 13 |
 
-Order and overlap: 5 to 8 go in order; 9 and 10 run beside 6 to 8; 3 and 4 run
-beside 5 to 8 once the perf suite is in; 11 follows 9, 12 follows 8 and 11, 13
-needs 4, and 14 closes the salal side. Wrap layout, Popover, NumberInput, the
+Phase 3 blocks feature work on every game, so three tracks run at once, each in
+its own session: the renderer (1 and 2 now, 3 and 4 once the perf suite is in),
+the ui core (5 to 8 in order), and theme and icons (9 beside 6, 10 once 2 and
+5 are in). Then 11 follows 9, 12 follows 8 and 11, 13 needs 4 and closes the
+first two tracks, and 14 closes the salal side. Wrap layout, Popover, NumberInput, the
 standalone Scrollbar, Counter, the drag service and the rounded clip are not in
 the sequence (Grid is the question under "Open"). None of worldsim's
 screens or asteroids' screen designs uses one; each comes when a game asks,
@@ -150,9 +152,10 @@ dual-deck-builder's port most likely first.
 
 Worldsim converts after PR 14, in two PRs, each pinning the latest tag. Each
 app moves whole, so no app runs both ui libraries; between the two PRs they
-share worldsim's build, which the `ui/` prefix allows. Worldsim's only work in
-flight is this extraction, whose other worldsim PRs (the renderer pins) land
-before, so world-sim's one large PR races nothing on its main.
+share worldsim's build, which the `ui/` prefix allows. No game has feature work
+in flight until the extraction is done, and the extraction's other worldsim
+PRs (the renderer pins) land before, so world-sim's one large PR races nothing
+on its main.
 
 | PR | worldsim | gate |
 |---|---|---|
