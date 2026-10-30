@@ -1,6 +1,6 @@
 // arc: Primitives::drawArc. Rings with partial sweeps (progress rings and gauges), pies, hairline
-// rings, negative sweeps, an arc under PushTransform, and the SDF disk next to drawCircle's 64-segment
-// fan.
+// rings, negative sweeps, an arc under PushTransform, and the SDF disk next to drawCircle's, which is
+// the same disk.
 
 #include "DesignCanvas.h"
 #include "Scenes.h"
@@ -152,7 +152,7 @@ namespace {
 			label("translucent, overlapping", 770.0F, 1290.0F);
 			P::drawCircle({.center = {1200.0F, 1130.0F}, .radius = 110.0F, .style = {.fill = {0.85F, 0.85F, 0.9F, 1.0F}}});
 			P::drawArc({.center = {1600.0F, 1130.0F}, .outerRadius = 110.0F, .color = {0.85F, 0.85F, 0.9F, 1.0F}});
-			label("drawCircle's 64-segment fan", 1200.0F, 1290.0F);
+			label("drawCircle", 1200.0F, 1290.0F);
 			label("drawArc's SDF disk", 1600.0F, 1290.0F);
 			P::PopTransform();
 		}

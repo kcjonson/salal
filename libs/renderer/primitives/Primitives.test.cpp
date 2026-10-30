@@ -180,6 +180,49 @@ namespace Renderer {
 		expectNear(pixel(9, 23), {0, 0, 0, 0});			 // left of the centre: outside the sweep
 	}
 
+	TEST_F(PrimitivesDrawTest, ACircleIsTheArcsDiskWithItsBorderRingOverIt) {
+		const Foundation::Color clear(0.0F, 0.0F, 0.0F, 0.0F);
+		const Foundation::Color red(1.0F, 0.0F, 0.0F, 1.0F);
+		render(clear, [&] { Primitives::drawCircle({.center = {16.0F, 16.0F}, .radius = 10.0F, .style = {.fill = red}}); });
+		const std::vector<uint8_t> circle = pixels;
+		render(clear, [&] { Primitives::drawArc({.center = {16.0F, 16.0F}, .outerRadius = 10.0F, .color = red}); });
+		EXPECT_EQ(circle, pixels);
+
+		// The centred border is the ring from 8 to 12. Along the row through the centre the
+		// pixel centres sit at 8.5 past it, half a pixel inside the ring's inner edge, then
+		// 10.5, in it, then 12.5, half a pixel past its outer edge; the edge ramps over a
+		// pixel either side, 0.85 half a pixel in and 0.15 half a pixel out.
+		render(clear, [&] {
+			Primitives::drawCircle(
+				{.center = {16.0F, 16.0F},
+				 .radius = 10.0F,
+				 .style = {.fill = red, .border = Foundation::BorderStyle{.color = {0.0F, 0.0F, 1.0F, 1.0F}, .width = 4.0F}}}
+			);
+		});
+		expectNear(pixel(16, 16), {255, 0, 0, 255});
+		expectNear(pixel(22, 16), {255, 0, 0, 255}); // 6.5 out: the fill
+		expectNear(pixel(24, 16), {38, 0, 217, 255}, 2);
+		expectNear(pixel(26, 16), {0, 0, 255, 255});
+		expectNear(pixel(28, 16), {0, 0, 38, 38}, 2);
+		expectNear(pixel(29, 16), {0, 0, 0, 0});
+
+		// A translucent border covers each pixel once: no pixel's alpha past the border's,
+		// where the line segments it was drawn as overlapped at every joint.
+		render(clear, [&] {
+			Primitives::drawCircle(
+				{.center = {16.0F, 16.0F},
+				 .radius = 10.0F,
+				 .style = {.fill = clear, .border = Foundation::BorderStyle{.color = {1.0F, 1.0F, 1.0F, 0.5F}, .width = 4.0F}}}
+			);
+		});
+		int most = 0;
+		for (size_t i = 3; i < pixels.size(); i += 4) {
+			most = std::max(most, static_cast<int>(pixels[i]));
+		}
+		EXPECT_LE(most, 129);
+		expectNear(pixel(26, 16), {128, 128, 128, 128});
+	}
+
 	TEST_F(PrimitivesDrawTest, PolygonFillsAndItsBorderSitsOutside) {
 		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
 		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {

@@ -13,11 +13,9 @@
 #include "vector/Types.h"
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
-#include <numbers>
 #include <stack>
 #include <unordered_map>
 #include <utils/Log.h>
@@ -398,52 +396,14 @@ namespace Renderer::Primitives {
 	}
 
 	void drawCircle(const CircleArgs& args) {
-		if (g_batchRenderer == nullptr) {
+		if (g_batchRenderer == nullptr || !(args.radius > 0.0F)) {
 			return;
 		}
 
-		// Tessellate circle into triangle fan
-		constexpr int	segments = 64; // Enough for smooth circles
-		constexpr float angleStep = (2.0F * std::numbers::pi_v<float>) / static_cast<float>(segments);
-		constexpr int	vertexCount = segments + 1; // Center + perimeter vertices
-		constexpr int	indexCount = segments * 3;	// Each segment creates a triangle
-
-		// Ensure vertex count fits in uint16_t index buffer
-		static_assert(vertexCount <= 65535, "Circle vertex count exceeds uint16_t index range");
-
-		// Use thread-local buffers to avoid allocations on every call
-		static thread_local std::vector<Foundation::Vec2> vertices;
-		static thread_local std::vector<uint16_t>		  indices;
-		vertices.clear();
-		indices.clear();
-		vertices.reserve(vertexCount);
-		indices.reserve(indexCount);
-
-		// Center vertex
-		vertices.push_back(args.center);
-
-		// Perimeter vertices
-		for (int i = 0; i < segments; ++i) {
-			float angle = static_cast<float>(i) * angleStep;
-			float x = args.center.x + args.radius * std::cos(angle);
-			float y = args.center.y + args.radius * std::sin(angle);
-			vertices.emplace_back(x, y);
-		}
-
-		// Generate triangle fan indices
-		for (int i = 0; i < segments; ++i) {
-			indices.push_back(0);											  // Center
-			indices.push_back(static_cast<uint16_t>(i + 1));				  // Current perimeter vertex
-			indices.push_back(static_cast<uint16_t>(1 + (i + 1) % segments)); // Next perimeter vertex
-		}
-
-		// Draw filled circle
 		if (args.style.fill.a > 0.0F) {
-			drawTriangles(
-				{.vertices = vertices.data(),
-				 .indices = indices.data(),
-				 .vertexCount = vertices.size(),
-				 .indexCount = indices.size(),
+			g_batchRenderer->addArc(
+				{.center = args.center,
+				 .outerRadius = args.radius,
 				 .color = args.style.fill,
 				 .id = args.id,
 				 .zIndex = args.zIndex,
@@ -451,23 +411,29 @@ namespace Renderer::Primitives {
 			);
 		}
 
-		// Draw border if specified
 		if (args.style.border.has_value()) {
-			const auto& border = args.style.border.value();
-
-			// Draw border as connected line segments
-			for (int i = 0; i < segments; ++i) {
-				Foundation::Vec2 start = vertices[i + 1];
-				Foundation::Vec2 end = vertices[1 + (i + 1) % segments];
-				drawLine(
-					{.start = start,
-					 .end = end,
-					 .style = {.color = border.color, .width = border.width},
-					 .id = args.id,
-					 .zIndex = args.zIndex,
-					 .blend = args.blend}
-				);
+			const Foundation::BorderStyle& border = args.style.border.value();
+			float						   outerRadius = args.radius + (border.width * 0.5F);
+			switch (border.position) {
+				case Foundation::BorderPosition::Inside:
+					outerRadius = args.radius;
+					break;
+				case Foundation::BorderPosition::Center:
+					break;
+				case Foundation::BorderPosition::Outside:
+					outerRadius = args.radius + border.width;
+					break;
 			}
+			// An inner radius below zero makes the ring a disk; addArc clamps it.
+			g_batchRenderer->addArc(
+				{.center = args.center,
+				 .innerRadius = outerRadius - border.width,
+				 .outerRadius = outerRadius,
+				 .color = border.color,
+				 .id = args.id,
+				 .zIndex = args.zIndex,
+				 .blend = args.blend}
+			);
 		}
 	}
 

@@ -251,17 +251,18 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			BlendMode				blend = BlendMode::Alpha;
 		};
 
-		// Draw a circle with optional fill and border.
-		//
-		// Circles are tessellated into a 64-segment triangle fan on the CPU,
-		// providing smooth appearance without requiring special shaders.
-		// Borders are rendered as connected line segments.
+		// Draw a circle with optional fill and border, each one quad in drawArc's SDF mode
+		// and anti-aliased like it: the fill a disk, the border a ring drawn over it at the
+		// same z. Each edge ramps over a device pixel either side, so a circle a pixel or two
+		// across carries more ink than its area: 1.8 times at a radius of half a device pixel,
+		// 1.2 at one.
 		//
 		// Parameters:
 		//   - center: Circle center position in current coordinate space
-		//   - radius: Circle radius in pixels
+		//   - radius: Circle radius in pixels; zero or less draws nothing
 		//   - style.fill: Fill color (set alpha to 0 to disable fill)
-		//   - style.border: Optional border (color and width)
+		//   - style.border: Optional border; `position` puts its width inside the radius,
+		//     centred on it (the default) or outside it, and `cornerRadius` is unused
 		//   - id: Optional debug identifier
 		//   - zIndex: Draw order (higher values drawn later)
 		void drawCircle(const CircleArgs& args);
