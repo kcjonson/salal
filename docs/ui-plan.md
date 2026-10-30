@@ -144,7 +144,7 @@ the ui core (5 to 8 in order), and theme and icons (9 beside 6, 10 once 2 and
 5 are in). Then 11 follows 9, 12 follows 8 and 11, 13 needs 4 and closes the
 first two tracks, and 14 closes the salal side. Wrap layout, Popover, NumberInput, the
 standalone Scrollbar, Counter, the drag service and the rounded clip are not in
-the sequence (Grid is the question under "Open"). None of worldsim's
+the sequence, and neither is Grid (below). None of worldsim's
 screens or asteroids' screen designs uses one; each comes when a game asks,
 dual-deck-builder's port most likely first.
 
@@ -182,10 +182,10 @@ conversion PR owns its part in its description:
   null for unknowns); a script reading `zIndex` or absolute `bounds` changes.
 - The select caret is an icon, and tooltip width is measured, not estimated.
 
-## Open
+## Grid
 
-One decision the sequence needs that ui-design.md leaves open:
-`display: Grid`. ui-design.md lists it with the taffy names; the spec puts
-wrap and grid out of scope, worldsim's `LayoutContainer` has neither, and no
-screen in the three games uses one. Recommended: PR 6 lands Block, Flex and
-None, and Grid comes with the first game that asks. Changes PR 6 only.
+Decided 2026-10-30: `display: Grid` waits for the first game that needs it, and
+PR 6 lands Block, Flex and None. Worldsim needs none: its grid-like screens
+(scenario select's five cards, world creator's `360 | stage | 360`,
+asset-manager's 2 by 3 variants, the Salvage sandbox scene's icon wall) are
+Flex rows, nested in a column where there is more than one.
