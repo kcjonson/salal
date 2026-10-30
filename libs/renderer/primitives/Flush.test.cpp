@@ -166,7 +166,7 @@ namespace Renderer {
 		const Foundation::Color fill(0.2F, 0.4F, 0.6F, 0.8F);
 		const Foundation::Color edge(1.0F, 1.0F, 1.0F, 0.5F);
 		Primitives::beginFrame();
-		Primitives::pushClip({.shape = Foundation::ClipRect{.bounds = Foundation::Rect{10.0F, 20.0F, 200.0F, 100.0F}}});
+		Primitives::pushClip(Foundation::Rect{10.0F, 20.0F, 200.0F, 100.0F});
 		Primitives::drawCircle(
 			{.center = {100.0F, 60.0F},
 			 .radius = 20.0F,
@@ -356,9 +356,9 @@ namespace Renderer {
 
 	TEST_F(FlushTest, ClipBoundsRideOnTheVerticesAndTheUniformsCarryTheFlip) {
 		Primitives::beginFrame();
-		Primitives::pushClip({.shape = Foundation::ClipRect{.bounds = Foundation::Rect{10.0F, 20.0F, 100.0F, 50.0F}}});
+		Primitives::pushClip(Foundation::Rect{10.0F, 20.0F, 100.0F, 50.0F});
 		rect(0.0F);
-		Primitives::pushClip({.shape = Foundation::ClipRect{.bounds = Foundation::Rect{50.0F, 0.0F, 100.0F, 100.0F}}});
+		Primitives::pushClip(Foundation::Rect{50.0F, 0.0F, 100.0F, 100.0F});
 		rect(60.0F);
 		Primitives::popClip();
 		Primitives::popClip();
@@ -384,7 +384,7 @@ namespace Renderer {
 
 	TEST_F(FlushTest, ClipsThatMissEachOtherCullWhatIsDrawnUnderThemUntilPopped) {
 		const auto clip = [](float x, float width) {
-			Primitives::pushClip({.shape = Foundation::ClipRect{.bounds = Foundation::Rect{x, 0.0F, width, 50.0F}}});
+			Primitives::pushClip(Foundation::Rect{x, 0.0F, width, 50.0F});
 		};
 		Primitives::beginFrame();
 		clip(0.0F, 50.0F);
@@ -414,7 +414,7 @@ namespace Renderer {
 		const std::array<Foundation::Vec2, 3> triangle = {{{0.0F, 0.0F}, {10.0F, 0.0F}, {0.0F, 10.0F}}};
 		const std::array<uint16_t, 3>		  triangleIndices = {0, 1, 2};
 		Primitives::beginFrame();
-		Primitives::pushClip({.shape = Foundation::ClipRect{.bounds = Foundation::Rect{20.0F, 20.0F, 0.0F, 40.0F}}});
+		Primitives::pushClip(Foundation::Rect{20.0F, 20.0F, 0.0F, 40.0F});
 		rect(0.0F);
 		Primitives::drawRect({.bounds = {0.0F, 0.0F, 10.0F, 10.0F}, .style = {.boxShadow = Foundation::BoxShadow{}}});
 		glyph(0.0F);

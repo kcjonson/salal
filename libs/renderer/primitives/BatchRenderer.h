@@ -247,9 +247,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Clear clip bounds (disables clipping)
 		void clearClipBounds();
 
-		// Get current clip bounds
-		const Foundation::Vec4& getClipBounds() const { return currentClipBounds; }
-
 		// --- Transform ---
 
 		// Set the current transform matrix.
