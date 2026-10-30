@@ -17,6 +17,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -61,9 +62,9 @@ namespace Renderer {
 			return contents<uint32_t>(gpu->geometry(draw.call.geometry)->indices);
 		}
 
-		static void rect(float x, BlendMode blend = BlendMode::Alpha, int zIndex = 0) {
+		static void rect(float x, BlendMode blend = BlendMode::Alpha, int32_t key = 0) {
 			Primitives::drawRect(
-				{.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::red()}, .zIndex = zIndex, .blend = blend}
+				{.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::red()}, .key = key, .blend = blend}
 			);
 		}
 
@@ -107,7 +108,7 @@ namespace Renderer {
 		EXPECT_EQ(gpu->frames(), 1);
 	}
 
-	TEST_F(FlushTest, TheZSortReachesTheIndexBuffer) {
+	TEST_F(FlushTest, TheKeySortReachesTheIndexBuffer) {
 		Primitives::beginFrame();
 		rect(0.0F, BlendMode::Alpha, 1);  // vertices 0-3
 		rect(20.0F, BlendMode::Alpha, 0); // vertices 4-7
@@ -120,7 +121,7 @@ namespace Renderer {
 		EXPECT_EQ(call.indexCount, 18U);
 		EXPECT_EQ(call.instanceCount, 0U);
 
-		// z 0 in submission order, then z 1; the vertices stay as added.
+		// Key 0 in submission order, then key 1; the vertices stay as added.
 		const std::vector<uint32_t> emitted = indices(gpu->draws()[0]);
 		ASSERT_EQ(emitted.size(), 18U);
 		EXPECT_EQ(emitted[0], 4U);
@@ -131,20 +132,20 @@ namespace Renderer {
 		EXPECT_EQ(uploaded[4].position.x, 20.0F);
 	}
 
-	TEST_F(FlushTest, ACirclesBorderDrawsAtItsZStraightAfterItsFill) {
+	TEST_F(FlushTest, ACirclesBorderDrawsAtItsKeyStraightAfterItsFill) {
 		Primitives::beginFrame();
 		Primitives::drawCircle(
 			{.center = {100.0F, 100.0F},
 			 .radius = 20.0F,
 			 .style =
 				 {.fill = Foundation::Color::red(), .border = Foundation::BorderStyle{.color = Foundation::Color::white(), .width = 2.0F}},
-			 .zIndex = 2}
+			 .key = 2}
 		);
-		rect(0.0F, BlendMode::Alpha, 1);  // submitted after the circle, below its z
-		rect(20.0F, BlendMode::Alpha, 2); // submitted after the circle, at its z
+		rect(0.0F, BlendMode::Alpha, 1);  // submitted after the circle, below its key
+		rect(20.0F, BlendMode::Alpha, 2); // submitted after the circle, at its key
 		Primitives::endFrame();
 
-		// Vertices as added: the fill's quad 0-3, the border's 4-7, the z 1 rect 8-11, the z 2
+		// Vertices as added: the fill's quad 0-3, the border's 4-7, the key 1 rect 8-11, the key 2
 		// rect 12-15.
 		ASSERT_EQ(gpu->draws().size(), 1U);
 		ASSERT_EQ(vertices(gpu->draws()[0]).size(), 16U);
@@ -157,10 +158,126 @@ namespace Renderer {
 				return index >= low && index < low + 4;
 			});
 		};
-		EXPECT_TRUE(allWithin(0, 8));	// the z 1 rect
-		EXPECT_TRUE(allWithin(6, 0));	// the fill, z 2
-		EXPECT_TRUE(allWithin(12, 4));	// the border, z 2, over the fill
-		EXPECT_TRUE(allWithin(18, 12)); // the z 2 rect, after the border at the same z
+		EXPECT_TRUE(allWithin(0, 8));	// the key 1 rect
+		EXPECT_TRUE(allWithin(6, 0));	// the fill, key 2
+		EXPECT_TRUE(allWithin(12, 4));	// the border, key 2, over the fill
+		EXPECT_TRUE(allWithin(18, 12)); // the key 2 rect, after the border at the same key
+	}
+
+	TEST_F(FlushTest, KeysSortAsSignedIntegersAndTiesKeepSubmissionOrder) {
+		constexpr int32_t kLowest = std::numeric_limits<int32_t>::min();
+		constexpr int32_t kHighest = std::numeric_limits<int32_t>::max();
+		Primitives::beginFrame();
+		rect(0.0F, BlendMode::Alpha, 0);		 // vertices 0-3
+		rect(10.0F, BlendMode::Alpha, kHighest); // 4-7
+		rect(20.0F, BlendMode::Alpha, -5);		 // 8-11
+		glyph(30.0F);							 // 12-15, key 0 after the rect at 0
+		rect(40.0F, BlendMode::Alpha, 3);		 // 16-19
+		rect(50.0F, BlendMode::Alpha, -5);		 // 20-23
+		rect(60.0F, BlendMode::Alpha, kLowest);	 // 24-27
+		Primitives::endFrame();
+
+		std::vector<uint32_t> emitted;
+		for (const backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
+			const std::vector<uint32_t> all = indices(draw);
+			emitted.insert(emitted.end(), all.begin() + draw.call.indexOffset, all.begin() + draw.call.indexOffset + draw.call.indexCount);
+		}
+		ASSERT_EQ(emitted.size(), 42U);
+		std::vector<uint32_t> firstVertices;
+		for (size_t quad = 0; quad < 7; ++quad) {
+			firstVertices.push_back(emitted[quad * 6]);
+		}
+		// The lowest key, both -5s as submitted, the rect then the glyph at 0, 3, the highest.
+		EXPECT_EQ(firstVertices, (std::vector<uint32_t>{24, 8, 20, 0, 12, 16, 4}));
+	}
+
+	TEST_F(FlushTest, AClipIsMappedThroughTheTransformItIsPushedUnder) {
+		const auto pushedUnder = [&](const Foundation::Mat4& transform, const Foundation::Rect& clip) {
+			gpu->clearRecord();
+			Primitives::beginFrame();
+			Primitives::PushTransform(transform);
+			Primitives::pushClip(clip);
+			rect(0.0F);
+			Primitives::popClip();
+			Primitives::PopTransform();
+			Primitives::endFrame();
+			EXPECT_EQ(gpu->draws().size(), 1U);
+			return gpu->draws().empty() ? Foundation::Vec4(-1.0F) : vertices(gpu->draws()[0])[0].clipBounds;
+		};
+		const Foundation::Rect clip{10.0F, 20.0F, 100.0F, 50.0F};
+		const Foundation::Mat4 identity(1.0F);
+		EXPECT_EQ(pushedUnder(identity, clip), Foundation::Vec4(10.0F, 20.0F, 110.0F, 70.0F));
+		EXPECT_EQ(
+			pushedUnder(glm::translate(identity, Foundation::Vec3(30.0F, 40.0F, 0.0F)), clip),
+			Foundation::Vec4(40.0F, 60.0F, 140.0F, 110.0F)
+		);
+		EXPECT_EQ(
+			pushedUnder(glm::scale(identity, Foundation::Vec3(2.0F, 0.5F, 1.0F)), clip), Foundation::Vec4(20.0F, 10.0F, 220.0F, 35.0F)
+		);
+		// A mirror turns the rect round; its bounds are the same box.
+		EXPECT_EQ(
+			pushedUnder(glm::scale(identity, Foundation::Vec3(-1.0F, 1.0F, 1.0F)), clip), Foundation::Vec4(-110.0F, 20.0F, -10.0F, 70.0F)
+		);
+		// A quarter turn takes (x, y) to (-y, x): the box around the turned rect.
+		const Foundation::Vec4 turned =
+			pushedUnder(glm::rotate(identity, std::numbers::pi_v<float> * 0.5F, Foundation::Vec3(0.0F, 0.0F, 1.0F)), clip);
+		EXPECT_NEAR(turned.x, -70.0F, kTolerance);
+		EXPECT_NEAR(turned.y, 10.0F, kTolerance);
+		EXPECT_NEAR(turned.z, -20.0F, kTolerance);
+		EXPECT_NEAR(turned.w, 110.0F, kTolerance);
+	}
+
+	TEST_F(FlushTest, AClipStaysWhereItWasPushedWhateverIsPushedOverIt) {
+		const Foundation::Mat4 offset = glm::translate(Foundation::Mat4(1.0F), Foundation::Vec3(30.0F, 0.0F, 0.0F));
+		Primitives::beginFrame();
+		Primitives::PushTransform(offset);
+		Primitives::pushClip(Foundation::Rect{0.0F, 0.0F, 100.0F, 100.0F}); // 30 to 130 on screen
+		Primitives::PushTransform(offset);									// a content offset inside the clip
+		rect(0.0F);
+		Primitives::pushClip(Foundation::Rect{50.0F, 0.0F, 100.0F, 50.0F}); // 110 to 210 under both offsets, cut at 130
+		rect(60.0F);
+		Primitives::popClip();
+		Primitives::PopTransform();
+		Primitives::popClip();
+		Primitives::PopTransform();
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 8U);
+		EXPECT_EQ(uploaded[0].position.x, 60.0F);
+		EXPECT_EQ(uploaded[0].clipBounds, Foundation::Vec4(30.0F, 0.0F, 130.0F, 100.0F));
+		EXPECT_EQ(uploaded[4].clipBounds, Foundation::Vec4(110.0F, 0.0F, 130.0F, 50.0F));
+	}
+
+	TEST_F(FlushTest, ANegativeExtentIsEmptyUnderAMirrorToo) {
+		Primitives::beginFrame();
+		Primitives::PushTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(-1.0F, -1.0F, 1.0F)));
+		Primitives::pushClip(Foundation::Rect{-10.0F, -10.0F, -50.0F, 50.0F});
+		rect(-5.0F);
+		Primitives::popClip();
+		Primitives::pushClip(Foundation::Rect{-10.0F, -10.0F, 50.0F, -50.0F});
+		rect(-5.0F);
+		Primitives::popClip();
+		Primitives::PopTransform();
+		Primitives::endFrame();
+		EXPECT_TRUE(gpu->draws().empty());
+	}
+
+	TEST_F(FlushTest, ClipsThatShareAnEdgeShareNoPixel) {
+		// Half-open, a clip's right and bottom edges are outside it, so the next clip over
+		// starts where it ends and the two meet in nothing.
+		Primitives::beginFrame();
+		Primitives::pushClip(Foundation::Rect{0.0F, 0.0F, 50.0F, 50.0F});
+		Primitives::pushClip(Foundation::Rect{50.0F, 0.0F, 50.0F, 50.0F});
+		rect(45.0F);
+		Primitives::popClip();
+		Primitives::pushClip(Foundation::Rect{0.0F, 50.0F, 50.0F, 50.0F});
+		rect(45.0F);
+		Primitives::popClip();
+		Primitives::popClip();
+		Primitives::endFrame();
+		EXPECT_TRUE(gpu->draws().empty());
 	}
 
 	TEST_F(FlushTest, ACirclesFillAndBorderAreAnArcQuadEach) {

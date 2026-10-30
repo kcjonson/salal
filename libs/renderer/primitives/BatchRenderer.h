@@ -39,7 +39,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		std::span<const uint16_t>		  indices;
 		Foundation::Color				  color;			// Every vertex's, without `colors`
 		const Foundation::Color*		  colors = nullptr; // One per vertex
-		float							  zIndex = 0.0F;
+		int32_t							  key = 0;
 		Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha;
 		const BoundaryLoops*			  feather = nullptr;
 	};
@@ -131,7 +131,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const std::optional<Foundation::BorderStyle>&	 border = std::nullopt,
 			float											 cornerRadius = 0.0F,
 			const std::optional<Foundation::LinearGradient>& gradient = std::nullopt,
-			float											 zIndex = 0.0F,
+			int32_t											 key = 0,
 			Primitives::BlendMode							 blend = Primitives::BlendMode::Alpha
 		);
 
@@ -142,7 +142,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::Rect&		 bounds,
 			const Foundation::BoxShadow& shadow,
 			float						 cornerRadius,
-			float						 zIndex = 0.0F,
+			int32_t						 key = 0,
 			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
 		);
 
@@ -159,7 +159,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void addStroke(
 			std::span<const StrokePiece> pieces,
 			const Foundation::Color&	 color,
-			float						 zIndex = 0.0F,
+			int32_t						 key = 0,
 			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
 		);
 
@@ -197,7 +197,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::Vec2&	 runOrigin,
 			TextureHandle			 atlas,
 			float					 pixelRange,
-			float					 zIndex = 0.0F,
+			int32_t					 key = 0,
 			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha
 		);
 
@@ -208,15 +208,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// --- Rendering ---
 
 		// The emit order and draw runs of what has been added; flush() submits
-		// exactly this. Groups are stable-sorted by sort domain, then z, when any
-		// carries an explicit z (submission order otherwise), and the emit order is
+		// exactly this. Groups are stable-sorted by sort domain, then key, when any
+		// carries a non-zero key (submission order otherwise), and the emit order is
 		// cut into a new run wherever a triangle needs a texture other than the bound
 		// one or a group's GPU blend state differs. Shapes, arcs and the like need no
 		// texture and never split.
 		DrawPlan plan();
 
 		// Start a new sort domain: everything added from here sorts after everything
-		// added before, whatever its z. No flush, and no run is cut for it.
+		// added before, whatever its key. No flush, and no run is cut for it.
 		void sortBarrier() { ++sortDomain; }
 
 		// Upload the vertices and the planned indices, set the uniforms and submit
@@ -275,7 +275,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Statistics
 		size_t		getVertexCount() const { return vertices.size(); }
-		size_t		getDrawGroupCount() const { return drawGroups.size(); } // the z sort's units, since the last flush
+		size_t		getDrawGroupCount() const { return drawGroups.size(); } // the key sort's units, since the last flush
 		size_t		getDrawCallCount() const { return drawCallCount; }
 		RenderStats getStats() const;
 
@@ -331,31 +331,31 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// texture an image vertex samples. plan() splits runs on these.
 		std::vector<TextureHandle> vertexAtlas;
 
-		// Per-draw-call groups. Each add* records one {indexStart, indexCount, domain,
-		// zIndex, blend}, or extends the last when it has the same domain, z and
-		// blend (every glyph of a text run after the first). plan() keeps submission
-		// order unless some group carries an explicit (non-zero) z, in which case
-		// groups are stable-sorted by domain, then z, and the emit-order index list is
-		// rebuilt. zIndex originates in the component layer; the domain counts
-		// sortBarrier() calls since the last flush.
+		// Per-draw-call groups. Each add* records one {indexStart, indexCount, order,
+		// blend}, or extends the last when it has the same order and blend (every
+		// glyph of a text run after the first). `order` is the domain, the count of
+		// sortBarrier() calls since the last flush, in the high word and the key with
+		// its sign bit flipped in the low one, so one unsigned compare sorts by domain,
+		// then key, negative keys first. plan() keeps submission order unless some
+		// group carries a non-zero key, in which case groups are stable-sorted by
+		// order and the emit-order index list is rebuilt.
 		struct DrawGroup {
 			uint32_t			  indexStart;
 			uint32_t			  indexCount;
-			uint32_t			  domain;
-			float				  zIndex;
+			uint64_t			  order;
 			Primitives::BlendMode blend;
 		};
 		std::vector<DrawGroup> drawGroups;
-		bool				   anyExplicitZ = false;
+		bool				   anyKey = false;
 		uint32_t			   sortDomain = 0;
 
-		// plan()'s output, reused across flushes: the z-sorted index list (unused in
+		// plan()'s output, reused across flushes: the key-sorted index list (unused in
 		// submission order) and the runs.
 		std::vector<uint32_t> sortedIndices;
 		std::vector<DrawRun>  runs;
 
 		// Record the index range [groupStart, current end) as one draw group.
-		void recordGroup(uint32_t groupStart, float zIndex, Primitives::BlendMode blend);
+		void recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend);
 
 		// addTriangles' feather ring along `loops`, whose indices count from `meshBase`,
 		// the mesh's first vertex in the batch.
