@@ -7,6 +7,7 @@
 
 #include <backend/NullBackend.h>
 #include <primitives/Primitives.h>
+#include <ui/shapes/Rectangle.h>
 #include <utils/Log.h>
 #include <utils/ResourcePath.h>
 
@@ -45,6 +46,49 @@ namespace app::testing {
 				{.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::white()}, .zIndex = zIndex}
 			);
 		}
+
+		// Each rect's x in the last frame's one draw, in the order the batch paints them: the index
+		// buffer's quads, each naming its first vertex.
+		std::vector<float> drawnX() {
+			auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
+			EXPECT_NE(gpu, nullptr);
+			EXPECT_EQ(gpu->draws().size(), 1U);
+			const Renderer::backend::GeometryDesc* geometry = gpu->geometry(gpu->draws().at(0).call.geometry);
+			EXPECT_NE(geometry, nullptr);
+			const std::span<const uint8_t>	   vertexBytes = gpu->bufferContents(geometry->vertices);
+			const std::span<const uint8_t>	   indexBytes = gpu->bufferContents(geometry->indices);
+			std::vector<Renderer::BatchVertex> vertices(vertexBytes.size() / sizeof(Renderer::BatchVertex));
+			std::vector<uint32_t>			   indices(indexBytes.size() / sizeof(uint32_t));
+			std::memcpy(vertices.data(), vertexBytes.data(), vertices.size() * sizeof(Renderer::BatchVertex));
+			std::memcpy(indices.data(), indexBytes.data(), indices.size() * sizeof(uint32_t));
+			std::vector<float> drawn;
+			for (size_t i = 0; i < indices.size(); i += 6) {
+				drawn.push_back(vertices.at(indices[i]).position.x);
+			}
+			return drawn;
+		}
+
+		void clearDraws() {
+			auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
+			ASSERT_NE(gpu, nullptr);
+			gpu->clearRecord();
+		}
+
+		// Counts the ui rectangles alive, so a test sees the scene's ui go.
+		int& liveUiRects() {
+			static int count = 0;
+			return count;
+		}
+
+		class CountedRect final : public ui::Rectangle {
+		  public:
+			CountedRect() { ++liveUiRects(); }
+			~CountedRect() override { --liveUiRects(); }
+			CountedRect(const CountedRect&) = delete;
+			CountedRect& operator=(const CountedRect&) = delete;
+			CountedRect(CountedRect&&) = delete;
+			CountedRect& operator=(CountedRect&&) = delete;
+		};
 
 		class RectOverlay final : public Overlay {
 		  public:
@@ -883,28 +927,78 @@ namespace app::testing {
 		app->scenes().push<SceneA>();
 		app->scenes().push<PauseScene>();
 		frame(0.0);
-
-		auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
-		ASSERT_NE(gpu, nullptr);
-		gpu->clearRecord();
+		clearDraws();
 		frame(0.0);
-		ASSERT_EQ(gpu->draws().size(), 1U);
-		const Renderer::backend::GeometryDesc* geometry = gpu->geometry(gpu->draws()[0].call.geometry);
-		ASSERT_NE(geometry, nullptr);
-		const std::span<const uint8_t>	   vertexBytes = gpu->bufferContents(geometry->vertices);
-		const std::span<const uint8_t>	   indexBytes = gpu->bufferContents(geometry->indices);
-		std::vector<Renderer::BatchVertex> vertices(vertexBytes.size() / sizeof(Renderer::BatchVertex));
-		std::vector<uint32_t>			   indices(indexBytes.size() / sizeof(uint32_t));
-		std::memcpy(vertices.data(), vertexBytes.data(), vertices.size() * sizeof(Renderer::BatchVertex));
-		std::memcpy(indices.data(), indexBytes.data(), indices.size() * sizeof(uint32_t));
-		ASSERT_EQ(indices.size(), 24U);
 
 		// The covered scene's z 5, the pause scene's z 0, then each overlay's lower z still over them.
-		std::vector<float> drawn;
-		for (size_t i = 0; i < indices.size(); i += 6) {
-			drawn.push_back(vertices.at(indices[i]).position.x);
-		}
-		EXPECT_EQ(drawn, (std::vector<float>{0.0F, 20.0F, 40.0F, 60.0F}));
+		EXPECT_EQ(drawnX(), (std::vector<float>{0.0F, 20.0F, 40.0F, 60.0F}));
+	}
+
+	// --- The scenes' ui ---
+
+	TEST_F(AppTest, EachScenesUiDrawsOverItsSceneAndUnderTheSceneAbove) {
+		start();
+		const auto mount = [](float x) {
+			return [x](App& running) {
+				running.scenes().top()->root().addChild<ui::Rectangle>({.position = {x, 0.0F}, .size = {10.0F, 10.0F}});
+			};
+		};
+		hooks()["A"].onEnter = mount(10.0F);
+		hooks()["A"].render = [](App& /*running*/) {
+			rectAt(0.0F, 1000);
+		};
+		hooks()["Pause"].onEnter = mount(30.0F);
+		hooks()["Pause"].render = [](App& /*running*/) {
+			rectAt(20.0F, 1000);
+		};
+		app->addOverlay(std::make_unique<RectOverlay>(40.0F, -5));
+		app->scenes().push<SceneA>();
+		app->scenes().push<PauseScene>();
+		frame(0.0);
+		clearDraws();
+		frame(0.0);
+
+		// Each scene's z 1000 under its own ui's key 0, both under the scene pushed over them.
+		EXPECT_EQ(drawnX(), (std::vector<float>{0.0F, 10.0F, 20.0F, 30.0F, 40.0F}));
+	}
+
+	TEST_F(AppTest, ASceneUiFollowsTheWindowAndGoesOnceOnExitHasRun) {
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			running.scenes().top()->root().addChild<CountedRect>({.size = {10.0F, 10.0F}});
+		};
+		hooks()["A"].onExit = [](App& /*running*/) {
+			EXPECT_EQ(liveUiRects(), 1);
+		};
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		Scene* scene = app->scenes().top();
+		ASSERT_NE(scene, nullptr);
+		EXPECT_EQ(scene->root().get()->getSize(), Foundation::Vec2(800.0F, 600.0F));
+		EXPECT_EQ(liveUiRects(), 1);
+
+		platform->resize(1024, 768);
+		frame(0.0);
+		EXPECT_EQ(scene->root().get()->getSize(), Foundation::Vec2(1024.0F, 768.0F));
+
+		app->scenes().pop();
+		frame(0.0);
+		EXPECT_EQ(liveUiRects(), 0);
+		EXPECT_EQ(count("A.onExit"), 1);
+	}
+
+	// A context a constructor makes has no stack to size it from; it takes the window when it enters.
+	TEST_F(AppTest, AUiMadeBeforeTheSceneEntersIsSizedWhenItDoes) {
+		class EarlyScene final : public TypedScene<> {
+		  public:
+			EarlyScene() { ui(); }
+			const char* name() const override { return "Early"; }
+			void		render(float /*alpha*/) override {}
+		};
+		start();
+		app->scenes().push<EarlyScene>();
+		frame(0.0);
+		EXPECT_EQ(app->scenes().top()->ui().getViewport(), Foundation::Vec2(800.0F, 600.0F));
 	}
 
 	// --- Exceptions ---

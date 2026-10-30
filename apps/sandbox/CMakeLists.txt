@@ -6,9 +6,12 @@ add_executable(salal_sandbox
     scenes/ArcScene.cpp
     scenes/BlendScene.cpp
     scenes/InputTestScene.cpp
+    scenes/PerfUiScene.cpp
     scenes/PolygonScene.cpp
     scenes/PolylineScene.cpp
     scenes/SdfMinimalScene.cpp
+    scenes/UiOrderScene.cpp
+    scenes/UiTextScene.cpp
 )
 
 target_include_directories(salal_sandbox PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

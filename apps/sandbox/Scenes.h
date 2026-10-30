@@ -1,7 +1,8 @@
 #pragma once
 
 // The sandbox's scenes, each defined in its own file under scenes/. They are the engine's test
-// fixtures, ported from worldsim's ui-sandbox: renderer-level drawing and input, no game content.
+// fixtures, ported from worldsim's ui-sandbox: renderer-level drawing and input, ui's ui_ scenes, and
+// perf_ui for the cost of ui's walk; no game content.
 
 #include <scene/Scene.h>
 
@@ -27,5 +28,8 @@ namespace sandbox {
 	extern const SceneInfo kPolylineScene;
 	extern const SceneInfo kBlendScene;
 	extern const SceneInfo kInputTestScene;
+	extern const SceneInfo kUiOrderScene;
+	extern const SceneInfo kUiTextScene;
+	extern const SceneInfo kPerfUiScene;
 
 } // namespace sandbox
