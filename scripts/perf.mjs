@@ -40,11 +40,11 @@ const FORBIDDEN_PORT = 8090;
 
 // Gated statistics: the median over a build's runs of each run's value. A head median more than the
 // threshold above the base median fails compare. Set from measured noise; docs/testing/README.md has
-// the numbers. perf_world's GPU time isn't gated: launch to launch its present waits or doesn't, and
-// the GPU's clocks, and so its time, follow.
+// the numbers. GPU time is gated in perf_quads only: perf_text's is 70 us, where a few microseconds
+// are 3%, and perf_world's present waits or doesn't launch to launch, and the GPU's clocks follow.
 const THRESHOLD_PCT = 4;
 const GATED_EVERYWHERE = ['cpuMs.p50', 'renderMs.p50'];
-const GATED = { perf_quads: [...GATED_EVERYWHERE, 'gpuMs.p50'], perf_text: [...GATED_EVERYWHERE, 'gpuMs.p50'] };
+const GATED = { perf_quads: [...GATED_EVERYWHERE, 'gpuMs.p50'] };
 const gatedIn = (scene) => GATED[scene] ?? GATED_EVERYWHERE;
 // Reported beside them, not gated: tails and counts move with intent (the rework changes the counts).
 const REPORTED = [

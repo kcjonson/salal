@@ -132,9 +132,9 @@ Compare builds the base in a worktree under the OS temp folder
 (`salal-perf/<ref>`, kept for the next run's incremental build; `git worktree
 remove` it when done), or takes `--base-exe`, and runs the two interleaved,
 alternating which goes first. It fails when the head's `cpuMs` or `renderMs`
-p50 is more than 4% above the base's, or its `gpuMs` p50 in `perf_quads` and
-`perf_text`. Tails, present and the counts are reported, not gated: the
-rework changes the counts on purpose.
+p50 is more than 4% above the base's, or its `gpuMs` p50 in `perf_quads`.
+The other GPU times, tails, present and the counts are reported, not gated:
+the rework changes the counts on purpose.
 
 ### Noise and the threshold
 
@@ -155,10 +155,13 @@ five runs: what a compare of one build against itself could show. `renderMs`
 moves with `cpuMs`. Unpinned, a launch landed on a different core or CCD
 and `perf_text`'s CPU time moved by a third, which is why the runner pins.
 The threshold, 4%, is four times the worst CPU A/A gap, so noise alone
-doesn't fail a compare, and a 5% regression clears it. `perf_world`'s GPU
-time isn't gated: launch to launch its present waits about 5 ms or doesn't
-(a frame of 9.7 or 4.4 ms, the CPU's time the same), and the GPU's clocks,
-and its time, follow.
+doesn't fail a compare, and a 5% regression clears it. An A/A compare, this
+build against the same commit built in the scratch worktree, moved no CPU
+figure more than 0.8%, but `perf_text`'s GPU time, 70 us, where a few
+microseconds are 3%, moved 3.0%, so GPU time is gated in `perf_quads` only.
+`perf_world`'s isn't either: launch to launch its present waits about 5 ms
+or doesn't (a frame of 9.7 or 4.4 ms, the CPU's time the same), and the
+GPU's clocks, and its time, follow.
 
 ### Results
 
