@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <span>
@@ -407,6 +408,43 @@ namespace Renderer {
 		EXPECT_EQ(uploaded[0].clipBounds, Foundation::Vec4(0.0F, 0.0F, 50.0F, 50.0F));
 		EXPECT_EQ(uploaded[4].position.x, 200.0F);
 		EXPECT_EQ(uploaded[4].clipBounds, Foundation::Vec4(0.0F));
+	}
+
+	TEST_F(FlushTest, ANanClipIsEmptyInsideAClipAsAtTheTop) {
+		const float nan = std::numeric_limits<float>::quiet_NaN();
+		Primitives::beginFrame();
+		Primitives::pushClip(Foundation::Rect{nan, 0.0F, 50.0F, 50.0F});
+		rect(0.0F);
+		Primitives::popClip();
+		Primitives::pushClip(Foundation::Rect{0.0F, 0.0F, 100.0F, 100.0F});
+		Primitives::pushClip(Foundation::Rect{0.0F, 0.0F, nan, 50.0F});
+		rect(10.0F);
+		Primitives::pushClip(Foundation::Rect{0.0F, 0.0F, 50.0F, 50.0F}); // over the empty clip, still empty
+		rect(20.0F);
+		Primitives::popClip();
+		Primitives::popClip();
+		Primitives::popClip();
+		Primitives::endFrame();
+		EXPECT_TRUE(gpu->draws().empty());
+	}
+
+	TEST_F(FlushTest, AClipOrTransformLeftPushedIsDroppedAtTheNextFrame) {
+		// A frame whose render threw between its pushes and their pops.
+		Primitives::beginFrame();
+		Primitives::PushTransform(glm::translate(Foundation::Mat4(1.0F), Foundation::Vec3(30.0F, 0.0F, 0.0F)));
+		Primitives::pushClip(Foundation::Rect{0.0F, 0.0F, 50.0F, 50.0F});
+		Primitives::pushClip(Foundation::Rect{100.0F, 0.0F, 50.0F, 50.0F}); // the empty clip
+		Primitives::endFrame();
+
+		Primitives::beginFrame();
+		rect(10.0F);
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 4U);
+		EXPECT_EQ(uploaded[0].position.x, 10.0F);
+		EXPECT_EQ(uploaded[0].clipBounds, Foundation::Vec4(0.0F));
+		EXPECT_EQ(Primitives::getCurrentTransform(), Foundation::Mat4(1.0F));
 	}
 
 	TEST_F(FlushTest, AClipWithNoAreaCullsEveryKindOfDraw) {

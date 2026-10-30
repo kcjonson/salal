@@ -857,6 +857,7 @@ namespace Renderer {
 		drawGroups.clear();
 		anyExplicitZ = false;
 		sortDomain = 0;
+		clearClipBounds();
 	}
 
 	void BatchRenderer::endFrame() {

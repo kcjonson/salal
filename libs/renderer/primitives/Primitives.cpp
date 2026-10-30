@@ -12,6 +12,7 @@
 #include "vector/Types.h"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
@@ -50,6 +51,9 @@ namespace Renderer::Primitives {
 	// (minX, minY, maxX, maxY). One with no area is the empty clip, which culls every
 	// draw; an intersection only shrinks, so every push over an empty clip stays empty.
 	static std::vector<Foundation::Vec4> g_clipStack;
+
+	// beginFrame found a clip or transform still pushed, and said so.
+	static bool g_warnedUnbalancedStacks = false;
 
 	// Tessellated polygon fills, keyed by a hash of the outline's vertex bits and
 	// checked against a copy of the outline, so a hash collision is a miss, never a
@@ -191,11 +195,29 @@ namespace Renderer::Primitives {
 	}
 
 	void beginFrame() {
+		// A frame starts with no clip and no transform. One still pushed is a push whose pop never
+		// ran, as when a render threw between them and the app logged it and went on; left, it would
+		// clip or move every frame after.
+		if (!g_clipStack.empty() || !g_transformStack.empty()) {
+			if (!g_warnedUnbalancedStacks) {
+				g_warnedUnbalancedStacks = true;
+				LOG_WARNING(
+					Renderer,
+					"beginFrame: %zu clips and %zu transforms were still pushed, a push without its pop; dropped (warned once)",
+					g_clipStack.size(),
+					g_transformStack.size()
+				);
+			}
+			g_clipStack.clear();
+			g_transformStack = {};
+			g_currentTransform = Foundation::Mat4(1.0F);
+		}
 		if (g_backend != nullptr) {
 			g_backend->beginFrame();
 		}
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->beginFrame();
+			g_batchRenderer->setTransform(g_currentTransform);
 		}
 	}
 
@@ -702,7 +724,10 @@ namespace Renderer::Primitives {
 			return;
 		}
 		Foundation::Vec4 bounds(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
-		if (!g_clipStack.empty()) {
+		if (std::isnan(bounds.x) || std::isnan(bounds.y) || std::isnan(bounds.z) || std::isnan(bounds.w)) {
+			// std::max and std::min would drop a NaN against the parent's bounds and keep the parent.
+			bounds = Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
+		} else if (!g_clipStack.empty()) {
 			const Foundation::Vec4& parent = g_clipStack.back();
 			bounds = {
 				std::max(parent.x, bounds.x), std::max(parent.y, bounds.y), std::min(parent.z, bounds.z), std::min(parent.w, bounds.w)
