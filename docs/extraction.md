@@ -732,7 +732,7 @@ adopted spec (decision C), with multi-device focus (I) and the storage model
 (F) settled on the way, and the spec's conformance scorecard as the acceptance
 test. Designed in [ui-design.md](ui-design.md) and sequenced in
 [ui-plan.md](ui-plan.md): four renderer PRs, ten that build `ui` in salal, then
-worldsim's conversion in three.
+worldsim's conversion in two.
 
 ### Phase 4, dual-deck-builder Job B
 

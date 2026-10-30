@@ -90,9 +90,7 @@ app links ui (the dependency rule allows it) and gives each `Scene` a ui
 context, made on first use, holding the scene's services ("Services and input
 routing"). App's default dispatch sends events to the overlays, then the top
 scene's ui, then the scene, and app registers the tree and lint providers from
-the top scene's context, so a game gets both with no code. A game that installs
-its own dispatch can call the default for a scene, which worldsim's bridge does
-while its scenes convert one at a time.
+the top scene's context, so a game gets both with no code.
 
 ### Build steps are C++ host tools
 
@@ -144,23 +142,22 @@ Order and overlap: 5 to 8 go in order; 9 and 10 run beside 6 to 8; 3 and 4 run
 beside 5 to 8 once the perf suite is in; 11 follows 9, 12 follows 8 and 11, 13
 needs 4, and 14 closes the salal side. Wrap layout, Popover, NumberInput, the
 standalone Scrollbar, Counter, the drag service and the rounded clip are not in
-the sequence (Grid is the third question under "Open"). None of worldsim's
+the sequence (Grid is the question under "Open"). None of worldsim's
 screens or asteroids' screen designs uses one; each comes when a game asks,
 dual-deck-builder's port most likely first.
 
 ## Worldsim's conversion
 
-Worldsim converts after PR 14, in its own PRs, each pinning the latest tag.
-Salal's ui and worldsim's `libs/ui` live side by side in world-sim between the
-first and the last, which the `ui/` prefix allows: a converted scene derives
-from `app::Scene` and takes app's default dispatch, an unconverted one keeps
-`UiScene` and the bridge, and the bridge passes the first kind to the default.
+Worldsim converts after PR 14, in two PRs, each pinning the latest tag. Each
+app moves whole, so no app runs both ui libraries; between the two PRs they
+share worldsim's build, which the `ui/` prefix allows. Worldsim's only work in
+flight is this extraction, whose other worldsim PRs (the renderer pins) land
+before, so world-sim's one large PR races nothing on its main.
 
 | PR | worldsim | gate |
 |---|---|---|
 | A. Theme, icons, ui-sandbox, asset-manager | `gen-cpp-theme.mjs` also emits a Design Tokens file for `salal_tokens()`; the 38 stroked glyphs of `IconGlyphs.h` outlined into filled SVGs, with `assets/ui/icons`' ten, in an `icons/` folder for `salal_icons()`; worldsim's own components on salal's ui (Avatar, Panel's kicker and bracket ticks); ui-sandbox's 16 pure-ui scenes deleted, since salal's sandbox has them, and its two Salvage scenes, its navigation menu and asset-manager converted | ctest; each converted scene through the dev server (tree, lint at 0, screenshot) against the pin before; asset-manager by hand |
-| B. Pre-game scenes | splash, landing, menu, settings, scenario-select, party-select, loading, world-creator and `scenes/shared` | the happy-path flows from launch to a started game, pad and mouse; tree and lint |
-| C. The game scene | `GameUI`, its views, dialogs and components; then `libs/ui`, `UiBridge`, `UiScene`, `UiOverlay`, `UiClipboard`, `Tokens.h` and `IconGlyphs.h` deleted | scripted `/api/input` runs before and after: a dialog from a menu, a tooltip over it, Tab and pad focus kept inside a dialog, a list in the game ui scrolled without zooming, a toast over a dialog; tree and lint; screenshots judged by a subagent for intended differences only |
+| B. World-sim | the pre-game scenes (splash, landing, menu, settings, scenario-select, party-select, loading, world-creator, `scenes/shared`) and the game scene (`GameUI`, its views, dialogs and components); then `libs/ui`, `UiBridge`, `UiScene`, `UiOverlay`, `UiClipboard`, `Tokens.h` and `IconGlyphs.h` deleted | the happy-path flows from launch to a started game, pad and mouse; scripted `/api/input` runs before and after: a dialog from a menu, a tooltip over it, Tab and pad focus kept inside a dialog, a list in the game ui scrolled without zooming, a toast over a dialog; tree and lint; screenshots judged by a subagent for intended differences only |
 
 What changes where a player or worldsim's tooling can see, known now; each
 conversion PR owns its part in its description:
@@ -184,18 +181,8 @@ conversion PR owns its part in its description:
 
 ## Open
 
-Decisions the sequence needs that ui-design.md leaves open, each with a
-recommendation:
-
-1. Worldsim's conversion, scene group by scene group (A, B and C apart, both ui
-   libraries in world-sim between B and C) or world-sim in one PR.
-   Recommended: apart. One PR over 18,000 lines of an active repo's screens is
-   the long-lived extraction branch extraction.md warns about; the cost is two
-   ui libraries in world-sim for the span. Changes only the worldsim side, and
-   nothing before PR 14 waits on it.
-2. Whether worldsim's game-ui work pauses while C is open. Recommended: yes,
-   since C touches every game-ui file.
-3. `display: Grid`. ui-design.md lists it with the taffy names; the spec puts
-   wrap and grid out of scope, worldsim's `LayoutContainer` has neither, and no
-   screen in the three games uses one. Recommended: PR 6 lands Block, Flex and
-   None, and Grid comes with the first game that asks. Changes PR 6 only.
+One decision the sequence needs that ui-design.md leaves open:
+`display: Grid`. ui-design.md lists it with the taffy names; the spec puts
+wrap and grid out of scope, worldsim's `LayoutContainer` has neither, and no
+screen in the three games uses one. Recommended: PR 6 lands Block, Flex and
+None, and Grid comes with the first game that asks. Changes PR 6 only.
