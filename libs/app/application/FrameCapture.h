@@ -3,13 +3,14 @@
 // A perf capture: each frame's times and the batch's counts from start to stop, and the GPU times
 // that came back meanwhile, summed into distributions at stop. The App records a frame that began
 // while capturing once it closes, at the next frame's start, so a capture holds whole frames only.
-// Room for kMaxFrames is reserved at start, so recording never allocates; frames past it are
-// counted as dropped, not kept. docs/testing/README.md has the runner that reads it.
+// Room for kMaxFrames is reserved at start, so recording never allocates, and let go at stop; frames
+// past it are counted as dropped, not kept. docs/testing/README.md has the runner that reads it.
 
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace app {
@@ -25,24 +26,39 @@ namespace app {
 		uint32_t triangles = 0;
 		uint32_t instances = 0;
 		uint64_t uploadBytes = 0;
-	};
-
-	// Nearest-rank percentiles, so each is a value some frame had.
-	struct Distribution {
-		double p50 = 0.0;
-		double p99 = 0.0;
-		double mean = 0.0;
-		double max = 0.0;
+		bool	 minimized = false; // the window had no framebuffer, so nothing was drawn
 	};
 
 	struct CaptureSummary {
-		uint64_t	 frames = 0;
-		uint64_t	 droppedFrames = 0; // past kMaxFrames
-		double		 seconds = 0.0;		// the frames' times summed
-		Distribution frameMs, cpuMs, presentMs, renderMs, flushMs;
-		uint64_t	 gpuFrames = 0; // GPU results that came back during the capture, a few frames behind
-		Distribution gpuMs;
-		Distribution drawCalls, vertices, triangles, instances, uploadBytes;
+		// Nearest-rank percentiles, so each is a value some frame had; none (null) over no frames.
+		struct Distribution {
+			double p50 = 0.0;
+			double p99 = 0.0;
+			double mean = 0.0;
+			double max = 0.0;
+		};
+		using Stat = std::optional<Distribution>;
+
+		uint64_t frames = 0;
+		uint64_t droppedFrames = 0;	  // past kMaxFrames
+		uint64_t minimizedFrames = 0; // frames the window had no framebuffer
+		double	 seconds = 0.0;		  // the frames' times summed
+		Stat	 frameMs, cpuMs, presentMs, renderMs, flushMs;
+		Stat	 drawCalls, vertices, triangles, instances, uploadBytes;
+
+		// GPU frames that came back during the capture, a few frames behind, and those that didn't
+		// come back in time and were never timed. gpuMs is over the ones that came back; none where
+		// the backend has no timestamps.
+		uint64_t gpuFrames = 0;
+		uint64_t gpuDropped = 0;
+		bool	 gpuSupported = true;
+		Stat	 gpuMs;
+
+		// What the run had at stop, which the App fills in.
+		int	 framebufferWidth = 0;
+		int	 framebufferHeight = 0;
+		bool resized = false; // the framebuffer changed size during the capture
+		bool vsync = true;
 
 		nlohmann::ordered_json toJson() const;
 	};

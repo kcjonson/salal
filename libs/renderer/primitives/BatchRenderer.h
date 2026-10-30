@@ -224,7 +224,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// one draw call per run.
 		void flush();
 
-		// Frame lifecycle
+		// Frame lifecycle. beginFrameStats() starts the frame's statistics and GPU frame; beginFrame()
+		// starts a batch, which a frame may hold several of (an offscreen pass inside it).
+		void beginFrameStats();
 		void beginFrame();
 		void endFrame();
 
@@ -281,6 +283,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// GPU timing of flush(), drawInstanced(), the baked pass and whatever a caller brackets with
 		// begin/endGpuSpan() (Primitives::clear), as GPUFrameTimer spans, off until turned on.
 		void				 setGpuTiming(bool enabled);
+		bool				 getGpuTiming() const { return gpuTiming; }
 		void				 beginGpuSpan();
 		void				 endGpuSpan();
 		const GPUFrameTimer& getGpuTimer() const { return gpuTimer; }

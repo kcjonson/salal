@@ -133,6 +133,7 @@ namespace Renderer::backend::gl {
 
 	GLBackend::GLBackend() {
 		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uniformAlignment);
+		glGetQueryiv(GL_TIMESTAMP, GL_QUERY_COUNTER_BITS, &timestampBits);
 		drawRing = makeRing(kUniformBinding, sizeof(DrawUniforms));
 		applyFixedState();
 	}
@@ -649,7 +650,17 @@ namespace Renderer::backend::gl {
 
 	// --- Timestamp queries ---
 
+	// glQueryCounter is core in 3.3, but a driver may count GL_TIMESTAMP with no bits (some of macOS's);
+	// there every query is refused, so a GPU timer reports none rather than zeros.
 	QueryHandle GLBackend::createTimestampQuery() {
+		if (timestampBits == 0) {
+			static bool warned = false;
+			if (!warned) {
+				warned = true;
+				LOG_WARNING(Renderer, "createTimestampQuery: GL_TIMESTAMP has no counter bits on this driver; no GPU timing");
+			}
+			return {};
+		}
 		return queries.insert(GLQuery::create());
 	}
 

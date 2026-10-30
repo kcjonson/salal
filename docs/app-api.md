@@ -135,6 +135,7 @@ public:
 	virtual bool closeRequested() const = 0;
 	virtual void present() = 0;
 	virtual void setVsync(bool) = 0;
+	virtual bool vsync() const = 0;                              // the WindowConfig's, or setVsync's since
 	virtual void setFullscreen(std::optional<int> monitor) = 0; // the window system's monitor order; windowed, logged, for one that isn't there
 	virtual std::optional<int> fullscreenMonitor() const = 0;
 	virtual void setWindowSize(int width, int height) = 0;      // the windowed size: now while windowed, where fullscreen returns to otherwise
@@ -220,7 +221,7 @@ public:
 	const Renderer::Viewport& viewport() const;
 	Renderer::CoordinateSystem& coordinateSystem();
 	Renderer::MetricsCollector* metrics();
-	void startCapture();                  // a perf capture of whole frames, GPU timing on (FrameCapture.h)
+	void startCapture();                  // a perf capture of whole frames, GPU timing on (FrameCapture.h); render() starts each frame's statistics with Primitives::beginFrameStats()
 	std::optional<CaptureSummary> stopCapture();
 	bool capturing() const;
 	void addOverlay(std::unique_ptr<Overlay>); // persistent across scene changes, above the stack: dev menus, debug HUDs
@@ -919,7 +920,7 @@ Routes:
 | `/api/ui/tree`, `/api/ui/lint` | step 10 | by providers the game registers (`"ui.tree"`, `"ui.lint"`) until salal's `ui` registers its own in phase 3; with none registered, `{"viewport":{"width":w,"height":h},"roots":[]}` at the logical viewport and `{"count":0,"violations":[]}`, so an app with no ui (the sandbox, the asteroids prototype) still meets the inspector contract |
 | `/api/ui/screenshot` | step 10 | read before present; one readback answers every screenshot parked for the frame; 500 when there is no backbuffer to read |
 | `/api/input` | queued at once, joins at step 3 | grows `char,<codepoint>`, `pad,<device>,<button>,down\|up`, `axis,<device>,<axis>,<value>`, `connect,vpad<n>`, `disconnect,vpad<n>`; a request's events all queue or none do, and a malformed one is a 400 naming it; injected events go through the accumulator, so injected keys reach the ui the way typed ones do (today they skip the focus manager, `InputManager.cpp:371-375`) |
-| `/api/control` | step 3 | `exit`, `scene`, `pause`, `resume`, `reload`, `vsync` as today, plus `step&ticks=<n>` (one tick without `ticks`, 409 unless paused) and `capture&op=start|stop` (a perf capture of every whole frame between the two, with the renderer's GPU timing on meanwhile; `stop` answers with the summary, 409 when none is running; [testing/README.md](testing/README.md), Performance); games register further actions, which is how world-sim keeps `camera` for `scripts/perf-capture.ps1:23` and `docs/testing/README.md:132`; an action answers once it has run, though `scene` and `reload` queue their change, which applies at step 6 (after resume while paused), so they answer before it takes effect, as today; an unknown action is a 404 at once (today a 400), a `scene` nothing was added under a 404 and a `reload` of a scene pushed with arguments a 409 |
+| `/api/control` | step 3 | `exit`, `scene`, `pause`, `resume`, `reload`, `vsync` as today, plus `step&ticks=<n>` (one tick without `ticks`, 409 unless paused) and `capture&op=start|stop` (a perf capture of every whole frame between the two, with the renderer's GPU timing on meanwhile; `stop` answers with the summary, with the framebuffer, vsync and minimized frames the run had, 409 when none is running; [testing/README.md](testing/README.md), Performance); games register further actions, which is how world-sim keeps `camera` for `scripts/perf-capture.ps1:23` and `docs/testing/README.md:132`; an action answers once it has run, though `scene` and `reload` queue their change, which applies at step 6 (after resume while paused), so they answer before it takes effect, as today; an unknown action is a 404 at once (today a 400), a `scene` nothing was added under a 404 and a `reload` of a scene pushed with arguments a 409 |
 | `/api/state?what=` | step 10 | `scene` answered by the server itself from the stack's `exportState()`; anything else by registered providers, 404 at once for an unregistered `what`, where today it is 503 after 2 s; `what` still defaults to `summary` |
 | `/api/dev/<verb>` | step 3 | the game's registered routes; 404 for an unregistered verb, where today it is queued and answered with an ack |
 | `/api/health`, `/api/metrics`, `/stream/metrics`, `/stream/logs`, `/` | at once | as today, `/api/metrics` adding the batch's instances, upload bytes, flushes and flush time; the index page lists every route, without worldsim's developer-client notes |

@@ -8,16 +8,18 @@
 namespace app {
 
 	namespace {
-		Distribution distribution(std::vector<double> values) {
+		using Stat = CaptureSummary::Stat;
+
+		Stat distribution(std::vector<double> values) {
 			if (values.empty()) {
-				return {};
+				return std::nullopt;
 			}
 			std::ranges::sort(values);
 			const auto rank = [&values](double quantile) {
 				const auto index = static_cast<std::size_t>(std::ceil(quantile * static_cast<double>(values.size())));
 				return values[std::clamp<std::size_t>(index, 1, values.size()) - 1];
 			};
-			return {
+			return CaptureSummary::Distribution{
 				.p50 = rank(0.5),
 				.p99 = rank(0.99),
 				.mean = std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size()),
@@ -26,7 +28,7 @@ namespace app {
 		}
 
 		template <typename Field>
-		Distribution over(const std::vector<FrameSample>& samples, Field field) {
+		Stat over(const std::vector<FrameSample>& samples, Field field) {
 			std::vector<double> values;
 			values.reserve(samples.size());
 			for (const FrameSample& sample : samples) {
@@ -35,8 +37,11 @@ namespace app {
 			return distribution(std::move(values));
 		}
 
-		nlohmann::ordered_json toJson(const Distribution& d) {
-			return {{"p50", d.p50}, {"p99", d.p99}, {"mean", d.mean}, {"max", d.max}};
+		nlohmann::ordered_json toJson(const Stat& stat) {
+			if (!stat) {
+				return nullptr;
+			}
+			return {{"p50", stat->p50}, {"p99", stat->p99}, {"mean", stat->mean}, {"max", stat->max}};
 		}
 	} // namespace
 
@@ -44,6 +49,7 @@ namespace app {
 		return {
 			{"frames", frames},
 			{"droppedFrames", droppedFrames},
+			{"minimizedFrames", minimizedFrames},
 			{"seconds", seconds},
 			{"frameMs", app::toJson(frameMs)},
 			{"cpuMs", app::toJson(cpuMs)},
@@ -51,12 +57,17 @@ namespace app {
 			{"renderMs", app::toJson(renderMs)},
 			{"flushMs", app::toJson(flushMs)},
 			{"gpuFrames", gpuFrames},
+			{"gpuDropped", gpuDropped},
+			{"gpuSupported", gpuSupported},
 			{"gpuMs", app::toJson(gpuMs)},
 			{"drawCalls", app::toJson(drawCalls)},
 			{"vertices", app::toJson(vertices)},
 			{"triangles", app::toJson(triangles)},
 			{"instances", app::toJson(instances)},
 			{"uploadBytes", app::toJson(uploadBytes)},
+			{"framebuffer", {{"width", framebufferWidth}, {"height", framebufferHeight}}},
+			{"resized", resized},
+			{"vsync", vsync},
 		};
 	}
 
@@ -93,17 +104,20 @@ namespace app {
 			.presentMs = over(samples, &FrameSample::presentMs),
 			.renderMs = over(samples, &FrameSample::renderMs),
 			.flushMs = over(samples, &FrameSample::flushMs),
-			.gpuFrames = gpuSamples.size(),
-			.gpuMs = distribution({gpuSamples.begin(), gpuSamples.end()}),
 			.drawCalls = over(samples, &FrameSample::drawCalls),
 			.vertices = over(samples, &FrameSample::vertices),
 			.triangles = over(samples, &FrameSample::triangles),
 			.instances = over(samples, &FrameSample::instances),
 			.uploadBytes = over(samples, &FrameSample::uploadBytes),
+			.gpuFrames = gpuSamples.size(),
+			.gpuMs = distribution({gpuSamples.begin(), gpuSamples.end()}),
 		};
 		for (const FrameSample& sample : samples) {
 			summary.seconds += static_cast<double>(sample.frameMs) / 1000.0;
+			summary.minimizedFrames += sample.minimized ? 1 : 0;
 		}
+		std::vector<FrameSample>().swap(samples);
+		std::vector<float>().swap(gpuSamples);
 		return summary;
 	}
 

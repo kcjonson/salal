@@ -140,8 +140,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// for the next one. Synchronous by design: it waits for the GPU.
 		void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height);
 
+		// A batch: beginFrame() clears what is pending and the clip and transform stacks,
+		// endFrame() flushes. A frame may hold several (an offscreen pass inside the
+		// app's frame), so the frame's statistics and GPU time start apart from them, at
+		// beginFrameStats(), which the app calls once a frame.
 		void beginFrame();
 		void endFrame(); // Flushes all batches
+		void beginFrameStats();
 
 		// GPU code outside the renderer left depth test, culling or scissor on, or bound
 		// a uniform buffer to binding point 0, which is the renderer's: set the fixed
@@ -484,7 +489,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Statistics ---
 
-		// The frame's batch since beginFrame(): draw calls, vertices and triangles (an
+		// The frame's batches since beginFrameStats(): draw calls, vertices and triangles (an
 		// instanced draw counting each instance's), the instances drawInstanced drew,
 		// the vertex, index and instance bytes written to the backend, and the flushes
 		// that submitted something with the CPU time they took (the plan, the uploads
@@ -507,10 +512,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Off, no query is written. Results come back a few frames late; turning it off
 		// drops the ones still on their way.
 		void setGpuTiming(bool enabled);
+		bool getGpuTiming();
 
+		// A frame is beginFrameStats() to the next.
 		struct GpuFrameTime {
-			float	 ms = 0.0F;	 // the latest frame whose spans have come back
-			uint64_t frames = 0; // frames timed since init(); a new result has arrived when it moves
+			float	 ms = 0.0F;		   // the latest frame whose spans have come back
+			uint64_t frames = 0;	   // frames timed since init(); a new result has arrived when it moves
+			uint64_t dropped = 0;	   // frames whose results weren't back in time, never timed
+			bool	 supported = true; // false where the backend has no timestamps
 		};
 
 		GpuFrameTime getGpuFrameTime();

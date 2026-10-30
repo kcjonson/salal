@@ -129,7 +129,8 @@ namespace app {
 		// A perf capture (FrameCapture.h) of every frame from the next one on, with the renderer's GPU
 		// timing on meanwhile; starting again starts over. The dev server's capture action runs these.
 		void startCapture();
-		// The capture's summary, the GPU timing off again; nullopt when none was running.
+		// The capture's summary, with the framebuffer and vsync the run had, and the GPU timing back as
+		// the capture found it; nullopt when none was running.
 		std::optional<CaptureSummary> stopCapture();
 		bool						  capturing() const;
 
@@ -220,10 +221,13 @@ namespace app {
 		double	 sectionStart = 0.0;
 		Sections sections;
 
-		FrameCapture  frameCapture;
-		bool		  frameInCapture = false; // this frame began while capturing
-		double		  renderSeconds = 0.0;	  // step 9, timed while capturing
-		std::uint64_t gpuFramesSeen = 0;
+		FrameCapture	   frameCapture;
+		bool			   frameInCapture = false; // this frame began while capturing
+		double			   renderSeconds = 0.0;	   // step 9, timed while capturing
+		std::uint64_t	   gpuFramesSeen = 0;
+		std::uint64_t	   gpuDroppedAtCapture = 0;
+		bool			   gpuTimingBeforeCapture = false;
+		Renderer::Viewport captureViewport{};
 	};
 
 } // namespace app

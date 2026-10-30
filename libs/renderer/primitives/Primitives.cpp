@@ -238,6 +238,12 @@ namespace Renderer::Primitives {
 		}
 	}
 
+	void beginFrameStats() {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->beginFrameStats();
+		}
+	}
+
 	void sortBarrier() {
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->sortBarrier();
@@ -810,12 +816,16 @@ namespace Renderer::Primitives {
 		}
 	}
 
+	bool getGpuTiming() {
+		return g_batchRenderer != nullptr && g_batchRenderer->getGpuTiming();
+	}
+
 	GpuFrameTime getGpuFrameTime() {
 		if (g_batchRenderer == nullptr) {
 			return {};
 		}
 		const GPUFrameTimer& timer = g_batchRenderer->getGpuTimer();
-		return {.ms = timer.lastFrameMs(), .frames = timer.framesTimed()};
+		return {.ms = timer.lastFrameMs(), .frames = timer.framesTimed(), .dropped = timer.framesDropped(), .supported = timer.supported()};
 	}
 
 } // namespace Renderer::Primitives

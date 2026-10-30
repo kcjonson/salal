@@ -502,6 +502,7 @@ namespace Renderer {
 	}
 
 	TEST_F(FlushTest, GpuTimingBracketsEachSubmissionOnceTurnedOn) {
+		Primitives::beginFrameStats();
 		Primitives::beginFrame();
 		rect(0.0F);
 		Primitives::endFrame();
@@ -509,6 +510,7 @@ namespace Renderer {
 
 		Primitives::setGpuTiming(true);
 		for (int frame = 0; frame < 5; ++frame) {
+			Primitives::beginFrameStats();
 			Primitives::beginFrame();
 			rect(0.0F);
 			Primitives::flush();
@@ -517,12 +519,32 @@ namespace Renderer {
 		}
 		EXPECT_EQ(gpu->timestampsWritten(), 20); // two flushes a frame, a pair each
 		EXPECT_EQ(Primitives::getGpuFrameTime().frames, 1U);
+		EXPECT_TRUE(Primitives::getGpuTiming());
 
 		Primitives::setGpuTiming(false);
+		Primitives::beginFrameStats();
 		Primitives::beginFrame();
 		rect(0.0F);
 		Primitives::endFrame();
 		EXPECT_EQ(gpu->timestampsWritten(), 20);
+	}
+
+	TEST_F(FlushTest, ABatchBegunInsideAFrameAddsToItsStatistics) {
+		Primitives::beginFrameStats();
+		Primitives::beginFrame();
+		rect(0.0F);
+		Primitives::endFrame();
+		Primitives::beginFrame(); // an offscreen pass inside the app's frame
+		rect(20.0F);
+		rect(40.0F);
+		Primitives::endFrame();
+		const Primitives::RenderStats stats = Primitives::getStats();
+		EXPECT_EQ(stats.drawCalls, 2U);
+		EXPECT_EQ(stats.vertexCount, 12U);
+		EXPECT_EQ(stats.flushCount, 2U);
+
+		Primitives::beginFrameStats();
+		EXPECT_EQ(Primitives::getStats().drawCalls, 0U);
 	}
 
 	TEST_F(FlushTest, InstancedDrawsCarryTheirCameraAndInstances) {

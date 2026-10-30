@@ -80,7 +80,7 @@ calls texture changes cost.
 | scene | what it draws | what it guards |
 |---|---|---|
 | `perf_quads` | 10,000 overlapping rects: radii, borders inside, centred and outside, some gradients and shadows, under a scrolling translate | per-quad batcher time and upload bytes, one draw call |
-| `perf_text` | 223 list rows in six sizes, 11 to 24 px: a background, an image icon, a label in one font atlas and a value and unit in a second (the sandbox's font loaded twice) | glyph batching, and texture splits: three draw calls a row today (671 a frame), which texture slots make one |
+| `perf_text` | 223 list rows in six sizes, 11 to 24 px: a background, an image icon from twelve that cycle, a label in one font atlas and a value and unit in a second (the sandbox's font loaded twice) | glyph batching and texture splits: three draw calls a row today (671 a frame), and fourteen textures a frame, more than eight resident slots hold, so a slow slot-full path shows |
 | `perf_world` | worldsim's VectorPerf 10,000 stars inside a clip, 120 stroked roads, a flush, 3,000 instanced trees, 400 rotating polygons from six cached silhouettes sorted by z, a barrier, 200 labels, then four clipped screen panels, under a panning, zooming camera | the world path: triangles, strokes, the z sort, barriers, clips and flushes |
 
 A ui tree with popups open and icons come with phase 3, when there is a ui
@@ -89,9 +89,10 @@ walk, a popup stack and an icon atlas to measure.
 ### What a capture holds
 
 `/api/control?action=capture&op=start` starts a capture and turns the
-renderer's GPU timing on; `op=stop` turns it off and answers with the
-summary. A capture holds every whole frame between the two. Each of these is
-reported as p50, p99, mean and max over the frames (nearest rank):
+renderer's GPU timing on; `op=stop` puts the timing back as it found it and
+answers with the summary. A capture holds every whole frame between the two.
+Each of these is reported as p50, p99, mean and max over the frames (nearest
+rank), or null over none:
 
 | field | what it is |
 |---|---|
@@ -100,12 +101,27 @@ reported as p50, p99, mean and max over the frames (nearest rank):
 | `presentMs` | the swap, which waits when the GPU or the compositor is behind |
 | `renderMs` | step 9, the scenes and overlays drawing and the batch's flushes; in these scenes, which only draw, the batcher's time |
 | `flushMs` | of that, the flushes: the plan, the uploads and the draw calls |
-| `gpuMs` | GPU time of each clear, flush, instanced draw and baked pass from a pair of timestamp queries, summed per frame (`GPUFrameTimer`), so a frame the CPU holds up reads what the GPU did, not how long it waited; read four frames late, never stalling |
+| `gpuMs` | GPU time of the frame's clears, flushes, instanced draws and baked passes (below), over the frames whose results came back |
 | `drawCalls`, `vertices`, `triangles`, `instances`, `uploadBytes` | the batch's counts, `uploadBytes` the vertex, index and instance bytes it wrote |
 
-GPU timing sits behind the backend's timestamp queries (no GL past the
-boundary), costs nothing while no capture runs, and reads 0 on the null
-backend. `/api/metrics` carries the live per-frame counts too.
+Beside them: `gpuFrames` and `gpuDropped`, the GPU results that came back
+and those that didn't in time; `gpuSupported`, false on a driver with no
+timestamps; `minimizedFrames`; and what the run had at stop, its
+`framebuffer`, whether it `resized`, and `vsync` (a settings file's
+`video.vsync` beats `--no-vsync`).
+
+GPU time comes from `GPUFrameTimer`: each clear, flush draw, instanced draw
+and baked pass is a span between two of the backend's timestamp queries
+(no GL past the boundary), a span inside another is part of it, and a
+frame's spans are summed, so a frame the CPU holds up reads what the GPU did,
+not how long it waited. A frame is one `App::render`, which calls
+`Primitives::beginFrameStats()` once, so a pass that begins a batch of its
+own inside it (an offscreen render) adds to the frame's counts and GPU time.
+Results are read four frames late and never waited for; one not back by then
+is dropped and counted. It costs nothing while no capture runs, reads 0 on the
+null backend, and on a GL driver whose `GL_TIMESTAMP` has no counter bits
+(some of macOS's) it times nothing and says so. `/api/metrics` carries the
+live per-frame counts too.
 
 ### The runner
 
@@ -113,86 +129,94 @@ backend. `/api/metrics` carries the live per-frame counts too.
 `SALAL_DEV_SERVER_IN_RELEASE` in `build-perf/`, beside `build/`: Release
 because it is what ships (RelWithDebInfo inlines less on MSVC), and its own
 build tree so a perf run leaves the developer's build alone. Each run
-launches one scene with `--scene`, `--http-port 8094` (checked free first;
-never 8090) and `--no-vsync`, pinned to logical CPUs 4 to 11, waits for
-`/api/health`, warms up 3 s, captures 5 s, reads `/api/metrics`, and exits
-through `/api/control?action=exit`. Before each run it waits for any `cl`,
-`link` or `ninja` (another session's build) to finish and for its cores to
-be under 25% busy, and notes in the run what it gave up waiting for. A build's figure for a statistic is the median of its five
-runs.
+launches one scene with `--scene`, `--http-port 8094` (never 8090) and
+`--no-vsync`, waits for `/api/health`, checks the scene it asked for is the
+one running, warms up 3 s, captures 5 s, reads `/api/metrics`, and exits
+through `/api/control?action=exit`. On a machine with 16 or more logical CPUs
+it pins the sandbox to logical CPUs 4 to 11 (`--affinity` for another mask);
+on a smaller one, or macOS, it runs unpinned, says so, and won't compare
+without an explicit `--threshold`. Before each run it waits for any compiler,
+linker, `ninja` or other sandbox to finish and for its cores to be under 25%
+busy, checks the port right before launching, and flags a run that went ahead
+after the wait ran out.
 
 ```
 node scripts/perf.mjs run                  # this checkout, into perf-results/local/
-node scripts/perf.mjs compare              # main, built in a scratch worktree, against this checkout
+node scripts/perf.mjs compare              # the merge-base with main, built in a scratch worktree, against this checkout
 node scripts/perf.mjs compare --base v0.20.0
-node scripts/perf.mjs noise --runs 10      # one build's run-to-run spread
+node scripts/perf.mjs noise                # one build's spread, and the gate's error rates on it
 ```
 
-Compare builds the base in a worktree under the OS temp folder
-(`salal-perf/<ref>`, kept for the next run's incremental build; `git worktree
-remove` it when done), or takes `--base-exe`, and runs the two interleaved,
-alternating which goes first. It fails when the head's `cpuMs` or `renderMs`
-p50 is more than 4% above the base's, or its `gpuMs` p50 in `perf_quads`.
-The other GPU times, tails, present and the counts are reported, not gated:
-the rework changes the counts on purpose.
+Compare builds the base in a worktree under the OS temp folder (one a
+checkout and ref, kept for the next run's incremental build; `git worktree
+remove` it when done), or takes `--base-exe`, prints both commits, and runs
+the two builds interleaved, five runs each, alternating which goes first. The
+first usable base is the tag cut with the perf suite; anything older has no
+perf scenes, which compare reports as invalid.
 
-### Noise and the threshold
+A build's figure for a timing is the fastest of its five runs, since
+interference only slows a run. Exit codes:
 
-Measured on `kevinsgamingdesktop` (Ryzen 9 5950X, RTX 3090, Windows 11),
-2026-10-30: ten runs of one Release build in each of two sessions about an
-hour apart, p50s. Range, CV and A/A gap are the worse of the two sessions.
+- **1, regressed**: a gated timing more than its scene's threshold above the
+  base, or a count up (draw calls, upload bytes, instances, vertices are
+  fixed for fixed content; `--allow-counts` reports them instead).
+- **3, inconclusive**: a side's two fastest runs differ by more than the
+  threshold (it didn't reproduce its figure), a run went ahead on a busy
+  machine, or the scene's content differs between the builds.
+- **2, invalid**: a bad option, a run that couldn't be made (a missing scene,
+  a port in use, a sandbox that didn't start), or data that can't be gated: a
+  gated value missing, zero or not finite, under 200 frames, a minimized
+  frame, a resize, vsync on, or GPU results for under 90% of a run's frames.
 
-| scene | statistic | median ms, session 1 | session 2 | range | CV | A/A gap, 5 runs a side | range unpinned |
-|---|---|---|---|---|---|---|---|
-| `perf_quads` | `cpuMs` | 0.917 | 0.794 | 2.3% | 0.8% | 1.2% | 14.0% |
-| | `gpuMs` | 0.205 | 0.205 | 0.0% | 0.0% | 0.0% | 1.2% |
-| `perf_text` | `cpuMs` | 0.719 | 0.475 | 4.7% | 1.3% | 1.0% | 36.8% |
-| | `gpuMs` | 0.069 | 0.069 | 5.9% | 2.0% | 1.5% | 5.9% |
-| `perf_world` | `cpuMs` | 4.347 | 3.852 | 15.7% | 4.8% | 0.7% | 15.3% |
-| | `gpuMs` | 0.284 | 0.178 | 37.2% | 17.8% | 4.4% | 49.8% |
+Tails, present, flush time and `perf_world`'s GPU time are reported, not
+gated.
 
-The A/A gap is the worst gap between the medians of two disjoint groups of
-five runs: what a compare of one build against itself could show. `renderMs`
-moves with `cpuMs`. Unpinned, a launch landed on a different core or CCD
-and `perf_text`'s CPU time moved by a third, which is why the runner pins.
-`perf_world`'s 15.7% range in session 2 is one run of ten; the median of five
-doesn't see it.
+### Thresholds, provisional
 
-The threshold, 4%, is over three times the worst CPU A/A gap, so noise alone
-doesn't fail a compare, and a 5% regression clears it. An A/A compare, this
-build against the same commit built in the scratch worktree, moved no CPU
-figure more than 0.8%, but `perf_text`'s GPU time, 70 us, where a few
-microseconds are 3%, moved 3.0%, so GPU time is gated in `perf_quads` only.
-`perf_world`'s isn't either: in session 1 its present waited about 5 ms in
-some launches and not others (a frame of 9.7 or 4.4 ms, the CPU's time the
-same), and the GPU's clocks, and its time, followed.
+| scene | gated, min of 5, threshold |
+|---|---|
+| `perf_quads` | `cpuMs` and `renderMs` p50, 3%; `gpuMs` p50, 3% |
+| `perf_text` | `cpuMs` and `renderMs` p50, 3%; `gpuMs` p50, 3% |
+| `perf_world` | `cpuMs` and `renderMs` p50, 3%; `gpuMs` not gated |
 
-Between sessions the level moved by up to a third (`perf_text` 0.719 to
-0.475 ms) while each session stayed tight. The cause isn't pinned down;
-other sessions' builds and tests on the same machine are the likely one, so
-the runner now waits for the cores it runs on to be under 25% busy and
-records their load before each run and the rest of the machine's during it.
-This is why a decision is always a compare, its two builds interleaved in
-one session, and never a run read against a committed result.
+These are provisional. They come from runs on `kevinsgamingdesktop` (Ryzen 9
+5950X, RTX 3090, Windows 11) on 2026-10-30 while the machine was in use and
+other sessions were building on it, which aren't valid baselines. Resampled,
+min of five at 3% falsely failed a build against itself in at most 1.0% of
+trials on the CPU timings and missed a 5% regression in at most 7.3%, but
+`perf_world`'s GPU time sat at one of two levels a third apart and falsely
+failed 25% of trials, so it isn't gated. Two sessions an hour apart differed
+by up to a third (`perf_text` 0.72 against 0.48 ms) while each was tight, and
+unpinned runs moved by a third launch to launch, which is why the runner pins
+and why a decision is always a compare, its builds interleaved in one
+session, and never a run read against a committed result. In one run of
+`perf_world` present waited in some frames (a `presentMs` mean of 3.06 ms
+against a p50 of 0.14), so its frame time's p50 doesn't add up from the
+others' p50s; the means do.
+
+To set them for good, on an idle machine: `node scripts/perf.mjs noise` with
+the default mask and with `--affinity 0x0550` (one logical CPU a core), and
+an A/A compare (`compare --base HEAD`), then the statistic and each scene's
+threshold from what those show.
 
 ### Results
 
-`perf-results/<machine>/<describe>.json`, committed: `<machine>` the host
-name in lower case, `<describe>` `git describe --tags` of the commit
-measured, which at a tag is the tag. `perf-results/local/` holds everything
-else (ad hoc runs, compares, noise) and is ignored.
+`perf-results/<machine>/<tag>.json`, committed: `<machine>` the host name in
+lower case. `perf-results/local/` holds everything else (ad hoc runs,
+compares, noise) and is ignored.
 
 At a tag, from a clean checkout of it:
 
 1. `node scripts/perf.mjs run --record`: writes
-   `perf-results/<machine>/<tag>.json`, refused with uncommitted changes.
+   `perf-results/<machine>/<tag>.json`, refused unless HEAD is exactly a tag
+   with nothing uncommitted.
 2. Commit that one file to `main`.
 
 A committed result is a record, read beside others from the same machine and
 window size (the sandbox's window is 80% of the primary monitor's work area),
-and never a threshold: sessions differ by more than one does (above). When a
-game's frame rate drops after an engine bump, `compare --base <old tag>` from
-a checkout of the new one answers it; the committed files say where to look.
+and never a threshold. When a game's frame rate drops after an engine bump,
+`compare --base <old tag>` from a checkout of the new one answers it; the
+committed files say where to look.
 
 ## Unit tests
 

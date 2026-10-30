@@ -38,7 +38,9 @@ namespace Renderer {
 
 	void GPUFrameTimer::beginFrame() {
 		if (frameOpen) {
-			endSpan();
+			if (depth > 0) {
+				closeSpan();
+			}
 			frames->slots[current].pending = true;
 			current = (current + 1) % kFrames;
 		}
@@ -56,6 +58,8 @@ namespace Renderer {
 				}
 				lastMs = static_cast<float>(static_cast<double>(totalNs) / 1.0e6);
 				++timed;
+			} else {
+				++dropped;
 			}
 		}
 		frame.pending = false;
@@ -64,25 +68,36 @@ namespace Renderer {
 	}
 
 	void GPUFrameTimer::beginSpan() {
-		if (!frameOpen || spanOpen) {
+		if (!frameOpen || unsupported || depth++ > 0) {
 			return;
 		}
 		Frames::Frame& frame = frames->slots[current];
 		if (frame.used == frame.spans.size()) {
-			frame.spans.push_back({.start = gpu.createTimestampQuery(), .stop = gpu.createTimestampQuery()});
+			const Frames::Span span{.start = gpu.createTimestampQuery(), .stop = gpu.createTimestampQuery()};
+			if (!span.start.isValid() || !span.stop.isValid()) {
+				gpu.destroyTimestampQuery(span.start);
+				gpu.destroyTimestampQuery(span.stop);
+				unsupported = true;
+				depth = 0;
+				return;
+			}
+			frame.spans.push_back(span);
 		}
 		gpu.writeTimestamp(frame.spans[frame.used].start);
-		spanOpen = true;
 	}
 
 	void GPUFrameTimer::endSpan() {
-		if (!spanOpen) {
+		if (depth == 0 || --depth > 0) {
 			return;
 		}
+		closeSpan();
+	}
+
+	void GPUFrameTimer::closeSpan() {
 		Frames::Frame& frame = frames->slots[current];
 		gpu.writeTimestamp(frame.spans[frame.used].stop);
 		++frame.used;
-		spanOpen = false;
+		depth = 0;
 	}
 
 	void GPUFrameTimer::reset() {
@@ -91,7 +106,7 @@ namespace Renderer {
 			frame.used = 0;
 		}
 		frameOpen = false;
-		spanOpen = false;
+		depth = 0;
 	}
 
 } // namespace Renderer

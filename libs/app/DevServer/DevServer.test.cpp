@@ -140,6 +140,7 @@ namespace app::testing {
 			bool					   closeRequested() const override { return false; }
 			void					   present() override { record("platform", "present"); }
 			void					   setVsync(bool enabled) override { record("platform", enabled ? "vsync on" : "vsync off"); }
+			bool					   vsync() const override { return false; }
 			void					   setFullscreen(std::optional<int> /*monitor*/) override {}
 			std::optional<int>		   fullscreenMonitor() const override { return std::nullopt; }
 			void					   setWindowSize(int /*width*/, int /*height*/) override {}
@@ -674,8 +675,21 @@ namespace app::testing {
 		frame();
 		const nlohmann::json stopped = nlohmann::json::parse(ask("/api/control?action=capture&op=stop").body);
 		EXPECT_EQ(stopped.at("op"), "stop");
-		EXPECT_EQ(stopped.at("capture").at("frames"), 3); // the three after the one that started it
+		const nlohmann::json& capture = stopped.at("capture");
+		EXPECT_EQ(capture.at("frames"), 3); // the three after the one that started it
+		EXPECT_EQ(capture.at("framebuffer").at("width"), 800);
+		EXPECT_EQ(capture.at("vsync"), true);  // the headless platform's, never set
+		EXPECT_EQ(capture.at("gpuFrames"), 0); // the first comes back four frames in
+		EXPECT_TRUE(capture.at("gpuMs").is_null());
 		EXPECT_FALSE(app->capturing());
+		EXPECT_FALSE(Renderer::Primitives::getGpuTiming()); // as the capture found it
+
+		Renderer::Primitives::setGpuTiming(true); // the game's own timing survives a capture
+		app->startCapture();
+		frame();
+		ASSERT_TRUE(app->stopCapture().has_value());
+		EXPECT_TRUE(Renderer::Primitives::getGpuTiming());
+		Renderer::Primitives::setGpuTiming(false);
 
 		Reply reply = ask("/api/control?action=capture&op=stop");
 		EXPECT_EQ(reply.status, 409);

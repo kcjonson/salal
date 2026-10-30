@@ -835,14 +835,10 @@ namespace Renderer {
 				 .indexCount = run.indexCount}
 			);
 		}
-		// The GPU span starts after the uploads, so it holds the draws and not the CPU writing them.
-		if (gpuTiming) {
-			gpuTimer.beginSpan();
-		}
+		// A GPU span holds draws, never the uploads before them, here and in drawInstanced().
+		beginGpuSpan();
 		gpu.draw(drawCalls);
-		if (gpuTiming) {
-			gpuTimer.endSpan();
-		}
+		endGpuSpan();
 		drawCallCount += drawCalls.size();
 
 		// Accumulate stats before clearing
@@ -860,7 +856,7 @@ namespace Renderer {
 		sortDomain = 0;
 	}
 
-	void BatchRenderer::beginFrame() {
+	void BatchRenderer::beginFrameStats() {
 		drawCallCount = 0;
 		frameVertexCount = 0;
 		frameTriangleCount = 0;
@@ -871,6 +867,9 @@ namespace Renderer {
 		if (gpuTiming) {
 			gpuTimer.beginFrame();
 		}
+	}
+
+	void BatchRenderer::beginFrame() {
 		vertices.clear();
 		indices.clear();
 		vertexAtlas.clear();
@@ -1085,9 +1084,6 @@ namespace Renderer {
 		uint32_t remaining = count;
 		uint32_t offset = 0;
 
-		if (gpuTiming) {
-			gpuTimer.beginSpan();
-		}
 		while (remaining > 0) {
 			uint32_t batchSize = std::min(remaining, handle.maxInstances);
 
@@ -1100,7 +1096,9 @@ namespace Renderer {
 				.indexCount = handle.indexCount,
 				.instanceCount = batchSize
 			};
+			beginGpuSpan();
 			gpu.draw({&call, 1});
+			endGpuSpan();
 
 			drawCallCount++;
 			// Each instance renders all mesh vertices; triangle count = indices / 3
@@ -1111,9 +1109,6 @@ namespace Renderer {
 
 			remaining -= batchSize;
 			offset += batchSize;
-		}
-		if (gpuTiming) {
-			gpuTimer.endSpan();
 		}
 	}
 
@@ -1144,17 +1139,13 @@ namespace Renderer {
 		// The same blend state as every batch draw; the caller's VAO draws follow
 		gpu.beginForeignDraws(pipeline, backend::BlendState::Alpha);
 		bakedPassOpen = true;
-		if (gpuTiming) {
-			gpuTimer.beginSpan();
-		}
+		beginGpuSpan();
 	}
 
 	void BatchRenderer::endBakedPass() {
 		// Alpha back to 1 so the instanced path (same shader branch) is unaffected
 		uniforms.bakedAlpha = 1.0F;
-		if (gpuTiming) {
-			gpuTimer.endSpan();
-		}
+		endGpuSpan();
 		gpu.endForeignDraws();
 		bakedPassOpen = false;
 	}

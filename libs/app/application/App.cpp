@@ -366,6 +366,7 @@ namespace app {
 			.triangles = stats.triangleCount,
 			.instances = stats.instanceCount,
 			.uploadBytes = stats.uploadBytes,
+			.minimized = framebufferEmpty,
 		});
 		const Renderer::Primitives::GpuFrameTime gpu = Renderer::Primitives::getGpuFrameTime();
 		if (gpu.frames != gpuFramesSeen) {
@@ -518,9 +519,12 @@ namespace app {
 		}
 	}
 
-	// The stack, then the overlays, each overlay its own sort domain over everything before it.
+	// The stack, then the overlays, each overlay its own sort domain over everything before it. The
+	// frame's statistics and GPU time start here, once, so a pass that begins a batch of its own
+	// inside the frame (an offscreen render) adds to them.
 	void App::render() {
 		const double start = frameInCapture ? platform->clock().now() : 0.0;
+		Renderer::Primitives::beginFrameStats();
 		Renderer::Primitives::beginFrame();
 		if (fontRenderer != nullptr) {
 			fontRenderer->updateFrame();
@@ -777,22 +781,39 @@ namespace app {
 		return metricsCollector.get();
 	}
 
-	// GPU timing restarts with the capture, so a result from a frame before it isn't counted in it.
+	// GPU timing restarts with the capture, so a result from a frame before it isn't counted in it, and a
+	// frame begun before it, under a capture started again, isn't recorded.
 	void App::startCapture() {
+		if (!frameCapture.active()) {
+			gpuTimingBeforeCapture = Renderer::Primitives::getGpuTiming();
+		}
 		Renderer::Primitives::setGpuTiming(false);
 		Renderer::Primitives::setGpuTiming(true);
-		gpuFramesSeen = Renderer::Primitives::getGpuFrameTime().frames;
+		const Renderer::Primitives::GpuFrameTime gpu = Renderer::Primitives::getGpuFrameTime();
+		gpuFramesSeen = gpu.frames;
+		gpuDroppedAtCapture = gpu.dropped;
+		captureViewport = coordinates.viewport();
+		frameInCapture = false;
 		frameCapture.start();
 		LOG_INFO(Engine, "Capture started");
 	}
 
+	// The GPU timing goes back to how the capture found it.
 	std::optional<CaptureSummary> App::stopCapture() {
 		if (!frameCapture.active()) {
 			return std::nullopt;
 		}
-		Renderer::Primitives::setGpuTiming(false);
+		const Renderer::Primitives::GpuFrameTime gpu = Renderer::Primitives::getGpuFrameTime();
+		Renderer::Primitives::setGpuTiming(gpuTimingBeforeCapture);
 		frameInCapture = false;
-		const CaptureSummary summary = frameCapture.stop();
+		CaptureSummary summary = frameCapture.stop();
+		summary.gpuDropped = gpu.dropped - gpuDroppedAtCapture;
+		summary.gpuSupported = gpu.supported;
+		const Renderer::Viewport& window = coordinates.viewport();
+		summary.framebufferWidth = window.framebufferWidth;
+		summary.framebufferHeight = window.framebufferHeight;
+		summary.resized = !sameSize(window, captureViewport);
+		summary.vsync = platform->vsync();
 		LOG_INFO(
 			Engine,
 			"Capture stopped: %llu frames over %.2fs",

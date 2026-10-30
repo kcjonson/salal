@@ -4,7 +4,8 @@
 // buffers, and records what it is asked to do, so the renderer's tests (and a
 // game's) run headless and check what would have reached the GPU. Nothing is
 // drawn; readPixels() reads zeros where GL would read, and a timestamp is ready, at
-// 0, once it is written.
+// 0, once it is written. Not final, so a test can override what a GPU would answer
+// (timestamps that lag, or none).
 
 #include "backend/Backend.h"
 #include "backend/SlotTable.h"
@@ -15,7 +16,7 @@
 
 namespace Renderer::backend {
 
-	class NullBackend final : public Backend {
+	class NullBackend : public Backend {
 	  public:
 		// One setHookUniforms() call.
 		struct HookUniforms {
