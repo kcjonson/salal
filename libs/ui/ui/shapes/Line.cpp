@@ -31,7 +31,7 @@ namespace ui {
 		localStart = start - low;
 		localEnd = end - low;
 		setPosition(low);
-		Component::setSize(high - low);
+		Component::setSize(Size(high - low));
 	}
 
 	void Line::describe(nlohmann::json& node) const {

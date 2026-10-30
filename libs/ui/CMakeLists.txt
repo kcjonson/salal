@@ -24,6 +24,7 @@ add_library(salal_ui STATIC
     ui/Transform.cpp
     ui/debug/LayoutLint.cpp
     ui/debug/TreeSnapshot.cpp
+    ui/detail/LayoutEngine.cpp
     ui/shapes/Circle.cpp
     ui/shapes/Line.cpp
     ui/shapes/Rectangle.cpp

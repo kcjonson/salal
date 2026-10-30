@@ -2,8 +2,10 @@
 
 #include "ui/Context.h"
 #include "ui/detail/Snapshot.h"
+#include "ui/shapes/Text.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace ui {
 
@@ -27,10 +29,23 @@ namespace ui {
 				   inner.bottom() <= outer.bottom() + kEpsilon;
 		}
 
-		bool overlapsBeyondEpsilon(const Foundation::Rect& a, const Foundation::Rect& b) {
+		// Touching edges aren't overlap, nor is up to `allowed` on an axis.
+		bool overlapsBeyondEpsilon(const Foundation::Rect& a, const Foundation::Rect& b, Foundation::Vec2 allowed) {
 			const float overlapWidth = std::min(a.right(), b.right()) - std::max(a.x, b.x);
 			const float overlapHeight = std::min(a.bottom(), b.bottom()) - std::max(a.y, b.y);
-			return overlapWidth > kEpsilon && overlapHeight > kEpsilon;
+			return overlapWidth > allowed.x + kEpsilon && overlapHeight > allowed.y + kEpsilon;
+		}
+
+		// What two rects share; none when it has no area.
+		std::optional<Foundation::Rect> intersection(const Foundation::Rect& a, const Foundation::Rect& b) {
+			const float left = std::max(a.x, b.x);
+			const float top = std::max(a.y, b.y);
+			const float right = std::min(a.right(), b.right());
+			const float bottom = std::min(a.bottom(), b.bottom());
+			if (right <= left || bottom <= top) {
+				return std::nullopt;
+			}
+			return Foundation::Rect{left, top, right - left, bottom - top};
 		}
 
 		struct Sibling {
@@ -49,19 +64,22 @@ namespace ui {
 			// One sibling group at `origin` in the viewport (the parent's top-left, untransformed), then
 			// each visible member's children. `parent` is null for the roots, which only the viewport
 			// contains. Within a stacking context an unset zIndex takes the parent's; under a new
-			// context it starts from 0.
+			// context it starts from 0. A parent that clips declares its children may run past it, so
+			// they aren't outside it, and only what its clip shows is held to the viewport.
 			void siblings(
-				const std::vector<ComponentId>& ids,
-				const Sibling*					parent,
-				Foundation::Vec2				origin,
-				int								inheritedZ,
-				LintResult&						result
+				const std::vector<ComponentId>&		   ids,
+				const Sibling*						   parent,
+				Foundation::Vec2					   origin,
+				int									   inheritedZ,
+				const std::optional<Foundation::Rect>& clip,
+				LintResult&							   result
 			) {
+				const bool			 parentClips = parent != nullptr && parent->component->getOverflow() == Overflow::Clip;
 				std::vector<Sibling> visible;
 				visible.reserve(ids.size());
 				for (std::size_t i = 0; i < ids.size(); ++i) {
 					const Component* component = context.find(ids[i]);
-					if (component == nullptr || !component->isVisible()) {
+					if (component == nullptr || !component->isShown()) {
 						continue;
 					}
 					const Foundation::Rect local = component->getBounds();
@@ -70,19 +88,38 @@ namespace ui {
 					if (bounds.width <= 0.0F || bounds.height <= 0.0F) {
 						result.violations.push_back({LintRule::ZeroOrNegativeSize, path, bounds, "", {}});
 					}
-					if (parent != nullptr && !containsWithEpsilon(parent->bounds, bounds)) {
+					if (parent != nullptr && !parentClips && !containsWithEpsilon(parent->bounds, bounds)) {
 						result.violations.push_back({LintRule::ChildOutsideParent, path, bounds, parent->path, parent->bounds});
 					}
-					if (!containsWithEpsilon(viewportRect, bounds)) {
+					const std::optional<Foundation::Rect> shown = clip ? intersection(bounds, *clip) : std::optional(bounds);
+					if (shown && !containsWithEpsilon(viewportRect, *shown)) {
 						result.violations.push_back({LintRule::OutsideViewport, path, bounds, "viewport", viewportRect});
+					}
+					if (const auto* text = dynamic_cast<const Text*>(component)) {
+						const Foundation::Vec2 extent = text->measureExtent().size;
+						const Foundation::Vec2 box = component->getSize();
+						if (extent.x > box.x + kEpsilon || extent.y > box.y + kEpsilon) {
+							const Foundation::Vec2 at{bounds.x + component->getMargin().left, bounds.y + component->getMargin().top};
+							result.violations.push_back(
+								{LintRule::TextOverflow, path, {at.x, at.y, extent.x, extent.y}, "", {at.x, at.y, box.x, box.y}}
+							);
+						}
 					}
 					visible.push_back({component, path, bounds, component->getZIndex().value_or(inheritedZ)});
 				}
 
-				// Roots are each a stacking context the size of the viewport, layered on purpose.
+				// Roots are each a stacking context the size of the viewport, layered on purpose. A flex
+				// parent's negative gap overlaps its children by that much on purpose too.
+				Foundation::Vec2 allowed{0.0F, 0.0F};
+				if (parent != nullptr && parent->component->getLayout().display == Display::Flex &&
+					parent->component->getLayout().gap < 0.0F) {
+					const float gap = -parent->component->getLayout().gap;
+					allowed = parent->component->getLayout().flexDirection == FlexDirection::Row ? Foundation::Vec2{gap, 0.0F}
+																								 : Foundation::Vec2{0.0F, gap};
+				}
 				for (std::size_t i = 0; parent != nullptr && i < visible.size(); ++i) {
 					for (std::size_t j = i + 1; j < visible.size(); ++j) {
-						if (visible[i].z == visible[j].z && overlapsBeyondEpsilon(visible[i].bounds, visible[j].bounds)) {
+						if (visible[i].z == visible[j].z && overlapsBeyondEpsilon(visible[i].bounds, visible[j].bounds, allowed)) {
 							result.violations.push_back(
 								{LintRule::SiblingOverlap, visible[i].path, visible[i].bounds, visible[j].path, visible[j].bounds}
 							);
@@ -90,9 +127,25 @@ namespace ui {
 					}
 				}
 
+				// A child's space starts at its parent's box, inside the parent's margin.
 				for (const Sibling& member : visible) {
-					const int childZ = member.component->getIsolation() ? 0 : member.z;
-					siblings(member.component->getChildren(), &member, {member.bounds.x, member.bounds.y}, childZ, result);
+					const int			   childZ = member.component->getIsolation() ? 0 : member.z;
+					const Edges&		   margin = member.component->getMargin();
+					const Foundation::Vec2 boxSize = member.component->getSize();
+					const Sibling		   box{
+						 member.component,
+						 member.path,
+								 {member.bounds.x + margin.left, member.bounds.y + margin.top, boxSize.x, boxSize.y},
+						 member.z
+					 };
+					std::optional<Foundation::Rect> childClip = clip;
+					if (member.component->getOverflow() == Overflow::Clip) {
+						childClip = clip ? intersection(box.bounds, *clip) : std::optional(box.bounds);
+						if (!childClip) {
+							childClip = Foundation::Rect{box.bounds.x, box.bounds.y, 0.0F, 0.0F};
+						}
+					}
+					siblings(member.component->getChildren(), &box, {box.bounds.x, box.bounds.y}, childZ, childClip, result);
 				}
 			}
 
@@ -113,6 +166,8 @@ namespace ui {
 				return "outside-viewport";
 			case LintRule::ZeroOrNegativeSize:
 				return "zero-or-negative-size";
+			case LintRule::TextOverflow:
+				return "text-overflow";
 		}
 		return "unknown";
 	}
@@ -120,7 +175,7 @@ namespace ui {
 	LintResult lint(const Context& context, Foundation::Vec2 viewport) {
 		LintResult result;
 		Linter	   linter(context, viewport);
-		linter.siblings(context.getRoots(), nullptr, {0.0F, 0.0F}, 0, result);
+		linter.siblings(context.getRoots(), nullptr, {0.0F, 0.0F}, 0, std::nullopt, result);
 		return result;
 	}
 

@@ -1,5 +1,7 @@
 #include "ui/Context.h"
 
+#include "ui/detail/LayoutEngine.h"
+
 #include <primitives/Primitives.h>
 #include <utils/Log.h>
 
@@ -54,12 +56,15 @@ namespace ui {
 		Component& added = *component;
 		added.setCommon(args);
 		added.position = {0.0F, 0.0F};
+		added.sizeSpec = Size(viewport);
 		added.size = viewport;
+		added.margin = {};
 		added.isolation = true;
 		const ComponentId rootId = registry.insert(std::move(component));
 		added.selfId = rootId;
 		added.context = this;
 		roots.push_back(rootId);
+		dirtyBoundaries.push_back(rootId);
 		geometryDirty = true;
 		orderDirty = true;
 		{
@@ -91,7 +96,10 @@ namespace ui {
 		viewport = size;
 		for (const ComponentId rootId : roots) {
 			if (Component* rootComponent = registry.find(rootId)) {
-				rootComponent->setSize(size);
+				rootComponent->sizeSpec = Size(size);
+				rootComponent->size = size;
+				rootComponent->layoutDirty = true;
+				dirtyBoundaries.push_back(rootId);
 			}
 		}
 		geometryDirty = true;
@@ -103,11 +111,32 @@ namespace ui {
 		const Registry::DispatchScope scope(registry);
 	}
 
+	// From each relayout boundary something under changed, a root's box being the viewport; then the
+	// screen maps and clips, the paint order, and onLayout for whatever moved, which may ask for
+	// another pass on the next frame.
 	void Context::layout() {
+		std::vector<ComponentId> moved;
+		if (!dirtyBoundaries.empty()) {
+			++layoutPass;
+			detail::LayoutEngine		   engine(registry, layoutPass, moved);
+			const std::vector<ComponentId> boundaries = std::exchange(dirtyBoundaries, {});
+			for (const ComponentId boundaryId : boundaries) {
+				Component* boundary = registry.find(boundaryId);
+				if (boundary == nullptr || !boundary->layoutDirty) {
+					continue;
+				}
+				if (!boundary->parentId.valid()) {
+					boundary->size = viewport;
+					boundary->offset = {0.0F, 0.0F};
+				}
+				engine.arrange(*boundary);
+			}
+			geometryDirty = true;
+		}
 		if (geometryDirty) {
 			for (const ComponentId rootId : roots) {
 				if (Component* rootComponent = registry.find(rootId)) {
-					updateScreen(*rootComponent, {});
+					updateScreen(*rootComponent, {}, std::nullopt);
 				}
 			}
 			geometryDirty = false;
@@ -116,13 +145,36 @@ namespace ui {
 			buildOrder();
 			orderDirty = false;
 		}
+		if (!moved.empty()) {
+			const Registry::DispatchScope scope(registry);
+			for (const ComponentId movedId : moved) {
+				Component* component = registry.find(movedId);
+				if (component != nullptr && component->handlers && component->handlers->onLayout) {
+					component->handlers->onLayout(*component);
+				}
+			}
+		}
 	}
 
-	void Context::updateScreen(Component& component, const Affine& parent) {
-		component.screen = parent * Affine::local(component.position, component.size, component.transform);
+	void Context::updateScreen(Component& component, const Affine& parent, const std::optional<Foundation::Rect>& parentClip) {
+		component.screen = parent * Affine::local(component.offset + component.margin.topLeft(), component.size, component.transform);
+		component.clip = parentClip;
+		std::optional<Foundation::Rect> childClip = parentClip;
+		if (component.overflow == Overflow::Clip) {
+			const Foundation::Rect box = component.screenBounds();
+			if (!childClip) {
+				childClip = box;
+			} else {
+				const float left = std::max(childClip->x, box.x);
+				const float top = std::max(childClip->y, box.y);
+				const float right = std::min(childClip->right(), box.right());
+				const float bottom = std::min(childClip->bottom(), box.bottom());
+				childClip = Foundation::Rect{left, top, std::max(right - left, 0.0F), std::max(bottom - top, 0.0F)};
+			}
+		}
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
-				updateScreen(*child, component.screen);
+				updateScreen(*child, component.screen, childClip);
 			}
 		}
 	}
@@ -132,7 +184,7 @@ namespace ui {
 		orderScratch.clear();
 		for (const ComponentId rootId : roots) {
 			Component* rootComponent = registry.find(rootId);
-			if (rootComponent != nullptr && rootComponent->visible) {
+			if (rootComponent != nullptr && rootComponent->isShown()) {
 				orderScratch.push_back({.component = rootComponent, .z = rootComponent->zIndex.value_or(0)});
 			}
 		}
@@ -184,7 +236,7 @@ namespace ui {
 	void Context::collectContext(Component& parent, int inheritedZ) {
 		for (const ComponentId childId : parent.children) {
 			Component* child = registry.find(childId);
-			if (child == nullptr || !child->visible) {
+			if (child == nullptr || !child->isShown()) {
 				continue;
 			}
 			const int z = child->zIndex.value_or(inheritedZ);
@@ -206,23 +258,31 @@ namespace ui {
 		}
 	}
 
-	// Depth first in tree order, so each component draws under its ancestors' transforms; its key, not
-	// the walk, puts it in paint order.
+	// Depth first in tree order, so each component draws under its ancestors' transforms and clips; its
+	// key, not the walk, puts it in paint order. Overflow::Clip cuts the children, not the component's
+	// own draws.
 	void Context::renderComponent(Component& component, float parentOpacity) {
-		if (!component.visible) {
+		if (!component.isShown()) {
 			return;
 		}
 		component.effectiveOpacity = parentOpacity * component.style.opacity.value_or(1.0F);
-		const Affine local = Affine::local(component.position, component.size, component.transform);
+		const Affine local = Affine::local(component.offset + component.margin.topLeft(), component.size, component.transform);
 		const bool	 moved = !local.isTranslation() || local.tx != 0.0F || local.ty != 0.0F;
 		if (moved) {
 			Renderer::Primitives::PushTransform(local.toMat4());
 		}
 		component.render();
+		const bool clipped = component.overflow == Overflow::Clip && !component.children.empty();
+		if (clipped) {
+			Renderer::Primitives::pushClip(component.screenBounds());
+		}
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
 				renderComponent(*child, component.effectiveOpacity);
 			}
+		}
+		if (clipped) {
+			Renderer::Primitives::popClip();
 		}
 		if (moved) {
 			Renderer::Primitives::PopTransform();

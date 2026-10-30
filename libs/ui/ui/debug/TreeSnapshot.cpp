@@ -31,21 +31,23 @@ namespace ui {
 		// The common fields, then the type's own; opacity is the effective value the walk computes, as
 		// of the last frame drawn, so it reads from the parent's.
 		nlohmann::json node(const Context& context, const Component& component, float parentOpacity) {
-			const float	   opacity = component.isVisible() ? parentOpacity * component.getStyle().opacity.value_or(1.0F) : 0.0F;
+			const float	   opacity = component.isShown() ? parentOpacity * component.getStyle().opacity.value_or(1.0F) : 0.0F;
 			nlohmann::json out;
 			out["id"] = component.getId().empty() ? nlohmann::json(nullptr) : nlohmann::json(component.getId());
 			out["type"] = component.typeName();
 			out["bounds"] = detail::rectJson(component.getBounds());
 			out["screenBounds"] = detail::rectJson(component.screenBounds());
-			out["margin"] = {{"top", 0.0F}, {"right", 0.0F}, {"bottom", 0.0F}, {"left", 0.0F}};
+			const Edges& margin = component.getMargin();
+			out["margin"] = {{"top", margin.top}, {"right", margin.right}, {"bottom", margin.bottom}, {"left", margin.left}};
 			const std::optional<int> zIndex = component.getZIndex();
 			out["zIndex"] = zIndex ? nlohmann::json(*zIndex) : nlohmann::json(nullptr);
 			out["isolation"] = component.getIsolation();
-			out["key"] = component.isVisible() ? nlohmann::json(component.drawKey()) : nlohmann::json(nullptr);
+			out["key"] = component.isShown() ? nlohmann::json(component.drawKey()) : nlohmann::json(nullptr);
 			out["visible"] = component.isVisible();
 			out["enabled"] = component.isEnabled();
 			out["opacity"] = opacity;
-			out["clip"] = nullptr;
+			const std::optional<Foundation::Rect>& clip = component.getClip();
+			out["clip"] = clip ? detail::rectJson(*clip) : nlohmann::json(nullptr);
 			out["contentOffset"] = nullptr;
 			out["transform"] = transformJson(component.getTransform());
 			out["focusable"] = false;

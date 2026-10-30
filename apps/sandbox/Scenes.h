@@ -30,5 +30,7 @@ namespace sandbox {
 	extern const SceneInfo kInputTestScene;
 	extern const SceneInfo kUiOrderScene;
 	extern const SceneInfo kUiTextScene;
+	extern const SceneInfo kUiLayoutScene;
+	extern const SceneInfo kUiClipScene;
 
 } // namespace sandbox

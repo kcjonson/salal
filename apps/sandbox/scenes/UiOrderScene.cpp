@@ -43,8 +43,8 @@ namespace {
 
 	// A box with a label filling it, centred.
 	Ref<Rectangle> labelled(Ref<Component> parent, Component::Args args, const std::string& label, float fontSize = 14.0F) {
-		const Foundation::Vec2 size = args.size;
-		Ref<Rectangle>		   box = parent.addChild<Rectangle>(args);
+		const ui::Size size = args.size;
+		Ref<Rectangle> box = parent.addChild<Rectangle>(args);
 		box.addChild<Text>({
 			.size = size,
 			.style =

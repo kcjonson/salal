@@ -43,7 +43,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void setGpuTimes(float renderMs, float tilePassMs);
 
 		// Set main loop timing breakdown (called by Application after each frame)
-		void setMainLoopTimings(float pollEventsMs, float inputHandleMs, float sceneUpdateMs, float sceneRenderMs, float swapBuffersMs);
+		void setMainLoopTimings(
+			float pollEventsMs,
+			float inputHandleMs,
+			float sceneUpdateMs,
+			float uiLayoutMs,
+			float sceneRenderMs,
+			float swapBuffersMs
+		);
 
 	  private:
 		using Clock = std::chrono::high_resolution_clock;
@@ -81,6 +88,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		float m_pollEventsMs{};
 		float m_inputHandleMs{};
 		float m_sceneUpdateMs{};
+		float m_uiLayoutMs{};
 		float m_sceneRenderMs{};
 		float m_swapBuffersMs{};
 

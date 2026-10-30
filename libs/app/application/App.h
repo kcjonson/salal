@@ -137,6 +137,7 @@ namespace app {
 			float poll = 0.0F;	  // step 2
 			float input = 0.0F;	  // steps 3 to 6
 			float update = 0.0F;  // steps 7 and 8
+			float layout = 0.0F;  // the ui layout pass, at the start of step 9
 			float render = 0.0F;  // steps 9 and 10
 			float present = 0.0F; // step 11
 		};
