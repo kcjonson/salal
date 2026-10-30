@@ -13,7 +13,8 @@
 // Flex is single-line: basis from the child's size or content, the leftover grown by flexGrow or
 // the overflow taken by flexShrink weighted by basis, min and max clamped, then the distribution run
 // once more with the clamped children fixed (R10.4). A text's automatic minimum in a row is its
-// longest word, or its whole width when it doesn't wrap.
+// longest word, or its whole width when it doesn't wrap. A scroller's flex children don't shrink: it
+// scrolls them instead.
 
 #include "ui/Component.h"
 
@@ -57,6 +58,7 @@ namespace ui::detail {
 		void flex(Component& node, std::optional<float> contentWidth, std::optional<float> contentHeight, float availableWidth);
 		void arrangeFlex(Component& node);
 		void arrangeFree(Component& node);
+		void scrollExtent(Component& node);
 		void placeAbsolute(Component& child, Foundation::Vec2 box);
 		void place(Component& child, Foundation::Vec2 offset, Foundation::Vec2 size);
 

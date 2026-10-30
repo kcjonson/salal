@@ -124,7 +124,9 @@ namespace ui {
 	enum class AlignItems : std::uint8_t { Start, Center, End, Stretch };
 	enum class JustifyContent : std::uint8_t { Start, Center, End, SpaceBetween, SpaceAround, SpaceEvenly };
 	enum class Position : std::uint8_t { Relative, Absolute };
-	enum class Overflow : std::uint8_t { Visible, Clip };
+	// Clip cuts the children at the box; Scroll cuts them too and scrolls them, by the wheel and a
+	// thumb, over their union plus the padding (R4.13).
+	enum class Overflow : std::uint8_t { Visible, Clip, Scroll };
 
 	struct Layout {
 		// As a container.

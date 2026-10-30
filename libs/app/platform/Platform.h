@@ -10,6 +10,7 @@
 #include <CoordinateSystem/CoordinateSystem.h>
 #include <backend/Backend.h>
 #include <input/InputTypes.h>
+#include <ui/Input.h>
 
 #include <memory>
 #include <optional>
@@ -94,6 +95,10 @@ namespace app {
 		// The system clipboard's text; empty when it holds none.
 		virtual std::string clipboardText() const = 0;
 		virtual void		setClipboardText(const std::string& text) = 0;
+
+		// The window's cursor, one of the window system's standard shapes; nothing where there's no
+		// window.
+		virtual void setCursor(ui::Cursor /*cursor*/) {}
 	};
 
 	// A window with a GL 3.3 core context current on the calling thread; null, logged, when the window

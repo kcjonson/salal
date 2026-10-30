@@ -36,6 +36,20 @@ namespace ui {
 		overflow = args.overflow;
 		zIndex = args.zIndex;
 		isolation = args.isolation;
+		pointerEvents = args.pointerEvents;
+		cursor = args.cursor;
+		const auto take = [this](const std::function<void(PointerEvent&)>& from, std::function<void(PointerEvent&)> Handlers::* to) {
+			if (from) {
+				handlersMade().*to = from;
+			}
+		};
+		take(args.onClick, &Handlers::onClick);
+		take(args.onPointerDown, &Handlers::onPointerDown);
+		take(args.onPointerUp, &Handlers::onPointerUp);
+		take(args.onPointerMove, &Handlers::onPointerMove);
+		take(args.onPointerEnter, &Handlers::onPointerEnter);
+		take(args.onPointerLeave, &Handlers::onPointerLeave);
+		take(args.onWheel, &Handlers::onWheel);
 		if (args.onLayout) {
 			setOnLayout(args.onLayout);
 		}
@@ -78,6 +92,7 @@ namespace ui {
 		std::erase(children, removed->selfId);
 		layoutChanged(false);
 		context->orderDirty = true;
+		context->removing(removed->selfId);
 		context->registry.release(removed->selfId);
 	}
 
@@ -91,6 +106,15 @@ namespace ui {
 
 	Component* Component::parentComponent() const {
 		return context != nullptr ? context->registry.find(parentId) : nullptr;
+	}
+
+	void Component::setEnabled(bool value) {
+		if (enabled != value) {
+			enabled = value;
+			if (context != nullptr) {
+				context->geometryDirty = true;
+			}
+		}
 	}
 
 	void Component::setVisible(bool value) {
@@ -165,11 +189,124 @@ namespace ui {
 		}
 	}
 
-	void Component::setOnLayout(std::function<void(Component&)> callback) {
+	Component::Handlers& Component::handlersMade() {
 		if (!handlers) {
 			handlers = std::make_unique<Handlers>();
 		}
-		handlers->onLayout = std::move(callback);
+		return *handlers;
+	}
+
+	void Component::setOnLayout(std::function<void(Component&)> callback) {
+		handlersMade().onLayout = std::move(callback);
+	}
+
+	void Component::setOnClick(std::function<void(PointerEvent&)> callback) {
+		handlersMade().onClick = std::move(callback);
+	}
+
+	void Component::setOnPointer(PointerEvent::Type type, std::function<void(PointerEvent&)> callback) {
+		Handlers& made = handlersMade();
+		switch (type) {
+			case PointerEvent::Type::Down:
+				made.onPointerDown = std::move(callback);
+				break;
+			case PointerEvent::Type::Up:
+				made.onPointerUp = std::move(callback);
+				break;
+			case PointerEvent::Type::Move:
+				made.onPointerMove = std::move(callback);
+				break;
+			case PointerEvent::Type::Enter:
+				made.onPointerEnter = std::move(callback);
+				break;
+			case PointerEvent::Type::Leave:
+				made.onPointerLeave = std::move(callback);
+				break;
+			case PointerEvent::Type::Wheel:
+				made.onWheel = std::move(callback);
+				break;
+			case PointerEvent::Type::Click:
+				made.onClick = std::move(callback);
+				break;
+			case PointerEvent::Type::Cancel:
+				break;
+		}
+	}
+
+	const std::function<void(PointerEvent&)>* Component::callbackFor(PointerEvent::Type type) const {
+		if (!handlers) {
+			return nullptr;
+		}
+		const std::function<void(PointerEvent&)>* callback = nullptr;
+		switch (type) {
+			case PointerEvent::Type::Down:
+				callback = &handlers->onPointerDown;
+				break;
+			case PointerEvent::Type::Up:
+				callback = &handlers->onPointerUp;
+				break;
+			case PointerEvent::Type::Move:
+				callback = &handlers->onPointerMove;
+				break;
+			case PointerEvent::Type::Enter:
+				callback = &handlers->onPointerEnter;
+				break;
+			case PointerEvent::Type::Leave:
+				callback = &handlers->onPointerLeave;
+				break;
+			case PointerEvent::Type::Wheel:
+				callback = &handlers->onWheel;
+				break;
+			case PointerEvent::Type::Click:
+				callback = &handlers->onClick;
+				break;
+			case PointerEvent::Type::Cancel:
+				break;
+		}
+		return callback != nullptr && *callback ? callback : nullptr;
+	}
+
+	bool Component::handlesPointer() const {
+		return handlers && (handlers->onClick || handlers->onPointerDown || handlers->onPointerUp || handlers->onPointerMove ||
+							handlers->onPointerEnter || handlers->onPointerLeave || handlers->onWheel);
+	}
+
+	void Component::setPointerEvents(std::optional<PointerEvents> value) {
+		pointerEvents = value;
+		if (context != nullptr) {
+			context->geometryDirty = true;
+		}
+	}
+
+	bool Component::containsPoint(Foundation::Vec2 local) const {
+		return local.x >= 0.0F && local.y >= 0.0F && local.x < size.x && local.y < size.y;
+	}
+
+	void Component::capturePointer() {
+		if (context != nullptr) {
+			context->capture(selfId);
+		}
+	}
+
+	void Component::releasePointer() {
+		if (context != nullptr && hasPointerCapture()) {
+			context->capture({});
+		}
+	}
+
+	bool Component::hasPointerCapture() const {
+		return context != nullptr && context->captor() == selfId;
+	}
+
+	void Component::scrollTo(Foundation::Vec2 value) {
+		const Foundation::Vec2 clamped = glm::clamp(value, Foundation::Vec2{0.0F, 0.0F}, scrollMax);
+		if (clamped != scroll) {
+			scroll = clamped;
+			if (context != nullptr) {
+				context->geometryDirty = true;
+				context->hoverStale = true;
+			}
+		}
 	}
 
 	Foundation::Rect Component::getBounds() const {

@@ -29,6 +29,7 @@
 //       ui::Ref<ui::Rectangle> fill;
 //   };
 
+#include "ui/Input.h"
 #include "ui/Layout.h"
 #include "ui/Registry.h"
 #include "ui/Style.h"
@@ -65,26 +66,39 @@
 //   transform  render and hit testing only, never layout or the lint
 //   layout     display, flex and positioning (ui/Layout.h)
 //   style      how it looks
-//   overflow   Clip cuts its children at its box
+//   overflow   Clip cuts its children at its box; Scroll cuts and scrolls them
 //   zIndex     its place among everything in its nearest stacking context; unset takes its parent's
 //   isolation  true makes it a stacking context, whose subtree paints as one at its zIndex
+//   pointerEvents  what the pointer can hit (ui/Input.h); unset, the type's default
+//   cursor     the window's cursor over it; unset, its parent's
+//   onClick, onPointerDown/Up/Move/Enter/Leave, onWheel  pointer callbacks, before the type's own
+//              handling; a click lands on the nearest common ancestor of the press and the release
 //   onLayout   called after a layout pass that moved or resized it
 #define UI_COMMON_ARGS                                                                                                                     \
-	::std::string							id;                                                                                            \
-	bool									visible = true;                                                                                \
-	bool									enabled = true;                                                                                \
-	::Foundation::Vec2						position{0.0F, 0.0F};                                                                          \
-	::ui::Size								size{};                                                                                        \
-	::ui::Size								minSize{};                                                                                     \
-	::ui::Size								maxSize{};                                                                                     \
-	::ui::Edges								margin{};                                                                                      \
-	::ui::Transform							transform{};                                                                                   \
-	::ui::Layout							layout{};                                                                                      \
-	::ui::Style								style{};                                                                                       \
-	::ui::Overflow							overflow = ::ui::Overflow::Visible;                                                            \
-	::std::optional<int>					zIndex;                                                                                        \
-	bool									isolation = false;                                                                             \
-	::std::function<void(::ui::Component&)> onLayout;
+	::std::string							   id;                                                                                         \
+	bool									   visible = true;                                                                             \
+	bool									   enabled = true;                                                                             \
+	::Foundation::Vec2						   position{0.0F, 0.0F};                                                                       \
+	::ui::Size								   size{};                                                                                     \
+	::ui::Size								   minSize{};                                                                                  \
+	::ui::Size								   maxSize{};                                                                                  \
+	::ui::Edges								   margin{};                                                                                   \
+	::ui::Transform							   transform{};                                                                                \
+	::ui::Layout							   layout{};                                                                                   \
+	::ui::Style								   style{};                                                                                    \
+	::ui::Overflow							   overflow = ::ui::Overflow::Visible;                                                         \
+	::std::optional<int>					   zIndex;                                                                                     \
+	bool									   isolation = false;                                                                          \
+	::std::optional<::ui::PointerEvents>	   pointerEvents;                                                                              \
+	::std::optional<::ui::Cursor>			   cursor;                                                                                     \
+	::std::function<void(::ui::PointerEvent&)> onClick;                                                                                    \
+	::std::function<void(::ui::PointerEvent&)> onPointerDown;                                                                              \
+	::std::function<void(::ui::PointerEvent&)> onPointerUp;                                                                                \
+	::std::function<void(::ui::PointerEvent&)> onPointerMove;                                                                              \
+	::std::function<void(::ui::PointerEvent&)> onPointerEnter;                                                                             \
+	::std::function<void(::ui::PointerEvent&)> onPointerLeave;                                                                             \
+	::std::function<void(::ui::PointerEvent&)> onWheel;                                                                                    \
+	::std::function<void(::ui::Component&)>	   onLayout;
 
 namespace ui {
 
@@ -92,6 +106,7 @@ namespace ui {
 	class Context;
 
 	namespace detail {
+		class Dispatcher;
 		class LayoutEngine;
 	} // namespace detail
 
@@ -167,7 +182,9 @@ namespace ui {
 		// Visible and not display: None, so laid out, drawn and linted.
 		[[nodiscard]] bool isShown() const { return visible && layout.display != Display::None; }
 		[[nodiscard]] bool isEnabled() const { return enabled; }
-		void			   setEnabled(bool value) { enabled = value; }
+		void			   setEnabled(bool value);
+		// Enabled itself and under no disabled ancestor (R8.3), as of the last layout.
+		[[nodiscard]] bool isEnabledInTree() const { return enabledInTree; }
 
 		// The declared offset, which places it under a Free parent or Absolute.
 		[[nodiscard]] Foundation::Vec2 getPosition() const { return position; }
@@ -209,6 +226,35 @@ namespace ui {
 		[[nodiscard]] std::int32_t drawKey() const { return key; }
 
 		void setOnLayout(std::function<void(Component&)> callback);
+		void setOnClick(std::function<void(PointerEvent&)> callback);
+		void setOnPointer(PointerEvent::Type type, std::function<void(PointerEvent&)> callback);
+
+		// --- Pointer ---
+
+		[[nodiscard]] PointerEvents			getPointerEvents() const { return pointerEvents.value_or(defaultPointerEvents()); }
+		void								setPointerEvents(std::optional<PointerEvents> value);
+		[[nodiscard]] std::optional<Cursor> getCursor() const { return cursor; }
+		void								setCursor(std::optional<Cursor> value) { cursor = value; }
+		// Under the pointer: it or a descendant is the hit (CSS :hover).
+		[[nodiscard]] bool isHovered() const { return hovered; }
+		// Pressed: a press landed on it or a descendant and hasn't been released or cancelled.
+		[[nodiscard]] bool isPressed() const { return pressed; }
+		// Every event of the pointer goes to this component until the release, a cancel or
+		// releasePointer(); from a press's handler. Its removal or hiding cancels it.
+		void			   capturePointer();
+		void			   releasePointer();
+		[[nodiscard]] bool hasPointerCapture() const;
+		// It answers the pointer itself: a pointer callback, or a type that handles it (the snapshot's
+		// handlesPointer, which the lint's unreachable-interactive rule reads).
+		[[nodiscard]] virtual bool handlesPointer() const;
+
+		// --- Scrolling, for Overflow::Scroll ---
+
+		[[nodiscard]] Foundation::Vec2 getScroll() const { return scroll; }
+		// How far it scrolls on each axis, from the last layout.
+		[[nodiscard]] Foundation::Vec2 getScrollMax() const { return scrollMax; }
+		void						   scrollTo(Foundation::Vec2 value);
+		void						   scrollBy(Foundation::Vec2 delta) { scrollTo(scroll + delta); }
 
 		// The tree snapshot's and the lint's name for the type.
 		[[nodiscard]] virtual const char* typeName() const { return "Component"; }
@@ -233,6 +279,13 @@ namespace ui {
 		[[nodiscard]] virtual float minContentWidth() const { return 0.0F; }
 		// Its content changed in a way that changes what it measures (a text's string, its font).
 		void contentChanged();
+		// A pointer event the dispatcher delivers to it, after its callback; consume() stops the bubble.
+		virtual void handlePointer(PointerEvent& /*event*/) {}
+		// Whether a point in its box hits it: the box, edges half-open (R8.12). A non-rectangular
+		// shape narrows it.
+		[[nodiscard]] virtual bool containsPoint(Foundation::Vec2 local) const;
+		// Its pointerEvents when unset: Passthrough, a container's; a leaf or a widget says Auto.
+		[[nodiscard]] virtual PointerEvents defaultPointerEvents() const { return PointerEvents::Passthrough; }
 
 		// Its effective opacity, its own style's times its ancestors'. Valid in render().
 		[[nodiscard]] float opacity() const { return effectiveOpacity; }
@@ -243,6 +296,7 @@ namespace ui {
 
 	  private:
 		friend class Context;
+		friend class detail::Dispatcher;
 		friend class detail::LayoutEngine;
 
 		// A measure the layout pass took, kept while nothing under the component changes.
@@ -257,8 +311,18 @@ namespace ui {
 		};
 
 		struct Handlers {
-			std::function<void(Component&)> onLayout;
+			std::function<void(PointerEvent&)> onClick;
+			std::function<void(PointerEvent&)> onPointerDown;
+			std::function<void(PointerEvent&)> onPointerUp;
+			std::function<void(PointerEvent&)> onPointerMove;
+			std::function<void(PointerEvent&)> onPointerEnter;
+			std::function<void(PointerEvent&)> onPointerLeave;
+			std::function<void(PointerEvent&)> onWheel;
+			std::function<void(Component&)>	   onLayout;
 		};
+		Handlers& handlersMade();
+		// Its callback for an event type, if it has one.
+		[[nodiscard]] const std::function<void(PointerEvent&)>* callbackFor(PointerEvent::Type type) const;
 
 		void		setCommon(const Args& args);
 		ComponentId adopt(std::unique_ptr<Component> child);
@@ -287,37 +351,55 @@ namespace ui {
 				.overflow = args.overflow,
 				.zIndex = args.zIndex,
 				.isolation = args.isolation,
+				.pointerEvents = args.pointerEvents,
+				.cursor = args.cursor,
+				.onClick = args.onClick,
+				.onPointerDown = args.onPointerDown,
+				.onPointerUp = args.onPointerUp,
+				.onPointerMove = args.onPointerMove,
+				.onPointerEnter = args.onPointerEnter,
+				.onPointerLeave = args.onPointerLeave,
+				.onWheel = args.onWheel,
 				.onLayout = args.onLayout,
 			};
 		}
 
-		std::string				  id;
-		Size					  sizeSpec;
-		Size					  minSpec;
-		Size					  maxSpec;
-		Edges					  margin;
-		Transform				  transform;
-		Layout					  layout;
-		Overflow				  overflow = Overflow::Visible;
-		std::optional<int>		  zIndex;
-		std::unique_ptr<Handlers> handlers; // made when the first callback is set
-		ComponentId				  selfId;
-		ComponentId				  parentId;
-		std::vector<ComponentId>  children;
-		Context*				  context = nullptr;
+		std::string					 id;
+		Size						 sizeSpec;
+		Size						 minSpec;
+		Size						 maxSpec;
+		Edges						 margin;
+		Transform					 transform;
+		Layout						 layout;
+		Overflow					 overflow = Overflow::Visible;
+		std::optional<int>			 zIndex;
+		std::optional<PointerEvents> pointerEvents;
+		std::optional<Cursor>		 cursor;
+		std::unique_ptr<Handlers>	 handlers; // made when the first callback is set
+		ComponentId					 selfId;
+		ComponentId					 parentId;
+		std::vector<ComponentId>	 children;
+		Context*					 context = nullptr;
 		// From the layout pass: the margin box's top-left in the parent's box, the map to the
 		// viewport, the clip, and the last two measures.
 		Foundation::Vec2				offset{0.0F, 0.0F};
 		Affine							screen;
 		std::optional<Foundation::Rect> clip;
 		Measured						measured[2];
+		Foundation::Vec2				scroll{0.0F, 0.0F};
+		Foundation::Vec2				scrollMax{0.0F, 0.0F};
 		std::int32_t					key = 0;
+		std::int32_t					lastKey = 0; // the highest key in its subtree, which a scrollbar draws at
 		float							effectiveOpacity = 1.0F;
 		bool							visible = true;
 		bool							enabled = true;
 		bool							isolation = false;
 		bool							layoutDirty = true;
 		bool							laidOut = false; // placed by a layout pass yet
+		bool							enabledInTree = true;
+		bool							hitBlocked = false; // an ancestor's pointerEvents keeps the pointer off it
+		bool							hovered = false;
+		bool							pressed = false;
 	};
 
 	// --- Templates ---

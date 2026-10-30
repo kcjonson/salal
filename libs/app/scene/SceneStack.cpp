@@ -33,6 +33,9 @@ namespace app {
 	ui::Context& Scene::ui() {
 		if (uiContext == nullptr) {
 			uiContext = std::make_unique<ui::Context>(stack != nullptr ? logicalSize(stack->app.viewport()) : Foundation::Vec2{0.0F, 0.0F});
+			if (stack != nullptr) {
+				uiContext->setScale(stack->app.uiScale());
+			}
 		}
 		return *uiContext;
 	}
@@ -182,6 +185,31 @@ namespace app {
 		detail::guard(scene.name(), "ui update", [&] { scene.uiContext->update(dt); });
 	}
 
+	bool SceneStack::dispatchTopUi(const foundation::InputEvent& event) {
+		if (entries.empty() || entries.back().scene->uiContext == nullptr) {
+			return false;
+		}
+		Scene& scene = *entries.back().scene;
+		bool   consumed = false;
+		detail::guard(scene.name(), "ui dispatch", [&] { consumed = scene.uiContext->dispatch(event); });
+		return consumed;
+	}
+
+	ui::Cursor SceneStack::topUiCursor() const {
+		if (entries.empty() || entries.back().scene->uiContext == nullptr) {
+			return ui::Cursor::Default;
+		}
+		return entries.back().scene->uiContext->cursor();
+	}
+
+	void SceneStack::scaleUi(float scale) {
+		for (Entry& entry : entries) {
+			if (entry.scene->uiContext != nullptr) {
+				entry.scene->uiContext->setScale(scale);
+			}
+		}
+	}
+
 	std::size_t SceneStack::firstRendered() const {
 		std::size_t first = entries.size();
 		while (first > 0) {
@@ -242,6 +270,10 @@ namespace app {
 		if (!entries.empty()) {
 			Entry& covered = entries.back();
 			covered.coveredAlpha = liveAlpha;
+			// What the covered scene's ui had in hand ends now; its focus stays for when it's on top again.
+			if (covered.scene->uiContext != nullptr) {
+				detail::guard(covered.scene->name(), "ui cancel", [&] { covered.scene->uiContext->cancelInteraction(); });
+			}
 			detail::guard(covered.scene->name(), "onCovered", [&] { covered.scene->onCovered(); });
 		}
 		enter(std::move(scene), std::move(change.name), std::move(change.onResult));
@@ -310,6 +342,7 @@ namespace app {
 		entries.push_back({.scene = std::move(scene), .name = std::move(name), .onResult = std::move(onResult)});
 		if (entered.uiContext != nullptr) {
 			entered.uiContext->setViewport(logicalSize(app.viewport()));
+			entered.uiContext->setScale(app.uiScale());
 		}
 		LOG_INFO(Engine, "Entering scene: %s", entered.name());
 		detail::guard(entered.name(), "onEnter", [&] { entered.onEnter(app); });

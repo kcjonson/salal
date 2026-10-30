@@ -192,6 +192,12 @@ namespace app {
 		void resized(const Renderer::Viewport& viewport);
 		// The top scene's ui update, after its own.
 		void updateTopUi(double dt);
+		// An event for the top scene's ui; true when the ui took it.
+		bool dispatchTopUi(const foundation::InputEvent& event);
+		// The cursor the top scene's ui asks for.
+		ui::Cursor topUiCursor() const;
+		// Every stacked scene's ui at the App's ui scale.
+		void scaleUi(float scale);
 		// The ui of every scene render() draws, laid out.
 		void layoutUi();
 		// The stack from its topmost opaque scene up, the top at liveAlpha and each covered scene at the

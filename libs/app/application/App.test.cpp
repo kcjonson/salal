@@ -985,6 +985,49 @@ namespace app::testing {
 		EXPECT_EQ(count("A.onExit"), 1);
 	}
 
+	TEST_F(AppTest, TheTopScenesUiTakesWhatItHitsAndTheSceneGetsTheRest) {
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			running.scenes().top()->root().addChild<ui::Rectangle>({.size = {100.0F, 100.0F}, .cursor = ui::Cursor::Pointer});
+		};
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		take();
+		platform->push({.type = InputEvent::Type::PointerMove, .position = {50.0F, 50.0F}});
+		frame(0.0);
+		EXPECT_EQ(count("A.handleEvent"), 0);
+		EXPECT_EQ(platform->cursor(), ui::Cursor::Pointer);
+		platform->push({.type = InputEvent::Type::PointerMove, .position = {300.0F, 300.0F}});
+		frame(0.0);
+		EXPECT_EQ(count("A.handleEvent"), 1);
+		EXPECT_EQ(platform->cursor(), ui::Cursor::Default);
+	}
+
+	TEST_F(AppTest, ACoveredScenesUiGetsACancelForWhatItHeld) {
+		class Held final : public ui::Rectangle {
+		  protected:
+			void handlePointer(ui::PointerEvent& event) override {
+				if (event.type == ui::PointerEvent::Type::Down) {
+					capturePointer();
+				} else if (event.type == ui::PointerEvent::Type::Cancel) {
+					record("held", "cancel");
+				}
+			}
+		};
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			running.scenes().top()->root().addChild<Held>({.size = {100.0F, 100.0F}});
+		};
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		platform->push({.type = InputEvent::Type::PointerDown, .mouseButton = foundation::MouseButton::Left, .position = {50.0F, 50.0F}});
+		frame(0.0);
+		take();
+		app->scenes().push<PauseScene>();
+		frame(0.0);
+		EXPECT_EQ(count("held.cancel"), 1);
+	}
+
 	// A context a constructor makes has no stack to size it from; it takes the window when it enters.
 	TEST_F(AppTest, AUiMadeBeforeTheSceneEntersIsSizedWhenItDoes) {
 		class EarlyScene final : public TypedScene<> {

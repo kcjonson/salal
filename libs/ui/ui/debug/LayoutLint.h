@@ -11,13 +11,15 @@
 //   zero-or-negative-size  a visible box with no width or no height
 //   text-overflow          a text whose laid-out extent passes its box by more than 0.5 px; its
 //                          bounds are the text's, its other bounds the box
+//   unreachable-interactive  a component that answers the pointer, clipped away where no scroller
+//                          brings it back, or covered whole by a sibling painted over it that takes
+//                          the pointer (its other path)
 //
 // Ink past a box (a shadow) is not overflow. Invisible subtrees are skipped. The roots are siblings,
 // each the viewport's size and layered on purpose, so they don't overlap each other. Paths join ids,
 // or Type[index] where there is none, with '/'; bounds are in the viewport. A child's bounds are its
-// margin box, and it is contained by its parent's box, unless the parent clips (Overflow::Clip), which
-// declares it may run past; then only the part the clip shows must be in the viewport.
-// unreachable-interactive comes with input.
+// margin box, and it is contained by its parent's box, unless the parent clips (Overflow::Clip or
+// Scroll), which declares it may run past; then only the part the clip shows must be in the viewport.
 
 #include <graphics/Rect.h>
 #include <math/Types.h>
@@ -36,6 +38,7 @@ namespace ui {
 		OutsideViewport,
 		ZeroOrNegativeSize,
 		TextOverflow,
+		UnreachableInteractive,
 	};
 
 	[[nodiscard]] const char* lintRuleName(LintRule rule);

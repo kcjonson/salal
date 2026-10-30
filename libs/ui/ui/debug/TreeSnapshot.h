@@ -10,7 +10,10 @@
 //   margin        per side
 //   zIndex        its own, null when unset; isolation; key, its draw key, the paint order
 //   visible, enabled, opacity (effective), clip (effective, null for none), contentOffset, transform
-//   focusable, pointerEvents, handlesPointer, state, value
+//   focusable, pointerEvents (its own, resolved), handlesPointer, state (hovered and pressed; the
+//                 rest come with focus), value
+//   scroll        a scroller's offset and how far it goes, {x, y, maxX, maxY}; null on anything else,
+//                 as is contentOffset, the scroll as its children see it
 //   text          a Text's content, measured extent and line count, and overflow
 //   style         the fill, text and border colours it resolves to
 //   inkBounds     where it may draw in the viewport, its ink extent included

@@ -9,6 +9,20 @@ namespace ui {
 
 	namespace {
 
+		const char* pointerEventsName(PointerEvents value) {
+			switch (value) {
+				case PointerEvents::Auto:
+					return "auto";
+				case PointerEvents::Passthrough:
+					return "passthrough";
+				case PointerEvents::Unit:
+					return "unit";
+				case PointerEvents::None:
+					break;
+			}
+			return "none";
+		}
+
 		nlohmann::json transformJson(const Transform& transform) {
 			if (transform.isIdentity()) {
 				return nullptr;
@@ -48,12 +62,30 @@ namespace ui {
 			out["opacity"] = opacity;
 			const std::optional<Foundation::Rect>& clip = component.getClip();
 			out["clip"] = clip ? detail::rectJson(*clip) : nlohmann::json(nullptr);
-			out["contentOffset"] = nullptr;
+			const bool			   scrolls = component.getOverflow() == Overflow::Scroll;
+			const Foundation::Vec2 scroll = component.getScroll();
+			out["contentOffset"] = scrolls ? nlohmann::json{{"x", -scroll.x}, {"y", -scroll.y}} : nlohmann::json(nullptr);
 			out["transform"] = transformJson(component.getTransform());
 			out["focusable"] = false;
-			out["pointerEvents"] = nullptr;
-			out["handlesPointer"] = false;
-			out["state"] = nullptr;
+			out["pointerEvents"] = pointerEventsName(component.getPointerEvents());
+			out["handlesPointer"] = component.handlesPointer();
+			// Focus arrives with the focus manager; until then its flags are unknown.
+			out["state"] = {
+				{"hovered", component.isHovered()},
+				{"pressed", component.isPressed()},
+				{"focused", nullptr},
+				{"focusVisible", nullptr},
+				{"selected", nullptr},
+				{"open", nullptr},
+				{"active", nullptr},
+				{"dropActive", nullptr},
+			};
+			if (scrolls) {
+				const Foundation::Vec2 most = component.getScrollMax();
+				out["scroll"] = {{"x", scroll.x}, {"y", scroll.y}, {"maxX", most.x}, {"maxY", most.y}};
+			} else {
+				out["scroll"] = nullptr;
+			}
 			out["text"] = nullptr;
 			out["value"] = nullptr;
 			const Style& style = component.getStyle();

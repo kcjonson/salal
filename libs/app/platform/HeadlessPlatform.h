@@ -51,6 +51,8 @@ namespace app {
 		void addMonitor(int width, int height);
 		// What setVsync last set; true until it's called.
 		bool vsync() const { return swapInterval; }
+		// What setCursor last set.
+		ui::Cursor cursor() const { return shownCursor; }
 
 		Renderer::Viewport							viewport() const override { return current; }
 		std::unique_ptr<Renderer::backend::Backend> createBackend() override;
@@ -65,6 +67,7 @@ namespace app {
 		std::optional<std::string>					keyLabel(foundation::Key key) const override;
 		std::string									clipboardText() const override { return clipboard; }
 		void										setClipboardText(const std::string& text) override { clipboard = text; }
+		void										setCursor(ui::Cursor cursor) override { shownCursor = cursor; }
 
 	  private:
 		struct Queued {
@@ -93,6 +96,7 @@ namespace app {
 		std::map<foundation::Key, std::string>					keyLabels;
 		std::string												clipboard;
 		bool													swapInterval = true;
+		ui::Cursor												shownCursor = ui::Cursor::Default;
 		std::vector<Size>										monitors;
 		std::optional<int>										fullscreen;
 		Size													windowed;
