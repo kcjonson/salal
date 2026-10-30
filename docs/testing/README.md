@@ -65,8 +65,8 @@ frame rate fell because of its own change or the engine's.
 - A change to batching, the shader, ui's walk or app's frame runs it against
   `main` on the same machine, and a regression past the threshold fails it.
 - Every tag's result is committed with the machine's name. When a game's frame
-  rate drops after an engine bump, run the suite at the old and new tags on
-  the same machine: if the engine's numbers moved, it's the engine.
+  rate drops after an engine bump, compare the old and new tags on the same
+  machine: if the engine's numbers moved, it's the engine.
 
 ### The scenes
 
@@ -117,8 +117,8 @@ launches one scene with `--scene`, `--http-port 8094` (checked free first;
 never 8090) and `--no-vsync`, pinned to logical CPUs 4 to 11, waits for
 `/api/health`, warms up 3 s, captures 5 s, reads `/api/metrics`, and exits
 through `/api/control?action=exit`. Before each run it waits for any `cl`,
-`link` or `ninja` (another session's build) to finish, and notes one it gave
-up on in the run. A build's figure for a statistic is the median of its five
+`link` or `ninja` (another session's build) to finish and for its cores to
+be under 25% busy, and notes in the run what it gave up waiting for. A build's figure for a statistic is the median of its five
 runs.
 
 ```
@@ -139,29 +139,41 @@ the rework changes the counts on purpose.
 ### Noise and the threshold
 
 Measured on `kevinsgamingdesktop` (Ryzen 9 5950X, RTX 3090, Windows 11),
-2026-10-30, ten runs of one Release build each, p50s:
+2026-10-30: ten runs of one Release build in each of two sessions about an
+hour apart, p50s. Range, CV and A/A gap are the worse of the two sessions.
 
-| scene | statistic | median ms | range | CV | A/A gap, 5 runs a side | range unpinned |
-|---|---|---|---|---|---|---|
-| `perf_quads` | `cpuMs` | 0.917 | 1.3% | 0.5% | 0.6% | 14.0% |
-| | `gpuMs` | 0.205 | 0.0% | 0.0% | 0.0% | 1.2% |
-| `perf_text` | `cpuMs` | 0.719 | 3.7% | 1.2% | 1.0% | 36.8% |
-| | `gpuMs` | 0.069 | 5.9% | 2.0% | 1.5% | 5.9% |
-| `perf_world` | `cpuMs` | 4.347 | 1.9% | 0.7% | 0.7% | 15.3% |
-| | `gpuMs` | 0.284 | 37.2% | 17.8% | 4.4% | 49.8% |
+| scene | statistic | median ms, session 1 | session 2 | range | CV | A/A gap, 5 runs a side | range unpinned |
+|---|---|---|---|---|---|---|---|
+| `perf_quads` | `cpuMs` | 0.917 | 0.794 | 2.3% | 0.8% | 1.2% | 14.0% |
+| | `gpuMs` | 0.205 | 0.205 | 0.0% | 0.0% | 0.0% | 1.2% |
+| `perf_text` | `cpuMs` | 0.719 | 0.475 | 4.7% | 1.3% | 1.0% | 36.8% |
+| | `gpuMs` | 0.069 | 0.069 | 5.9% | 2.0% | 1.5% | 5.9% |
+| `perf_world` | `cpuMs` | 4.347 | 3.852 | 15.7% | 4.8% | 0.7% | 15.3% |
+| | `gpuMs` | 0.284 | 0.178 | 37.2% | 17.8% | 4.4% | 49.8% |
 
 The A/A gap is the worst gap between the medians of two disjoint groups of
 five runs: what a compare of one build against itself could show. `renderMs`
 moves with `cpuMs`. Unpinned, a launch landed on a different core or CCD
 and `perf_text`'s CPU time moved by a third, which is why the runner pins.
-The threshold, 4%, is four times the worst CPU A/A gap, so noise alone
+`perf_world`'s 15.7% range in session 2 is one run of ten; the median of five
+doesn't see it.
+
+The threshold, 4%, is over three times the worst CPU A/A gap, so noise alone
 doesn't fail a compare, and a 5% regression clears it. An A/A compare, this
 build against the same commit built in the scratch worktree, moved no CPU
 figure more than 0.8%, but `perf_text`'s GPU time, 70 us, where a few
 microseconds are 3%, moved 3.0%, so GPU time is gated in `perf_quads` only.
-`perf_world`'s isn't either: launch to launch its present waits about 5 ms
-or doesn't (a frame of 9.7 or 4.4 ms, the CPU's time the same), and the
-GPU's clocks, and its time, follow.
+`perf_world`'s isn't either: in session 1 its present waited about 5 ms in
+some launches and not others (a frame of 9.7 or 4.4 ms, the CPU's time the
+same), and the GPU's clocks, and its time, followed.
+
+Between sessions the level moved by up to a third (`perf_text` 0.719 to
+0.475 ms) while each session stayed tight. The cause isn't pinned down;
+other sessions' builds and tests on the same machine are the likely one, so
+the runner now waits for the cores it runs on to be under 25% busy and
+records their load before each run and the rest of the machine's during it.
+This is why a decision is always a compare, its two builds interleaved in
+one session, and never a run read against a committed result.
 
 ### Results
 
@@ -176,8 +188,11 @@ At a tag, from a clean checkout of it:
    `perf-results/<machine>/<tag>.json`, refused with uncommitted changes.
 2. Commit that one file to `main`.
 
-A result compares only with others from the same machine, at the same window
-size: the sandbox's window is 80% of the primary monitor's work area.
+A committed result is a record, read beside others from the same machine and
+window size (the sandbox's window is 80% of the primary monitor's work area),
+and never a threshold: sessions differ by more than one does (above). When a
+game's frame rate drops after an engine bump, `compare --base <old tag>` from
+a checkout of the new one answers it; the committed files say where to look.
 
 ## Unit tests
 

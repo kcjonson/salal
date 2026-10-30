@@ -18,7 +18,8 @@
 //   --out <path>          where the JSON goes (run: perf-results/local/<describe>.json)
 //   --record              run: write perf-results/<machine>/<describe>.json, the file a tag's result is
 //                         committed as; refused for --exe or uncommitted changes
-//   --wait-busy <seconds> how long to wait for another build (cl, link, ninja) to finish before a run (default 900)
+//   --wait-busy <seconds> how long to wait before a run for another build (cl, link, ninja) to finish and the
+//                         CPUs it runs on to fall below BUSY_LOAD_PCT busy (default 900)
 //   --affinity <mask>     the logical CPUs the sandbox may run on, a hex mask (default: defaultAffinity());
 //                         none to leave it to the scheduler
 //
@@ -63,6 +64,7 @@ const REPORTED = [
 ];
 const KEYS = [...new Set([...GATED_EVERYWHERE, ...REPORTED])];
 const FLAGS = ['record'];
+const BUSY_LOAD_PCT = 25;
 const BUSY = ['cl.exe', 'link.exe', 'ninja.exe', 'cl', 'ld', 'ninja'];
 
 function parseArgs(argv) {
@@ -177,18 +179,52 @@ function busyProcesses() {
 	}
 }
 
-// Another session's build steals the cores a run measures: wait for it, or note it in the run.
-async function waitForQuiet(seconds) {
-	const deadline = Date.now() + seconds * 1000;
+// The logical CPUs in a hex affinity mask; every one without a mask.
+function cpusIn(affinity) {
+	const all = os.cpus().map((_, i) => i);
+	if (affinity === null) {
+		return all;
+	}
+	const mask = BigInt(affinity);
+	return all.filter((i) => ((mask >> BigInt(i)) & 1n) === 1n);
+}
+
+const cpuTimes = () => os.cpus().map((cpu) => cpu.times);
+
+// How busy `cpus` were between two cpuTimes(), as a percentage of their time.
+function busyPct(before, after, cpus) {
+	const spent = (t) => t.user + t.nice + t.sys + t.irq;
+	let busy = 0;
+	let total = 0;
+	for (const i of cpus) {
+		busy += spent(after[i]) - spent(before[i]);
+		total += spent(after[i]) + after[i].idle - spent(before[i]) - before[i].idle;
+	}
+	return total > 0 ? Math.round((1000 * busy) / total) / 10 : 0;
+}
+
+async function load(cpus) {
+	const before = cpuTimes();
+	await sleep(1000);
+	return busyPct(before, cpuTimes(), cpus);
+}
+
+// Another session's build or tests steal the cores a run measures: wait for them, or note them in the run.
+async function waitForQuiet(settings) {
+	const deadline = Date.now() + settings.waitBusy * 1000;
+	const cpus = cpusIn(settings.affinity);
 	let busy = busyProcesses();
-	if (busy.length > 0) {
-		console.log(`perf: waiting for ${busy.join(', ')} to finish`);
+	let loadPct = await load(cpus);
+	const noisy = () => busy.length > 0 || loadPct > BUSY_LOAD_PCT;
+	if (noisy()) {
+		console.log(`perf: waiting for ${[...busy, `${loadPct.toFixed(0)}% load`].join(', ')}`);
 	}
-	while (busy.length > 0 && Date.now() < deadline) {
-		await sleep(5000);
+	while (noisy() && Date.now() < deadline) {
+		await sleep(4000);
 		busy = busyProcesses();
+		loadPct = await load(cpus);
 	}
-	return busy;
+	return { busy, loadPct };
 }
 
 // --- One launch ---
@@ -215,7 +251,7 @@ async function launch(exe, scene, settings) {
 	if (!(await portFree(port))) {
 		throw new Error(`port ${port} is busy; pass --port`);
 	}
-	const busy = await waitForQuiet(settings.waitBusy);
+	const quiet = await waitForQuiet(settings);
 	const args = [`--scene=${scene}`, '--http-port', String(port), '--no-vsync'];
 	const pinned = settings.affinity !== null && process.platform === 'linux';
 	const child = spawn(pinned ? 'taskset' : exe, pinned ? [settings.affinity, exe, ...args] : args, {
@@ -249,11 +285,18 @@ async function launch(exe, scene, settings) {
 		}
 		await sleep(settings.warmup * 1000);
 		await get(port, '/api/control?action=capture&op=start');
+		const before = cpuTimes();
 		await sleep(settings.window * 1000);
+		const after = cpuTimes();
 		const { capture } = await get(port, '/api/control?action=capture&op=stop');
 		const live = await get(port, '/api/metrics');
 		capture.live = { drawCalls: live.drawCalls, vertexCount: live.vertexCount, uploadBytes: live.uploadBytes, flushCount: live.flushCount };
-		capture.busy = busy;
+		capture.busy = quiet.busy;
+		capture.loadBeforePct = quiet.loadPct;
+		// The rest of the machine meanwhile: another session's work there shares caches, memory and power.
+		const pinnedCpus = new Set(cpusIn(settings.affinity));
+		const otherCpus = os.cpus().map((_, i) => i).filter((i) => settings.affinity === null || !pinnedCpus.has(i));
+		capture.otherCpusLoadPct = busyPct(before, after, otherCpus);
 		await get(port, '/api/control?action=exit');
 		return capture;
 	} finally {
