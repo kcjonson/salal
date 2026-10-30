@@ -121,20 +121,19 @@ is the first thing that quietly breaks if nobody is watching.
 
 ## The component model
 
-Three roles:
+One node interface for every element, leaf shape or composite widget
+(decided 2026-10-30, [ui-design.md](ui-design.md)). A node renders its own
+draws only; the framework walks children, so every node is laid out, linted,
+hit-tested and focusable the same way, and a clickable Text or an Image drop
+target needs no new class. Widgets (Button, TextInput) are compositions of
+nodes, not new primitives.
 
-- **Layer** owns position, size, and parent-child hierarchy. Not interactive.
-- **Component** extends Layer with interaction: pointer events, wheel, focus.
-- **Shapes** are concrete leaves: Rectangle, Circle, Line, Text, Triangle.
-
-Widgets (Button, TextInput) are compositions of shapes, not new primitives.
-
-Worldsim has the three as classes, from the colonysim port. Dual-deck-builder's
-current code has one `Component` base that is both leaf and container, with
-Rectangle, Circle, Line, Polygon, Triangle and Text as subclasses and "layer"
-meaning a named z-layer (`src/renderer/engine/components/Component.ts`,
-`draw/layers.ts`); its spec's object model (chapter 8) is the candidate
-reference for the C++ `ui` if decision C adopts the spec.
+Worldsim has three roles from the colonysim port (`IComponent`, `ILayer`,
+`Component`), non-interactive shapes, design-system classes outside the tree,
+and composites that draw their own children; phase 3 replaces all of that.
+Dual-deck-builder's code already has one `Component` base that is both leaf
+and container (`src/renderer/engine/components/Component.ts`), the shape its
+spec's chapter 8 describes.
 
 The shape list above is not enough for the consumers. asteroids-roguelike's
 arena needs a filled polygon with a per-frame transform (asteroid silhouettes,
@@ -157,10 +156,10 @@ the object model, input and focus, layout, style and theme, and observability,
 with a conformance scorecard for both implementations
 (`14-testing-and-conformance.md`: the TypeScript engine scores 85 yes and 15
 partial of 100 required rules) and a 32-item worldsim gap list
-(`16-backend-opengl.md`). Adopting it as the normative spec for salal's `ui`,
-with the gap list as the phase 3 worklist, is decision C in
-[open-decisions.md](open-decisions.md). Until that is decided this document
-stays the normative one and the spec is a reference.
+(`16-backend-opengl.md`). It is not adopted wholesale (decision C in
+[open-decisions.md](open-decisions.md)): phase 3 revisits it rule by rule on
+native merits, and [ui-design.md](ui-design.md) records where salal departs
+from it and why. Where ui-design.md and the spec disagree, ui-design.md wins.
 
 ## The frame contract
 
@@ -319,14 +318,13 @@ to values only if profiling demanded it; sections at `:103-166`, `:414`,
 `:489` and `:673` still say so. Its "Architectural Decision" section was then
 overwritten in place on 2025-11-03 to say value semantics with `std::variant`
 from the start, skipping the shared_ptr step entirely (`:168-172`), and the
-revision history was never updated. Which one the code followed is unverified:
-`libs/ui/layer` is 176 lines, `components` is 12,765, and nobody has yet
-checked what `Layer` stores. That is decision F in
-[open-decisions.md](open-decisions.md), a phase 3 question. If the code took
-the shared_ptr path, **that is the portability debt**, and extraction is the
-moment it is cheapest to change, because value semantics are better C++ on
-their own merits: better cache behaviour, no reference cycles, no lifetime
-ambiguity.
+revision history was never updated. The code followed neither: each
+`Component` keeps its children by value in a per-parent bump arena with
+position-based handles (checked 2026-10-30). Salal's `ui` replaces that with a
+per-scene slot map and generational ids (decision F, settled in
+[ui-design.md](ui-design.md), "Component API"), the shape Rust UI frameworks
+use, so the UI layer no longer carries the portability debt this section
+worried about.
 
 The `sim` layers in consumers are already data-oriented with dense ids and
 component arrays. They would port to Rust almost mechanically. The UI layer, as
