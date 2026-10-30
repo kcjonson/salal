@@ -90,13 +90,25 @@ namespace Renderer {
 
 	void BatchRenderer::recordGroup(uint32_t groupStart, float zIndex, Primitives::BlendMode blend) {
 		const uint32_t end = static_cast<uint32_t>(indices.size());
-		if (end > groupStart) {
-			drawGroups.push_back(
-				{.indexStart = groupStart, .indexCount = end - groupStart, .domain = sortDomain, .zIndex = zIndex, .blend = blend}
-			);
-			if (zIndex != 0.0F) {
-				anyExplicitZ = true;
+		if (end <= groupStart) {
+			return;
+		}
+		// Straight after a group with the same domain, z and blend, an add joins it: the
+		// stable sort would keep the two together anyway, and a text run, a glyph an add,
+		// stays one group.
+		if (!drawGroups.empty()) {
+			DrawGroup& last = drawGroups.back();
+			if (last.indexStart + last.indexCount == groupStart && last.domain == sortDomain && last.zIndex == zIndex &&
+				last.blend == blend) {
+				last.indexCount = end - last.indexStart;
+				return;
 			}
+		}
+		drawGroups.push_back(
+			{.indexStart = groupStart, .indexCount = end - groupStart, .domain = sortDomain, .zIndex = zIndex, .blend = blend}
+		);
+		if (zIndex != 0.0F) {
+			anyExplicitZ = true;
 		}
 	}
 

@@ -278,6 +278,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Statistics
 		size_t		getVertexCount() const { return vertices.size(); }
+		size_t		getDrawGroupCount() const { return drawGroups.size(); } // the z sort's units, since the last flush
 		size_t		getDrawCallCount() const { return drawCallCount; }
 		RenderStats getStats() const;
 
@@ -334,10 +335,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		std::vector<TextureHandle> vertexAtlas;
 
 		// Per-draw-call groups. Each add* records one {indexStart, indexCount, domain,
-		// zIndex, blend}. plan() keeps submission order unless some group carries an
-		// explicit (non-zero) z, in which case groups are stable-sorted by domain, then
-		// z, and the emit-order index list is rebuilt. zIndex originates in the
-		// component layer; the domain counts sortBarrier() calls since the last flush.
+		// zIndex, blend}, or extends the last when it has the same domain, z and
+		// blend (every glyph of a text run after the first). plan() keeps submission
+		// order unless some group carries an explicit (non-zero) z, in which case
+		// groups are stable-sorted by domain, then z, and the emit-order index list is
+		// rebuilt. zIndex originates in the component layer; the domain counts
+		// sortBarrier() calls since the last flush.
 		struct DrawGroup {
 			uint32_t			  indexStart;
 			uint32_t			  indexCount;

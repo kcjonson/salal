@@ -242,6 +242,38 @@ TEST(BatchPlanTest, ExplicitZSortsGroupsStablyBeforeSplitting) {
 	EXPECT_EQ(plan.runs[1].indexCount, 12U);
 }
 
+TEST(BatchPlanTest, ATextRunIsOneGroupHoweverManyGlyphs) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	batch.setFontAtlas(kAtlasA);
+	addRect(batch, BlendMode::Alpha, 2.0F); // vertices 0-3
+	for (int glyph = 0; glyph < 40; ++glyph) {
+		addGlyph(batch, kAtlasA, BlendMode::Alpha, 1.0F); // vertices 4-163
+	}
+	EXPECT_EQ(batch.getDrawGroupCount(), 2U);
+
+	// The next run at another blend, then one in a new sort domain, then a rect at
+	// the second run's z: a group each.
+	for (int glyph = 0; glyph < 3; ++glyph) {
+		addGlyph(batch, kAtlasA, BlendMode::Additive, 1.0F);
+	}
+	batch.sortBarrier();
+	for (int glyph = 0; glyph < 3; ++glyph) {
+		addGlyph(batch, kAtlasA, BlendMode::Additive, 1.0F);
+	}
+	addRect(batch, BlendMode::Alpha, 1.0F);
+	EXPECT_EQ(batch.getDrawGroupCount(), 5U);
+
+	// The first run sorts as a whole, every glyph in order, then the additive run,
+	// then the z 2 rect, all under the new domain's two groups.
+	const DrawPlan plan = batch.plan();
+	ASSERT_EQ(plan.indices.size(), (1U + 40U + 3U + 3U + 1U) * 6U);
+	EXPECT_EQ(plan.indices[0], 4U);
+	EXPECT_EQ(plan.indices[39 * 6], 160U);
+	EXPECT_EQ(plan.indices[43 * 6], 0U);
+	EXPECT_EQ(plan.runs.size(), 1U);
+}
+
 TEST(BatchPlanTest, ASortBarrierKeepsEarlierDrawsUnderLaterOnesWhateverTheirZ) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
