@@ -130,6 +130,9 @@ namespace Renderer {
 		float											 zIndex,
 		Primitives::BlendMode							 blend
 	) { // NOLINT(readability-convert-member-functions-to-static)
+		if (clipEmpty) {
+			return;
+		}
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
 
@@ -294,7 +297,7 @@ namespace Renderer {
 		// further `blur` so the shader has room to fade the falloff to zero.
 		const float halfW = (bounds.width * 0.5F) + shadow.spread;
 		const float halfH = (bounds.height * 0.5F) + shadow.spread;
-		if (halfW <= 0.0F || halfH <= 0.0F) {
+		if (clipEmpty || halfW <= 0.0F || halfH <= 0.0F) {
 			return;
 		}
 		const float blur = shadow.blur > 0.0F ? shadow.blur : 0.5F;
@@ -357,6 +360,9 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::addTriangles(const TriangleMeshArgs& mesh) {
+		if (clipEmpty) {
+			return;
+		}
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
 
@@ -459,6 +465,9 @@ namespace Renderer {
 		float						 zIndex,
 		Primitives::BlendMode		 blend
 	) {
+		if (clipEmpty) {
+			return;
+		}
 		const uint32_t		   groupStart = static_cast<uint32_t>(indices.size());
 		const Foundation::Vec4 colorVec = color.toVec4();
 		const Foundation::Vec4 noBorder(0.0F, 0.0F, 0.0F, 0.0F);
@@ -500,7 +509,7 @@ namespace Renderer {
 		}
 		sweep = std::min(sweep, kTwoPi);
 		const float innerRadius = std::max(args.innerRadius, 0.0F);
-		if (!(sweep > 0.0F) || !(args.outerRadius > innerRadius)) {
+		if (clipEmpty || !(sweep > 0.0F) || !(args.outerRadius > innerRadius)) {
 			return;
 		}
 
@@ -532,7 +541,7 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::addImageQuad(const Primitives::ImageArgs& args) {
-		if (!args.texture.isValid()) {
+		if (clipEmpty || !args.texture.isValid()) {
 			return;
 		}
 		const Foundation::Rect& b = args.bounds;
@@ -565,6 +574,9 @@ namespace Renderer {
 		float					 zIndex,
 		Primitives::BlendMode	 blend
 	) {
+		if (clipEmpty) {
+			return;
+		}
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		// Resolve the atlas this glyph samples, and its range. An invalid handle
 		// means the default atlas (the game's default family's, set via setFontAtlas)
@@ -863,10 +875,13 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::setClipBounds(const Foundation::Vec4& bounds) {
-		currentClipBounds = bounds;
+		// Written so NaN bounds are empty too.
+		clipEmpty = !(bounds.z > bounds.x && bounds.w > bounds.y);
+		currentClipBounds = clipEmpty ? Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F) : bounds;
 	}
 
 	void BatchRenderer::clearClipBounds() {
+		clipEmpty = false;
 		currentClipBounds = Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
 	}
 

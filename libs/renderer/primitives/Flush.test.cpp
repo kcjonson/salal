@@ -382,6 +382,63 @@ namespace Renderer {
 		EXPECT_EQ(uniforms.transform, Foundation::Mat4(1.0F));
 	}
 
+	TEST_F(FlushTest, ClipsThatMissEachOtherCullWhatIsDrawnUnderThemUntilPopped) {
+		const auto clip = [](float x, float width) {
+			Primitives::pushClip({.shape = Foundation::ClipRect{.bounds = Foundation::Rect{x, 0.0F, width, 50.0F}}});
+		};
+		Primitives::beginFrame();
+		clip(0.0F, 50.0F);
+		clip(100.0F, 50.0F); // misses the first: the empty clip
+		rect(0.0F);
+		clip(0.0F, 320.0F); // over the empty clip, still empty
+		rect(110.0F);
+		Primitives::popClip();
+		rect(120.0F);
+		Primitives::popClip();
+		rect(10.0F); // in the first clip again
+		Primitives::popClip();
+		rect(200.0F);
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 8U);
+		EXPECT_EQ(uploaded[0].position.x, 10.0F);
+		EXPECT_EQ(uploaded[0].clipBounds, Foundation::Vec4(0.0F, 0.0F, 50.0F, 50.0F));
+		EXPECT_EQ(uploaded[4].position.x, 200.0F);
+		EXPECT_EQ(uploaded[4].clipBounds, Foundation::Vec4(0.0F));
+	}
+
+	TEST_F(FlushTest, AClipWithNoAreaCullsEveryKindOfDraw) {
+		const TextureHandle					  image = Primitives::createTexture({.width = 1, .height = 1});
+		const std::array<Foundation::Vec2, 3> triangle = {{{0.0F, 0.0F}, {10.0F, 0.0F}, {0.0F, 10.0F}}};
+		const std::array<uint16_t, 3>		  triangleIndices = {0, 1, 2};
+		Primitives::beginFrame();
+		Primitives::pushClip({.shape = Foundation::ClipRect{.bounds = Foundation::Rect{20.0F, 20.0F, 0.0F, 40.0F}}});
+		rect(0.0F);
+		Primitives::drawRect({.bounds = {0.0F, 0.0F, 10.0F, 10.0F}, .style = {.boxShadow = Foundation::BoxShadow{}}});
+		glyph(0.0F);
+		Primitives::drawLine({.start = {0.0F, 0.0F}, .end = {10.0F, 10.0F}});
+		Primitives::drawTriangles(
+			{.vertices = triangle.data(),
+			 .indices = triangleIndices.data(),
+			 .vertexCount = triangle.size(),
+			 .indexCount = triangleIndices.size(),
+			 .color = Foundation::Color::white(),
+			 .antiAlias = true}
+		);
+		Primitives::drawCircle({.center = {10.0F, 10.0F}, .radius = 5.0F, .style = {.border = Foundation::BorderStyle{}}});
+		Primitives::drawPolygon({.vertices = triangle, .style = {.border = Foundation::LineStyle{}}});
+		Primitives::drawPolyline({.points = triangle, .width = 2.0F});
+		Primitives::drawArc({.center = {10.0F, 10.0F}, .outerRadius = 5.0F});
+		Primitives::drawImage({.texture = image, .bounds = {0.0F, 0.0F, 4.0F, 4.0F}});
+		Primitives::popClip();
+		Primitives::endFrame();
+
+		EXPECT_TRUE(gpu->draws().empty());
+		Primitives::destroyTexture(image);
+	}
+
 	TEST_F(FlushTest, EachFlushIsASubmissionThatStartsTheBuffersOver) {
 		Primitives::beginFrame();
 		rect(0.0F);

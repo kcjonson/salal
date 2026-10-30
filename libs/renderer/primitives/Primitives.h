@@ -484,16 +484,19 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Push a new clip region. Nested clips are intersected.
 		// For ClipRect with ClipMode::Inside, this uses the fast shader path.
+		// A clip with no area, or one that misses the clip it is pushed in, is the
+		// empty clip: nothing draws under it, whatever is pushed over it, until it is
+		// popped.
 		void pushClip(const Foundation::ClipSettings& settings);
 
 		// Pop the most recent clip region, restoring the parent clip (if any).
 		void popClip();
 
 		// Get current clip bounds as Vec4 (minX, minY, maxX, maxY).
-		// Returns (0,0,0,0) if no clip is active.
+		// Returns (0,0,0,0) if no clip is active; the empty clip's have no area.
 		Foundation::Vec4 getCurrentClipBounds();
 
-		// Check if any clip region is currently active.
+		// Check if any clip region is currently active, the empty clip included.
 		bool IsClipActive();
 
 		// === Convenience Functions for Future Clip Shapes ===

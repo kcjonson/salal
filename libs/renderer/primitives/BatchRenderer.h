@@ -228,8 +228,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Clipping ---
 
-		// Set current clip bounds (applied to all subsequent vertices)
-		// bounds: (minX, minY, maxX, maxY) in screen coordinates
+		// Clip every add from here to `bounds`, (minX, minY, maxX, maxY) in screen
+		// coordinates. Bounds with no area are the empty clip: every add is culled,
+		// adding nothing, until the clip changes.
 		void setClipBounds(const Foundation::Vec4& bounds);
 
 		// Clear clip bounds (disables clipping)
@@ -393,6 +394,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Current clip bounds (applied to all vertices)
 		// (0,0,0,0) means no clipping
 		Foundation::Vec4 currentClipBounds{0.0F, 0.0F, 0.0F, 0.0F};
+
+		// The empty clip is set: every add returns before adding anything.
+		bool clipEmpty = false;
 
 		// Classification of currentTransform, cached once per setTransform() to
 		// avoid per-vertex checks. Text snapping runs for Identity/TranslateOnly
