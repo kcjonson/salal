@@ -87,6 +87,7 @@ if(SALAL_BUILD_TESTS)
 endif()
 include(cmake/SalalTesting.cmake)
 include(cmake/SalalBaseShader.cmake)
+include(cmake/SalalIcons.cmake)
 
 add_subdirectory(libs/foundation)
 add_subdirectory(libs/renderer)
