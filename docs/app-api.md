@@ -545,9 +545,9 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   inside `AppLauncher::initialize` (`:371`).
 - Only the top scene receives events, fixed ticks and update. Covered scenes
   render, from the topmost opaque one up, then the overlays. Each scene and
-  each overlay renders behind a `Primitives::sortBarrier()`, so its `zIndex`
-  values sort only against its own draws and everything it draws lands over
-  what came before it, with no flush between them.
+  each overlay renders behind a `Primitives::sortBarrier()`, so its draw keys
+  sort only against its own draws and everything it draws lands over what came
+  before it, with no flush between them.
 - Arguments and results are typed per scene and checked at compile time:
   `finish(R)` is how a scene returns, and the caller's callback runs before
   its `onUncovered`, with the finished scene off the stack but not yet

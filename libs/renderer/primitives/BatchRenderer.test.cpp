@@ -24,14 +24,14 @@ namespace {
 	const TextureHandle kAtlasB = TextureHandle::make(2, 0);
 	const TextureHandle kImage = TextureHandle::make(3, 0);
 
-	void addGlyph(BatchRenderer& batch, TextureHandle atlas, BlendMode blend = BlendMode::Alpha, float zIndex = 0.0F) {
+	void addGlyph(BatchRenderer& batch, TextureHandle atlas, BlendMode blend = BlendMode::Alpha, int32_t key = 0) {
 		batch.addTextQuad(
-			{0.0F, 0.0F}, {8.0F, 8.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {0.0F, 8.0F}, atlas, 4.0F, zIndex, blend
+			{0.0F, 0.0F}, {8.0F, 8.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {0.0F, 8.0F}, atlas, 4.0F, key, blend
 		);
 	}
 
-	void addRect(BatchRenderer& batch, BlendMode blend = BlendMode::Alpha, float zIndex = 0.0F) {
-		batch.addQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::Color::red(), std::nullopt, 0.0F, std::nullopt, zIndex, blend);
+	void addRect(BatchRenderer& batch, BlendMode blend = BlendMode::Alpha, int32_t key = 0) {
+		batch.addQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::Color::red(), std::nullopt, 0.0F, std::nullopt, key, blend);
 	}
 
 } // namespace
@@ -218,16 +218,16 @@ TEST(BatchPlanTest, AnImageSplitsOnItsTexture) {
 	EXPECT_EQ(batch.getPendingVertices().size(), 12U);
 }
 
-TEST(BatchPlanTest, ExplicitZSortsGroupsStablyBeforeSplitting) {
+TEST(BatchPlanTest, KeysSortGroupsStablyBeforeSplitting) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.setFontAtlas(kAtlasA);
-	addGlyph(batch, kAtlasA, BlendMode::Alpha, 1.0F);	 // vertices 0-3
-	addGlyph(batch, kAtlasB, BlendMode::Additive, 0.0F); // vertices 4-7
-	addRect(batch, BlendMode::Additive, 1.0F);			 // vertices 8-11
-	addGlyph(batch, kAtlasB, BlendMode::Alpha, 0.0F);	 // vertices 12-15
+	addGlyph(batch, kAtlasA, BlendMode::Alpha, 1);	  // vertices 0-3
+	addGlyph(batch, kAtlasB, BlendMode::Additive, 0); // vertices 4-7
+	addRect(batch, BlendMode::Additive, 1);			  // vertices 8-11
+	addGlyph(batch, kAtlasB, BlendMode::Alpha, 0);	  // vertices 12-15
 
-	// z 0 first in submission order (glyph B, glyph B), then z 1 (glyph A, rect).
+	// Key 0 first in submission order (glyph B, glyph B), then key 1 (glyph A, rect).
 	const DrawPlan plan = batch.plan();
 	ASSERT_EQ(plan.indices.size(), 24U);
 	EXPECT_EQ(plan.indices[0], 4U);
@@ -246,26 +246,26 @@ TEST(BatchPlanTest, ATextRunIsOneGroupHoweverManyGlyphs) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.setFontAtlas(kAtlasA);
-	addRect(batch, BlendMode::Alpha, 2.0F); // vertices 0-3
+	addRect(batch, BlendMode::Alpha, 2); // vertices 0-3
 	for (int glyph = 0; glyph < 40; ++glyph) {
-		addGlyph(batch, kAtlasA, BlendMode::Alpha, 1.0F); // vertices 4-163
+		addGlyph(batch, kAtlasA, BlendMode::Alpha, 1); // vertices 4-163
 	}
 	EXPECT_EQ(batch.getDrawGroupCount(), 2U);
 
 	// The next run at another blend, then one in a new sort domain, then a rect at
-	// the second run's z: a group each.
+	// the second run's key: a group each.
 	for (int glyph = 0; glyph < 3; ++glyph) {
-		addGlyph(batch, kAtlasA, BlendMode::Additive, 1.0F);
+		addGlyph(batch, kAtlasA, BlendMode::Additive, 1);
 	}
 	batch.sortBarrier();
 	for (int glyph = 0; glyph < 3; ++glyph) {
-		addGlyph(batch, kAtlasA, BlendMode::Additive, 1.0F);
+		addGlyph(batch, kAtlasA, BlendMode::Additive, 1);
 	}
-	addRect(batch, BlendMode::Alpha, 1.0F);
+	addRect(batch, BlendMode::Alpha, 1);
 	EXPECT_EQ(batch.getDrawGroupCount(), 5U);
 
 	// The first run sorts as a whole, every glyph in order, then the additive run,
-	// then the z 2 rect, all under the new domain's two groups.
+	// then the key 2 rect, all under the new domain's two groups.
 	const DrawPlan plan = batch.plan();
 	ASSERT_EQ(plan.indices.size(), (1U + 40U + 3U + 3U + 1U) * 6U);
 	EXPECT_EQ(plan.indices[0], 4U);
@@ -274,17 +274,17 @@ TEST(BatchPlanTest, ATextRunIsOneGroupHoweverManyGlyphs) {
 	EXPECT_EQ(plan.runs.size(), 1U);
 }
 
-TEST(BatchPlanTest, ASortBarrierKeepsEarlierDrawsUnderLaterOnesWhateverTheirZ) {
+TEST(BatchPlanTest, ASortBarrierKeepsEarlierDrawsUnderLaterOnesWhateverTheirKeys) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
 	batch.setFontAtlas(kAtlasA);
-	addRect(batch, BlendMode::Alpha, 5.0F); // vertices 0-3
-	addRect(batch, BlendMode::Alpha, 1.0F); // vertices 4-7
+	addRect(batch, BlendMode::Alpha, 5); // vertices 0-3
+	addRect(batch, BlendMode::Alpha, 1); // vertices 4-7
 	batch.sortBarrier();
-	addRect(batch, BlendMode::Alpha, -3.0F); // vertices 8-11
-	addRect(batch, BlendMode::Alpha, -4.0F); // vertices 12-15
+	addRect(batch, BlendMode::Alpha, -3); // vertices 8-11
+	addRect(batch, BlendMode::Alpha, -4); // vertices 12-15
 
-	// Each side z-sorted, the first side wholly under the second; still one run.
+	// Each side sorted by key, the first side wholly under the second; still one run.
 	const DrawPlan plan = batch.plan();
 	ASSERT_EQ(plan.indices.size(), 24U);
 	EXPECT_EQ(plan.indices[0], 4U);

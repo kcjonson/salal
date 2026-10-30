@@ -46,7 +46,7 @@ namespace ui {
 			.color = detail::withOpacity(style.color.value_or(kStroke), opacity()),
 			.cap = roundCaps ? Renderer::Primitives::LineCap::Round : Renderer::Primitives::LineCap::Butt,
 			.id = getId().empty() ? nullptr : getId().c_str(),
-			.zIndex = drawKey(),
+			.key = drawKey(),
 		});
 	}
 

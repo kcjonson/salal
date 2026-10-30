@@ -48,9 +48,13 @@ namespace Renderer::Primitives {
 	static Foundation::Mat4				g_currentTransform = Foundation::Mat4(1.0F);
 
 	// The clip stack, each entry the intersection of every rect pushed up to it,
-	// (minX, minY, maxX, maxY). One with no area is the empty clip, which culls every
-	// draw; an intersection only shrinks, so every push over an empty clip stays empty.
+	// mapped to the screen when pushed, (minX, minY, maxX, maxY). One with no area is
+	// the empty clip, which culls every draw; an intersection only shrinks, so every
+	// push over an empty clip stays empty.
 	static std::vector<Foundation::Vec4> g_clipStack;
+
+	// A clip was pushed under a rotation or shear, and the box around it used.
+	static bool g_warnedRotatedClip = false;
 
 	// beginFrame found a clip or transform still pushed, and said so.
 	static bool g_warnedUnbalancedStacks = false;
@@ -351,16 +355,12 @@ namespace Renderer::Primitives {
 
 		// Outer box-shadow / glow sits behind the fill (emit first).
 		if (args.style.boxShadow.has_value()) {
-			g_batchRenderer->addShadowQuad(
-				args.bounds, args.style.boxShadow.value(), cornerRadius, static_cast<float>(args.zIndex), args.blend
-			);
+			g_batchRenderer->addShadowQuad(args.bounds, args.style.boxShadow.value(), cornerRadius, args.key, args.blend);
 		}
 
 		// Single AddQuad call handles fill, border, rounded corners, and an optional
 		// gradient (per-corner vertex colors) via the GPU.
-		g_batchRenderer->addQuad(
-			args.bounds, args.style.fill, args.style.border, cornerRadius, args.style.gradient, static_cast<float>(args.zIndex), args.blend
-		);
+		g_batchRenderer->addQuad(args.bounds, args.style.fill, args.style.border, cornerRadius, args.style.gradient, args.key, args.blend);
 	}
 
 	void drawLine(const LineArgs& args) {
@@ -390,11 +390,7 @@ namespace Renderer::Primitives {
 		};
 		static constexpr uint16_t kQuadIndices[6] = {0, 1, 2, 0, 2, 3};
 		g_batchRenderer->addTriangles(
-			{.vertices = quad,
-			 .indices = kQuadIndices,
-			 .color = args.style.color,
-			 .zIndex = static_cast<float>(args.zIndex),
-			 .blend = args.blend}
+			{.vertices = quad, .indices = kQuadIndices, .color = args.style.color, .key = args.key, .blend = args.blend}
 		);
 	}
 
@@ -411,7 +407,7 @@ namespace Renderer::Primitives {
 			 .indices = {args.indices, args.indexCount},
 			 .color = args.color,
 			 .colors = args.colors,
-			 .zIndex = static_cast<float>(args.zIndex),
+			 .key = args.key,
 			 .blend = args.blend,
 			 .feather = feathered ? &boundary : nullptr}
 		);
@@ -428,7 +424,7 @@ namespace Renderer::Primitives {
 				 .outerRadius = args.radius,
 				 .color = args.style.fill,
 				 .id = args.id,
-				 .zIndex = args.zIndex,
+				 .key = args.key,
 				 .blend = args.blend}
 			);
 		}
@@ -453,7 +449,7 @@ namespace Renderer::Primitives {
 				 .outerRadius = outerRadius,
 				 .color = border.color,
 				 .id = args.id,
-				 .zIndex = args.zIndex,
+				 .key = args.key,
 				 .blend = args.blend}
 			);
 		}
@@ -517,7 +513,6 @@ namespace Renderer::Primitives {
 			return;
 		}
 
-		const float zIndex = static_cast<float>(args.zIndex);
 		if (args.style.fill.a > 0.0F) {
 			const PolygonCacheEntry& fill = polygonFill(args.vertices);
 			if (!fill.mesh.indices.empty()) {
@@ -525,7 +520,7 @@ namespace Renderer::Primitives {
 					{.vertices = fill.mesh.vertices,
 					 .indices = fill.mesh.indices,
 					 .color = args.style.fill,
-					 .zIndex = zIndex,
+					 .key = args.key,
 					 .blend = args.blend,
 					 .feather = &fill.boundary}
 				);
@@ -539,7 +534,7 @@ namespace Renderer::Primitives {
 			// fill's feather fades, the border is whole.
 			static thread_local std::vector<StrokePiece> pieces;
 			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces);
-			g_batchRenderer->addStroke(pieces, border.color, zIndex, args.blend);
+			g_batchRenderer->addStroke(pieces, border.color, args.key, args.blend);
 		}
 	}
 
@@ -552,7 +547,7 @@ namespace Renderer::Primitives {
 		// noisy line's near-repeats don't uncut the joints either side.
 		strokePolyline(args, g_batchRenderer->getLocalPixel(), 0.25F * g_batchRenderer->getLocalDevicePixel(), pieces);
 		if (!pieces.empty()) {
-			g_batchRenderer->addStroke(pieces, args.color, static_cast<float>(args.zIndex), args.blend);
+			g_batchRenderer->addStroke(pieces, args.color, args.key, args.blend);
 		}
 	}
 
@@ -614,7 +609,7 @@ namespace Renderer::Primitives {
 			g_fontRenderer->generateGlyphQuads(
 				effective, glm::vec2(pos.x, pos.y), args.scale, glm::vec4(col.r, col.g, col.b, col.a), quads, args.font, args.letterSpacing
 			);
-			drawGlyphs(quads.data(), quads.size(), static_cast<float>(args.zIndex), args.blend);
+			drawGlyphs(quads.data(), quads.size(), args.key, args.blend);
 		};
 
 		if (args.shadowColor.a > 0.0F) {
@@ -623,7 +618,7 @@ namespace Renderer::Primitives {
 		emit(origin, args.color);
 	}
 
-	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, float zIndex, BlendMode blend) {
+	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, int32_t key, BlendMode blend) {
 		if (g_batchRenderer == nullptr) {
 			return;
 		}
@@ -642,7 +637,7 @@ namespace Renderer::Primitives {
 				Foundation::Vec2(quad.runOrigin.x, quad.runOrigin.y),
 				quad.atlas,
 				quad.pixelRange,
-				zIndex,
+				key,
 				blend
 			);
 		}
@@ -723,7 +718,28 @@ namespace Renderer::Primitives {
 		if (g_batchRenderer == nullptr) {
 			return;
 		}
-		Foundation::Vec4 bounds(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+		Foundation::Vec4 bounds(0.0F, 0.0F, 0.0F, 0.0F);
+		// Checked before the mapping, which a mirror would otherwise use to turn a negative extent round.
+		if (rect.width >= 0.0F && rect.height >= 0.0F && !std::isnan(rect.x) && !std::isnan(rect.y)) {
+			const Foundation::Mat4& m = g_currentTransform;
+			if (m[0][1] != 0.0F || m[1][0] != 0.0F) {
+				if (!g_warnedRotatedClip) {
+					g_warnedRotatedClip = true;
+					LOG_WARNING(Renderer, "pushClip under a rotation or shear clips to the box around it, which shows more (warned once)");
+				}
+			}
+			const Foundation::Vec2 corners[4] = {
+				{rect.x, rect.y}, {rect.x + rect.width, rect.y}, {rect.x, rect.y + rect.height}, {rect.x + rect.width, rect.y + rect.height}
+			};
+			const Foundation::Vec4 first = m * Foundation::Vec4(corners[0], 0.0F, 1.0F);
+			bounds = {first.x, first.y, first.x, first.y};
+			for (int i = 1; i < 4; ++i) {
+				const Foundation::Vec4 mapped = m * Foundation::Vec4(corners[i], 0.0F, 1.0F);
+				bounds = {
+					std::min(bounds.x, mapped.x), std::min(bounds.y, mapped.y), std::max(bounds.z, mapped.x), std::max(bounds.w, mapped.y)
+				};
+			}
+		}
 		if (std::isnan(bounds.x) || std::isnan(bounds.y) || std::isnan(bounds.z) || std::isnan(bounds.w)) {
 			// std::max and std::min would drop a NaN against the parent's bounds and keep the parent.
 			bounds = Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
