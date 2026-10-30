@@ -146,8 +146,9 @@ Lines, glyphs, images and shadows are quads. Polygon triangles and feather
 rings go in as quads whose fourth corner repeats the third, so there is one
 path and one format. The transform stays baked on the CPU, as the ordering
 model assumes. Flat is a mode value. Instanced meshes (`InstancedMeshVertex`)
-are a separate path and don't change. The shader-hook contract changes with
-this: hooks see per-instance inputs instead of per-vertex ones.
+are a separate path and don't change. The shader hooks run only on that path
+and keep their points and arguments; what changes is the batched attributes a
+hook can also see (1 and 3 to 5), which the instance's replace.
 
 Why: the per-vertex layout writes everything about a rect (colour, border,
 radius, clip, mode) into each of its four 80-byte vertices plus six indices,
@@ -240,9 +241,10 @@ strokes, and Health Icons because its licence is published two ways.
 The build step produces an MSDF atlas. `salal_icons(target icons/)` runs
 msdfgen over the folder at build time, a host dependency like glslang's
 validator, and writes an atlas PNG, its msdf-atlas-gen JSON and a name table
-from filename to private-use codepoint. The atlas loads as one more font
-family, so an `Icon` is one tinted text-mode quad in the same resident set as
-text.
+from filename to private-use codepoint. ui's icon service owns the atlas and
+builds glyph quads from its JSON, drawn through `drawGlyphs` as text is (a
+quad carries its atlas and range), so an `Icon` is one tinted text-mode quad in
+the same resident set as text and `FontRenderer`'s families stay the game's.
 
 Why MSDF: one instance an icon, three texture samples and a median a
 fragment. Tessellated meshes cost 100 to 300 instances an icon with the
