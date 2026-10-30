@@ -59,6 +59,8 @@ repo's `specboard.md`.
 - **[docs/ui-design.md](docs/ui-design.md)** is the phase 3 design of `ui`,
   decided rule by rule against dual-deck-builder's ui-rendering-spec: where
   salal departs from the spec and why, starting with the ordering model.
+- **[docs/ui-plan.md](docs/ui-plan.md)** is the phase 3 PR sequence: the
+  renderer changes first, `ui` built in salal, then worldsim's conversion.
 - **[docs/testing/README.md](docs/testing/README.md)** is the testing strategy:
   happy-path scripts run by cheap subagent fleets, local scene diffs for
   rendering code, the strict perf suite, and bounded unit tests.
