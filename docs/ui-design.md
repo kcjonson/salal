@@ -23,12 +23,12 @@ that slot's stacking contexts.
   layout never do), which is the part of CSS z-index that hurts. Every root
   is a context of its own: each of the scene's roots, each stack entry, and
   the tooltip and drag tiers. An ancestor's clip applies
-  whatever the `zIndex`; escaping a clip is what the overlay stack is for.
-- **The overlay stack.** Dialogs, menus, selects, context menus and toasts are
+  whatever the `zIndex`; escaping a clip is what the popup stack is for.
+- **The popup stack.** Dialogs, menus, selects, context menus and toasts are
   entries in one stack, ordered by when they opened, latest on top; a toast is
   brought to the front when it arrives. An entry stays logically owned by the
   component that opened it, for lifetime, dismissal and commands, and anything
-  opened from an entry lands above it. The overlay service (R8.21) is this
+  opened from an entry lands above it. The popup service (R8.21) is this
   stack.
 - **Fixed tiers above the stack.** Tooltip, then drag, for the two things that
   must win however recently they opened. A screen transition is app's
@@ -314,7 +314,7 @@ size is a design call per screen, not a lint.
 
 Decided 2026-10-30. Takes R1.6 and R8.14, scoped per scene.
 
-Every ui service (focus, the overlay stack, the theme, input dispatch,
+Every ui service (focus, the popup stack, the theme, input dispatch,
 viewport, clock and animator, placement, clipboard) reaches a component
 through the context of the scene it was mounted in. There are no singletons,
 and constructors touch no service. The draw API stays process-wide.
@@ -395,7 +395,7 @@ root().removeChild(row);   // health.get() is null from here on
 - **Storage is a slot map the scene owns.** Each component is allocated once
   and filed in a slot; a `Ref` is a 64-bit (index, generation) pair. A lookup
   is an index and a compare, no hashing. Parent and children are stored as
-  ids, and so are focus, capture, hover, overlay-stack entries and timers.
+  ids, and so are focus, capture, hover, popup-stack entries and timers.
   `removeChild` unlinks at once and frees after the current dispatch through
   one path, which bumps the slot's generation and clears every reference to
   the component (focus falls back, capture gets a cancel, timers drop). Game
@@ -553,3 +553,42 @@ impl Component for HealthBar {
     }
 }
 ```
+
+## Remaining rules
+
+Decided 2026-10-30, closing the review of the spec.
+
+- **No raster images.** None of the games has raster art (dual-deck-builder
+  has one UI art file besides its font atlases), so there is no Image
+  component (R12.5), no nine-slice (R2.12, R5.19) and no art residency,
+  decoding or context-loss handling (R5.31 to R5.33). Textures are MSDF
+  atlases (fonts, icons) and render targets; `drawImage` stays only to
+  composite a render target.
+- **Rounded clip (R4.14):** deferred until a game needs one. Until then,
+  inset content by the radius. The instance format already has a byte for a
+  rounded-clip entry.
+- **Small text (R6.4a):** no raster fallback. Loading an atlas whose distance
+  range is under a sixth of the em warns, and text stays at 11 px and up.
+- **UI scale (R7.5):** one scale for the whole UI, applied by redefining
+  app's logical viewport, which also covers asteroids' text-scale setting.
+- **Ink extent (R8.8):** taken. A shadow or glow drawn past a component's
+  box is ink, not overflow, so the lint doesn't flag it.
+- **Snapshot fields (R13.11):** the tree snapshot's field names are the same
+  in every game, so one agent toolkit drives them all, and a missing value is
+  null, never zero.
+- **Devices to players:** a device belongs to a player through app's existing
+  slot claiming, and each player's devices drive that player's focus
+  (Services and input routing, above).
+- **Activate and cancel (R9.27):** ui reads activate, cancel and the
+  navigation directions as actions from foundation's `ActionMap`, rebindable
+  per device, never from hard-coded keys.
+- **Names:** ui's stack of dialogs, menus, selects, context menus and toasts
+  is the popup stack, run by the popup service. "Overlay" stays app's word
+  for its diagnostic layers (`app::Overlay`), so the two don't collide.
+- **Screen transitions (R8.22, R12.38):** app's `SceneStack` owns them; ui
+  mounts a scene's roots in `onEnter` and unmounts them in `onExit`.
+- **The lint's required rules** are R13.25's first six; the spec's chapter 13
+  checklist count (four) and rule 7 don't apply.
+- **Debug drawing (R13.45):** world debug lines draw in a world domain below
+  the UI; the diagnostic domain (app's overlays) draws after the UI, as R3.21
+  says.
