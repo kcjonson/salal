@@ -132,9 +132,10 @@ void main() {
 		// to UI coordinates (top-left origin, physical pixels)
 		float physicalY = u_viewportHeight - gl_FragCoord.y;
 
-		// Discard if outside clip bounds (all comparisons in physical pixels)
-		if (gl_FragCoord.x < physicalClipBounds.x || gl_FragCoord.x > physicalClipBounds.z ||
-			physicalY < physicalClipBounds.y || physicalY > physicalClipBounds.w) {
+		// Discard outside the clip, half-open in physical pixels: a pixel centre on the
+		// right or bottom edge is outside, so a clip w pixels wide keeps w columns
+		if (gl_FragCoord.x < physicalClipBounds.x || gl_FragCoord.x >= physicalClipBounds.z ||
+			physicalY < physicalClipBounds.y || physicalY >= physicalClipBounds.w) {
 			discard;
 		}
 	}
