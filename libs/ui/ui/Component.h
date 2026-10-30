@@ -6,7 +6,7 @@
 // component's own content only, and the context walks the children.
 //
 // Coordinates are logical pixels, y down, local to the parent's box. Layout (ui/Layout.h) places each
-// component: its margin box at `position` under a Block parent, in the flow under a Flex one. render()
+// component: its margin box at `position` under a Free parent, in the flow under a Flex one. render()
 // draws with (0, 0) at the component's own box, inside its margin. screenBounds() and localToScreen()
 // reach the viewport; a component never adds up its ancestors' positions itself.
 //
@@ -57,7 +57,7 @@
 //   visible    false takes the subtree out of layout, drawing, the lint and the paint order (state, not
 //              style)
 //   enabled    reported by the snapshot; input reads it
-//   position   the margin box's top-left in the parent's box, under a Block parent or Absolute
+//   position   the margin box's top-left in the parent's box, under a Free parent or Absolute
 //   size       px, ui::percent() of the parent's box, or ui::kAuto (the default): its content
 //   minSize    clamps a resolved size; auto is 0
 //   maxSize    clamps a resolved size; auto is none
@@ -169,7 +169,7 @@ namespace ui {
 		[[nodiscard]] bool isEnabled() const { return enabled; }
 		void			   setEnabled(bool value) { enabled = value; }
 
-		// The declared offset, which places it under a Block parent or Absolute.
+		// The declared offset, which places it under a Free parent or Absolute.
 		[[nodiscard]] Foundation::Vec2 getPosition() const { return position; }
 		void						   setPosition(Foundation::Vec2 value);
 		// The box's size as the last layout resolved it.

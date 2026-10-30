@@ -1,4 +1,4 @@
-// ui_layout: Flex and Block, after worldsim's ui-sandbox layout scene (apps/ui-sandbox/scenes/
+// ui_layout: Flex and Free placement, after worldsim's ui-sandbox layout scene (apps/ui-sandbox/scenes/
 // LayoutScene.cpp, a4226e17). Six columns, one per justifyContent; four per alignItems; a row of a
 // fixed box and two growing ones at 1x and 2x; a column whose body grows; a nested card; a wrapping
 // text in a column that hugs it; and absolutely placed badges in a card's corners. The stage is a

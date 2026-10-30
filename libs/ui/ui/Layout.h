@@ -4,12 +4,14 @@
 //
 // A component's `display` decides how its children are placed:
 //
-//   Block  the default. Each child sits at its own `position` in the parent's box; an auto size hugs
-//          the children's boxes. This is the free placement every screen had before layout.
-//   Flex   children flow along flexDirection, spaced by gap inside padding, sized by flexGrow and
-//          flexShrink on the main axis and alignItems or alignSelf on the cross one. A child with
-//          `position: Absolute` leaves the flow and is placed as under Block, or by `inset`.
-//   None   the component and its subtree take no room and don't draw, as `visible: false`.
+//   Free  the default. Each child sits at its own `position` in the parent's box; an auto size hugs
+//         the children's boxes. This is the free placement every screen had before layout.
+//   Flex  children flow along flexDirection, spaced by gap inside padding, sized by flexGrow and
+//         flexShrink on the main axis and alignItems or alignSelf on the cross one. A child with
+//         `position: Absolute` leaves the flow and is placed as under Free, or by `inset`.
+//   None  the component and its subtree take no room and don't draw, as `visible: false`.
+//
+// CSS's Block, normal flow, isn't built: a Flex column stacks, and Block comes when a game asks.
 //
 // Sizes are px, a percentage of the parent's box (inside its padding, for a flex child), or auto: a
 // text's or a container's content, a stretched or grown flex child's share. An assigned size never
@@ -115,7 +117,7 @@ namespace ui {
 		bool operator==(const Inset&) const = default;
 	};
 
-	enum class Display : std::uint8_t { Block, Flex, None };
+	enum class Display : std::uint8_t { Free, Flex, None };
 	enum class FlexDirection : std::uint8_t { Row, Column };
 	// alignItems on a flex container, alignSelf on one child. Stretch fills the cross axis for a child
 	// whose cross size is auto and starts one whose isn't.
@@ -126,7 +128,7 @@ namespace ui {
 
 	struct Layout {
 		// As a container.
-		Display		   display = Display::Block;
+		Display		   display = Display::Free;
 		FlexDirection  flexDirection = FlexDirection::Row;
 		float		   gap = 0.0F; // px between flex children; negative overlaps them
 		Edges		   padding;

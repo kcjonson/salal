@@ -274,7 +274,7 @@ namespace ui {
 		component.render();
 		const bool clipped = component.overflow == Overflow::Clip && !component.children.empty();
 		if (clipped) {
-			Renderer::Primitives::pushClip(component.screenBounds());
+			Renderer::Primitives::pushClip({0.0F, 0.0F, component.size.x, component.size.y});
 		}
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {

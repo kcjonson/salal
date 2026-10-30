@@ -98,7 +98,7 @@ namespace ui::detail {
 			return *own;
 		}
 		if (node.layout.display != Display::Flex) {
-			return blockContent(node, width, height);
+			return freeContent(node, width, height);
 		}
 		const Edges&		 padding = node.layout.padding;
 		std::optional<float> contentWidth = width ? std::optional(std::max(*width - padding.horizontal(), 0.0F)) : std::nullopt;
@@ -119,8 +119,8 @@ namespace ui::detail {
 				   : Foundation::Vec2{cross + padding.horizontal(), main + padding.vertical()};
 	}
 
-	// A Block hugs its children where they sit; absolutely positioned ones are out of its flow.
-	Foundation::Vec2 LayoutEngine::blockContent(Component& node, std::optional<float> width, std::optional<float> height) {
+	// A Free component hugs its children where they sit; absolutely positioned ones are out of it.
+	Foundation::Vec2 LayoutEngine::freeContent(Component& node, std::optional<float> width, std::optional<float> height) {
 		const Foundation::Vec2 box{width.value_or(-1.0F), height.value_or(-1.0F)};
 		Foundation::Vec2	   extent{0.0F, 0.0F};
 		for (const ComponentId childId : node.children) {
@@ -242,11 +242,11 @@ namespace ui::detail {
 		if (node.layout.display == Display::Flex) {
 			arrangeFlex(node);
 		} else {
-			arrangeBlock(node);
+			arrangeFree(node);
 		}
 	}
 
-	void LayoutEngine::arrangeBlock(Component& node) {
+	void LayoutEngine::arrangeFree(Component& node) {
 		for (const ComponentId childId : node.children) {
 			Component* child = registry.find(childId);
 			if (child == nullptr || !child->isShown()) {

@@ -5,7 +5,7 @@
 // in one pass over the tree rather than inside each container's render:
 //
 //   measure  the size a component takes for the axes its parent knows, its auto axes from its
-//            content: a leaf's own (a text), a Block's children's boxes, a Flex's flow. Kept per
+//            content: a leaf's own (a text), a Free one's children's boxes, a Flex's flow. Kept per
 //            component while nothing under it changes.
 //   arrange  a component whose size is decided places its children and decides theirs, then
 //            arranges each child that changed or holds a change.
@@ -51,12 +51,12 @@ namespace ui::detail {
 		};
 
 		Foundation::Vec2 contentSize(Component& node, std::optional<float> width, std::optional<float> height, float availableWidth);
-		Foundation::Vec2 blockContent(Component& node, std::optional<float> width, std::optional<float> height);
+		Foundation::Vec2 freeContent(Component& node, std::optional<float> width, std::optional<float> height);
 		// Each flowing child's main and cross size inside a content box whose known axes are given,
 		// left in `items`.
 		void flex(Component& node, std::optional<float> contentWidth, std::optional<float> contentHeight, float availableWidth);
 		void arrangeFlex(Component& node);
-		void arrangeBlock(Component& node);
+		void arrangeFree(Component& node);
 		void placeAbsolute(Component& child, Foundation::Vec2 box);
 		void place(Component& child, Foundation::Vec2 offset, Foundation::Vec2 size);
 

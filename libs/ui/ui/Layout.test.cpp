@@ -1,4 +1,4 @@
-// The layout pass: Flex's sizing and placement, Block's free placement, absolute children, and
+// The layout pass: Flex's sizing and placement, Free placement, absolute children, and
 // invalidation to the relayout boundary. Ported from worldsim's LayoutContainer.test.cpp (a4226e17)
 // where its cases still apply, with the spec's 10.9 cases; the two freeze tests come first. A fake
 // text with fixed word widths stands in for fonts, so it runs headless.
@@ -246,9 +246,9 @@ namespace ui {
 		EXPECT_EQ(boundsOf(second)[0], 80.0F);
 	}
 
-	// --- Block, None and absolute children ---
+	// --- Free, None and absolute children ---
 
-	TEST_F(UiLayoutTest, ABlockPlacesChildrenWhereTheySayAndHugsTheirBoxes) {
+	TEST_F(UiLayoutTest, FreePlacesChildrenWhereTheySayAndHugsTheirBoxes) {
 		Ref<Component> group = context.root().addChild<Component>({.position = {50.0F, 50.0F}});
 		group.addChild<Component>({.position = {10.0F, 0.0F}, .size = {30.0F, 30.0F}});
 		Ref<Component> far = group.addChild<Component>({.position = {100.0F, 40.0F}, .size = {20.0F, 10.0F}, .margin = 5.0F});

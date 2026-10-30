@@ -410,16 +410,18 @@ root().removeChild(row);   // health.get() is null from here on
     of layout, drawing, input and focus), `enabled`
   - geometry: `position`, `size` (px, percent or auto), `minSize`, `maxSize`,
     `margin`, `transform` (render and hit test only)
-  - layout: `layout`, with CSS names as taffy uses them: `display` (Block,
+  - layout: `layout`, with CSS names as taffy uses them: `display` (Free,
     Flex, Grid, None), `flexDirection`, `gap`, `padding`, `alignItems`,
     `justifyContent`, and as a child `flexGrow`, `flexShrink`, `alignSelf`,
-    `position` (Relative or Absolute) and `inset`. The top-level `position`
-    is the offset of an absolutely positioned component; flow children are
-    placed by their parent's layout. `display: Block` is the default and
-    places each child at its own `position`, its auto size hugging their
-    boxes, as a hand-placed screen is; Flex (and Grid) flow theirs, and
-    `position: Absolute` takes a child out of a flowing parent. Taffy's
-    Block is CSS normal flow, which a Flex column covers
+    `position` (Relative or Absolute) and `inset`. `display: Free`, the
+    default, places each child at its own top-level `position`, its auto size
+    hugging their boxes; Flex (and Grid) flow theirs, and `position:
+    Absolute` takes a child out of a flowing parent to its `position` or
+    `inset`. The default isn't CSS's Block: in normal flow a child's
+    `position` means nothing and children stack, so every hand-placed screen
+    and every overlay inside a component (a bar's fill over its track) would
+    need `Absolute` on each child. Block keeps its CSS meaning and comes when
+    a game asks, since a Flex column already stacks
   - look: `style`, `overflow` (Visible, Clip or Scroll; scrolling is a
     property of any component, not a separate container)
   - ordering: `zIndex` and `isolation` (Ordering, above)
