@@ -315,10 +315,12 @@ Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
 `SALAL_WITH_DEV_SERVER` off needn't have it), `gtest`, `benchmark`, and
 `glslang` with its `tools` feature as a host dependency, whose
 `glslangValidator` checks the base shader at build time (a FetchContent
-consumer adds it to its own manifest). Worldsim's
-`pugixml`, `lua` and `sol2` serve its `assets` target, `msdfgen` its font-atlas
-tool, and all four stay behind; `msdfgen` comes back in phase 3 as a host
-dependency for the icon build step (`salal_icons()`, [docs/ui-design.md](docs/ui-design.md)).
+consumer adds it to its own manifest), and `msdfgen` without its default
+features, also a host dependency, which `salal_icons(<target> <dir>)`
+(`cmake/SalalIcons.cmake`) builds its icon tool on: every SVG in the folder
+checked against ui-design.md's icon rules, one MSDF atlas, its JSON and a name
+table embedded in the target (a game that builds no icons needn't have it).
+Worldsim's `pugixml`, `lua` and `sol2` serve its `assets` target and stay behind.
 An audio library is proposed and not decided
 (worldsim has none; `miniaudio` is the recommendation).
 
