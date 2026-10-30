@@ -409,7 +409,7 @@ root().removeChild(row);   // health.get() is null from here on
   - geometry: `position`, `size` (px, percent or auto), `minSize`, `maxSize`,
     `margin`, `transform` (render and hit test only)
   - layout: `layout`, with CSS names as taffy uses them: `display` (Block,
-    Flex, None, and Grid once a game needs it, decided 2026-10-30), `flexDirection`, `gap`, `padding`, `alignItems`,
+    Flex, Grid, None), `flexDirection`, `gap`, `padding`, `alignItems`,
     `justifyContent`, and as a child `flexGrow`, `flexShrink`, `alignSelf`,
     `position` (Relative or Absolute) and `inset`. The top-level `position`
     is the offset of an absolutely positioned component; flow children are

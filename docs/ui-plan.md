@@ -109,7 +109,7 @@ that would be reworked a PR later.
 ## Sequencing
 
 Each salal PR is a minor tag. Worldsim pins after PRs 1 and 2 with small edits
-and after 3 and 4 with none. It takes the tags from 5 to 14 with one CMake line
+and after 3 and 4 with none. It takes the tags from 5 to 15 with one CMake line
 between them, at PR 7's pin, where it starts linking salal's ui because app
 does; it uses salal's ui from its first conversion PR.
 
@@ -137,14 +137,15 @@ list.
 | 12. Popup stack, placement and modality | the popup service: entries in open order, each its own slot and stacking context, owned by its opener, anything opened from an entry landing above it, a toast brought to the front on arrival; the tooltip tier above the stack, and the drag tier's slot without its service; modality and popup exclusivity per focus context, content below a modal inert for that player (gap 11); dismissal on an outside press, cancel and focus loss (R9.13, R9.14); the placement service (R12.30); entries walked under their opener at their own slot's key, through a new `Primitives` clip push that resets instead of intersecting (gap 2) | none | headless tests: a dialog opened from a menu lands above it, a tooltip above both, two players' modals stay apart, hit testing and focus follow the stack; sandbox `ui_popups`; a popups-open perf scene | 8, 11 |
 | 13. Controls | ported onto the core: Button and ListRow (the icon a child, gap 30; `size` setting the font, gap 19), Slider, ProgressBar, TextInput (app's clipboard through the context), TabBar, SegmentedControl (interactive now), TreeView, Badge, Stat, KeyCap, Divider, and Panel's structure, a title and an actions slot (gap 17); new: Checkbox and Toggle (R12.9), RadioGroup (R12.35). Each with its worldsim suite. The sandbox's picker rebuilt on ListRow and its `Primitives` picker deleted | none | the ported suites through the dispatcher; sandbox scenes from worldsim's button, tab bar, text input and tree view scenes; happy-path lines for each control; scene diff; perf suite | 4, 8, 9, 10, 11 |
 | 14. Popups | Menu, Select (its caret an icon, gap 19), DropdownButton, ContextMenu, Dialog (its focus scope its subtree), Tooltip (any component as content, measured, gap 19), and Toast, ported onto the popup stack with their suites; `TooltipManager` becomes the tooltip tier and `ToastStack` the stack's toast entries (gap 30) | none | the ported suites; sandbox scenes from worldsim's context menu, dialog, dropdown, toast and tooltip scenes; happy-path lines; perf suite | 12, 13 |
+| 15. Grid | `display: Grid` with taffy's names: `gridTemplateColumns` and `gridTemplateRows` in px, percent, `auto`, `fr` and `minmax`; `gap`; row-first auto placement; `gridColumn` and `gridRow` with spans on a child; `alignItems`, `justifyItems` and their `Self` forms. No named areas, subgrid or dense packing until a game asks. Track sizing and placement are plain functions over the children's measured sizes, written and tested first with no tree, then wired into the layout pass | none | headless tests of track sizing (fixed, `fr` with a `minmax` floor, `auto` from content) and placement (spans, auto flow around explicit items), written from the CSS Grid spec's examples; sandbox `ui_grid`; perf suite | none to start; 6 to merge |
 
-Phase 3 blocks feature work on every game, so three tracks run at once, each in
+Phase 3 blocks feature work on every game, so four tracks run at once, each in
 its own session: the renderer (1 and 2 now, 3 and 4 once the perf suite is in),
-the ui core (5 to 8 in order), and theme and icons (9 beside 6, 10 once 2 and
-5 are in). Then 11 follows 9, 12 follows 8 and 11, 13 needs 4 and closes the
+the ui core (5 to 8 in order), theme and icons (9 beside 6, 10 once 2 and 5 are
+in), and Grid (15, started now, merged after 6). Then 11 follows 9, 12 follows 8 and 11, 13 needs 4 and closes the
 first two tracks, and 14 closes the salal side. Wrap layout, Popover, NumberInput, the
 standalone Scrollbar, Counter, the drag service and the rounded clip are not in
-the sequence, and neither is Grid (below). None of worldsim's
+the sequence. None of worldsim's
 screens or asteroids' screen designs uses one; each comes when a game asks,
 dual-deck-builder's port most likely first.
 
@@ -184,8 +185,9 @@ conversion PR owns its part in its description:
 
 ## Grid
 
-Decided 2026-10-30: `display: Grid` waits for the first game that needs it, and
-PR 6 lands Block, Flex and None. Worldsim needs none: its grid-like screens
-(scenario select's five cards, world creator's `360 | stage | 360`,
-asset-manager's 2 by 3 variants, the Salvage sandbox scene's icon wall) are
-Flex rows, nested in a column where there is more than one.
+Decided 2026-10-30: `display: Grid` is PR 15, its own track, since nothing
+waits on it and it touches nothing else. PR 6 lands Block, Flex and None, and
+worldsim's conversion doesn't need Grid: its grid-like screens (scenario
+select's five cards, world creator's `360 | stage | 360`, asset-manager's 2 by
+3 variants, the Salvage sandbox scene's icon wall) are Flex rows, nested in a
+column where there is more than one, and may move to Grid once it lands.
