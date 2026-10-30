@@ -216,8 +216,8 @@ removing legacy code. One way to do each thing.
 There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
 renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
-`blend` and `input_test`), ui's (`ui_order` and `ui_text`) and the perf
-scene `perf_ui` on the GLFW platform, under a scene picker drawn with
+`blend` and `input_test`) and ui's (`ui_order` and `ui_text`) on the GLFW
+platform, under a scene picker drawn with
 `Primitives` (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
 has its state and the tab's and rows' bounds). It serves the dev server on
 127.0.0.1:8090 in Debug and RelWithDebInfo (`--http-port <port>` for another).
