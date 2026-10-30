@@ -17,7 +17,7 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		Outside // Border drawn outside rect bounds (total size increased)
 	};
 
-	// Optional border style for rectangles
+	// Optional border style for rectangles and circles (a circle ignores cornerRadius)
 	struct BorderStyle {
 		Color		   color = Color::white();
 		float		   width = 1.0F;

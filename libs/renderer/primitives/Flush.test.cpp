@@ -9,6 +9,7 @@
 #include "primitives/Primitives.h"
 #include "vector/Types.h"
 
+#include <glm/geometric.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
@@ -18,6 +19,7 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <numbers>
 #include <span>
 #include <vector>
 
@@ -27,8 +29,9 @@ namespace Renderer {
 
 	class FlushTest : public ::testing::Test {
 	  protected:
-		static constexpr int kWidth = 320;
-		static constexpr int kHeight = 200;
+		static constexpr int   kWidth = 320;
+		static constexpr int   kHeight = 200;
+		static constexpr float kTolerance = 1e-4F;
 
 		void SetUp() override {
 			auto owned = std::make_unique<backend::NullBackend>();
@@ -140,25 +143,163 @@ namespace Renderer {
 		rect(20.0F, BlendMode::Alpha, 2); // submitted after the circle, at its z
 		Primitives::endFrame();
 
-		// Vertices as added: the fill's fan 0-64, the border's 64 quads 65-320, the z 1 rect
-		// 321-324, the z 2 rect 325-328.
-		constexpr uint32_t kFanEnd = 65;
-		constexpr uint32_t kBorderEnd = kFanEnd + (64 * 4);
+		// Vertices as added: the fill's quad 0-3, the border's 4-7, the z 1 rect 8-11, the z 2
+		// rect 12-15.
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		ASSERT_EQ(vertices(gpu->draws()[0]).size(), kBorderEnd + 8);
+		ASSERT_EQ(vertices(gpu->draws()[0]).size(), 16U);
 		const std::vector<uint32_t> emitted = indices(gpu->draws()[0]);
-		ASSERT_EQ(emitted.size(), 6U + (64U * 3U) + (64U * 6U) + 6U);
+		ASSERT_EQ(emitted.size(), 24U);
 
 		// The draw groups in emit order, each by the vertices its indices reach.
-		const auto allWithin = [&](size_t from, size_t count, uint32_t low, uint32_t high) {
-			return std::ranges::all_of(std::span(emitted).subspan(from, count), [&](uint32_t index) {
-				return index >= low && index < high;
+		const auto allWithin = [&](size_t from, uint32_t low) {
+			return std::ranges::all_of(std::span(emitted).subspan(from, 6), [&](uint32_t index) {
+				return index >= low && index < low + 4;
 			});
 		};
-		EXPECT_TRUE(allWithin(0, 6, kBorderEnd, kBorderEnd + 4));		// the z 1 rect
-		EXPECT_TRUE(allWithin(6, 192, 0, kFanEnd));						// the fill, z 2
-		EXPECT_TRUE(allWithin(198, 384, kFanEnd, kBorderEnd));			// the border, z 2, over the fill
-		EXPECT_TRUE(allWithin(582, 6, kBorderEnd + 4, kBorderEnd + 8)); // the z 2 rect, after the border at the same z
+		EXPECT_TRUE(allWithin(0, 8));	// the z 1 rect
+		EXPECT_TRUE(allWithin(6, 0));	// the fill, z 2
+		EXPECT_TRUE(allWithin(12, 4));	// the border, z 2, over the fill
+		EXPECT_TRUE(allWithin(18, 12)); // the z 2 rect, after the border at the same z
+	}
+
+	TEST_F(FlushTest, ACirclesFillAndBorderAreAnArcQuadEach) {
+		const Foundation::Color fill(0.2F, 0.4F, 0.6F, 0.8F);
+		const Foundation::Color edge(1.0F, 1.0F, 1.0F, 0.5F);
+		Primitives::beginFrame();
+		Primitives::pushClip({.shape = Foundation::ClipRect{.bounds = Foundation::Rect{10.0F, 20.0F, 200.0F, 100.0F}}});
+		Primitives::drawCircle(
+			{.center = {100.0F, 60.0F},
+			 .radius = 20.0F,
+			 .style = {.fill = fill, .border = Foundation::BorderStyle{.color = edge, .width = 4.0F}}}
+		);
+		Primitives::popClip();
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 8U);
+		EXPECT_EQ(indices(gpu->draws()[0]), (std::vector<uint32_t>{0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7}));
+
+		const float							  pi = std::numbers::pi_v<float>;
+		const std::array<Foundation::Vec2, 4> corners = {{{-1.0F, -1.0F}, {1.0F, -1.0F}, {1.0F, 1.0F}, {-1.0F, 1.0F}}};
+		// Each quad reaches a pixel past its outer radius: the fill's 20, the centred
+		// border's 22. Its SDF coordinates are the corner's offset from the centre, turned.
+		const auto expectArc = [&](size_t first, float innerRadius, float outerRadius, const Foundation::Color& color) {
+			const float reach = outerRadius + 1.0F;
+			for (size_t k = 0; k < 4; ++k) {
+				const BatchVertex& vertex = uploaded[first + k];
+				EXPECT_NEAR(vertex.position.x, 100.0F + (corners[k].x * reach), kTolerance) << first + k;
+				EXPECT_NEAR(vertex.position.y, 60.0F + (corners[k].y * reach), kTolerance) << first + k;
+				EXPECT_NEAR(glm::length(vertex.texCoord), reach * std::numbers::sqrt2_v<float>, kTolerance) << first + k;
+				EXPECT_EQ(vertex.color, color.toVec4());
+				EXPECT_EQ(vertex.data1, Foundation::Vec4(0.0F));
+				EXPECT_EQ(vertex.data2, Foundation::Vec4(innerRadius, outerRadius, pi, kRenderModeArc));
+				EXPECT_EQ(vertex.clipBounds, Foundation::Vec4(10.0F, 20.0F, 210.0F, 120.0F));
+			}
+		};
+		expectArc(0, 0.0F, 20.0F, fill);
+		expectArc(4, 18.0F, 22.0F, edge);
+	}
+
+	TEST_F(FlushTest, ACirclesBorderRadiiFollowItsPosition) {
+		// The border alone (the fill is transparent, so it adds nothing), radius 20, width 4.
+		const auto ring = [&](const Foundation::BorderStyle& border) {
+			gpu->clearRecord();
+			Primitives::beginFrame();
+			Primitives::drawCircle(
+				{.center = {50.0F, 50.0F}, .radius = 20.0F, .style = {.fill = {1.0F, 1.0F, 1.0F, 0.0F}, .border = border}}
+			);
+			Primitives::endFrame();
+			EXPECT_EQ(gpu->draws().size(), 1U);
+			const std::vector<BatchVertex> uploaded = gpu->draws().empty() ? std::vector<BatchVertex>{} : vertices(gpu->draws()[0]);
+			EXPECT_EQ(uploaded.size(), 4U);
+			return uploaded.empty() ? Foundation::Vec2(-1.0F) : Foundation::Vec2(uploaded[0].data2.x, uploaded[0].data2.y);
+		};
+		using Foundation::BorderPosition;
+		EXPECT_EQ(ring({.width = 4.0F}), Foundation::Vec2(18.0F, 22.0F)); // centred by default, as the line segments were
+		EXPECT_EQ(ring({.width = 4.0F, .position = BorderPosition::Center}), Foundation::Vec2(18.0F, 22.0F));
+		EXPECT_EQ(ring({.width = 4.0F, .position = BorderPosition::Inside}), Foundation::Vec2(16.0F, 20.0F));
+		EXPECT_EQ(ring({.width = 4.0F, .position = BorderPosition::Outside}), Foundation::Vec2(20.0F, 24.0F));
+		// Wider than the radius: a disk, its outer edge still where the position puts it.
+		EXPECT_EQ(ring({.width = 30.0F, .position = BorderPosition::Inside}), Foundation::Vec2(0.0F, 20.0F));
+		EXPECT_EQ(ring({.width = 50.0F}), Foundation::Vec2(0.0F, 45.0F));
+	}
+
+	TEST_F(FlushTest, ACircleWithNoRadiusNoWidthOrNoFillAddsNothing) {
+		const Foundation::BorderStyle border{.width = 2.0F};
+		Primitives::beginFrame();
+		Primitives::drawCircle({.center = {50.0F, 50.0F}, .radius = 0.0F, .style = {.border = border}});
+		Primitives::drawCircle({.center = {50.0F, 50.0F}, .radius = -5.0F, .style = {.border = border}});
+		Primitives::drawCircle(
+			{.center = {50.0F, 50.0F},
+			 .radius = 5.0F,
+			 .style = {.fill = {1.0F, 1.0F, 1.0F, 0.0F}, .border = Foundation::BorderStyle{.width = 0.0F}}}
+		);
+		Primitives::endFrame();
+		EXPECT_TRUE(gpu->draws().empty());
+	}
+
+	TEST_F(FlushTest, DrawCircleAndDrawArcAgreeOnADiskUnderEveryTransform) {
+		// Bit for bit, both quads, and in the additive mode when asked: the same disk.
+		const Foundation::Mat4 identity(1.0F);
+		const Foundation::Mat4 turned =
+			glm::scale(glm::rotate(glm::translate(identity, {100.3F, 50.7F, 0.0F}), 0.37F, {0.0F, 0.0F, 1.0F}), {1.7F, 1.7F, 1.0F});
+		const Foundation::Mat4	mirrored = glm::scale(glm::translate(identity, {200.0F, 0.0F, 0.0F}), {-1.0F, 0.5F, 1.0F});
+		const Foundation::Color color(0.9F, 0.8F, 0.1F, 0.6F);
+		for (const Foundation::Mat4* transform : {&identity, &turned, &mirrored}) {
+			for (const BlendMode blend : {BlendMode::Alpha, BlendMode::Additive}) {
+				gpu->clearRecord();
+				Primitives::beginFrame();
+				Primitives::PushTransform(*transform);
+				Primitives::drawCircle({.center = {30.0F, 40.0F}, .radius = 12.5F, .style = {.fill = color}, .blend = blend});
+				Primitives::drawArc({.center = {30.0F, 40.0F}, .outerRadius = 12.5F, .color = color, .blend = blend});
+				Primitives::PopTransform();
+				Primitives::endFrame();
+
+				ASSERT_EQ(gpu->draws().size(), 1U);
+				const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+				ASSERT_EQ(uploaded.size(), 8U);
+				EXPECT_EQ(std::memcmp(&uploaded[0], &uploaded[4], 4 * sizeof(BatchVertex)), 0);
+				EXPECT_EQ(uploaded[0].data2.w, blend == BlendMode::Additive ? kRenderModeArc + kAdditiveModeOffset : kRenderModeArc);
+			}
+		}
+	}
+
+	TEST_F(FlushTest, ACirclesQuadsCarryTheTransformAndItsSdfStaysLocal) {
+		// The corners go through the transform; the SDF's coordinates and radii stay in the
+		// circle's own units, so the disk becomes the ellipse the transform makes of it. The
+		// quad's pixel of padding is a local pixel, 1 / sqrt(|det|): 2 here.
+		const Foundation::Mat4 stretched = glm::scale(
+			glm::rotate(glm::translate(Foundation::Mat4(1.0F), {80.0F, 60.0F, 0.0F}), 0.5F, {0.0F, 0.0F, 1.0F}), {2.0F, 0.125F, 1.0F}
+		);
+		Primitives::beginFrame();
+		Primitives::PushTransform(stretched);
+		Primitives::drawCircle(
+			{.center = {10.0F, -5.0F},
+			 .radius = 8.0F,
+			 .style = {
+				 .fill = Foundation::Color::red(),
+				 .border = Foundation::BorderStyle{.width = 2.0F, .position = Foundation::BorderPosition::Outside}
+			 }}
+		);
+		Primitives::PopTransform();
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 8U);
+		const std::array<Foundation::Vec2, 4> corners = {{{-1.0F, -1.0F}, {1.0F, -1.0F}, {1.0F, 1.0F}, {-1.0F, 1.0F}}};
+		for (size_t k = 0; k < 8; ++k) {
+			const float			   reach = (k < 4 ? 8.0F : 10.0F) + 2.0F;
+			const Foundation::Vec4 local(10.0F + (corners[k % 4].x * reach), -5.0F + (corners[k % 4].y * reach), 0.0F, 1.0F);
+			const Foundation::Vec4 expected = stretched * local;
+			EXPECT_NEAR(uploaded[k].position.x, expected.x, 1e-3F) << k;
+			EXPECT_NEAR(uploaded[k].position.y, expected.y, 1e-3F) << k;
+			EXPECT_NEAR(glm::length(uploaded[k].texCoord), reach * std::numbers::sqrt2_v<float>, kTolerance) << k;
+		}
+		EXPECT_EQ(uploaded[0].data2.y, 8.0F);
+		EXPECT_EQ(uploaded[4].data2.x, 8.0F);
+		EXPECT_EQ(uploaded[4].data2.y, 10.0F);
 	}
 
 	TEST_F(FlushTest, AlphaAndAdditiveShareOneDrawCall) {
