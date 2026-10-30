@@ -3,7 +3,6 @@
 // Primitive Rendering API - Unified 2D drawing interface.
 //
 // This API provides immediate-mode drawing functions used by:
-// - RmlUI backend (screen-space UI panels)
 // - Game world rendering (tiles, entities)
 // - World-space UI (health bars, tooltips)
 // - Custom UI components
@@ -15,7 +14,6 @@
 #include "Texture.h"
 #include "backend/Backend.h"
 #include "font/FontRenderer.h"
-#include "graphics/ClipTypes.h"
 #include "graphics/Color.h"
 #include "graphics/PrimitiveStyles.h"
 #include "graphics/Rect.h"
@@ -152,10 +150,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// between flushes.
 		void invalidateState();
 
-		// Draw-order barrier: flush pending batched primitives now. Groups only
-		// z-sort against each other within one flush, so flushing between two
-		// passes (e.g. world drawing vs UI) keeps their zIndex spaces independent
-		// and guarantees the later pass paints on top.
+		// Draw-order barrier without a flush: every draw from here sorts after every
+		// draw before it, whatever their zIndex, so two passes (a covered scene and
+		// the one over it, the scenes and an overlay) keep their zIndex spaces apart
+		// and the later pass paints on top. It costs no draw call: the batch sorts on
+		// the barrier count ahead of z. The app sets one before each stacked scene
+		// and each overlay renders.
+		void sortBarrier();
+
+		// Flush pending batched primitives now: upload them and submit their draw
+		// calls. GPU work of a caller's own that must land over what was drawn so
+		// far needs it; for draw order alone, sortBarrier() is enough.
 		void flush();
 
 		// Size of the bound target in pixels: the projection for batched drawing.
@@ -461,67 +466,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- State Management ---
 
-		// === Clipping System (Shader-based, batching-friendly) ===
-		//
-		// PushClip/PopClip provide per-vertex clip bounds that preserve batching.
-		// All vertices added after PushClip() will be clipped to the specified region.
-		// Supports nested clipping (intersection of all active clip regions).
-		//
-		// Fast path: ClipRect with ClipMode::Inside uses shader-based clipping
-		// (zero GL state changes, full batching preserved).
-		//
-		// Slow path: Complex shapes (rounded rect, circle, path) or ClipMode::Outside
-		// will use stencil buffer in future phases (stub functions for now).
-		//
-		// See /docs/technical/ui-framework/clipping.md for design details.
+		// Clip what is drawn from here to `bounds`, in screen coordinates whatever
+		// transform is pushed, intersected with the clip it is pushed in. The bounds
+		// ride on each vertex and the fragment shader discards outside them, so a clip
+		// costs no draw call and no GL state. A rect with no area, or one that misses
+		// the clip it is pushed in, is the empty clip: nothing draws under it, whatever
+		// is pushed over it, until it is popped. Instanced and baked draws ignore clips.
+		void pushClip(const Foundation::Rect& bounds);
 
-		// Push a new clip region. Nested clips are intersected.
-		// For ClipRect with ClipMode::Inside, this uses the fast shader path.
-		void pushClip(const Foundation::ClipSettings& settings);
-
-		// Pop the most recent clip region, restoring the parent clip (if any).
+		// Pop the most recent clip, restoring the one it was pushed in, if any.
 		void popClip();
-
-		// Get current clip bounds as Vec4 (minX, minY, maxX, maxY).
-		// Returns (0,0,0,0) if no clip is active.
-		Foundation::Vec4 getCurrentClipBounds();
-
-		// Check if any clip region is currently active.
-		bool IsClipActive();
-
-		// === Convenience Functions for Future Clip Shapes ===
-		//
-		// These functions provide a simpler API for common clip shapes.
-		// Currently they use bounding-box approximation; future phases will
-		// implement proper stencil-buffer clipping for accurate shapes.
-
-		// Push a rounded rectangle clip region.
-		// NOTE: Currently uses bounding box approximation. Accurate rounded rect
-		// clipping requires stencil buffer (Phase 3).
-		void pushClipRoundedRect(const Foundation::Rect& bounds, float cornerRadius);
-
-		// Push a circular clip region.
-		// NOTE: Currently uses bounding box approximation. Accurate circular
-		// clipping requires stencil buffer (Phase 3).
-		void pushClipCircle(const Foundation::Vec2& center, float radius);
-
-		// Push an arbitrary path clip region.
-		// NOTE: Currently uses bounding box approximation. Accurate path
-		// clipping requires stencil buffer (Phase 3).
-		void pushClipPath(const std::vector<Foundation::Vec2>& vertices);
-
-		// === ClipMode::Outside Support ===
-		//
-		// ClipMode::Outside is defined in ClipTypes.h but not yet implemented.
-		// When implemented, it will allow "punch hole" effects where content
-		// is visible OUTSIDE the clip shape (e.g., spotlight effects).
-		// This requires stencil buffer with inverted test (Phase 3).
-
-		// Legacy scissor functions (deprecated - use PushClip/PopClip instead)
-		// Scissor/clipping (for scrollable containers)
-		void			 PushScissor(const Foundation::Rect& clipRect);
-		void			 PopScissor();
-		Foundation::Rect getCurrentScissor();
 
 		// Transform stack (for world-space rendering)
 		void			 PushTransform(const Foundation::Mat4& transform);

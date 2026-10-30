@@ -29,8 +29,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		Foundation::Vec4 color;		 // Fill color RGBA, straight alpha
 		Foundation::Vec4 data1;		 // Border: (color.rgb, width) for shapes, (blur, 0, 0, 0) for shadows
 		Foundation::Vec4 data2;		 // xyz per mode, w the mode (BatchRenderer.h has the table). Shape: (halfW, halfH, cornerRadius,
-									 // borderPos); text: (pixelRange, 0, 0, w); shadow: (halfW, halfH, cornerRadius, w);
-									 // arc: (innerR, outerR, sweep / 2, w); image: (0, 0, 0, w)
+									 // borderPos with the border's alpha); text: (pixelRange, 0, 0, w); shadow: (halfW, halfH,
+									 // cornerRadius, w); arc: (innerR, outerR, sweep / 2, w); image: (0, 0, 0, w)
 		Foundation::Vec4 clipBounds; // Clip rect (minX, minY, maxX, maxY), or (0,0,0,0) for no clipping
 	};
 	static_assert(sizeof(BatchVertex) == 80, "BatchVertex is the 80-byte stride of the Batched layout");

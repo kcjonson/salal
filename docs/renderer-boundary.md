@@ -270,6 +270,9 @@ pixels premultiplies them before upload), and screenshots moving by rounding.
 One readback does change: a draw over a transparent target stores alpha `a`
 where straight blending stored `a * a`.
 
+A rect's border alpha rides in `data2.w` too, added later: its transparency in
+the shape mode's fraction, 0 to 0.25, so an opaque border keeps the whole number.
+
 Offscreen render target as the first backend object: `RenderTarget` above,
 `Rgba16F` for bloom, in PR 2. The primitives asteroids needs, and whether each is
 a new batch entry:

@@ -490,7 +490,7 @@ namespace app {
 		}
 	}
 
-	// The stack, then the overlays.
+	// The stack, then the overlays, each overlay its own sort domain over everything before it.
 	void App::render() {
 		Renderer::Primitives::beginFrame();
 		if (fontRenderer != nullptr) {
@@ -499,6 +499,7 @@ namespace app {
 		Renderer::Primitives::clear(config.clearColor);
 		sceneStack.render(liveAlpha());
 		for (const std::unique_ptr<Overlay>& overlay : overlays) {
+			Renderer::Primitives::sortBarrier();
 			detail::guard("Overlay", "render", [&] { overlay->render(); });
 		}
 

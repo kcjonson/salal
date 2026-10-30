@@ -51,19 +51,6 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		bool intersects(const Rect& other) const {
 			return x < other.x + other.width && x + width > other.x && y < other.y + other.height && y + height > other.y;
 		}
-
-		static Rect intersection(const Rect& a, const Rect& b) {
-			float left = glm::max(a.x, b.x);
-			float right = glm::min(a.x + a.width, b.x + b.width);
-			float top = glm::max(a.y, b.y);
-			float bottom = glm::min(a.y + a.height, b.y + b.height);
-
-			if (right > left && bottom > top) {
-				return {left, top, right - left, bottom - top};
-			}
-
-			return {}; // Empty rect
-		}
 	};
 
 } // namespace Foundation

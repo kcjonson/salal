@@ -64,6 +64,34 @@ TEST(RenderModeTest, AlphaKeepsTheModeAndAdditiveMovesItOutOfEveryAlphaRange) {
 	EXPECT_EQ(renderMode(kRenderModeImage, BlendMode::Additive), -15.0F);
 }
 
+TEST(RenderModeTest, AShapesBorderAlphaRidesInItsModesFractionAsTransparency) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto			 rectWithBorder = [&](float alpha, Foundation::BorderPosition position, BlendMode blend) {
+		  batch.addQuad(
+			  {0.0F, 0.0F, 10.0F, 10.0F},
+			  Foundation::Color::red(),
+			  Foundation::BorderStyle{.color = {1.0F, 1.0F, 1.0F, alpha}, .width = 2.0F, .position = position},
+			  0.0F,
+			  std::nullopt,
+			  0.0F,
+			  blend
+		  );
+	};
+	rectWithBorder(1.0F, Foundation::BorderPosition::Center, BlendMode::Alpha);
+	rectWithBorder(0.4F, Foundation::BorderPosition::Center, BlendMode::Alpha);
+	rectWithBorder(0.0F, Foundation::BorderPosition::Outside, BlendMode::Additive);
+	addRect(batch);
+
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
+	ASSERT_EQ(vertices.size(), 16U);
+	EXPECT_EQ(vertices[0].data2.w, 1.0F); // opaque: the whole number
+	EXPECT_FLOAT_EQ(vertices[4].data2.w, 1.0F + (kBorderTransparencySpan * 0.6F));
+	EXPECT_EQ(vertices[8].data2.w, 6.0F + kBorderTransparencySpan); // still short of the next half unit
+	EXPECT_EQ(vertices[12].data2.w, 1.0F);							// no border
+	EXPECT_EQ(vertices[4].data1, Foundation::Vec4(1.0F, 1.0F, 1.0F, 2.0F));
+}
+
 TEST(RenderModeTest, AdditiveSharesAlphasBlendState) {
 	EXPECT_EQ(blendState(BlendMode::Alpha), backend::BlendState::Alpha);
 	EXPECT_EQ(blendState(BlendMode::Additive), backend::BlendState::Alpha);
@@ -212,6 +240,58 @@ TEST(BatchPlanTest, ExplicitZSortsGroupsStablyBeforeSplitting) {
 	EXPECT_EQ(plan.runs[1].texture, kAtlasA);
 	EXPECT_EQ(plan.runs[1].indexStart, 12U);
 	EXPECT_EQ(plan.runs[1].indexCount, 12U);
+}
+
+TEST(BatchPlanTest, ATextRunIsOneGroupHoweverManyGlyphs) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	batch.setFontAtlas(kAtlasA);
+	addRect(batch, BlendMode::Alpha, 2.0F); // vertices 0-3
+	for (int glyph = 0; glyph < 40; ++glyph) {
+		addGlyph(batch, kAtlasA, BlendMode::Alpha, 1.0F); // vertices 4-163
+	}
+	EXPECT_EQ(batch.getDrawGroupCount(), 2U);
+
+	// The next run at another blend, then one in a new sort domain, then a rect at
+	// the second run's z: a group each.
+	for (int glyph = 0; glyph < 3; ++glyph) {
+		addGlyph(batch, kAtlasA, BlendMode::Additive, 1.0F);
+	}
+	batch.sortBarrier();
+	for (int glyph = 0; glyph < 3; ++glyph) {
+		addGlyph(batch, kAtlasA, BlendMode::Additive, 1.0F);
+	}
+	addRect(batch, BlendMode::Alpha, 1.0F);
+	EXPECT_EQ(batch.getDrawGroupCount(), 5U);
+
+	// The first run sorts as a whole, every glyph in order, then the additive run,
+	// then the z 2 rect, all under the new domain's two groups.
+	const DrawPlan plan = batch.plan();
+	ASSERT_EQ(plan.indices.size(), (1U + 40U + 3U + 3U + 1U) * 6U);
+	EXPECT_EQ(plan.indices[0], 4U);
+	EXPECT_EQ(plan.indices[39 * 6], 160U);
+	EXPECT_EQ(plan.indices[43 * 6], 0U);
+	EXPECT_EQ(plan.runs.size(), 1U);
+}
+
+TEST(BatchPlanTest, ASortBarrierKeepsEarlierDrawsUnderLaterOnesWhateverTheirZ) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	batch.setFontAtlas(kAtlasA);
+	addRect(batch, BlendMode::Alpha, 5.0F); // vertices 0-3
+	addRect(batch, BlendMode::Alpha, 1.0F); // vertices 4-7
+	batch.sortBarrier();
+	addRect(batch, BlendMode::Alpha, -3.0F); // vertices 8-11
+	addRect(batch, BlendMode::Alpha, -4.0F); // vertices 12-15
+
+	// Each side z-sorted, the first side wholly under the second; still one run.
+	const DrawPlan plan = batch.plan();
+	ASSERT_EQ(plan.indices.size(), 24U);
+	EXPECT_EQ(plan.indices[0], 4U);
+	EXPECT_EQ(plan.indices[6], 0U);
+	EXPECT_EQ(plan.indices[12], 12U);
+	EXPECT_EQ(plan.indices[18], 8U);
+	EXPECT_EQ(plan.runs.size(), 1U);
 }
 
 // ============================================================================

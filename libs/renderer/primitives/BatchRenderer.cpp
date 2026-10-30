@@ -90,11 +90,25 @@ namespace Renderer {
 
 	void BatchRenderer::recordGroup(uint32_t groupStart, float zIndex, Primitives::BlendMode blend) {
 		const uint32_t end = static_cast<uint32_t>(indices.size());
-		if (end > groupStart) {
-			drawGroups.push_back({.indexStart = groupStart, .indexCount = end - groupStart, .zIndex = zIndex, .blend = blend});
-			if (zIndex != 0.0F) {
-				anyExplicitZ = true;
+		if (end <= groupStart) {
+			return;
+		}
+		// Straight after a group with the same domain, z and blend, an add joins it: the
+		// stable sort would keep the two together anyway, and a text run, a glyph an add,
+		// stays one group.
+		if (!drawGroups.empty()) {
+			DrawGroup& last = drawGroups.back();
+			if (last.indexStart + last.indexCount == groupStart && last.domain == sortDomain && last.zIndex == zIndex &&
+				last.blend == blend) {
+				last.indexCount = end - last.indexStart;
+				return;
 			}
+		}
+		drawGroups.push_back(
+			{.indexStart = groupStart, .indexCount = end - groupStart, .domain = sortDomain, .zIndex = zIndex, .blend = blend}
+		);
+		if (zIndex != 0.0F) {
+			anyExplicitZ = true;
 		}
 	}
 
@@ -128,6 +142,9 @@ namespace Renderer {
 		float											 zIndex,
 		Primitives::BlendMode							 blend
 	) { // NOLINT(readability-convert-member-functions-to-static)
+		if (clipEmpty) {
+			return;
+		}
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
 
@@ -158,13 +175,15 @@ namespace Renderer {
 			}
 		}
 
-		// Pack border data (color RGB + width)
+		// Pack border data (color RGB + width); its alpha goes in the mode
 		Foundation::Vec4 borderData(0.0F, 0.0F, 0.0F, 0.0F);
 		float			 borderWidth = 0.0F;
+		float			 borderAlpha = 1.0F;
 		float			 borderPosEnum = 1.0F; // Default to Center
 		if (border.has_value()) {
 			borderData = Foundation::Vec4(border->color.r, border->color.g, border->color.b, border->width);
 			borderWidth = border->width;
+			borderAlpha = border->color.a;
 			// Use corner radius from border if provided
 			if (border->cornerRadius > 0.0F) {
 				cornerRadius = border->cornerRadius;
@@ -201,9 +220,9 @@ namespace Renderer {
 		float centerX = bounds.x + halfW;
 		float centerY = bounds.y + halfH;
 
-		// Pack shape parameters (halfWidth, halfHeight, cornerRadius, borderPosition)
+		// Pack shape parameters (halfWidth, halfHeight, cornerRadius, borderPosition and alpha)
 		// Note: shapeParams still uses the ORIGINAL halfW/halfH for SDF calculation
-		Foundation::Vec4 shapeParams(halfW, halfH, cornerRadius, renderMode(borderPosEnum, blend));
+		Foundation::Vec4 shapeParams(halfW, halfH, cornerRadius, shapeMode(borderPosEnum, borderAlpha, blend));
 
 		// Add 4 vertices with expanded screen positions but rect-local coordinates
 		// that extend beyond the original shape bounds.
@@ -292,7 +311,7 @@ namespace Renderer {
 		// further `blur` so the shader has room to fade the falloff to zero.
 		const float halfW = (bounds.width * 0.5F) + shadow.spread;
 		const float halfH = (bounds.height * 0.5F) + shadow.spread;
-		if (halfW <= 0.0F || halfH <= 0.0F) {
+		if (clipEmpty || halfW <= 0.0F || halfH <= 0.0F) {
 			return;
 		}
 		const float blur = shadow.blur > 0.0F ? shadow.blur : 0.5F;
@@ -355,6 +374,9 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::addTriangles(const TriangleMeshArgs& mesh) {
+		if (clipEmpty) {
+			return;
+		}
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
 
@@ -457,6 +479,9 @@ namespace Renderer {
 		float						 zIndex,
 		Primitives::BlendMode		 blend
 	) {
+		if (clipEmpty) {
+			return;
+		}
 		const uint32_t		   groupStart = static_cast<uint32_t>(indices.size());
 		const Foundation::Vec4 colorVec = color.toVec4();
 		const Foundation::Vec4 noBorder(0.0F, 0.0F, 0.0F, 0.0F);
@@ -498,7 +523,7 @@ namespace Renderer {
 		}
 		sweep = std::min(sweep, kTwoPi);
 		const float innerRadius = std::max(args.innerRadius, 0.0F);
-		if (!(sweep > 0.0F) || !(args.outerRadius > innerRadius)) {
+		if (clipEmpty || !(sweep > 0.0F) || !(args.outerRadius > innerRadius)) {
 			return;
 		}
 
@@ -530,7 +555,7 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::addImageQuad(const Primitives::ImageArgs& args) {
-		if (!args.texture.isValid()) {
+		if (clipEmpty || !args.texture.isValid()) {
 			return;
 		}
 		const Foundation::Rect& b = args.bounds;
@@ -563,6 +588,9 @@ namespace Renderer {
 		float					 zIndex,
 		Primitives::BlendMode	 blend
 	) {
+		if (clipEmpty) {
+			return;
+		}
 		const uint32_t zGroupStart = static_cast<uint32_t>(indices.size());
 		// Resolve the atlas this glyph samples, and its range. An invalid handle
 		// means the default atlas (the game's default family's, set via setFontAtlas)
@@ -681,13 +709,15 @@ namespace Renderer {
 	DrawPlan BatchRenderer::plan() {
 		// Resolve draw order. Submission ("organic") order is kept unless some draw
 		// carried an explicit (non-zero) z; then the per-draw-call groups are
-		// stable-sorted by z and the emit-order index list is rebuilt (groups, not
-		// triangles). The zIndex came from the component layer; the renderer only
-		// orders by it. The fast path costs nothing beyond the group records.
+		// stable-sorted by sort domain, then z, and the emit-order index list is
+		// rebuilt (groups, not triangles). Domains rise in submission order, so the
+		// fast path already has them in order. The zIndex came from the component
+		// layer; the renderer only orders by it. The fast path costs nothing beyond
+		// the group records.
 		std::span<const uint32_t> emit = indices;
 		if (anyExplicitZ) {
 			std::stable_sort(drawGroups.begin(), drawGroups.end(), [](const DrawGroup& a, const DrawGroup& b) {
-				return a.zIndex < b.zIndex;
+				return a.domain != b.domain ? a.domain < b.domain : a.zIndex < b.zIndex;
 			});
 			sortedIndices.clear();
 			sortedIndices.reserve(indices.size());
@@ -814,6 +844,7 @@ namespace Renderer {
 		vertexAtlas.clear();
 		drawGroups.clear();
 		anyExplicitZ = false;
+		sortDomain = 0;
 	}
 
 	void BatchRenderer::beginFrame() {
@@ -825,6 +856,8 @@ namespace Renderer {
 		vertexAtlas.clear();
 		drawGroups.clear();
 		anyExplicitZ = false;
+		sortDomain = 0;
+		clearClipBounds();
 	}
 
 	void BatchRenderer::endFrame() {
@@ -857,10 +890,13 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::setClipBounds(const Foundation::Vec4& bounds) {
-		currentClipBounds = bounds;
+		// Written so NaN bounds are empty too.
+		clipEmpty = !(bounds.z > bounds.x && bounds.w > bounds.y);
+		currentClipBounds = clipEmpty ? Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F) : bounds;
 	}
 
 	void BatchRenderer::clearClipBounds() {
+		clipEmpty = false;
 		currentClipBounds = Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
 	}
 

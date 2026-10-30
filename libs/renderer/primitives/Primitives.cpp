@@ -4,7 +4,6 @@
 #include "primitives/Primitives.h"
 #include "CoordinateSystem/CoordinateSystem.h"
 #include "font/FontRenderer.h"
-#include "graphics/ClipTypes.h"
 #include "primitives/BatchRenderer.h"
 #include "primitives/BoundaryLoops.h"
 #include "primitives/Stroke.h"
@@ -13,6 +12,7 @@
 #include "vector/Types.h"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
@@ -44,18 +44,16 @@ namespace Renderer::Primitives {
 	static bool							g_warnedNoFontRenderer = false; // drawText warns once until a font renderer is set
 	static TextureHandle				g_tileAtlasTexture;
 	static std::vector<glm::vec4>		g_tileAtlasRects;
-	static std::stack<Foundation::Rect> g_scissorStack;
 	static std::stack<Foundation::Mat4> g_transformStack;
-	static Foundation::Rect				g_currentScissor;
 	static Foundation::Mat4				g_currentTransform = Foundation::Mat4(1.0F);
 
-	// Clip stack for shader-based clipping (preserves batching)
-	// Each entry stores the ClipSettings and the computed bounds
-	struct ClipStackEntry {
-		Foundation::ClipSettings settings;
-		Foundation::Vec4		 bounds; // Computed (minX, minY, maxX, maxY)
-	};
-	static std::stack<ClipStackEntry> g_clipStack;
+	// The clip stack, each entry the intersection of every rect pushed up to it,
+	// (minX, minY, maxX, maxY). One with no area is the empty clip, which culls every
+	// draw; an intersection only shrinks, so every push over an empty clip stays empty.
+	static std::vector<Foundation::Vec4> g_clipStack;
+
+	// beginFrame found a clip or transform still pushed, and said so.
+	static bool g_warnedUnbalancedStacks = false;
 
 	// Tessellated polygon fills, keyed by a hash of the outline's vertex bits and
 	// checked against a copy of the outline, so a hash collision is a miss, never a
@@ -197,11 +195,29 @@ namespace Renderer::Primitives {
 	}
 
 	void beginFrame() {
+		// A frame starts with no clip and no transform. One still pushed is a push whose pop never
+		// ran, as when a render threw between them and the app logged it and went on; left, it would
+		// clip or move every frame after.
+		if (!g_clipStack.empty() || !g_transformStack.empty()) {
+			if (!g_warnedUnbalancedStacks) {
+				g_warnedUnbalancedStacks = true;
+				LOG_WARNING(
+					Renderer,
+					"beginFrame: %zu clips and %zu transforms were still pushed, a push without its pop; dropped (warned once)",
+					g_clipStack.size(),
+					g_transformStack.size()
+				);
+			}
+			g_clipStack.clear();
+			g_transformStack = {};
+			g_currentTransform = Foundation::Mat4(1.0F);
+		}
 		if (g_backend != nullptr) {
 			g_backend->beginFrame();
 		}
 		if (g_batchRenderer != nullptr) {
 			g_batchRenderer->beginFrame();
+			g_batchRenderer->setTransform(g_currentTransform);
 		}
 	}
 
@@ -213,6 +229,12 @@ namespace Renderer::Primitives {
 		}
 		if (g_backend != nullptr) {
 			g_backend->endFrame();
+		}
+	}
+
+	void sortBarrier() {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->sortBarrier();
 		}
 	}
 
@@ -695,108 +717,23 @@ namespace Renderer::Primitives {
 		}
 	}
 
-	// --- Clip Stack (Shader-based, batching-friendly) ---
+	// --- Clip Stack ---
 
-	// Helper to compute Vec4 bounds from ClipSettings
-	static Foundation::Vec4 ComputeClipBounds(const Foundation::ClipSettings& settings) {
-		// Check for ClipRect (fast path)
-		if (const auto* clipRect = std::get_if<Foundation::ClipRect>(&settings.shape)) {
-			if (clipRect->bounds.has_value()) {
-				const auto& rect = clipRect->bounds.value();
-				return Foundation::Vec4(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
-			}
-			// If no explicit bounds, use full viewport (no clipping)
-			return Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
-		}
-
-		// Stub for future complex shapes (rounded rect, circle, path)
-		// These will use stencil buffer in future phases
-		if (std::holds_alternative<Foundation::ClipRoundedRect>(settings.shape)) {
-			// TODO: Phase 3 - use stencil buffer for rounded rect
-			// For now, use bounding box approximation
-			const auto& rr = std::get<Foundation::ClipRoundedRect>(settings.shape);
-			if (rr.bounds.has_value()) {
-				const auto& rect = rr.bounds.value();
-				return Foundation::Vec4(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
-			}
-		}
-
-		if (std::holds_alternative<Foundation::ClipCircle>(settings.shape)) {
-			// TODO: Phase 3 - use stencil buffer for circle
-			// For now, use bounding box approximation
-			const auto& circle = std::get<Foundation::ClipCircle>(settings.shape);
-			float		minX = circle.center.x - circle.radius;
-			float		minY = circle.center.y - circle.radius;
-			float		maxX = circle.center.x + circle.radius;
-			float		maxY = circle.center.y + circle.radius;
-			return Foundation::Vec4(minX, minY, maxX, maxY);
-		}
-
-		if (std::holds_alternative<Foundation::ClipPath>(settings.shape)) {
-			// TODO: Phase 3 - use stencil buffer for path
-			// For now, compute bounding box of path vertices
-			const auto& path = std::get<Foundation::ClipPath>(settings.shape);
-			if (!path.vertices.empty()) {
-				float minX = path.vertices[0].x;
-				float minY = path.vertices[0].y;
-				float maxX = minX;
-				float maxY = minY;
-				for (const auto& v : path.vertices) {
-					minX = std::min(minX, v.x);
-					minY = std::min(minY, v.y);
-					maxX = std::max(maxX, v.x);
-					maxY = std::max(maxY, v.y);
-				}
-				return Foundation::Vec4(minX, minY, maxX, maxY);
-			}
-		}
-
-		// No clipping
-		return Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
-	}
-
-	// Helper to intersect two clip bounds
-	static Foundation::Vec4 IntersectClipBounds(const Foundation::Vec4& a, const Foundation::Vec4& b) {
-		// If either is empty (0,0,0,0), use the other
-		bool aEmpty = (a.z <= a.x || a.w <= a.y);
-		bool bEmpty = (b.z <= b.x || b.w <= b.y);
-
-		if (aEmpty)
-			return b;
-		if (bEmpty)
-			return a;
-
-		// Intersect the two rectangles
-		float minX = std::max(a.x, b.x);
-		float minY = std::max(a.y, b.y);
-		float maxX = std::min(a.z, b.z);
-		float maxY = std::min(a.w, b.w);
-
-		// Check for no intersection (empty result)
-		if (maxX <= minX || maxY <= minY) {
-			return Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
-		}
-
-		return Foundation::Vec4(minX, minY, maxX, maxY);
-	}
-
-	void pushClip(const Foundation::ClipSettings& settings) {
+	void pushClip(const Foundation::Rect& rect) {
 		if (g_batchRenderer == nullptr) {
 			return;
 		}
-
-		// Compute bounds for this clip
-		Foundation::Vec4 bounds = ComputeClipBounds(settings);
-
-		// Intersect with current clip (nested clipping)
-		if (!g_clipStack.empty()) {
-			bounds = IntersectClipBounds(g_clipStack.top().bounds, bounds);
+		Foundation::Vec4 bounds(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+		if (std::isnan(bounds.x) || std::isnan(bounds.y) || std::isnan(bounds.z) || std::isnan(bounds.w)) {
+			// std::max and std::min would drop a NaN against the parent's bounds and keep the parent.
+			bounds = Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
+		} else if (!g_clipStack.empty()) {
+			const Foundation::Vec4& parent = g_clipStack.back();
+			bounds = {
+				std::max(parent.x, bounds.x), std::max(parent.y, bounds.y), std::min(parent.z, bounds.z), std::min(parent.w, bounds.w)
+			};
 		}
-
-		// Push to stack
-		g_clipStack.push({settings, bounds});
-
-		// Update batch renderer with new clip bounds
+		g_clipStack.push_back(bounds);
 		g_batchRenderer->setClipBounds(bounds);
 	}
 
@@ -804,89 +741,14 @@ namespace Renderer::Primitives {
 		if (g_clipStack.empty()) {
 			return;
 		}
-
-		g_clipStack.pop();
-
-		// Restore parent clip or clear if stack is empty
+		g_clipStack.pop_back();
 		if (g_batchRenderer != nullptr) {
 			if (g_clipStack.empty()) {
 				g_batchRenderer->clearClipBounds();
 			} else {
-				g_batchRenderer->setClipBounds(g_clipStack.top().bounds);
+				g_batchRenderer->setClipBounds(g_clipStack.back());
 			}
 		}
-	}
-
-	Foundation::Vec4 getCurrentClipBounds() {
-		if (g_clipStack.empty()) {
-			return Foundation::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
-		}
-		return g_clipStack.top().bounds;
-	}
-
-	bool IsClipActive() {
-		if (g_clipStack.empty()) {
-			return false;
-		}
-		const auto& bounds = g_clipStack.top().bounds;
-		// Clip is active if bounds form a valid rectangle (maxX > minX, maxY > minY)
-		return (bounds.z > bounds.x) && (bounds.w > bounds.y);
-	}
-
-	// --- Convenience Functions for Future Clip Shapes ---
-	// These delegate to pushClip() with the appropriate ClipShape variant.
-	// Currently use bounding-box approximation; Phase 3 will add stencil-buffer support.
-
-	void pushClipRoundedRect(const Foundation::Rect& bounds, float cornerRadius) {
-		Foundation::ClipSettings settings;
-		settings.shape = Foundation::ClipRoundedRect{.bounds = bounds, .cornerRadius = cornerRadius};
-		pushClip(settings);
-	}
-
-	void pushClipCircle(const Foundation::Vec2& center, float radius) {
-		Foundation::ClipSettings settings;
-		settings.shape = Foundation::ClipCircle{.center = center, .radius = radius};
-		pushClip(settings);
-	}
-
-	void pushClipPath(const std::vector<Foundation::Vec2>& vertices) {
-		Foundation::ClipSettings settings;
-		settings.shape = Foundation::ClipPath{.vertices = vertices};
-		pushClip(settings);
-	}
-
-	// --- Scissor Stack (Legacy) ---
-
-	void PushScissor(const Foundation::Rect& clipRect) {
-		// Intersect with current scissor (nested clipping)
-		if (!g_scissorStack.empty()) {
-			g_currentScissor = Foundation::Rect::intersection(g_currentScissor, clipRect);
-		} else {
-			g_currentScissor = clipRect;
-		}
-
-		g_scissorStack.push(g_currentScissor);
-
-		// TODO: Apply to OpenGL state
-		// For now, just track it
-	}
-
-	void PopScissor() {
-		if (!g_scissorStack.empty()) {
-			g_scissorStack.pop();
-
-			if (!g_scissorStack.empty()) {
-				g_currentScissor = g_scissorStack.top();
-			} else {
-				g_currentScissor = Foundation::Rect(); // Clear scissor
-			}
-
-			// TODO: Apply to OpenGL state
-		}
-	}
-
-	Foundation::Rect getCurrentScissor() {
-		return g_currentScissor;
 	}
 
 	// --- Transform Stack ---

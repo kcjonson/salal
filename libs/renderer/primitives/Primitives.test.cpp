@@ -223,6 +223,37 @@ namespace Renderer {
 		expectNear(pixel(26, 16), {128, 128, 128, 128});
 	}
 
+	TEST_F(PrimitivesDrawTest, ARectsTranslucentBorderLiesOverTheFillInsideAndBesideItOutside) {
+		const Foundation::Color clear(0.0F, 0.0F, 0.0F, 0.0F);
+		const Foundation::Color halfWhite(1.0F, 1.0F, 1.0F, 0.5F);
+		const auto				rect = [](const Foundation::Color& fill, const Foundation::BorderStyle& border) {
+			 Primitives::drawRect({.bounds = {8.0F, 8.0F, 16.0F, 16.0F}, .style = {.fill = fill, .border = border}});
+		};
+
+		// The rect runs from 8 to 24; along the middle row, pixel 10's centre is 2.5 in
+		// from its edge and pixel 5's 2.5 out, each well clear of a ramp.
+		render(clear, [&] {
+			rect({1.0F, 0.0F, 0.0F, 1.0F}, {.color = halfWhite, .width = 4.0F, .position = Foundation::BorderPosition::Inside});
+		});
+		expectNear(pixel(16, 16), {255, 0, 0, 255});
+		expectNear(pixel(10, 16), {255, 128, 128, 255}); // half white over red
+
+		render(clear, [&] {
+			rect({1.0F, 0.0F, 0.0F, 1.0F}, {.color = halfWhite, .width = 4.0F, .position = Foundation::BorderPosition::Outside});
+		});
+		expectNear(pixel(10, 16), {255, 0, 0, 255});
+		expectNear(pixel(5, 16), {128, 128, 128, 128}); // the border alone: no fill under it
+
+		// A half blue fill under a centred border 8 wide: over the fill inside the edge,
+		// alone outside it.
+		render(clear, [&] {
+			rect({0.0F, 0.0F, 1.0F, 0.5F}, {.color = halfWhite, .width = 8.0F, .position = Foundation::BorderPosition::Center});
+		});
+		expectNear(pixel(16, 16), {0, 0, 128, 128});
+		expectNear(pixel(10, 16), {128, 128, 191, 191});
+		expectNear(pixel(5, 16), {128, 128, 128, 128});
+	}
+
 	TEST_F(PrimitivesDrawTest, PolygonFillsAndItsBorderSitsOutside) {
 		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
 		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
