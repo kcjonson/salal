@@ -1,0 +1,29 @@
+{
+  "palette": {
+    "$type": "color",
+    "slate": {
+      "900": { "$value": { "colorSpace": "srgb", "components": [0.1, 0.12, 0.16] } },
+      "100": { "$value": { "colorSpace": "srgb", "components": [0.9, 0.92, 0.95] } }
+    },
+    "ember": { "$value": { "colorSpace": "display-p3", "components": [0.9, 0.4, 0.1], "hex": "#e6661a" } }
+  },
+  "color": {
+    "surface": {
+      "raised": { "$value": "{palette.slate.900}" }
+    },
+    "text": {
+      "primary": { "$value": "{palette.slate.100}" }
+    }
+  },
+  "styles": {
+    "healthBar": {
+      "fill": {
+        "backgroundColor": { "$value": "{palette.ember}" },
+        "borderRadius": { "$value": "{radius.sm}" }
+      },
+      "track": {
+        "backgroundColor": { "$value": { "$ref": "#/color/surface/sunken/$value" } }
+      }
+    }
+  }
+}
