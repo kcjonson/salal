@@ -64,6 +64,34 @@ TEST(RenderModeTest, AlphaKeepsTheModeAndAdditiveMovesItOutOfEveryAlphaRange) {
 	EXPECT_EQ(renderMode(kRenderModeImage, BlendMode::Additive), -15.0F);
 }
 
+TEST(RenderModeTest, AShapesBorderAlphaRidesInItsModesFractionAsTransparency) {
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	const auto			 rectWithBorder = [&](float alpha, Foundation::BorderPosition position, BlendMode blend) {
+		  batch.addQuad(
+			  {0.0F, 0.0F, 10.0F, 10.0F},
+			  Foundation::Color::red(),
+			  Foundation::BorderStyle{.color = {1.0F, 1.0F, 1.0F, alpha}, .width = 2.0F, .position = position},
+			  0.0F,
+			  std::nullopt,
+			  0.0F,
+			  blend
+		  );
+	};
+	rectWithBorder(1.0F, Foundation::BorderPosition::Center, BlendMode::Alpha);
+	rectWithBorder(0.4F, Foundation::BorderPosition::Center, BlendMode::Alpha);
+	rectWithBorder(0.0F, Foundation::BorderPosition::Outside, BlendMode::Additive);
+	addRect(batch);
+
+	const std::span<const BatchVertex> vertices = batch.getPendingVertices();
+	ASSERT_EQ(vertices.size(), 16U);
+	EXPECT_EQ(vertices[0].data2.w, 1.0F); // opaque: the whole number
+	EXPECT_FLOAT_EQ(vertices[4].data2.w, 1.0F + (kBorderTransparencySpan * 0.6F));
+	EXPECT_EQ(vertices[8].data2.w, 6.0F + kBorderTransparencySpan); // still short of the next half unit
+	EXPECT_EQ(vertices[12].data2.w, 1.0F);							// no border
+	EXPECT_EQ(vertices[4].data1, Foundation::Vec4(1.0F, 1.0F, 1.0F, 2.0F));
+}
+
 TEST(RenderModeTest, AdditiveSharesAlphasBlendState) {
 	EXPECT_EQ(blendState(BlendMode::Alpha), backend::BlendState::Alpha);
 	EXPECT_EQ(blendState(BlendMode::Additive), backend::BlendState::Alpha);

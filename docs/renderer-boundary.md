@@ -259,7 +259,8 @@ dual-deck-builder R5.22a) and never splits a draw; without it, additive is
 `BatchVertex` has no spare field for shapes: border position 0 to 2 plus 4 for
 additive, and every negative mode (text and shadow, and the arc and image modes
 PR 3 added) 10 lower when additive; `BatchRenderer.h` and `base.frag` carry the
-same table. Decided: premultiplied, in the same PR, also because compositing a
+same table. A rect's border alpha rides there too, later: its transparency in the
+shape mode's fraction, 0 to 0.25, so an opaque border keeps the whole number. Decided: premultiplied, in the same PR, also because compositing a
 straight-alpha render target over the scene (bloom) gives dark fringes. Nothing
 the base shader samples carries alpha in PR 3 (font atlases are RGB8; the tile
 atlas is sampled only by worldsim's tile shader, `ChunkRenderer.cpp:537`,

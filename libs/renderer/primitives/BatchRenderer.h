@@ -21,6 +21,7 @@
 #include "primitives/Primitives.h"
 #include "primitives/Stroke.h"
 #include "vector/Tessellator.h"
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -55,12 +56,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	//   shadow            -3           -13
 	//   arc               -4           -14
 	//   image             -5           -15
+	//
+	// A shape's mode also carries its border's transparency (1 - alpha) in its
+	// fraction, over kBorderTransparencySpan, so an opaque border, or none, keeps
+	// the whole number above.
 	constexpr float kRenderModeText = -1.0F;	  // MSDF text
 	constexpr float kRenderModeShadow = -3.0F;	  // Box-shadow / glow (SDF soft falloff)
 	constexpr float kRenderModeArc = -4.0F;		  // Ring, arc or pie (SDF)
 	constexpr float kRenderModeImage = -5.0F;	  // Plain texture sample
 	constexpr float kAdditiveShapeOffset = 4.0F;  // Added to a shape's border position
 	constexpr float kAdditiveModeOffset = -10.0F; // Added to a negative mode
+	constexpr float kBorderTransparencySpan = 0.25F;
 
 	// data2.w for a border position (0..2) or a negative mode, drawn with `blend`.
 	constexpr float renderMode(float mode, Primitives::BlendMode blend) {
@@ -68,6 +74,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			return mode;
 		}
 		return mode >= 0.0F ? mode + kAdditiveShapeOffset : mode + kAdditiveModeOffset;
+	}
+
+	// data2.w for a shape: its border position (0..2) and its border's alpha, drawn with `blend`.
+	constexpr float shapeMode(float borderPosition, float borderAlpha, Primitives::BlendMode blend) {
+		return renderMode(borderPosition, blend) + (kBorderTransparencySpan * (1.0F - std::clamp(borderAlpha, 0.0F, 1.0F)));
 	}
 
 	// The GPU blend state a mode draws in. Output is premultiplied and blended

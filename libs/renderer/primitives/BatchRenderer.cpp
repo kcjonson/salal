@@ -163,13 +163,15 @@ namespace Renderer {
 			}
 		}
 
-		// Pack border data (color RGB + width)
+		// Pack border data (color RGB + width); its alpha goes in the mode
 		Foundation::Vec4 borderData(0.0F, 0.0F, 0.0F, 0.0F);
 		float			 borderWidth = 0.0F;
+		float			 borderAlpha = 1.0F;
 		float			 borderPosEnum = 1.0F; // Default to Center
 		if (border.has_value()) {
 			borderData = Foundation::Vec4(border->color.r, border->color.g, border->color.b, border->width);
 			borderWidth = border->width;
+			borderAlpha = border->color.a;
 			// Use corner radius from border if provided
 			if (border->cornerRadius > 0.0F) {
 				cornerRadius = border->cornerRadius;
@@ -206,9 +208,9 @@ namespace Renderer {
 		float centerX = bounds.x + halfW;
 		float centerY = bounds.y + halfH;
 
-		// Pack shape parameters (halfWidth, halfHeight, cornerRadius, borderPosition)
+		// Pack shape parameters (halfWidth, halfHeight, cornerRadius, borderPosition and alpha)
 		// Note: shapeParams still uses the ORIGINAL halfW/halfH for SDF calculation
-		Foundation::Vec4 shapeParams(halfW, halfH, cornerRadius, renderMode(borderPosEnum, blend));
+		Foundation::Vec4 shapeParams(halfW, halfH, cornerRadius, shapeMode(borderPosEnum, borderAlpha, blend));
 
 		// Add 4 vertices with expanded screen positions but rect-local coordinates
 		// that extend beyond the original shape bounds.
