@@ -10,7 +10,7 @@ protected pixel for pixel, and nothing in CI compares images. Decided
 | GL readback tests | the same files, skipped headless | renderer changes, locally | the developer |
 | Happy-path scripts | `docs/testing/happy-path/*.md` | before every commit | a cheap subagent fleet |
 | Scene diffs | `scripts/scene-diff.mjs` (to build) | before committing drawing or rendering code | the developer, a subagent judging |
-| Perf suite | `perf_*` sandbox scenes, `scripts/perf.mjs` (to build) | before committing batching, shader, ui walk or app frame changes, and at every tag | the developer |
+| Perf suite | `perf_*` sandbox scenes, `scripts/perf.mjs` | before committing batching, shader, ui walk or app frame changes, and at every tag | the developer |
 
 ## Happy-path scripts
 
@@ -62,18 +62,119 @@ Strict, and the engine's own. Rendering performance dropping in gameplay is
 the regression the games have hit most, and a game needs to know whether its
 frame rate fell because of its own change or the engine's.
 
-The perf suite is a set of stress scenes in the sandbox (thousands of quads,
-text, icons, a ui tree with popups open, world-like batches with flushes) and
-a runner: a release build, vsync off, a warm-up, then a fixed window, reading
-`/api/metrics` for CPU and GPU frame time (p50, p99), batcher time, draw
-calls, instances and bytes uploaded, written as JSON to `perf-results/`.
-
 - A change to batching, the shader, ui's walk or app's frame runs it against
   `main` on the same machine, and a regression past the threshold fails it.
-  The threshold is set from measured run-to-run noise.
 - Every tag's result is committed with the machine's name. When a game's frame
   rate drops after an engine bump, run the suite at the old and new tags on
   the same machine: if the engine's numbers moved, it's the engine.
+
+### The scenes
+
+Three sandbox scenes, each fixed content from a fixed seed, with any motion a
+function of the tick, so every frame of a tick draws the same. They are built
+to measure what the instanced-quad and texture-slot rework
+([ui-design.md](../ui-design.md), Per-draw data and Texture residency)
+changes: the batcher's CPU time per quad, the bytes it uploads, and the draw
+calls texture changes cost.
+
+| scene | what it draws | what it guards |
+|---|---|---|
+| `perf_quads` | 10,000 overlapping rects: radii, borders inside, centred and outside, some gradients and shadows, under a scrolling translate | per-quad batcher time and upload bytes, one draw call |
+| `perf_text` | 223 list rows in six sizes, 11 to 24 px: a background, an image icon, a label in one font atlas and a value and unit in a second (the sandbox's font loaded twice) | glyph batching, and texture splits: three draw calls a row today (671 a frame), which texture slots make one |
+| `perf_world` | worldsim's VectorPerf 10,000 stars inside a clip, 120 stroked roads, a flush, 3,000 instanced trees, 400 rotating polygons from six cached silhouettes sorted by z, a barrier, 200 labels, then four clipped screen panels, under a panning, zooming camera | the world path: triangles, strokes, the z sort, barriers, clips and flushes |
+
+A ui tree with popups open and icons come with phase 3, when there is a ui
+walk, a popup stack and an icon atlas to measure.
+
+### What a capture holds
+
+`/api/control?action=capture&op=start` starts a capture and turns the
+renderer's GPU timing on; `op=stop` turns it off and answers with the
+summary. A capture holds every whole frame between the two. Each of these is
+reported as p50, p99, mean and max over the frames (nearest rank):
+
+| field | what it is |
+|---|---|
+| `frameMs` | start to start: the frame's work, present and pacing |
+| `cpuMs` | poll, input, update, render and the dev server's post-render step: the CPU's work, without present |
+| `presentMs` | the swap, which waits when the GPU or the compositor is behind |
+| `renderMs` | step 9, the scenes and overlays drawing and the batch's flushes; in these scenes, which only draw, the batcher's time |
+| `flushMs` | of that, the flushes: the plan, the uploads and the draw calls |
+| `gpuMs` | GPU time of each clear, flush, instanced draw and baked pass from a pair of timestamp queries, summed per frame (`GPUFrameTimer`), so a frame the CPU holds up reads what the GPU did, not how long it waited; read four frames late, never stalling |
+| `drawCalls`, `vertices`, `triangles`, `instances`, `uploadBytes` | the batch's counts, `uploadBytes` the vertex, index and instance bytes it wrote |
+
+GPU timing sits behind the backend's timestamp queries (no GL past the
+boundary), costs nothing while no capture runs, and reads 0 on the null
+backend. `/api/metrics` carries the live per-frame counts too.
+
+### The runner
+
+`node scripts/perf.mjs` builds the sandbox Release with
+`SALAL_DEV_SERVER_IN_RELEASE` in `build-perf/`, beside `build/`: Release
+because it is what ships (RelWithDebInfo inlines less on MSVC), and its own
+build tree so a perf run leaves the developer's build alone. Each run
+launches one scene with `--scene`, `--http-port 8094` (checked free first;
+never 8090) and `--no-vsync`, pinned to logical CPUs 4 to 11, waits for
+`/api/health`, warms up 3 s, captures 5 s, reads `/api/metrics`, and exits
+through `/api/control?action=exit`. Before each run it waits for any `cl`,
+`link` or `ninja` (another session's build) to finish, and notes one it gave
+up on in the run. A build's figure for a statistic is the median of its five
+runs.
+
+```
+node scripts/perf.mjs run                  # this checkout, into perf-results/local/
+node scripts/perf.mjs compare              # main, built in a scratch worktree, against this checkout
+node scripts/perf.mjs compare --base v0.20.0
+node scripts/perf.mjs noise --runs 10      # one build's run-to-run spread
+```
+
+Compare builds the base in a worktree under the OS temp folder
+(`salal-perf/<ref>`, kept for the next run's incremental build; `git worktree
+remove` it when done), or takes `--base-exe`, and runs the two interleaved,
+alternating which goes first. It fails when the head's `cpuMs` or `renderMs`
+p50 is more than 4% above the base's, or its `gpuMs` p50 in `perf_quads` and
+`perf_text`. Tails, present and the counts are reported, not gated: the
+rework changes the counts on purpose.
+
+### Noise and the threshold
+
+Measured on `kevinsgamingdesktop` (Ryzen 9 5950X, RTX 3090, Windows 11),
+2026-10-30, ten runs of one Release build each, p50s:
+
+| scene | statistic | median ms | range | CV | A/A gap, 5 runs a side | range unpinned |
+|---|---|---|---|---|---|---|
+| `perf_quads` | `cpuMs` | 0.917 | 1.3% | 0.5% | 0.6% | 14.0% |
+| | `gpuMs` | 0.205 | 0.0% | 0.0% | 0.0% | 1.2% |
+| `perf_text` | `cpuMs` | 0.719 | 3.7% | 1.2% | 1.0% | 36.8% |
+| | `gpuMs` | 0.069 | 5.9% | 2.0% | 1.5% | 5.9% |
+| `perf_world` | `cpuMs` | 4.347 | 1.9% | 0.7% | 0.7% | 15.3% |
+| | `gpuMs` | 0.284 | 37.2% | 17.8% | 4.4% | 49.8% |
+
+The A/A gap is the worst gap between the medians of two disjoint groups of
+five runs: what a compare of one build against itself could show. `renderMs`
+moves with `cpuMs`. Unpinned, a launch landed on a different core or CCD
+and `perf_text`'s CPU time moved by a third, which is why the runner pins.
+The threshold, 4%, is four times the worst CPU A/A gap, so noise alone
+doesn't fail a compare, and a 5% regression clears it. `perf_world`'s GPU
+time isn't gated: launch to launch its present waits about 5 ms or doesn't
+(a frame of 9.7 or 4.4 ms, the CPU's time the same), and the GPU's clocks,
+and its time, follow.
+
+### Results
+
+`perf-results/<machine>/<describe>.json`, committed: `<machine>` the host
+name in lower case, `<describe>` `git describe --tags` of the commit
+measured, which at a tag is the tag. `perf-results/local/` holds everything
+else (ad hoc runs, compares, noise) and is ignored.
+
+At a tag, from a clean checkout of it:
+
+1. `node scripts/perf.mjs run --record`: writes
+   `perf-results/<machine>/<tag>.json`, refused with uncommitted changes.
+2. Commit that one file to `main`.
+
+A result compares only with others from the same machine, at the same window
+size: the sandbox's window is 80% of the primary monitor's work area.
 
 ## Unit tests
 

@@ -337,12 +337,40 @@ namespace app {
 			if (metricsFrameOpen) {
 				const Renderer::Primitives::RenderStats stats = Renderer::Primitives::getStats();
 				metricsCollector->setRenderStats(stats.drawCalls, stats.vertexCount, stats.triangleCount);
+				metricsCollector->setBatchStats(stats.instanceCount, stats.uploadBytes, stats.flushCount, stats.flushMs);
 				metricsCollector->setMainLoopTimings(sections.poll, sections.input, sections.update, sections.render, sections.present);
 				metricsCollector->endFrame();
 			}
 			metricsCollector->beginFrame();
 			metricsFrameOpen = true;
+		}
+		if (frameInCapture && frameCapture.active()) {
+			recordCapturedFrame(elapsed);
+		}
+		frameInCapture = frameCapture.active();
+		if (metricsCollector != nullptr || frameInCapture) {
 			sectionStart = now;
+		}
+	}
+
+	void App::recordCapturedFrame(double frameSeconds) {
+		const Renderer::Primitives::RenderStats stats = Renderer::Primitives::getStats();
+		frameCapture.add({
+			.frameMs = static_cast<float>(frameSeconds * 1000.0),
+			.cpuMs = sections.poll + sections.input + sections.update + sections.render,
+			.presentMs = sections.present,
+			.renderMs = static_cast<float>(renderSeconds * 1000.0),
+			.flushMs = stats.flushMs,
+			.drawCalls = stats.drawCalls,
+			.vertices = stats.vertexCount,
+			.triangles = stats.triangleCount,
+			.instances = stats.instanceCount,
+			.uploadBytes = stats.uploadBytes,
+		});
+		const Renderer::Primitives::GpuFrameTime gpu = Renderer::Primitives::getGpuFrameTime();
+		if (gpu.frames != gpuFramesSeen) {
+			gpuFramesSeen = gpu.frames;
+			frameCapture.addGpu(gpu.ms);
 		}
 	}
 
@@ -492,6 +520,7 @@ namespace app {
 
 	// The stack, then the overlays, each overlay its own sort domain over everything before it.
 	void App::render() {
+		const double start = frameInCapture ? platform->clock().now() : 0.0;
 		Renderer::Primitives::beginFrame();
 		if (fontRenderer != nullptr) {
 			fontRenderer->updateFrame();
@@ -504,6 +533,9 @@ namespace app {
 		}
 
 		Renderer::Primitives::endFrame();
+		if (frameInCapture) {
+			renderSeconds = platform->clock().now() - start;
+		}
 	}
 
 	// The screenshot, then the state providers, read before present.
@@ -516,7 +548,7 @@ namespace app {
 	}
 
 	void App::endSection(float& section) {
-		if (metricsCollector == nullptr) {
+		if (metricsCollector == nullptr && !frameInCapture) {
 			return;
 		}
 		const double now = platform->clock().now();
@@ -743,6 +775,35 @@ namespace app {
 
 	Renderer::MetricsCollector* App::metrics() {
 		return metricsCollector.get();
+	}
+
+	// GPU timing restarts with the capture, so a result from a frame before it isn't counted in it.
+	void App::startCapture() {
+		Renderer::Primitives::setGpuTiming(false);
+		Renderer::Primitives::setGpuTiming(true);
+		gpuFramesSeen = Renderer::Primitives::getGpuFrameTime().frames;
+		frameCapture.start();
+		LOG_INFO(Engine, "Capture started");
+	}
+
+	std::optional<CaptureSummary> App::stopCapture() {
+		if (!frameCapture.active()) {
+			return std::nullopt;
+		}
+		Renderer::Primitives::setGpuTiming(false);
+		frameInCapture = false;
+		const CaptureSummary summary = frameCapture.stop();
+		LOG_INFO(
+			Engine,
+			"Capture stopped: %llu frames over %.2fs",
+			static_cast<unsigned long long>(summary.frames), // NOLINT(google-runtime-int)
+			summary.seconds
+		);
+		return summary;
+	}
+
+	bool App::capturing() const {
+		return frameCapture.active();
 	}
 
 	void App::addOverlay(std::unique_ptr<Overlay> overlay) {

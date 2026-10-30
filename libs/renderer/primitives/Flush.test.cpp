@@ -493,6 +493,36 @@ namespace Renderer {
 		ASSERT_EQ(uploaded.size(), 4U); // the stream buffer holds the second flush only
 		EXPECT_EQ(uploaded[0].position.x, 40.0F);
 		EXPECT_EQ(gpu->uniformWrites().size(), 2U);
+
+		const Primitives::RenderStats stats = Primitives::getStats();
+		EXPECT_EQ(stats.flushCount, 2U);
+		EXPECT_EQ(stats.uploadBytes, (12 * sizeof(BatchVertex)) + (18 * sizeof(uint32_t)));
+		EXPECT_EQ(stats.instanceCount, 0U);
+		EXPECT_GE(stats.flushMs, 0.0F);
+	}
+
+	TEST_F(FlushTest, GpuTimingBracketsEachSubmissionOnceTurnedOn) {
+		Primitives::beginFrame();
+		rect(0.0F);
+		Primitives::endFrame();
+		EXPECT_EQ(gpu->timestampsWritten(), 0); // off by default
+
+		Primitives::setGpuTiming(true);
+		for (int frame = 0; frame < 5; ++frame) {
+			Primitives::beginFrame();
+			rect(0.0F);
+			Primitives::flush();
+			rect(20.0F);
+			Primitives::endFrame();
+		}
+		EXPECT_EQ(gpu->timestampsWritten(), 20); // two flushes a frame, a pair each
+		EXPECT_EQ(Primitives::getGpuFrameTime().frames, 1U);
+
+		Primitives::setGpuTiming(false);
+		Primitives::beginFrame();
+		rect(0.0F);
+		Primitives::endFrame();
+		EXPECT_EQ(gpu->timestampsWritten(), 20);
 	}
 
 	TEST_F(FlushTest, InstancedDrawsCarryTheirCameraAndInstances) {

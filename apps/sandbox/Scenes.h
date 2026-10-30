@@ -1,8 +1,10 @@
 #pragma once
 
 // The sandbox's scenes, each defined in its own file under scenes/. They are the engine's test
-// fixtures, ported from worldsim's ui-sandbox: renderer-level drawing and input, no game content.
+// fixtures, ported from worldsim's ui-sandbox: renderer-level drawing and input, no game content. The
+// perf_ scenes are the perf suite's (docs/testing/README.md, Performance).
 
+#include <primitives/FontFamily.h>
 #include <scene/Scene.h>
 
 #include <memory>
@@ -27,5 +29,13 @@ namespace sandbox {
 	extern const SceneInfo kPolylineScene;
 	extern const SceneInfo kBlendScene;
 	extern const SceneInfo kInputTestScene;
+	extern const SceneInfo kPerfQuadsScene;
+	extern const SceneInfo kPerfTextScene;
+	extern const SceneInfo kPerfWorldScene;
+
+	// The families main.cpp loads. The second is the same atlas loaded again, so perf_text has two font
+	// atlases to alternate between, as a game with a body and a mono font does.
+	inline constexpr Renderer::FontFamily kMonoFont{0};
+	inline constexpr Renderer::FontFamily kSecondFont{1};
 
 } // namespace sandbox

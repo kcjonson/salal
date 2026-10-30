@@ -484,13 +484,36 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Statistics ---
 
+		// The frame's batch since beginFrame(): draw calls, vertices and triangles (an
+		// instanced draw counting each instance's), the instances drawInstanced drew,
+		// the vertex, index and instance bytes written to the backend, and the flushes
+		// that submitted something with the CPU time they took (the plan, the uploads
+		// and the draw calls).
 		struct RenderStats {
 			uint32_t drawCalls = 0;
 			uint32_t vertexCount = 0;
 			uint32_t triangleCount = 0;
+			uint32_t instanceCount = 0;
+			uint64_t uploadBytes = 0;
+			uint32_t flushCount = 0;
+			float	 flushMs = 0.0F;
 		};
 
 		RenderStats getStats();
+
+		// GPU timing of the batch, off until turned on: each clear, flush, instanced draw
+		// and baked pass is bracketed by a pair of timestamp queries and a frame's spans are
+		// summed (GPUFrameTimer), so a frame the CPU holds up reads only what the GPU did.
+		// Off, no query is written. Results come back a few frames late; turning it off
+		// drops the ones still on their way.
+		void setGpuTiming(bool enabled);
+
+		struct GpuFrameTime {
+			float	 ms = 0.0F;	 // the latest frame whose spans have come back
+			uint64_t frames = 0; // frames timed since init(); a new result has arrived when it moves
+		};
+
+		GpuFrameTime getGpuFrameTime();
 
 	} // namespace Primitives
 } // namespace Renderer

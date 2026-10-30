@@ -9,6 +9,7 @@
 
 #include "DevServer/DevServer.h"
 #include "application/AppConfig.h"
+#include "application/FrameCapture.h"
 #include "clipboard/Clipboard.h"
 #include "detail/TypeKey.h"
 #include "input/Input.h"
@@ -23,6 +24,7 @@
 #include <input/InputTypes.h>
 #include <metrics/MetricsCollector.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -124,6 +126,13 @@ namespace app {
 		// Null unless AppConfig::metrics.
 		Renderer::MetricsCollector* metrics();
 
+		// A perf capture (FrameCapture.h) of every frame from the next one on, with the renderer's GPU
+		// timing on meanwhile; starting again starts over. The dev server's capture action runs these.
+		void startCapture();
+		// The capture's summary, the GPU timing off again; nullopt when none was running.
+		std::optional<CaptureSummary> stopCapture();
+		bool						  capturing() const;
+
 		// Persistent across scene changes, above the stack. One added during a frame joins once the frame
 		// is over.
 		void addOverlay(std::unique_ptr<Overlay> overlay);
@@ -174,6 +183,7 @@ namespace app {
 		void  pace() const;
 		float liveAlpha() const;
 		void  endSection(float& section);
+		void  recordCapturedFrame(double frameSeconds);
 
 		AppConfig									config;
 		std::unique_ptr<Platform>					platform;
@@ -209,6 +219,11 @@ namespace app {
 		bool	 metricsFrameOpen = false;
 		double	 sectionStart = 0.0;
 		Sections sections;
+
+		FrameCapture  frameCapture;
+		bool		  frameInCapture = false; // this frame began while capturing
+		double		  renderSeconds = 0.0;	  // step 9, timed while capturing
+		std::uint64_t gpuFramesSeen = 0;
 	};
 
 } // namespace app

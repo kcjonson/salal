@@ -5,6 +5,7 @@
 #include "CoordinateSystem/CoordinateSystem.h"
 #include "primitives/BoundaryLoops.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <numbers>
@@ -71,7 +72,8 @@ namespace Renderer {
 		  indexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialIndexBytes, nullptr)),
 		  geometry(
 			  renderBackend.createGeometry({.layout = backend::VertexLayout::Batched, .vertices = vertexBuffer, .indices = indexBuffer})
-		  ) {
+		  ),
+		  gpuTimer(renderBackend) {
 		if (!pipeline.isValid()) {
 			std::cerr << "Failed to load the base shader!" << std::endl;
 		}
@@ -779,12 +781,14 @@ namespace Renderer {
 		if (vertices.empty()) {
 			return;
 		}
+		const auto flushStart = std::chrono::steady_clock::now();
 
 		const DrawPlan drawPlan = plan();
 
 		// The whole batch, every flush: the stream buffers start over
 		gpu.updateBuffer(vertexBuffer, 0, vertices.size() * sizeof(BatchVertex), vertices.data());
 		gpu.updateBuffer(indexBuffer, 0, drawPlan.indices.size_bytes(), drawPlan.indices.data());
+		frameUploadBytes += (vertices.size() * sizeof(BatchVertex)) + drawPlan.indices.size_bytes();
 
 		// Create projection matrix
 		// If CoordinateSystem is set, use it for DPI-aware projection (logical pixels)
@@ -831,12 +835,21 @@ namespace Renderer {
 				 .indexCount = run.indexCount}
 			);
 		}
+		// The GPU span starts after the uploads, so it holds the draws and not the CPU writing them.
+		if (gpuTiming) {
+			gpuTimer.beginSpan();
+		}
 		gpu.draw(drawCalls);
+		if (gpuTiming) {
+			gpuTimer.endSpan();
+		}
 		drawCallCount += drawCalls.size();
 
 		// Accumulate stats before clearing
 		frameVertexCount += vertices.size();
 		frameTriangleCount += indices.size() / 3;
+		++frameFlushCount;
+		frameFlushSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - flushStart).count();
 
 		// Clear buffers for next batch
 		vertices.clear();
@@ -851,6 +864,13 @@ namespace Renderer {
 		drawCallCount = 0;
 		frameVertexCount = 0;
 		frameTriangleCount = 0;
+		frameInstanceCount = 0;
+		frameUploadBytes = 0;
+		frameFlushCount = 0;
+		frameFlushSeconds = 0.0;
+		if (gpuTiming) {
+			gpuTimer.beginFrame();
+		}
 		vertices.clear();
 		indices.clear();
 		vertexAtlas.clear();
@@ -886,7 +906,30 @@ namespace Renderer {
 		stats.drawCalls = static_cast<uint32_t>(drawCallCount);
 		stats.vertexCount = static_cast<uint32_t>(frameVertexCount);
 		stats.triangleCount = static_cast<uint32_t>(frameTriangleCount);
+		stats.instanceCount = static_cast<uint32_t>(frameInstanceCount);
+		stats.uploadBytes = frameUploadBytes;
+		stats.flushCount = static_cast<uint32_t>(frameFlushCount);
+		stats.flushMs = static_cast<float>(frameFlushSeconds * 1000.0);
 		return stats;
+	}
+
+	void BatchRenderer::setGpuTiming(bool enabled) {
+		if (!enabled) {
+			gpuTimer.reset();
+		}
+		gpuTiming = enabled;
+	}
+
+	void BatchRenderer::beginGpuSpan() {
+		if (gpuTiming) {
+			gpuTimer.beginSpan();
+		}
+	}
+
+	void BatchRenderer::endGpuSpan() {
+		if (gpuTiming) {
+			gpuTimer.endSpan();
+		}
 	}
 
 	void BatchRenderer::setClipBounds(const Foundation::Vec4& bounds) {
@@ -1042,6 +1085,9 @@ namespace Renderer {
 		uint32_t remaining = count;
 		uint32_t offset = 0;
 
+		if (gpuTiming) {
+			gpuTimer.beginSpan();
+		}
 		while (remaining > 0) {
 			uint32_t batchSize = std::min(remaining, handle.maxInstances);
 
@@ -1060,9 +1106,14 @@ namespace Renderer {
 			// Each instance renders all mesh vertices; triangle count = indices / 3
 			frameVertexCount += static_cast<size_t>(handle.vertexCount) * batchSize;
 			frameTriangleCount += static_cast<size_t>(handle.indexCount / 3) * batchSize;
+			frameInstanceCount += batchSize;
+			frameUploadBytes += batchSize * sizeof(InstanceData);
 
 			remaining -= batchSize;
 			offset += batchSize;
+		}
+		if (gpuTiming) {
+			gpuTimer.endSpan();
 		}
 	}
 
@@ -1093,11 +1144,17 @@ namespace Renderer {
 		// The same blend state as every batch draw; the caller's VAO draws follow
 		gpu.beginForeignDraws(pipeline, backend::BlendState::Alpha);
 		bakedPassOpen = true;
+		if (gpuTiming) {
+			gpuTimer.beginSpan();
+		}
 	}
 
 	void BatchRenderer::endBakedPass() {
 		// Alpha back to 1 so the instanced path (same shader branch) is unaffected
 		uniforms.bakedAlpha = 1.0F;
+		if (gpuTiming) {
+			gpuTimer.endSpan();
+		}
 		gpu.endForeignDraws();
 		bakedPassOpen = false;
 	}

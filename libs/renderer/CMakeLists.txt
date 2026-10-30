@@ -17,6 +17,7 @@ add_library(salal_renderer STATIC
     metrics/MetricsCollector.cpp
     metrics/PerformanceMetrics.cpp
     metrics/GPUTimer.cpp
+    metrics/GPUFrameTimer.cpp
     vector/Tessellator.cpp
     vector/Bezier.cpp
     vector/SVGLoader.cpp
