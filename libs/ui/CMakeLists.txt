@@ -1,6 +1,5 @@
 add_library(salal_ui STATIC
     Ui.cpp
-    ui/layout/Grid.cpp
 )
 add_library(salal::ui ALIAS salal_ui)
 
