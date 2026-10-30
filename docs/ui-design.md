@@ -523,24 +523,28 @@ allocated once; nothing keeps a pointer into the array, only ids.
 
 ### Theme styles
 
-A game's tokens file defines its styles with the same names `Style` uses:
+A game's tokens file defines its styles under the top-level `styles` group,
+with the same names `Style` uses:
 
 ```json
 {
-  "pane": {
-    "backgroundColor": { "$type": "color", "$value": "{color.surface.raised}" },
-    "borderColor": { "$type": "color", "$value": "{color.line.edge}" },
-    "borderWidth": { "$type": "dimension", "$value": { "value": 1, "unit": "px" } },
-    "borderRadius": { "$type": "dimension", "$value": "{radius.md}" }
+  "styles": {
+    "pane": {
+      "backgroundColor": { "$type": "color", "$value": "{color.surface.raised}" },
+      "borderColor": { "$type": "color", "$value": "{color.line.edge}" },
+      "borderWidth": { "$type": "dimension", "$value": { "value": 1, "unit": "px" } },
+      "borderRadius": { "$type": "dimension", "$value": "{radius.md}" }
+    }
   }
 }
 ```
 
 `salal_tokens(my_game tokens/)` generates a typed constant per style at build
 time, an index into the loaded theme, so code names `ui::styles::pane` and a
-typo is a compile error. A style missing from a mode the resolver loads fails
-the load in a dev build, naming the style and the file; a release build falls
-back to the base set.
+typo is a compile error. The build loads the folder in every mode its resolver
+has and fails on a token some modes lack. A style a game's table names that a
+loaded file lacks fails the load in a dev build, naming the style and the file;
+a release build warns and the style's fields fall back to the type's defaults.
 
 ### In Rust
 

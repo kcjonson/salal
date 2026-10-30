@@ -1,0 +1,357 @@
+{
+  "$description": "ui's default theme and the contract: every token a ui component reads, in three tiers. base holds plain values; the semantic groups (color, space, radius, lineWidth, font, typography, motion, size, tone, state, focusRing, shadow) alias base; styles alias the semantic groups. A game's tokens file overrides any tier, and its aliases are the mapping: point ui's semantic tokens at the game's own base names.",
+  "base": {
+    "$description": "Tier 1, plain values. ui reads none of these directly.",
+    "color": {
+      "$type": "color",
+      "black": { "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "hex": "#000000"} },
+      "white": { "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"} },
+      "gray950": { "$value": {"colorSpace": "srgb", "components": [0.0431, 0.051, 0.0706], "hex": "#0b0d12"} },
+      "gray900": { "$value": {"colorSpace": "srgb", "components": [0.0706, 0.0824, 0.1098], "hex": "#12151c"} },
+      "gray850": { "$value": {"colorSpace": "srgb", "components": [0.0941, 0.1098, 0.1412], "hex": "#181c24"} },
+      "gray800": { "$value": {"colorSpace": "srgb", "components": [0.1255, 0.1412, 0.1804], "hex": "#20242e"} },
+      "gray700": { "$value": {"colorSpace": "srgb", "components": [0.1725, 0.1922, 0.2392], "hex": "#2c313d"} },
+      "gray600": { "$value": {"colorSpace": "srgb", "components": [0.2667, 0.2902, 0.3412], "hex": "#444a57"} },
+      "gray500": { "$value": {"colorSpace": "srgb", "components": [0.4196, 0.4471, 0.502], "hex": "#6b7280"} },
+      "gray400": { "$value": {"colorSpace": "srgb", "components": [0.5647, 0.5922, 0.6392], "hex": "#9097a3"} },
+      "gray300": { "$value": {"colorSpace": "srgb", "components": [0.7255, 0.7451, 0.7843], "hex": "#b9bec8"} },
+      "gray200": { "$value": {"colorSpace": "srgb", "components": [0.8392, 0.851, 0.8745], "hex": "#d6d9df"} },
+      "gray100": { "$value": {"colorSpace": "srgb", "components": [0.9255, 0.9333, 0.9451], "hex": "#eceef1"} },
+      "gray50": { "$value": {"colorSpace": "srgb", "components": [0.9686, 0.9725, 0.9804], "hex": "#f7f8fa"} },
+      "blue500": { "$value": {"colorSpace": "srgb", "components": [0.3098, 0.549, 1], "hex": "#4f8cff"} },
+      "blue300": { "$value": {"colorSpace": "srgb", "components": [0.6157, 0.7412, 1], "hex": "#9dbdff"} },
+      "teal500": { "$value": {"colorSpace": "srgb", "components": [0.1804, 0.7686, 0.7137], "hex": "#2ec4b6"} },
+      "green500": { "$value": {"colorSpace": "srgb", "components": [0.298, 0.6863, 0.4314], "hex": "#4caf6e"} },
+      "amber500": { "$value": {"colorSpace": "srgb", "components": [0.9098, 0.6392, 0.2431], "hex": "#e8a33e"} },
+      "red500": { "$value": {"colorSpace": "srgb", "components": [0.8784, 0.3255, 0.2353], "hex": "#e0533c"} }
+    },
+    "space": {
+      "0": { "$value": {"value": 0, "unit": "px"} },
+      "1": { "$value": {"value": 2, "unit": "px"} },
+      "2": { "$value": {"value": 4, "unit": "px"} },
+      "3": { "$value": {"value": 8, "unit": "px"} },
+      "4": { "$value": {"value": 12, "unit": "px"} },
+      "5": { "$value": {"value": 16, "unit": "px"} },
+      "6": { "$value": {"value": 24, "unit": "px"} },
+      "7": { "$value": {"value": 32, "unit": "px"} },
+      "8": { "$value": {"value": 48, "unit": "px"} },
+      "$type": "dimension"
+    },
+    "radius": {
+      "0": { "$value": {"value": 0, "unit": "px"} },
+      "1": { "$value": {"value": 2, "unit": "px"} },
+      "2": { "$value": {"value": 4, "unit": "px"} },
+      "3": { "$value": {"value": 8, "unit": "px"} },
+      "$type": "dimension",
+      "pill": { "$value": {"value": 9999, "unit": "px"} }
+    },
+    "fontSize": {
+      "12": { "$value": {"value": 12, "unit": "px"} },
+      "14": { "$value": {"value": 14, "unit": "px"} },
+      "16": { "$value": {"value": 16, "unit": "px"} },
+      "20": { "$value": {"value": 20, "unit": "px"} },
+      "28": { "$value": {"value": 28, "unit": "px"} },
+      "40": { "$value": {"value": 40, "unit": "px"} },
+      "$type": "dimension"
+    },
+    "duration": {
+      "100": { "$value": {"value": 100, "unit": "ms"} },
+      "200": { "$value": {"value": 200, "unit": "ms"} },
+      "350": { "$value": {"value": 350, "unit": "ms"} },
+      "$type": "duration"
+    },
+    "easing": {
+      "$type": "cubicBezier",
+      "standard": { "$value": [0.2, 0, 0, 1] },
+      "decelerate": { "$value": [0, 0, 0, 1] },
+      "accelerate": { "$value": [0.3, 0, 1, 1] }
+    }
+  },
+  "color": {
+    "$description": "Tier 2, palette roles.",
+    "$type": "color",
+    "surface": {
+      "base": { "$value": "{base.color.gray950}" },
+      "raised": { "$value": "{base.color.gray850}" },
+      "sunken": { "$value": "{base.color.gray900}" },
+      "overlay": { "$value": "{base.color.gray800}" },
+      "control": { "$value": "{base.color.gray700}" }
+    },
+    "text": {
+      "primary": { "$value": "{base.color.gray100}" },
+      "secondary": { "$value": "{base.color.gray400}" },
+      "disabled": { "$value": "{base.color.gray600}" },
+      "inverse": { "$value": "{base.color.gray950}" }
+    },
+    "line": {
+      "subtle": { "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.06, "hex": "#ffffff"} },
+      "edge": { "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.12, "hex": "#ffffff"} },
+      "strong": { "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.24, "hex": "#ffffff"} }
+    },
+    "scrim": { "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.6, "hex": "#000000"} },
+    "focus": { "$value": "{base.color.blue300}" }
+  },
+  "space": {
+    "$type": "dimension",
+    "xxs": { "$value": "{base.space.1}" },
+    "xs": { "$value": "{base.space.2}" },
+    "sm": { "$value": "{base.space.3}" },
+    "md": { "$value": "{base.space.4}" },
+    "lg": { "$value": "{base.space.5}" },
+    "xl": { "$value": "{base.space.6}" },
+    "xxl": { "$value": "{base.space.7}" }
+  },
+  "radius": {
+    "$type": "dimension",
+    "none": { "$value": "{base.radius.0}" },
+    "sm": { "$value": "{base.radius.1}" },
+    "md": { "$value": "{base.radius.2}" },
+    "lg": { "$value": "{base.radius.3}" },
+    "pill": { "$value": "{base.radius.pill}" }
+  },
+  "lineWidth": {
+    "$type": "dimension",
+    "thin": { "$value": {"value": 1, "unit": "px"} },
+    "thick": { "$value": {"value": 2, "unit": "px"} }
+  },
+  "font": {
+    "$description": "The font roles, each the name of a family the game registers with the theme (ThemeArgs::fontFamilies).",
+    "family": {
+      "$type": "fontFamily",
+      "display": { "$value": "display" },
+      "body": { "$value": "body" },
+      "mono": { "$value": "mono" }
+    }
+  },
+  "typography": {
+    "$type": "typography",
+    "display": {
+      "$value": {
+        "fontFamily": "{font.family.display}",
+        "fontSize": "{base.fontSize.40}",
+        "fontWeight": 700,
+        "letterSpacing": { "value": 0, "unit": "px" },
+        "lineHeight": 1.1
+      }
+    },
+    "title": {
+      "$value": {
+        "fontFamily": "{font.family.display}",
+        "fontSize": "{base.fontSize.20}",
+        "fontWeight": 600,
+        "letterSpacing": { "value": 0, "unit": "px" },
+        "lineHeight": 1.2
+      }
+    },
+    "body": {
+      "$value": {
+        "fontFamily": "{font.family.body}",
+        "fontSize": "{base.fontSize.14}",
+        "fontWeight": 400,
+        "letterSpacing": { "value": 0, "unit": "px" },
+        "lineHeight": 1.4
+      }
+    },
+    "caption": {
+      "$value": {
+        "fontFamily": "{font.family.body}",
+        "fontSize": "{base.fontSize.12}",
+        "fontWeight": 400,
+        "letterSpacing": { "value": 0, "unit": "px" },
+        "lineHeight": 1.3
+      }
+    },
+    "mono": {
+      "$value": {
+        "fontFamily": "{font.family.mono}",
+        "fontSize": "{base.fontSize.14}",
+        "fontWeight": 400,
+        "letterSpacing": { "value": 0, "unit": "px" },
+        "lineHeight": 1.4
+      }
+    }
+  },
+  "motion": {
+    "duration": {
+      "$type": "duration",
+      "fast": { "$value": "{base.duration.100}" },
+      "normal": { "$value": "{base.duration.200}" },
+      "slow": { "$value": "{base.duration.350}" }
+    },
+    "easing": {
+      "$type": "cubicBezier",
+      "standard": { "$value": "{base.easing.standard}" },
+      "enter": { "$value": "{base.easing.decelerate}" },
+      "exit": { "$value": "{base.easing.accelerate}" }
+    }
+  },
+  "size": {
+    "$description": "sm, md and lg set a control's font size and height.",
+    "$type": "dimension",
+    "sm": {
+      "fontSize": { "$value": "{base.fontSize.12}" },
+      "controlHeight": { "$value": {"value": 24, "unit": "px"} }
+    },
+    "md": {
+      "fontSize": { "$value": "{base.fontSize.14}" },
+      "controlHeight": { "$value": {"value": 32, "unit": "px"} }
+    },
+    "lg": {
+      "fontSize": { "$value": "{base.fontSize.16}" },
+      "controlHeight": { "$value": {"value": 40, "unit": "px"} }
+    }
+  },
+  "tone": {
+    "$description": "The semantic tones. color is the tone itself, subtle a fill wash, onColor text on a solid fill. Auto picks one by value from 0 to 1: under dangerBelow danger, under warningBelow warning, else positive.",
+    "$type": "color",
+    "default": {
+      "color": { "$value": "{color.text.primary}" },
+      "subtle": { "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.08, "hex": "#ffffff"} },
+      "onColor": { "$value": "{color.text.inverse}" }
+    },
+    "accent": {
+      "color": { "$value": "{base.color.blue500}" },
+      "subtle": { "$value": {"colorSpace": "srgb", "components": [0.3098, 0.549, 1], "alpha": 0.16, "hex": "#4f8cff"} },
+      "onColor": { "$value": "{base.color.white}" }
+    },
+    "info": {
+      "color": { "$value": "{base.color.teal500}" },
+      "subtle": { "$value": {"colorSpace": "srgb", "components": [0.1804, 0.7686, 0.7137], "alpha": 0.16, "hex": "#2ec4b6"} },
+      "onColor": { "$value": "{base.color.gray950}" }
+    },
+    "positive": {
+      "color": { "$value": "{base.color.green500}" },
+      "subtle": { "$value": {"colorSpace": "srgb", "components": [0.298, 0.6863, 0.4314], "alpha": 0.16, "hex": "#4caf6e"} },
+      "onColor": { "$value": "{base.color.gray950}" }
+    },
+    "warning": {
+      "color": { "$value": "{base.color.amber500}" },
+      "subtle": { "$value": {"colorSpace": "srgb", "components": [0.9098, 0.6392, 0.2431], "alpha": 0.16, "hex": "#e8a33e"} },
+      "onColor": { "$value": "{base.color.gray950}" }
+    },
+    "danger": {
+      "color": { "$value": "{base.color.red500}" },
+      "subtle": { "$value": {"colorSpace": "srgb", "components": [0.8784, 0.3255, 0.2353], "alpha": 0.16, "hex": "#e0533c"} },
+      "onColor": { "$value": "{base.color.white}" }
+    },
+    "auto": {
+      "dangerBelow": { "$type": "number", "$value": 0.25 },
+      "warningBelow": { "$type": "number", "$value": 0.5 }
+    }
+  },
+  "state": {
+    "$description": "State layers, applied in this order over a component's base: hover, pressed, active (open or selected), then disabled's opacity; the focus ring is last.",
+    "hover": {
+      "wash": { "$type": "color", "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.06, "hex": "#ffffff"} }
+    },
+    "pressed": {
+      "wash": { "$type": "color", "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.1, "hex": "#ffffff"} }
+    },
+    "active": {
+      "wash": {
+        "$type": "color",
+        "$value": { "colorSpace": "srgb", "components": [0.3098, 0.549, 1], "alpha": 0.18, "hex": "#4f8cff" }
+      }
+    },
+    "disabled": {
+      "opacity": { "$type": "number", "$value": 0.45 }
+    }
+  },
+  "focusRing": {
+    "color": { "$type": "color", "$value": "{color.focus}" },
+    "width": { "$type": "dimension", "$value": {"value": 2, "unit": "px"} },
+    "offset": { "$type": "dimension", "$value": {"value": 2, "unit": "px"} }
+  },
+  "shadow": {
+    "$type": "shadow",
+    "raised": {
+      "$value": {
+        "color": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.35, "hex": "#000000" },
+        "offsetX": { "value": 0, "unit": "px" },
+        "offsetY": { "value": 2, "unit": "px" },
+        "blur": { "value": 6, "unit": "px" },
+        "spread": { "value": 0, "unit": "px" }
+      }
+    },
+    "overlay": {
+      "$value": {
+        "color": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.5, "hex": "#000000" },
+        "offsetX": { "value": 0, "unit": "px" },
+        "offsetY": { "value": 8, "unit": "px" },
+        "blur": { "value": 24, "unit": "px" },
+        "spread": { "value": 0, "unit": "px" }
+      }
+    }
+  },
+  "styles": {
+    "$description": "Tier 3, component styles: ui::styles::<name>. Field names are Style's.",
+    "pane": {
+      "backgroundColor": { "$value": "{color.surface.raised}" },
+      "borderColor": { "$value": "{color.line.edge}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" },
+      "borderRadius": { "$value": "{radius.md}" }
+    },
+    "inset": {
+      "backgroundColor": { "$value": "{color.surface.sunken}" },
+      "borderColor": { "$value": "{color.line.subtle}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" },
+      "borderRadius": { "$value": "{radius.sm}" }
+    },
+    "overlay": {
+      "backgroundColor": { "$value": "{color.surface.overlay}" },
+      "borderColor": { "$value": "{color.line.strong}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" },
+      "borderRadius": { "$value": "{radius.lg}" },
+      "boxShadow": { "$value": "{shadow.overlay}" }
+    },
+    "scrim": {
+      "backgroundColor": { "$value": "{color.scrim}" }
+    },
+    "divider": {
+      "backgroundColor": { "$value": "{color.line.subtle}" }
+    },
+    "button": {
+      "backgroundColor": { "$value": "{color.surface.control}" },
+      "borderColor": { "$value": "{color.line.edge}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" },
+      "borderRadius": { "$value": "{radius.md}" },
+      "color": { "$value": "{color.text.primary}" },
+      "font": { "$value": "{typography.body}" }
+    },
+    "tooltip": {
+      "backgroundColor": { "$value": "{color.surface.overlay}" },
+      "borderColor": { "$value": "{color.line.strong}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" },
+      "borderRadius": { "$value": "{radius.sm}" },
+      "boxShadow": { "$value": "{shadow.raised}" },
+      "color": { "$value": "{color.text.primary}" },
+      "font": { "$value": "{typography.caption}" }
+    },
+    "text": {
+      "display": {
+        "color": { "$value": "{color.text.primary}" },
+        "font": { "$value": "{typography.display}" }
+      },
+      "title": {
+        "color": { "$value": "{color.text.primary}" },
+        "font": { "$value": "{typography.title}" }
+      },
+      "body": {
+        "color": { "$value": "{color.text.primary}" },
+        "font": { "$value": "{typography.body}" }
+      },
+      "secondary": {
+        "color": { "$value": "{color.text.secondary}" },
+        "font": { "$value": "{typography.body}" }
+      },
+      "caption": {
+        "color": { "$value": "{color.text.secondary}" },
+        "font": { "$value": "{typography.caption}" }
+      },
+      "mono": {
+        "color": { "$value": "{color.text.primary}" },
+        "font": { "$value": "{typography.mono}" }
+      }
+    }
+  }
+}
