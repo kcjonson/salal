@@ -193,6 +193,7 @@ TEST(IconAtlas, ThePngAndTheGeneratedTableCarryTheAtlas) {
 	int								width = 0;
 	int								height = 0;
 	int								channels = 0;
+	stbi_set_flip_vertically_on_load(0);
 	stbi_uc* decoded = stbi_load_from_memory(png.data(), static_cast<int>(png.size()), &width, &height, &channels, 3);
 	ASSERT_NE(decoded, nullptr);
 	EXPECT_EQ(width, atlas->width);

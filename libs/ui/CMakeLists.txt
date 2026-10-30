@@ -1,4 +1,5 @@
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(Stb REQUIRED)
 
 # The Design Tokens loader and resolver (ui/theme/dtcg/), on nlohmann-json alone: the theme loads
 # with it at run time, and salal_tokens() (cmake/SalalTokens.cmake) runs it at build time through
@@ -22,7 +23,6 @@ set_target_properties(salal_ui_dtcg salal_tokens_tool PROPERTIES FOLDER salal)
 find_package(msdfgen CONFIG QUIET)
 if(msdfgen_FOUND)
     find_package(NanoSVG CONFIG REQUIRED)
-    find_package(Stb REQUIRED)
     add_library(salal_ui_iconbuild STATIC
         ui/iconbuild/SvgCheck.cpp
         ui/iconbuild/IconAtlasBuilder.cpp
@@ -44,6 +44,7 @@ add_library(salal_ui STATIC
     Ui.cpp
     ui/theme/Theme.cpp
     ui/theme/Variants.cpp
+    ui/icons/IconAtlas.cpp
 )
 add_library(salal::ui ALIAS salal_ui)
 
@@ -52,6 +53,8 @@ target_include_directories(salal_ui
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${Stb_INCLUDE_DIR} # IconAtlas decodes its PNG with the renderer's stb_image
 )
 
 target_link_libraries(salal_ui
