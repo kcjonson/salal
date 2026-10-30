@@ -889,18 +889,15 @@ namespace app::testing {
 		ASSERT_EQ(gpu->draws().size(), 1U);
 		const Renderer::backend::GeometryDesc* geometry = gpu->geometry(gpu->draws()[0].call.geometry);
 		ASSERT_NE(geometry, nullptr);
-		const std::span<const uint8_t>	   vertexBytes = gpu->bufferContents(geometry->vertices);
-		const std::span<const uint8_t>	   indexBytes = gpu->bufferContents(geometry->indices);
-		std::vector<Renderer::BatchVertex> vertices(vertexBytes.size() / sizeof(Renderer::BatchVertex));
-		std::vector<uint32_t>			   indices(indexBytes.size() / sizeof(uint32_t));
-		std::memcpy(vertices.data(), vertexBytes.data(), vertices.size() * sizeof(Renderer::BatchVertex));
-		std::memcpy(indices.data(), indexBytes.data(), indices.size() * sizeof(uint32_t));
-		ASSERT_EQ(indices.size(), 24U);
+		const std::span<const uint8_t>		 bytes = gpu->bufferContents(geometry->vertices);
+		std::vector<Renderer::BatchInstance> quads(bytes.size() / sizeof(Renderer::BatchInstance));
+		std::memcpy(quads.data(), bytes.data(), quads.size() * sizeof(Renderer::BatchInstance));
+		ASSERT_EQ(quads.size(), 4U);
 
-		// The covered scene's z 5, the pause scene's z 0, then each overlay's lower z still over them.
+		// The covered scene's key 5, the pause scene's key 0, then each overlay's lower key still over them.
 		std::vector<float> drawn;
-		for (size_t i = 0; i < indices.size(); i += 6) {
-			drawn.push_back(vertices.at(indices[i]).position.x);
+		for (const Renderer::BatchInstance& quad : quads) {
+			drawn.push_back(quad.corners[0].x);
 		}
 		EXPECT_EQ(drawn, (std::vector<float>{0.0F, 20.0F, 40.0F, 60.0F}));
 	}

@@ -71,8 +71,11 @@ layout qualifier: the build gives its block a point. All three fail the build.
 and every other global it declares should carry the prefix too
 (`sway_gust`, say); two hooks declaring the same name fail in
 `glslangValidator`, as does a hook reusing one of the base shader's. A hook sees
-the base shader's batched attributes (0 to 5) and its `DrawUniforms` block, but
-not the instance attributes `a_instanceData1` and `a_instanceData2`, which
+the base shader's attributes and its `DrawUniforms` block. On the instanced-mesh
+path, where hooks run, only `a_position` and `a_color` (0 and 2) carry data; the
+batched quad's per-instance attributes (1, 3 to 5 and 8 to 12) read GL's
+defaults there. It doesn't see the mesh's instance attributes `a_instanceData1`
+and `a_instanceData2`, which
 `includes/instancing.glsl` declares after the hooks; it should rely only on its
 arguments and its own block. A `#define` in a hook stays live for the rest of the
 vertex stage, `instancing.glsl` and `main` included (`#define scale 2.0` breaks
