@@ -141,9 +141,10 @@ namespace ui {
 
 		shownText.get()->setStyle(textStyle);
 		shownText.get()->setText(editor.text());
+		shownText.get()->setVisible(!editor.text().empty());
 		shownText.get()->setPosition({-scroll, 0.0F});
 		placeholderText.get()->setStyle(textStyle.extend({.color = theme.get(tokens::color::text::disabled)}));
-		placeholderText.get()->setVisible(editor.text().empty());
+		placeholderText.get()->setVisible(editor.text().empty() && !placeholder.empty());
 
 		const float fieldHeight =
 			field.get()->getSize().y > 0.0F ? field.get()->getSize().y : sizeMetrics(theme, ControlSize::Md).controlHeight;

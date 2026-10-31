@@ -78,12 +78,11 @@ namespace {
 				{"tooltip", styles::tooltip},
 			}};
 			for (std::size_t i = 0; i < panes.size(); ++i) {
-				const float x = static_cast<float>(i) * 190.0F;
-				stage
-					.addChild<Rectangle>(
-						{.id = panes[i].first, .position = {x, 100.0F}, .size = {170.0F, 110.0F}, .style = panes[i].second}
-					)
-					.addChild<Text>({.position = {12.0F, 12.0F}, .style = styles::text::secondary, .text = panes[i].first});
+				const float	   x = static_cast<float>(i) * 190.0F;
+				Ref<Rectangle> pane = stage.addChild<Rectangle>(
+					{.id = panes[i].first, .position = {x, 100.0F}, .size = {170.0F, 110.0F}, .style = panes[i].second}
+				);
+				pane.addChild<Text>({.position = {12.0F, 12.0F}, .style = styles::text::secondary, .text = panes[i].first});
 			}
 			// A theme style extended with a field of its own.
 			stage.addChild<Rectangle>({
@@ -102,9 +101,13 @@ namespace {
 				{"Caption", styles::text::caption},
 				{"Mono 0123456789", styles::text::mono},
 			}};
-
-			const ui::Layout stack{.display = ui::Display::Flex, .flexDirection = ui::FlexDirection::Column, .gap = 4.0F};
-			Ref<Component>	 column = stage.addChild<Component>({.position = {0.0F, 290.0F}, .layout = stack});
+			// A column, so each role takes its own line height.
+			Ref<Component> column = stage.addChild<Component>({
+				.id = "type",
+				.position = {0.0F, 290.0F},
+				.size = {400.0F, ui::kAuto},
+				.layout = {.display = ui::Display::Flex, .flexDirection = ui::FlexDirection::Column, .gap = 4.0F},
+			});
 			for (const auto& [label, style] : roles) {
 				column.addChild<Text>({.style = style, .text = label});
 			}
@@ -147,16 +150,20 @@ namespace {
 				);
 			}
 
-			// The focus ring, drawn outside a control's box as its own outline.
+			// The focus ring, drawn outside a control's box as its own outline, with the control inside it.
 			const ui::FocusRing ring = ui::focusRing(theme);
-			swatches.addChild<Rectangle>({
-				.position = {520.0F - ring.offset - ring.width, 70.0F - ring.offset - ring.width},
-				.size = {64.0F + 2.0F * (ring.offset + ring.width), 40.0F + 2.0F * (ring.offset + ring.width)},
-				.style =
-					{.backgroundColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), .borderColor = ring.color, .borderWidth = ring.width},
-				.pointerEvents = ui::PointerEvents::None,
-			});
-			swatch({520.0F, 70.0F}, control, "focus ring");
+			const float			outset = ring.offset + ring.width;
+			Ref<Rectangle>		outline = swatches.addChild<Rectangle>({
+					 .position = {520.0F - outset, 70.0F - outset},
+					 .size = {64.0F + 2.0F * outset, 40.0F + 2.0F * outset},
+					 .style = {
+						 .backgroundColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), .borderColor = ring.color, .borderWidth = ring.width
+				 },
+			 });
+			outline.addChild<Rectangle>(
+				{.position = {outset, outset}, .size = {64.0F, 40.0F}, .style = {.backgroundColor = control, .borderRadius = 4.0F}}
+			);
+			swatches.addChild<Text>({.position = {520.0F, 116.0F}, .style = styles::text::caption, .text = "focus ring"});
 		}
 
 		Ref<Component> swatches;

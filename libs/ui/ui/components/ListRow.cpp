@@ -61,7 +61,7 @@ namespace ui {
 			shownIcon = addChild<Icon>({.size = {kIcon, kIcon}, .style = dim ? styles::text::secondary : Style{}, .name = iconName});
 		}
 		text = addChild<Text>({.layout = {.flexGrow = 1.0F}, .style = dim ? styles::text::secondary : styles::text::body, .text = label});
-		trailingText = addChild<Text>({.style = styles::label, .text = trailing});
+		trailingText = addChild<Text>({.visible = !trailing.empty(), .style = styles::label, .text = trailing});
 		setSelected(selectedAtStart);
 	}
 
@@ -96,6 +96,7 @@ namespace ui {
 		trailing = std::move(value);
 		if (Text* shown = trailingText.get()) {
 			shown->setText(trailing);
+			shown->setVisible(!trailing.empty());
 		}
 	}
 

@@ -44,6 +44,7 @@ namespace ui {
 
 	  private:
 		void fill();
+		void showTexts();
 
 		float		   value;
 		Tone		   tone;
@@ -52,6 +53,7 @@ namespace ui {
 		ControlSize	   controlSize;
 		bool		   inlineLabel;
 		Ref<Rectangle> bar;
+		Ref<Component> texts; // the header row, or the track for an inline bar
 		Ref<Text>	   shownLabel;
 		Ref<Text>	   shownValue;
 	};

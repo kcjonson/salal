@@ -44,31 +44,27 @@ namespace {
 
 	  private:
 		static void sizes(Ref<Component> stage) {
-			constexpr std::array<float, 5> kSizes{12.0F, 16.0F, 24.0F, 32.0F, 48.0F};
-			constexpr float				   kLarge = 96.0F;
-			float						   y = 70.0F;
+			constexpr std::array<float, 6> kSizes{12.0F, 16.0F, 24.0F, 32.0F, 48.0F, 96.0F};
+			constexpr float				   kColumn = 112.0F; // the largest size and a gap
 			for (std::size_t i = 0; i < kNames.size(); ++i) {
-				const char* name = kNames[i];
-				stage.addChild<Text>({.position = {0.0F, y + 8.0F}, .style = styles::text::caption, .text = name});
-				float x = 100.0F;
-				for (const float size : kSizes) {
-					stage.addChild<Icon>(
-						{.id = std::string(name) + "_" + std::to_string(static_cast<int>(size)),
-						 .position = {x, y},
-						 .size = {size, size},
-						 .name = name}
-					);
-					x += size + 16.0F;
-				}
-				// The largest size in a block of its own, three across, so it has the room.
-				stage.addChild<Icon>(
-					{.id = std::string(name) + "_" + std::to_string(static_cast<int>(kLarge)),
-					 .position =
-						 {440.0F + static_cast<float>(i % 3) * (kLarge + 16.0F), 70.0F + static_cast<float>(i / 3) * (kLarge + 16.0F)},
-					 .size = {kLarge, kLarge},
-					 .name = name}
+				stage.addChild<Text>(
+					{.position = {100.0F + static_cast<float>(i) * kColumn, 60.0F}, .style = styles::text::caption, .text = kNames[i]}
 				);
-				y += 52.0F;
+			}
+			// A row a size, as tall as it.
+			float y = 84.0F;
+			for (const float size : kSizes) {
+				const std::string px = std::to_string(static_cast<int>(size));
+				stage.addChild<Text>({.position = {0.0F, y}, .style = styles::text::caption, .text = px + " px"});
+				for (std::size_t i = 0; i < kNames.size(); ++i) {
+					stage.addChild<Icon>(
+						{.id = std::string(kNames[i]) + "_" + px,
+						 .position = {100.0F + static_cast<float>(i) * kColumn, y},
+						 .size = {size, size},
+						 .name = kNames[i]}
+					);
+				}
+				y += size + 16.0F;
 			}
 		}
 
