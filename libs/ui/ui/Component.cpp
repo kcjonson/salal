@@ -196,6 +196,10 @@ namespace ui {
 		}
 	}
 
+	void Component::registerPopup(ComponentId entry, PopupOptions options) {
+		context->openPopup(entry, selfId, std::move(options));
+	}
+
 	Component::Handlers& Component::handlersMade() {
 		if (!handlers) {
 			handlers = std::make_unique<Handlers>();

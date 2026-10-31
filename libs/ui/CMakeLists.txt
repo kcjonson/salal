@@ -43,6 +43,7 @@ endif()
 add_library(salal_ui STATIC
     ui/Component.cpp
     ui/Context.cpp
+    ui/Popup.cpp
     ui/Registry.cpp
     ui/Style.cpp
     ui/Transform.cpp

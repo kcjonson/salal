@@ -83,19 +83,26 @@ namespace ui {
 				int									   inheritedZ,
 				const std::optional<Foundation::Rect>& clip,
 				bool								   inScroller,
-				LintResult&							   result
+				LintResult&							   result,
+				const std::string&					   prefix = {}, // the path an entry's group hangs from
+				bool								   entryGroup = false
 			) {
-				const bool			 parentClips = parent != nullptr && clips(*parent->component);
-				std::vector<Sibling> visible;
+				const bool				 parentClips = parent != nullptr && clips(*parent->component);
+				std::vector<std::size_t> entries; // checked as roots of their own, after the rest
+				std::vector<Sibling>	 visible;
 				visible.reserve(ids.size());
 				for (std::size_t i = 0; i < ids.size(); ++i) {
 					const Component* component = context.find(ids[i]);
+					if (!entryGroup && component != nullptr && component->isShown() && component->isPopupEntry()) {
+						entries.push_back(i);
+						continue;
+					}
 					if (component == nullptr || !component->isShown()) {
 						continue;
 					}
 					const Foundation::Rect local = component->getBounds();
 					const Foundation::Rect bounds{origin.x + local.x, origin.y + local.y, local.width, local.height};
-					const std::string	   path = joinPath(parent != nullptr ? parent->path : std::string{}, pathSegment(*component, i));
+					const std::string	   path = joinPath(parent != nullptr ? parent->path : prefix, pathSegment(*component, i));
 					if (bounds.width <= 0.0F || bounds.height <= 0.0F) {
 						result.violations.push_back({LintRule::ZeroOrNegativeSize, path, bounds, "", {}});
 					}
@@ -180,6 +187,17 @@ namespace ui {
 					}
 					const bool scrolls = inScroller || member.component->getOverflow() == Overflow::Scroll;
 					siblings(member.component->getChildren(), &box, {box.bounds.x, box.bounds.y}, childZ, childClip, scrolls, result);
+				}
+
+				// A popup entry is out of its opener's box and clips on purpose: a root of its own, where
+				// it is on screen, held to the viewport alone.
+				for (const std::size_t index : entries) {
+					const Component*	   entry = context.find(ids[index]);
+					const Foundation::Rect screen = entry->screenBounds();
+					const Foundation::Rect local = entry->getBounds();
+					const Foundation::Vec2 at{screen.x - entry->getMargin().left - local.x, screen.y - entry->getMargin().top - local.y};
+					const std::vector<ComponentId> one{ids[index]};
+					siblings(one, nullptr, at, 0, std::nullopt, false, result, parent != nullptr ? parent->path : prefix, true);
 				}
 			}
 

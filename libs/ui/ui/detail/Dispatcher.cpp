@@ -181,7 +181,7 @@ namespace ui::detail {
 			deliver(*target, event);
 			return !pressing || pressOwned;
 		}
-		return pressing && pressOwned;
+		return (pressing && pressOwned) || context.pointerInert();
 	}
 
 	bool Dispatcher::pointerDown(PointerEvent& event) {
@@ -194,15 +194,25 @@ namespace ui::detail {
 		}
 		bool			  onThumb = false;
 		const ComponentId hit = find(captured) != nullptr ? captured : context.hitTest(event.screen, &onThumb);
+		if (find(captured) == nullptr && context.pressOutside(hit, event.button)) {
+			// Closing the menus was the whole of this press: its gesture is the ui's, and clicks nothing.
+			pressing = true;
+			pressCancelled = true;
+			pressButton = event.button;
+			pressAt = event.screen;
+			pressTarget = {};
+			pressOwned = true;
+			return true;
+		}
 		pressing = true;
 		pressCancelled = false;
 		pressButton = event.button;
 		pressAt = event.screen;
 		pressTarget = hit;
 		Component* target = find(hit);
-		pressOwned = target != nullptr;
+		pressOwned = target != nullptr || context.pointerInert();
 		if (target == nullptr) {
-			return false;
+			return pressOwned;
 		}
 		if (onThumb) {
 			const Scrollbar		   bar = scrollbarOf(target->size, target->scroll, target->scrollMax);
@@ -232,7 +242,7 @@ namespace ui::detail {
 				deliver(*target, event);
 				return true;
 			}
-			return false;
+			return context.pointerInert();
 		}
 		if (event.button != pressButton) {
 			event.type = PointerEvent::Type::Move;
@@ -278,7 +288,7 @@ namespace ui::detail {
 		const ComponentId hit = context.hitTest(event.screen);
 		Component*		  target = find(hit);
 		if (target == nullptr) {
-			return false;
+			return context.pointerInert();
 		}
 		deliver(*target, event);
 		if (event.consumed) {

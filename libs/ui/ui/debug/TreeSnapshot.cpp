@@ -9,6 +9,20 @@ namespace ui {
 
 	namespace {
 
+		const char* popupKindName(PopupKind kind) {
+			switch (kind) {
+				case PopupKind::Menu:
+					return "menu";
+				case PopupKind::Dialog:
+					return "dialog";
+				case PopupKind::Toast:
+					return "toast";
+				case PopupKind::Tooltip:
+					break;
+			}
+			return "tooltip";
+		}
+
 		const char* pointerEventsName(PointerEvents value) {
 			switch (value) {
 				case PointerEvents::Auto:
@@ -56,6 +70,9 @@ namespace ui {
 			const std::optional<int> zIndex = component.getZIndex();
 			out["zIndex"] = zIndex ? nlohmann::json(*zIndex) : nlohmann::json(nullptr);
 			out["isolation"] = component.getIsolation();
+			const std::optional<PopupKind> popup = component.getPopupKind();
+			out["popup"] = popup ? nlohmann::json(popupKindName(*popup)) : nlohmann::json(nullptr);
+			out["slot"] = component.paintSlot();
 			out["key"] = component.isShown() ? nlohmann::json(component.drawKey()) : nlohmann::json(nullptr);
 			out["visible"] = component.isVisible();
 			out["enabled"] = component.isEnabled();

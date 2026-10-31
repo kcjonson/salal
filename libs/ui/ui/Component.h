@@ -31,6 +31,7 @@
 
 #include "ui/Input.h"
 #include "ui/Layout.h"
+#include "ui/Popup.h"
 #include "ui/Registry.h"
 #include "ui/Style.h"
 #include "ui/Transform.h"
@@ -249,6 +250,22 @@ namespace ui {
 		// handlesPointer, which the lint's unreachable-interactive rule reads).
 		[[nodiscard]] virtual bool handlesPointer() const;
 
+		// --- Popups (ui/Popup.h) ---
+
+		// Builds T under this component as a popup stack entry: out of this component's flow, a stacking
+		// context in a slot of its own, placed beside this component after each layout. Close it with
+		// Context::closePopup, or by removing it or this component.
+		template <typename T>
+		Ref<T>								   openPopup(const typename T::Args& args, PopupOptions options = {});
+		[[nodiscard]] bool					   isPopupEntry() const { return popupKind.has_value(); }
+		[[nodiscard]] std::optional<PopupKind> getPopupKind() const { return popupKind; }
+		// A press on it, or under it, closes an open menu without being consumed, so one press moves
+		// from one menu's trigger to another's (R9.13).
+		void			   setPopupTrigger(bool value) { popupTrigger = value; }
+		[[nodiscard]] bool isPopupTrigger() const { return popupTrigger; }
+		// Its draw key's slot: 0 for the scene, its entry's in a stack entry, as of the last layout.
+		[[nodiscard]] int paintSlot() const { return slot; }
+
 		// --- Scrolling, for Overflow::Scroll ---
 
 		[[nodiscard]] Foundation::Vec2 getScroll() const { return scroll; }
@@ -328,6 +345,7 @@ namespace ui {
 		[[nodiscard]] const std::function<void(PointerEvent&)>* callbackFor(PointerEvent::Type type) const;
 
 		void		setCommon(const Args& args);
+		void		registerPopup(ComponentId entry, PopupOptions options);
 		ComponentId adopt(std::unique_ptr<Component> child);
 		Component*	parentComponent() const;
 		// Layout must run again from here: its own box changed (`ownBox`, which its parent places) or
@@ -404,6 +422,9 @@ namespace ui {
 		bool							hitBlocked = false; // an ancestor's pointerEvents keeps the pointer off it
 		bool							hovered = false;
 		bool							pressed = false;
+		bool							popupTrigger = false;
+		std::optional<PopupKind>		popupKind; // a stack entry's
+		int								slot = 0;
 	};
 
 	// --- Templates ---
@@ -427,6 +448,15 @@ namespace ui {
 			return {};
 		}
 		return component->template addChild<C>(args);
+	}
+
+	template <typename T>
+	Ref<T> Component::openPopup(const typename T::Args& args, PopupOptions options) {
+		Ref<T> entry = addChild<T>(args);
+		if (entry.get() != nullptr) {
+			registerPopup(entry.componentId(), std::move(options));
+		}
+		return entry.get() != nullptr ? entry : Ref<T>();
 	}
 
 	template <typename T>
