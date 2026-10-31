@@ -30,7 +30,13 @@ namespace ui {
 				setActive(chosen);
 				setStyle(chosen ? Style{.color = theme.get(tokens::color::text::primary)} : Style{});
 				if (Text* shown = text.get()) {
-					shown->setStyle({.color = getStyle().color, .fontFamily = getStyle().fontFamily, .fontSize = getStyle().fontSize});
+					shown->setStyle({
+						.color = getStyle().color,
+						.fontFamily = getStyle().fontFamily,
+						.fontSize = getStyle().fontSize,
+						.letterSpacing = getStyle().letterSpacing,
+						.textTransform = getStyle().textTransform,
+					});
 				}
 				if (Rectangle* shown = underline.get()) {
 					shown->setVisible(chosen);

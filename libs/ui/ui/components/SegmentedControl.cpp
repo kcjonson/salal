@@ -33,7 +33,13 @@ namespace ui {
 				setActive(chosen);
 				setStyle(chosen ? Style{.backgroundColor = tone.subtle, .color = tone.color} : Style{});
 				if (Text* shown = text.get()) {
-					shown->setStyle({.color = getStyle().color, .fontFamily = getStyle().fontFamily, .fontSize = fontSize});
+					shown->setStyle({
+						.color = getStyle().color,
+						.fontFamily = getStyle().fontFamily,
+						.fontSize = fontSize,
+						.letterSpacing = getStyle().letterSpacing,
+						.textTransform = getStyle().textTransform,
+					});
 				}
 			}
 
