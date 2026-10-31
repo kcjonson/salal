@@ -198,6 +198,7 @@ namespace app {
 		ui::Cursor topUiCursor() const;
 		// Every stacked scene's ui at the App's ui scale.
 		void scaleUi(float scale);
+		void reduceMotionUi(bool reduced);
 		// The ui of every scene render() draws, laid out.
 		void layoutUi();
 		// The stack from its topmost opaque scene up, the top at liveAlpha and each covered scene at the

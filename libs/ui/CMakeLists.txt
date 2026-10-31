@@ -41,6 +41,7 @@ if(msdfgen_FOUND)
 endif()
 
 add_library(salal_ui STATIC
+    ui/Animator.cpp
     ui/Component.cpp
     ui/Context.cpp
     ui/Registry.cpp
@@ -56,6 +57,7 @@ add_library(salal_ui STATIC
     ui/shapes/Text.cpp
     ui/theme/Theme.cpp
     ui/theme/Variants.cpp
+    ui/theme/StateColor.cpp
     ui/icons/IconAtlas.cpp
 )
 add_library(salal::ui ALIAS salal_ui)

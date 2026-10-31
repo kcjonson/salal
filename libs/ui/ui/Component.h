@@ -29,6 +29,7 @@
 //       ui::Ref<ui::Rectangle> fill;
 //   };
 
+#include "ui/Animator.h"
 #include "ui/Input.h"
 #include "ui/Layout.h"
 #include "ui/Registry.h"
@@ -230,6 +231,17 @@ namespace ui {
 		void setOnClick(std::function<void(PointerEvent&)> callback);
 		void setOnPointer(PointerEvent::Type type, std::function<void(PointerEvent&)> callback);
 
+		// --- Time (ui/Animator.h) ---
+
+		// update(dt) on the next frame, once (R8.17); an animation asks again from its update.
+		void requestUpdate();
+		// A tween it owns, cancelled when it's removed; empty, logged, before it's mounted.
+		template <typename T>
+		[[nodiscard]] Tween<T> tween(TweenArgs<T> args);
+		// Timers it owns, dropped when it's removed.
+		TimerId after(double delayMs, std::function<void()> callback);
+		TimerId every(double intervalMs, std::function<void()> callback);
+
 		// --- Pointer ---
 
 		[[nodiscard]] PointerEvents			getPointerEvents() const { return pointerEvents.value_or(defaultPointerEvents()); }
@@ -283,6 +295,8 @@ namespace ui {
 		// Its content changed in a way that changes what it measures (a text's string, its font).
 		void contentChanged();
 		// A pointer event the dispatcher delivers to it, after its callback; consume() stops the bubble.
+		// Its update phase, `dt` seconds, on the frame after it called requestUpdate.
+		virtual void update(float /*dt*/) {}
 		virtual void handlePointer(PointerEvent& /*event*/) {}
 		// Whether a point in its box hits it: the box, edges half-open (R8.12). A non-rectangular
 		// shape narrows it.
@@ -323,7 +337,8 @@ namespace ui {
 			std::function<void(PointerEvent&)> onWheel;
 			std::function<void(Component&)>	   onLayout;
 		};
-		Handlers& handlersMade();
+		[[nodiscard]] Animator* animatorOf() const;
+		Handlers&				handlersMade();
 		// Its callback for an event type, if it has one.
 		[[nodiscard]] const std::function<void(PointerEvent&)>* callbackFor(PointerEvent::Type type) const;
 
@@ -404,6 +419,7 @@ namespace ui {
 		bool							hitBlocked = false; // an ancestor's pointerEvents keeps the pointer off it
 		bool							hovered = false;
 		bool							pressed = false;
+		bool							updateRequested = false;
 	};
 
 	// --- Templates ---
@@ -427,6 +443,16 @@ namespace ui {
 			return {};
 		}
 		return component->template addChild<C>(args);
+	}
+
+	template <typename T>
+	Tween<T> Component::tween(TweenArgs<T> args) {
+		Animator* animator = animatorOf();
+		if (animator == nullptr) {
+			return {};
+		}
+		args.owner = selfId;
+		return animator->tween(args);
 	}
 
 	template <typename T>
