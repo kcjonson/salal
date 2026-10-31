@@ -33,14 +33,15 @@ namespace {
 	}};
 
 	// In the picker's order; the first is where the sandbox starts without --scene.
-	const std::array<const sandbox::SceneInfo*, 24> kScenes{
-		// The renderer's, from worldsim.
+	const std::array<const sandbox::SceneInfo*, 25> kScenes{
+		// The renderer's, from worldsim, then the fill hook's.
 		&sandbox::kSdfMinimalScene,
 		&sandbox::kPolygonScene,
 		&sandbox::kArcScene,
 		&sandbox::kPolylineScene,
 		&sandbox::kBlendScene,
 		&sandbox::kInputTestScene,
+		&sandbox::kFillHookScene,
 		// ui's.
 		&sandbox::kUiOrderScene,
 		&sandbox::kUiTextScene,

@@ -20,6 +20,7 @@
 #include "math/Types.h"
 #include "primitives/FontFamily.h"
 #include "primitives/InstanceData.h"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <glm/vec4.hpp>
@@ -206,10 +207,19 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// them never splits a draw, and the mode never changes draw order.
 		enum class BlendMode : uint8_t { Alpha, Additive };
 
+		// A rect's surface from a fill hook (docs/shader-hooks.md, "Fill hooks"): the generated
+		// k<Name>Fill constant of a hook in the base shader init() was given, and the twelve bytes
+		// it reads as its params.
+		struct Fill {
+			const backend::FillHook* hook = nullptr; // none: the style's flat fill
+			std::array<uint32_t, 3>	 params{};		 // the hook's, packed as it reads them
+		};
+
 		// Arguments for DrawRect
 		struct RectArgs {
 			Foundation::Rect	  bounds;
 			Foundation::RectStyle style;
+			Fill				  fill{};
 			const char*			  id = nullptr; // Optional: for inspection/debugging
 			int32_t				  key = 0;
 			BlendMode			  blend = BlendMode::Alpha;
@@ -239,7 +249,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			bool					 antiAlias = false; // Optional: feather the mesh's boundary
 		};
 
-		// Draw a rectangle with optional fill and border
+		// Draw a rectangle with optional fill and border. With `fill.hook`, the hook gives the
+		// fill's colour at each pixel from style.fill and the params, under the same corners,
+		// border and clip. A hooked rect has one fill colour, so a gradient on one is logged once
+		// per id and the hook drawn over style.fill; a hook the base shader doesn't have is
+		// logged once per id and the rect drawn as if it named none.
 		void drawRect(const RectArgs& args);
 
 		// Draw a line
@@ -449,14 +463,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Alpha multiplied into instanced and baked draws (u_bakedAlpha); 1 is opaque.
 		void setBakedAlpha(float alpha);
 
-		// Fill a hook's uniform block (docs/shader-hooks.md) for the instanced draws
-		// issued from here on; a draw already issued keeps the values it was given.
-		// `bytes` is the block's std140 contents, the block's size exactly: a C++
-		// struct laid out like the GLSL, through std::as_bytes. `block` is the constant
-		// the generated header has for it, `hook` the hook's name (its file name before
-		// .vert.glsl). A block the base shader init() was given does not have, or the
-		// wrong size, is logged and ignored. Every block starts zeroed, which a hook
-		// takes as off.
+		// Fill a hook's uniform block (docs/shader-hooks.md) for the draws issued from here
+		// on, a vertex hook's instanced draws or a fill hook's rects; a draw already issued
+		// keeps the values it was given, so a fill hook's block flushes the batch first when a
+		// pending rect names that hook. `bytes` is the block's std140 contents, the block's
+		// size exactly: a C++ struct laid out like the GLSL, through std::as_bytes. `block` is
+		// the constant the generated header has for it, `hook` the hook's name (its file name
+		// before .vert.glsl or .frag.glsl). A block the base shader init() was given does not
+		// have, or the wrong size, is logged and ignored. Every block starts zeroed, which a
+		// hook takes as off.
 		void setHookUniforms(const backend::HookUniformBlock& block, std::span<const std::byte> bytes);
 		void setHookUniforms(std::string_view hook, std::span<const std::byte> bytes);
 

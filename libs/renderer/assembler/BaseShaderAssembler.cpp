@@ -11,7 +11,8 @@
 namespace Renderer::assembler {
 
 	namespace {
-		constexpr std::string_view kHookSuffix = ".vert.glsl";
+		constexpr std::string_view kVertexSuffix = ".vert.glsl";
+		constexpr std::string_view kFillSuffix = ".frag.glsl";
 		constexpr std::string_view kHooksInclude = "hooks.glsl";
 		constexpr std::string_view kDrawUniformsBlock = "DrawUniforms";
 		// The raw string literals embed() writes: the text may not contain the closing sequence, and
@@ -64,6 +65,24 @@ namespace Renderer::assembler {
 
 		bool defines(const std::string& code, const std::string& function) {
 			return std::regex_search(code, std::regex("\\b" + function + "\\s*\\("));
+		}
+
+		// False, with `error` set, when a fill hook names a derivative or u_textures: it runs inside the
+		// rect mode's branch, after the clip's discard, where derivatives are undefined, and samples no
+		// texture.
+		bool checkFillNames(const std::string& code, const Hook& hook, std::string& error) {
+			static const std::regex kForbidden("\\b(dFdx|dFdy|fwidth|u_textures)\\b");
+			std::smatch				match;
+			if (!std::regex_search(code, match, kForbidden)) {
+				return true;
+			}
+			const std::string name = match[1].str();
+			const auto		  line = std::count(code.begin(), code.begin() + match.position(), '\n') + 1;
+			error = hook.fileName + ":" + std::to_string(line) + ": " + name +
+					(name == "u_textures" ? " in a fill hook, which samples no texture"
+										  : " in a fill hook, where derivatives are undefined (it runs inside the rect mode's branch); "
+											"pixelSize is one pixel in local units");
+			return false;
 		}
 
 		// False, with `error` set, when the hook has a #version or #extension line or a binding
@@ -140,11 +159,11 @@ namespace Renderer::assembler {
 
 		// Resolves includes depth first into `out`, each file once per stage.
 		struct Resolver {
-			const ReadFile&					  readFile;
-			const std::optional<std::string>& hooks;
-			std::set<std::filesystem::path>	  included;
-			bool							  hooksIncluded = false;
-			std::string						  error;
+			const ReadFile&					readFile;
+			const std::string&				hooks;
+			std::set<std::filesystem::path> included;
+			bool							hooksIncluded = false;
+			std::string						error;
 
 			bool resolve(const std::filesystem::path& file, const std::string& site, std::string& out) {
 				const std::optional<std::string> text = readFile(file);
@@ -167,17 +186,13 @@ namespace Renderer::assembler {
 					const std::string target = match[1].str();
 					const std::string here = file.filename().generic_string() + ":" + std::to_string(number) + ": ";
 					if (target == kHooksInclude) {
-						if (!hooks.has_value()) {
-							error = here + "hooks.glsl is for base.vert alone; only vertex hooks exist";
-							return false;
-						}
 						if (hooksIncluded) {
 							error = here + "hooks.glsl is included twice";
 							return false;
 						}
 						hooksIncluded = true;
 						out += "// BEGIN INCLUDE: hooks.glsl, generated\n";
-						out += *hooks;
+						out += hooks;
 						out += "// END INCLUDE: hooks.glsl\n";
 						continue;
 					}
@@ -225,6 +240,16 @@ namespace Renderer::assembler {
 			return (size + 15U) / 16U * 16U;
 		}
 
+		// A hook's text as its stage takes it, between markers that name it, ending in a newline.
+		void appendHookText(const Hook& hook, std::string& out) {
+			out += "\n// --- hook " + hook.fileName + " ---\n";
+			out += hook.text;
+			if (!hook.text.ends_with('\n')) {
+				out += '\n';
+			}
+			out += "// --- end of hook " + hook.fileName + " ---\n";
+		}
+
 		// `text` as raw string literals of at most kPieceBytes each (a longer line gets a piece of its
 		// own), one per line of the generated source.
 		std::string rawPieces(const std::string& text) {
@@ -258,18 +283,22 @@ namespace Renderer::assembler {
 		std::sort(files.begin(), files.end(), [](const HookFile& a, const HookFile& b) { return a.fileName < b.fileName; });
 		Hooks				  result;
 		uint32_t			  nextBinding = 1;
+		uint32_t			  nextFill = 1;
+		std::set<std::string> names;
 		std::set<std::string> blocks{std::string(kDrawUniformsBlock)};
 		std::set<std::string> constants;
 		for (HookFile& file : files) {
 			if (file.fileName.starts_with('.')) {
 				continue;
 			}
-			if (!file.fileName.ends_with(kHookSuffix)) {
-				result.error = file.fileName + " is not a vertex hook: a hook is <name>.vert.glsl, and only vertex hooks exist";
+			const bool fill = file.fileName.ends_with(kFillSuffix);
+			if (!fill && !file.fileName.ends_with(kVertexSuffix)) {
+				result.error =
+					file.fileName + " is not a hook: a hook is <name>.vert.glsl, a vertex hook, or <name>.frag.glsl, a fill hook";
 				return result;
 			}
 			Hook hook{
-				.name = file.fileName.substr(0, file.fileName.size() - kHookSuffix.size()),
+				.name = file.fileName.substr(0, file.fileName.size() - (fill ? kFillSuffix : kVertexSuffix).size()),
 				.fileName = file.fileName,
 				.text = withUnixNewlines(std::move(file.text)),
 			};
@@ -279,13 +308,33 @@ namespace Renderer::assembler {
 							   "generated names would be reserved (gl, a gl_ prefix, a trailing or double underscore)";
 				return result;
 			}
-			const std::string code = withoutComments(hook.text);
-			hook.instanceLocal = defines(code, hook.name + "_instanceLocal");
-			hook.instanceWorld = defines(code, hook.name + "_instanceWorld");
-			if (!hook.instanceLocal && !hook.instanceWorld) {
-				result.error =
-					file.fileName + " defines no hook point: neither " + hook.name + "_instanceLocal nor " + hook.name + "_instanceWorld";
+			if (!names.insert(hook.name).second) {
+				result.error = file.fileName + ": " + hook.name + " is both a vertex and a fill hook; a name is one hook";
 				return result;
+			}
+			const std::string code = withoutComments(hook.text);
+			if (fill) {
+				if (!defines(code, hook.name + "_fill")) {
+					result.error = file.fileName + " defines no " + hook.name + "_fill, a fill hook's one point";
+					return result;
+				}
+				if (!checkFillNames(code, hook, result.error)) {
+					return result;
+				}
+				if (nextFill > kMaxFillHooks) {
+					result.error = file.fileName + ": more than " + std::to_string(kMaxFillHooks) +
+								   " fill hooks; a rect names its fill hook in one byte, and 0 is none";
+					return result;
+				}
+				hook.fillIndex = nextFill++;
+			} else {
+				hook.instanceLocal = defines(code, hook.name + "_instanceLocal");
+				hook.instanceWorld = defines(code, hook.name + "_instanceWorld");
+				if (!hook.instanceLocal && !hook.instanceWorld) {
+					result.error = file.fileName + " defines no hook point: neither " + hook.name + "_instanceLocal nor " + hook.name +
+								   "_instanceWorld";
+					return result;
+				}
 			}
 			if (!checkDirectives(code, hook, result.error) || !readBlock(code, hook, result.error)) {
 				return result;
@@ -312,15 +361,13 @@ namespace Renderer::assembler {
 		return result;
 	}
 
-	std::string hookChain(const std::vector<Hook>& hooks) {
-		std::string out = "// The consumer's hooks (salal docs/shader-hooks.md), in file-name order, then the chain base.vert calls.\n";
+	std::string vertexStageHooks(const std::vector<Hook>& hooks) {
+		std::string out =
+			"// The consumer's vertex hooks (salal docs/shader-hooks.md), in file-name order, then the chain base.vert calls.\n";
 		for (const Hook& hook : hooks) {
-			out += "\n// --- hook " + hook.fileName + " ---\n";
-			out += hook.text;
-			if (!hook.text.ends_with('\n')) {
-				out += '\n';
+			if (hook.fillIndex == 0) {
+				appendHookText(hook, out);
 			}
-			out += "// --- end of hook " + hook.fileName + " ---\n";
 		}
 		out += "\n// An instanced vertex in mesh space, before the instance's rotation, scale and translation.\n";
 		out += "vec2 applyInstanceLocalHooks(vec2 position, vec2 instancePosition) {\n";
@@ -341,14 +388,35 @@ namespace Renderer::assembler {
 		return out;
 	}
 
-	Assembled assemble(const std::filesystem::path& file, const ReadFile& readFile, const std::optional<std::string>& hooks) {
+	std::string fragmentStageHooks(const std::vector<Hook>& hooks) {
+		std::string out =
+			"// The consumer's fill hooks (salal docs/shader-hooks.md), in file-name order, then the switch base.frag's rect mode "
+			"calls.\n";
+		std::string cases;
+		for (const Hook& hook : hooks) {
+			if (hook.fillIndex != 0) {
+				appendHookText(hook, out);
+				cases += "\t\tcase " + std::to_string(hook.fillIndex) + "u: return " + hook.name +
+						 "_fill(color, local, halfSize, params, pixelSize);\n";
+			}
+		}
+		out += "\n// A rect's premultiplied colour at the pixel: what the fill hook its index names gives, or its fill for 0.\n";
+		out += "vec4 applyFillHook(uint fill, vec4 color, vec2 local, vec2 halfSize, uvec3 params, float pixelSize) {\n";
+		if (!cases.empty()) {
+			out += "\tswitch (fill) {\n" + cases + "\t}\n";
+		}
+		out += "\treturn color;\n}\n";
+		return out;
+	}
+
+	Assembled assemble(const std::filesystem::path& file, const ReadFile& readFile, const std::string& hooks) {
 		Resolver  resolver{.readFile = readFile, .hooks = hooks};
 		Assembled result;
 		resolver.included.insert(file.lexically_normal());
 		if (!resolver.resolve(file, "", result.text)) {
 			return {.error = resolver.error};
 		}
-		if (hooks.has_value() && !resolver.hooksIncluded) {
+		if (!resolver.hooksIncluded) {
 			return {.error = file.filename().generic_string() + " never includes hooks.glsl, where the hooks go"};
 		}
 		return result;
@@ -469,9 +537,23 @@ namespace Renderer::assembler {
 		std::string			  constants;
 		std::string			  blockList;
 		size_t				  blockCount = 0;
+		std::string			  fillList;
+		size_t				  fillCount = 0;
 		std::set<std::string> names;
 		for (const Hook& hook : args.hooks) {
 			hookList += (hookList.empty() ? " " : ", ") + hook.fileName;
+			if (hook.fillIndex != 0) {
+				const std::string fillConstant = constantName(hook.name) + "Fill";
+				const std::string index = std::to_string(hook.fillIndex);
+				if (!names.insert(fillConstant).second) {
+					return {.error = hook.fileName + ": its C++ constant, " + fillConstant + ", is already taken"};
+				}
+				constants += "\n\t// " + hook.fileName + ", fill index " + index + ".\n";
+				constants += "\tinline constexpr Renderer::backend::FillHook " + fillConstant + "{.hook = \"" + hook.name +
+							 "\", .index = " + index + "};\n";
+				fillList += (fillList.empty() ? "" : ", ") + fillConstant;
+				++fillCount;
+			}
 			if (hook.block.empty()) {
 				continue;
 			}
@@ -522,7 +604,7 @@ namespace Renderer::assembler {
 
 		Embedded result;
 		result.header = "// Generated by salal_base_shader() from base.vert, base.frag and the hooks below; do not edit\n"
-						"// (salal docs/shader-hooks.md). Hooks, in chain order:" +
+						"// (salal docs/shader-hooks.md). Hooks, in file-name order:" +
 						hookList +
 						".\n"
 						"#pragma once\n\n"
@@ -541,6 +623,13 @@ namespace Renderer::assembler {
 					 blockList + "};\n\n";
 			hookBlocks = "kHookBlocks";
 		}
+		std::string fills;
+		std::string fillHooks = "{}";
+		if (fillCount > 0) {
+			fills = "\t\tconstexpr std::array<Renderer::backend::FillHook, " + std::to_string(fillCount) + "> kFillHooks = {" + fillList +
+					"};\n\n";
+			fillHooks = "kFillHooks";
+		}
 		result.source = "// Generated by salal_base_shader(); do not edit.\n\n"
 						"#include \"" +
 						args.header +
@@ -558,7 +647,7 @@ namespace Renderer::assembler {
 						rawPieces(args.vertex) +
 						"\t\t};\n"
 						"\t\tconstexpr std::string_view kFragment[] = {\n" +
-						rawPieces(args.fragment) + "\t\t};\n\n" + blocks +
+						rawPieces(args.fragment) + "\t\t};\n\n" + blocks + fills +
 						"\t\tstd::string join(std::span<const std::string_view> pieces) {\n"
 						"\t\t\tstd::string text;\n"
 						"\t\t\tfor (const std::string_view piece : pieces) {\n"
@@ -575,6 +664,9 @@ namespace Renderer::assembler {
 						"\t\t\t.fragment = fragment.c_str(),\n"
 						"\t\t\t.hookBlocks = " +
 						hookBlocks +
+						",\n"
+						"\t\t\t.fillHooks = " +
+						fillHooks +
 						",\n"
 						"\t\t};\n"
 						"\t\treturn kSource;\n"
