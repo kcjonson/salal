@@ -65,6 +65,7 @@ namespace ui {
 			std::string		 path;
 			Foundation::Rect bounds; // in the viewport, untransformed
 			int				 z;
+			bool			 decoration = false;
 		};
 
 		class Linter {
@@ -105,10 +106,11 @@ namespace ui {
 					const Foundation::Rect local = component->getBounds();
 					const Foundation::Rect bounds{origin.x + local.x, origin.y + local.y, local.width, local.height};
 					const std::string	   path = joinPath(parent != nullptr ? parent->path : prefix, pathSegment(*component, i));
-					if (bounds.width <= 0.0F || bounds.height <= 0.0F) {
+					const bool			   decoration = component->getPointerEvents() == PointerEvents::None;
+					if (!decoration && (bounds.width <= 0.0F || bounds.height <= 0.0F)) {
 						result.violations.push_back({LintRule::ZeroOrNegativeSize, path, bounds, "", {}});
 					}
-					if (parent != nullptr && !parentClips && !containsWithEpsilon(parent->bounds, bounds)) {
+					if (parent != nullptr && !parentClips && !decoration && !containsWithEpsilon(parent->bounds, bounds)) {
 						result.violations.push_back({LintRule::ChildOutsideParent, path, bounds, parent->path, parent->bounds});
 					}
 					const std::optional<Foundation::Rect> shown = clip ? intersection(bounds, *clip) : std::optional(bounds);
@@ -129,7 +131,7 @@ namespace ui {
 					if (interactive(*component) && clip && !inScroller && !intersection(bounds, *clip)) {
 						result.violations.push_back({LintRule::UnreachableInteractive, path, bounds, "clip", *clip});
 					}
-					visible.push_back({component, path, bounds, component->getZIndex().value_or(inheritedZ)});
+					visible.push_back({component, path, bounds, component->getZIndex().value_or(inheritedZ), decoration});
 				}
 
 				// Covered whole by a sibling painted over it that takes the pointer.
@@ -161,6 +163,9 @@ namespace ui {
 				}
 				for (std::size_t i = 0; parent != nullptr && i < visible.size(); ++i) {
 					for (std::size_t j = i + 1; j < visible.size(); ++j) {
+						if (visible[i].decoration || visible[j].decoration) {
+							continue;
+						}
 						if (visible[i].z == visible[j].z && overlapsBeyondEpsilon(visible[i].bounds, visible[j].bounds, allowed)) {
 							result.violations.push_back(
 								{LintRule::SiblingOverlap, visible[i].path, visible[i].bounds, visible[j].path, visible[j].bounds}

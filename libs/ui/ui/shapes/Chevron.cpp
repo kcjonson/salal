@@ -15,8 +15,8 @@ namespace ui {
 
 	void Chevron::onMount() {
 		Component::setSize(Size(Foundation::Vec2{kBox, kBox}));
-		first = addChild<Line>({.lineWidth = kStroke, .roundCaps = true});
-		second = addChild<Line>({.lineWidth = kStroke, .roundCaps = true});
+		first = addChild<Line>({.pointerEvents = PointerEvents::None, .lineWidth = kStroke, .roundCaps = true});
+		second = addChild<Line>({.pointerEvents = PointerEvents::None, .lineWidth = kStroke, .roundCaps = true});
 		show();
 	}
 

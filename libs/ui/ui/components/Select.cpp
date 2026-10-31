@@ -1,6 +1,7 @@
 #include "ui/components/Select.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/theme/Tokens.h"
 
 namespace ui {
@@ -17,6 +18,12 @@ namespace ui {
 		  placeholder(args.placeholder),
 		  controlSize(args.controlSize),
 		  onChange(args.onChange) {}
+
+	void Select::describe(nlohmann::json& node) const {
+		Control::describe(node);
+		node["state"]["open"] = isOpen();
+		node["value"] = value;
+	}
 
 	StyleId Select::themeStyle() const {
 		return styles::select.theme;

@@ -28,8 +28,22 @@ namespace ui {
 			void onMount() override {
 				Control::onMount();
 				const Style stroke{.color = getContext()->getTheme().get(tokens::color::text::secondary)};
-				addChild<Line>({.style = stroke, .start = {9.0F, 9.0F}, .end = {19.0F, 19.0F}, .lineWidth = 1.5F, .roundCaps = true});
-				addChild<Line>({.style = stroke, .start = {19.0F, 9.0F}, .end = {9.0F, 19.0F}, .lineWidth = 1.5F, .roundCaps = true});
+				addChild<Line>(
+					{.style = stroke,
+					 .pointerEvents = PointerEvents::None,
+					 .start = {9.0F, 9.0F},
+					 .end = {19.0F, 19.0F},
+					 .lineWidth = 1.5F,
+					 .roundCaps = true}
+				);
+				addChild<Line>(
+					{.style = stroke,
+					 .pointerEvents = PointerEvents::None,
+					 .start = {19.0F, 9.0F},
+					 .end = {9.0F, 19.0F},
+					 .lineWidth = 1.5F,
+					 .roundCaps = true}
+				);
 			}
 
 			void activate() override {
@@ -119,11 +133,13 @@ namespace ui {
 				 }}
 			);
 		}
-		// Last in tree order, so Tab reaches the content first.
+		// Last in tree order, so Tab reaches the content first. It sits over the header, whose padding
+		// leaves it room, and its zIndex says so.
 		box.addChild<DialogClose>({
 			.size = {kClose, kClose},
 			.layout = {.position = Position::Absolute, .inset = {.top = kCloseInset, .right = kCloseInset}},
 			.style = {.backgroundColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), .borderRadius = theme.get(tokens::radius::sm)},
+			.zIndex = 1,
 		});
 	}
 

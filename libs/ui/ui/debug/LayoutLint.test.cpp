@@ -67,6 +67,25 @@ namespace ui {
 		EXPECT_EQ(result.violations[0].rule, LintRule::SiblingOverlap);
 	}
 
+	// pointerEvents None declares decoration: over a sibling, out of its parent or empty on purpose.
+	// What it holds is still checked.
+	TEST_F(UiLintTest, DecorationMayOverlapAndLeaveItsParent) {
+		Ref<Component> parent = context.root().addChild<Component>(at(10.0F, 10.0F, 200.0F, 300.0F));
+		parent.addChild<Component>(at(10.0F, 10.0F, 50.0F, 30.0F));
+		Ref<Component> ring =
+			parent.addChild<Component>({.position = {6.0F, 6.0F}, .size = {58.0F, 38.0F}, .pointerEvents = PointerEvents::None});
+		parent.addChild<Component>({.position = {180.0F, 10.0F}, .size = {40.0F, 20.0F}, .pointerEvents = PointerEvents::None});
+		parent.addChild<Component>({.position = {10.0F, 60.0F}, .size = {0.0F, 4.0F}, .pointerEvents = PointerEvents::None});
+		EXPECT_TRUE(run().clean());
+
+		ring.addChild<Component>(at(0.0F, 0.0F, 20.0F, 20.0F));
+		ring.addChild<Component>(at(10.0F, 10.0F, 20.0F, 20.0F));
+		const LintResult result = run();
+		ASSERT_EQ(result.violations.size(), 1U);
+		EXPECT_EQ(result.violations[0].rule, LintRule::SiblingOverlap);
+		EXPECT_EQ(result.violations[0].path, "root/Component[0]/Component[1]/Component[0]");
+	}
+
 	TEST_F(UiLintTest, TouchingEdgesAreNotOverlap) {
 		Ref<Component> parent = context.root().addChild<Component>(at(0.0F, 0.0F, 200.0F, 300.0F));
 		parent.addChild<Component>(at(0.0F, 0.0F, 50.0F, 30.0F));

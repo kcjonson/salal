@@ -15,6 +15,12 @@
 //                          brings it back, or covered whole by a sibling painted over it that takes
 //                          the pointer (its other path)
 //
+// A component whose own pointerEvents is None is decoration (R8.29): its owner paints it over or under
+// the rest on purpose, a caret's strokes, a hairline under tabs, a slider's thumb or a focus ring, and
+// the pointer never reaches it. It is exempt from sibling-overlap, on either side, from
+// child-outside-parent, and from zero-or-negative-size, since a fill at 0 is empty on purpose; its
+// children are judged by their own.
+//
 // Ink past a box (a shadow) is not overflow. Invisible subtrees are skipped. The roots are siblings,
 // each the viewport's size and layered on purpose, so they don't overlap each other. Paths join ids,
 // or Type[index] where there is none, with '/'; bounds are in the viewport. A child's bounds are its

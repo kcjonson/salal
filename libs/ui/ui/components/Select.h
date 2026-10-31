@@ -48,6 +48,7 @@ namespace ui {
 
 		[[nodiscard]] const char* typeName() const override { return "Select"; }
 		[[nodiscard]] StyleId	  themeStyle() const override;
+		void					  describe(nlohmann::json& node) const override;
 
 	  protected:
 		void onMount() override;

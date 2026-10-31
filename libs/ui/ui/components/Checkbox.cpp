@@ -1,6 +1,7 @@
 #include "ui/components/Checkbox.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
 
@@ -17,6 +18,12 @@ namespace ui {
 		  checked(args.checked),
 		  onChange(args.onChange) {}
 
+	void Checkbox::describe(nlohmann::json& node) const {
+		Control::describe(node);
+		node["state"]["selected"] = checked;
+		node["value"] = checked;
+	}
+
 	StyleId Checkbox::themeStyle() const {
 		return styles::listRow.theme; // the row itself has no fill; the box carries the look
 	}
@@ -30,8 +37,12 @@ namespace ui {
 		row.gap = kGap;
 		setLayout(row);
 		box = addChild<Rectangle>({.size = {kBox, kBox}});
-		tickShort = box.addChild<Line>({.start = {3.5F, 8.0F}, .end = {6.5F, 11.0F}, .lineWidth = kTick, .roundCaps = true});
-		tickLong = box.addChild<Line>({.start = {6.5F, 11.0F}, .end = {12.5F, 4.5F}, .lineWidth = kTick, .roundCaps = true});
+		tickShort = box.addChild<Line>(
+			{.pointerEvents = PointerEvents::None, .start = {3.5F, 8.0F}, .end = {6.5F, 11.0F}, .lineWidth = kTick, .roundCaps = true}
+		);
+		tickLong = box.addChild<Line>(
+			{.pointerEvents = PointerEvents::None, .start = {6.5F, 11.0F}, .end = {12.5F, 4.5F}, .lineWidth = kTick, .roundCaps = true}
+		);
 		if (!label.empty()) {
 			addChild<Text>({.style = styles::text::body, .text = label});
 		}

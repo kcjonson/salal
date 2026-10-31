@@ -12,8 +12,11 @@
 #include "ui/components/TextInput.h"
 #include "ui/components/Toggle.h"
 #include "ui/components/TreeView.h"
+#include "ui/debug/TreeSnapshot.h"
 
 #include <gtest/gtest.h>
+
+#include <nlohmann/json.hpp>
 
 namespace ui {
 
@@ -54,6 +57,12 @@ namespace ui {
 				return {box.x + box.width * 0.5F, box.y + box.height * 0.5F};
 			}
 
+			// The root's children as the tree snapshot reports them.
+			nlohmann::json snapshot() {
+				context.layout();
+				return nlohmann::json::parse(treeJson(&context, "", {800.0F, 600.0F}))["roots"][0]["children"];
+			}
+
 			Context		   context{{800.0F, 600.0F}};
 			Ref<Component> root = context.root();
 		};
@@ -85,6 +94,11 @@ namespace ui {
 		EXPECT_TRUE(box.get()->isChecked());
 		EXPECT_FALSE(toggle.get()->isOn());
 		EXPECT_EQ(changes, (std::vector<bool>{true, false}));
+		const nlohmann::json nodes = snapshot();
+		EXPECT_EQ(nodes[0]["value"], true);
+		EXPECT_EQ(nodes[0]["state"]["selected"], true);
+		EXPECT_EQ(nodes[1]["value"], false);
+		EXPECT_EQ(nodes[1]["state"]["selected"], false);
 	}
 
 	// The knob eases over motion.duration.fast, 100 ms in ui's tokens, and snaps under reduced motion.
@@ -136,6 +150,11 @@ namespace ui {
 		EXPECT_EQ(segments, (std::vector<int>{1}));
 		EXPECT_EQ(tabs, (std::vector<std::string>{"cargo"}));
 		EXPECT_EQ(bar.get()->getSelectedId(), "cargo");
+		const nlohmann::json nodes = snapshot();
+		EXPECT_EQ(nodes[0]["value"], 1);
+		EXPECT_EQ(nodes[1]["value"], 1);
+		EXPECT_EQ(nodes[1]["children"][1]["state"]["active"], true);
+		EXPECT_EQ(nodes[2]["value"], "cargo");
 	}
 
 	TEST_F(UiControlsTest, ASliderFollowsADragSnapsAndStepsByKey) {

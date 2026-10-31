@@ -62,6 +62,7 @@ namespace ui {
 			.size = {percent(value * 100.0F), percent(100.0F)},
 			.layout = {.position = Position::Absolute, .inset = {.top = 0.0F, .left = 0.0F}},
 			.style = {.borderRadius = radius},
+			.pointerEvents = PointerEvents::None,
 		});
 		if (inlineLabel) {
 			texts = track;

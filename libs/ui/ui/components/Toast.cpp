@@ -47,8 +47,22 @@ namespace ui {
 				Control::onMount();
 				setFocusable(false);
 				const Style stroke{.color = getContext()->getTheme().get(tokens::color::text::secondary)};
-				addChild<Line>({.style = stroke, .start = {6.0F, 6.0F}, .end = {14.0F, 14.0F}, .lineWidth = 1.5F, .roundCaps = true});
-				addChild<Line>({.style = stroke, .start = {14.0F, 6.0F}, .end = {6.0F, 14.0F}, .lineWidth = 1.5F, .roundCaps = true});
+				addChild<Line>(
+					{.style = stroke,
+					 .pointerEvents = PointerEvents::None,
+					 .start = {6.0F, 6.0F},
+					 .end = {14.0F, 14.0F},
+					 .lineWidth = 1.5F,
+					 .roundCaps = true}
+				);
+				addChild<Line>(
+					{.style = stroke,
+					 .pointerEvents = PointerEvents::None,
+					 .start = {14.0F, 6.0F},
+					 .end = {6.0F, 14.0F},
+					 .lineWidth = 1.5F,
+					 .roundCaps = true}
+				);
 			}
 
 			void activate() override {
@@ -89,6 +103,7 @@ namespace ui {
 			.size = {kStripe, kAuto},
 			.layout = {.position = Position::Absolute, .inset = {.top = 0.0F, .bottom = 0.0F, .left = 0.0F}},
 			.style = {.backgroundColor = tone.color},
+			.pointerEvents = PointerEvents::None,
 		});
 		if (!iconName.empty()) {
 			addChild<Icon>({.size = {kIcon, kIcon}, .style = {.color = tone.color}, .name = iconName});

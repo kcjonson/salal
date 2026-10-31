@@ -1,6 +1,7 @@
 #include "ui/components/SegmentedControl.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/shapes/Text.h"
 #include "ui/theme/Tokens.h"
 
@@ -70,6 +71,11 @@ namespace ui {
 		  tone(args.tone),
 		  controlSize(args.controlSize),
 		  onChange(args.onChange) {}
+
+	void SegmentedControl::describe(nlohmann::json& node) const {
+		Rectangle::describe(node);
+		node["value"] = selected;
+	}
 
 	StyleId SegmentedControl::themeStyle() const {
 		return styles::segmented.theme;

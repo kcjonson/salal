@@ -31,6 +31,7 @@ namespace ui {
 		void setStyle(const Style& declared) override;
 
 		[[nodiscard]] const char* typeName() const override { return "RadioGroup"; }
+		void					  describe(nlohmann::json& node) const override;
 
 		// An option, by the group.
 		void choose(int index);

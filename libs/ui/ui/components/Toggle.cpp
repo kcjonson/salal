@@ -1,6 +1,7 @@
 #include "ui/components/Toggle.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
 
@@ -18,6 +19,12 @@ namespace ui {
 		: label(args.label),
 		  on(args.on),
 		  onChange(args.onChange) {}
+
+	void Toggle::describe(nlohmann::json& node) const {
+		Control::describe(node);
+		node["state"]["selected"] = on;
+		node["value"] = on;
+	}
 
 	StyleId Toggle::themeStyle() const {
 		return styles::listRow.theme; // the row itself has no fill; the track carries the look

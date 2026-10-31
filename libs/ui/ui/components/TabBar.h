@@ -37,6 +37,7 @@ namespace ui {
 		void choose(const std::string& id);
 
 		[[nodiscard]] const char* typeName() const override { return "TabBar"; }
+		void					  describe(nlohmann::json& node) const override;
 
 	  protected:
 		void onMount() override;

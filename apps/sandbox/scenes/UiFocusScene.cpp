@@ -202,6 +202,7 @@ namespace {
 				.style = {.backgroundColor = Foundation::Color(0.18F, 0.2F, 0.25F, 1.0F), .borderRadius = 8.0F},
 				.onKeyDown = [this](KeyEvent& event) {
 					if (event.type == KeyEvent::Type::Cancel) {
+						show("Dialog cancelled");
 						closeDialog();
 						event.consume();
 					}

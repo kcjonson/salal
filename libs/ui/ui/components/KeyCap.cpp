@@ -33,6 +33,7 @@ namespace ui {
 			.size = {kAuto, kEdge},
 			.layout = {.position = Position::Absolute, .inset = {.right = 0.0F, .bottom = 0.0F, .left = 0.0F}},
 			.style = styles::keycapEdge,
+			.pointerEvents = PointerEvents::None,
 		});
 		text = addChild<Text>({.style = styles::label.extend({.textTransform = Foundation::TextTransform::Uppercase}), .text = label});
 	}
