@@ -144,8 +144,8 @@ TEST(Theme, StateLayersTonesAndSizesReadTheTokens) {
 	EXPECT_EQ(ui::resolveTone(theme, ui::Tone::Info, 0.1F), ui::Tone::Info);
 	expectColor(ui::toneColors(theme, ui::Tone::Danger).color, 0.8784F, 0.3255F, 0.2353F);
 
-	EXPECT_FLOAT_EQ(ui::sizeMetrics(theme, ui::Size::Lg).controlHeight, 40.0F);
-	EXPECT_FLOAT_EQ(ui::sizeMetrics(theme, ui::Size::Sm).fontSize, 12.0F);
+	EXPECT_FLOAT_EQ(ui::sizeMetrics(theme, ui::ControlSize::Lg).controlHeight, 40.0F);
+	EXPECT_FLOAT_EQ(ui::sizeMetrics(theme, ui::ControlSize::Sm).fontSize, 12.0F);
 	EXPECT_FLOAT_EQ(ui::focusRing(theme).width, 2.0F);
 }
 

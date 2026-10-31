@@ -112,7 +112,7 @@ namespace {
 			wrapBox.addChild<Text>({
 				.id = "wrapped",
 				.position = {10.0F, 10.0F},
-				.size = {280.0F, 0.0F},
+				.size = {280.0F, ui::kAuto},
 				.style = {.color = Color::white(), .fontSize = 14.0F},
 				.text = "This is a longer paragraph of text that wraps to fit the width it is given. Word-based wrapping keeps "
 						"words whole and breaks only at spaces.",
@@ -143,7 +143,7 @@ namespace {
 			centredBox.addChild<Text>({
 				.id = "centred",
 				.position = {0.0F, 10.0F},
-				.size = {360.0F, 0.0F},
+				.size = {360.0F, ui::kAuto},
 				.style = {.color = Color::white(), .fontSize = 14.0F, .textAlign = HorizontalAlign::Center},
 				.text = "This wrapped text is centred. Each line is centred on its own within the width.",
 				.wrap = true,

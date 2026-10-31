@@ -276,7 +276,8 @@ public:
    then the overlays, with `realDelta`, unless paused (worldsim's order). Its
    input is the frame reader's, edges included, even for a scene that became
    top in step 6.
-9. The ui of every scene about to render is laid out, paused or not. Then
+9. The ui of every scene about to render is laid out, paused or not, timed as
+   its own metrics section (`uiLayoutMs`). Then
    `Primitives::beginFrame`, `clear(clearColor)`, render the stack from the
    topmost opaque scene upward, each scene's ui after it behind a sort
    barrier, then overlays, then `Primitives::endFrame`.

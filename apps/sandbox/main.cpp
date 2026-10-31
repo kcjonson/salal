@@ -33,7 +33,7 @@ namespace {
 	}};
 
 	// In the picker's order; the first is where the sandbox starts without --scene.
-	const std::array<const sandbox::SceneInfo*, 9> kScenes{
+	const std::array<const sandbox::SceneInfo*, 11> kScenes{
 		&sandbox::kSdfMinimalScene,
 		&sandbox::kPolygonScene,
 		&sandbox::kArcScene,
@@ -42,6 +42,8 @@ namespace {
 		&sandbox::kInputTestScene,
 		&sandbox::kUiOrderScene,
 		&sandbox::kUiTextScene,
+		&sandbox::kUiLayoutScene,
+		&sandbox::kUiClipScene,
 		&sandbox::kUiThemeScene,
 	};
 

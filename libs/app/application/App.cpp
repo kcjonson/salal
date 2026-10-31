@@ -314,6 +314,8 @@ namespace app {
 		runFixedTicks();
 		updateScenes();
 		endSection(sections.update);
+		sceneStack.layoutUi();
+		endSection(sections.layout);
 		render();
 		devServerPostRender();
 		endSection(sections.render);
@@ -340,7 +342,9 @@ namespace app {
 			if (metricsFrameOpen) {
 				const Renderer::Primitives::RenderStats stats = Renderer::Primitives::getStats();
 				metricsCollector->setRenderStats(stats.drawCalls, stats.vertexCount, stats.triangleCount);
-				metricsCollector->setMainLoopTimings(sections.poll, sections.input, sections.update, sections.render, sections.present);
+				metricsCollector->setMainLoopTimings(
+					sections.poll, sections.input, sections.update, sections.layout, sections.render, sections.present
+				);
 				metricsCollector->endFrame();
 			}
 			metricsCollector->beginFrame();
@@ -495,9 +499,9 @@ namespace app {
 	}
 
 	// The stack, each scene's ui over it, then the overlays, each overlay its own sort domain over
-	// everything before it. The ui lays out first, paused or not, so a resize while paused draws right.
+	// everything before it. The ui was laid out just before, paused or not, so a resize while paused
+	// draws right.
 	void App::render() {
-		sceneStack.layoutUi();
 		Renderer::Primitives::beginFrame();
 		if (fontRenderer != nullptr) {
 			fontRenderer->updateFrame();
