@@ -142,6 +142,7 @@ namespace Renderer::backend::gl {
 		SlotTable<QueryHandle, GLQuery>			  queries;
 
 		GLint					 uniformAlignment = 256;
+		GLint					 timestampBits = 0;	   // GL_TIMESTAMP's counter bits; 0 where the driver has no timestamps
 		UniformRing				 drawRing;			   // DrawUniforms, on kUniformBinding
 		std::vector<UniformRing> hookRings;			   // one per hook block binding point, made by createPipeline()
 		std::vector<GLuint>		 inactiveHookBindings; // points whose block a pipeline had inactive; writes there are dropped

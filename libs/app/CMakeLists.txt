@@ -13,6 +13,7 @@ endif()
 
 add_library(salal_app STATIC
     application/App.cpp
+    application/FrameCapture.cpp
     application/CommandLine.cpp
     clipboard/Clipboard.cpp
     detail/SafeFile.cpp

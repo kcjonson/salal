@@ -8,6 +8,7 @@
 #include "utils/Log.h"
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <glm/gtc/packing.hpp>
 #include <iostream>
@@ -82,7 +83,8 @@ namespace Renderer {
 		: gpu(renderBackend),
 		  pipeline(renderBackend.createPipeline(baseShader)),
 		  instanceBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialInstanceBytes, nullptr)),
-		  geometry(renderBackend.createGeometry({.layout = backend::VertexLayout::Batched, .vertices = instanceBuffer})) {
+		  geometry(renderBackend.createGeometry({.layout = backend::VertexLayout::Batched, .vertices = instanceBuffer})),
+		  gpuTimer(renderBackend) {
 		if (!pipeline.isValid()) {
 			std::cerr << "Failed to load the base shader!" << std::endl;
 		}
@@ -636,11 +638,13 @@ namespace Renderer {
 		if (instances.empty()) {
 			return;
 		}
+		const auto flushStart = std::chrono::steady_clock::now();
 
 		const DrawPlan drawPlan = plan();
 
 		// The whole batch, every flush: the stream buffer starts over
 		gpu.updateBuffer(instanceBuffer, 0, drawPlan.instances.size_bytes(), drawPlan.instances.data());
+		frameUploadBytes += drawPlan.instances.size_bytes();
 
 		// Create projection matrix
 		// If CoordinateSystem is set, use it for DPI-aware projection (logical pixels)
@@ -687,13 +691,19 @@ namespace Renderer {
 				 .instanceCount = run.instanceCount}
 			);
 		}
+		// A GPU span holds draws, never the uploads before them, here and in drawInstanced().
+		beginGpuSpan();
 		gpu.draw(drawCalls);
+		endGpuSpan();
 		drawCallCount += drawCalls.size();
 		freePending();
 
-		// Accumulate stats before clearing: six vertices and two triangles a quad
+		// Accumulate stats before clearing: an instance, six vertices and two triangles a quad
+		frameInstanceCount += instances.size();
 		frameVertexCount += instances.size() * 6;
 		frameTriangleCount += instances.size() * 2;
+		++frameFlushCount;
+		frameFlushSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - flushStart).count();
 
 		// Clear buffers for next batch
 		instances.clear();
@@ -703,11 +713,21 @@ namespace Renderer {
 		sortDomain = 0;
 	}
 
-	void BatchRenderer::beginFrame() {
-		freePending(); // nothing left in the batch samples them
+	void BatchRenderer::beginFrameStats() {
 		drawCallCount = 0;
 		frameVertexCount = 0;
 		frameTriangleCount = 0;
+		frameInstanceCount = 0;
+		frameUploadBytes = 0;
+		frameFlushCount = 0;
+		frameFlushSeconds = 0.0;
+		if (gpuTiming) {
+			gpuTimer.beginFrame();
+		}
+	}
+
+	void BatchRenderer::beginFrame() {
+		freePending(); // nothing left in the batch samples them
 		instances.clear();
 		instanceTextures.clear();
 		drawGroups.clear();
@@ -742,7 +762,30 @@ namespace Renderer {
 		stats.drawCalls = static_cast<uint32_t>(drawCallCount);
 		stats.vertexCount = static_cast<uint32_t>(frameVertexCount);
 		stats.triangleCount = static_cast<uint32_t>(frameTriangleCount);
+		stats.instanceCount = static_cast<uint32_t>(frameInstanceCount);
+		stats.uploadBytes = frameUploadBytes;
+		stats.flushCount = static_cast<uint32_t>(frameFlushCount);
+		stats.flushMs = static_cast<float>(frameFlushSeconds * 1000.0);
 		return stats;
+	}
+
+	void BatchRenderer::setGpuTiming(bool enabled) {
+		if (!enabled) {
+			gpuTimer.reset();
+		}
+		gpuTiming = enabled;
+	}
+
+	void BatchRenderer::beginGpuSpan() {
+		if (gpuTiming) {
+			gpuTimer.beginSpan();
+		}
+	}
+
+	void BatchRenderer::endGpuSpan() {
+		if (gpuTiming) {
+			gpuTimer.endSpan();
+		}
 	}
 
 	void BatchRenderer::setClipBounds(const Foundation::Vec4& bounds) {
@@ -914,12 +957,16 @@ namespace Renderer {
 				.indexCount = handle.indexCount,
 				.instanceCount = batchSize
 			};
+			beginGpuSpan();
 			gpu.draw({&call, 1});
+			endGpuSpan();
 
 			drawCallCount++;
 			// Each instance renders all mesh vertices; triangle count = indices / 3
 			frameVertexCount += static_cast<size_t>(handle.vertexCount) * batchSize;
 			frameTriangleCount += static_cast<size_t>(handle.indexCount / 3) * batchSize;
+			frameInstanceCount += batchSize;
+			frameUploadBytes += batchSize * sizeof(InstanceData);
 
 			remaining -= batchSize;
 			offset += batchSize;
@@ -953,11 +1000,13 @@ namespace Renderer {
 		// The same blend state as every batch draw; the caller's VAO draws follow
 		gpu.beginForeignDraws(pipeline, backend::BlendState::Alpha);
 		bakedPassOpen = true;
+		beginGpuSpan();
 	}
 
 	void BatchRenderer::endBakedPass() {
 		// Alpha back to 1 so the instanced path (same shader branch) is unaffected
 		uniforms.bakedAlpha = 1.0F;
+		endGpuSpan();
 		gpu.endForeignDraws();
 		bakedPassOpen = false;
 	}

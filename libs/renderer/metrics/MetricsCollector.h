@@ -23,6 +23,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Set rendering stats (called by renderer)
 		void setRenderStats(uint32_t drawCalls, uint32_t vertexCount, uint32_t triangleCount);
 
+		// Set the batch's instances, upload bytes and flushes (Primitives::RenderStats, called by the app)
+		void setBatchStats(uint32_t instanceCount, uint64_t uploadBytes, uint32_t flushCount, float flushMs);
+
 		// Set timing breakdown (called by game scene for profiling)
 		void setTimingBreakdown(
 			float	 tileRenderMs,
@@ -64,6 +67,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		uint32_t drawCalls;
 		uint32_t vertexCount;
 		uint32_t triangleCount;
+		uint32_t instanceCount{};
+		uint64_t uploadBytes{};
+		uint32_t flushCount{};
+		float	 flushMs{};
 
 		// Entity renderer stats (raw GL draws outside the batch renderer)
 		uint32_t entityDrawCalls{};

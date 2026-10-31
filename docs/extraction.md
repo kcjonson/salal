@@ -746,9 +746,9 @@ Deferred, and still to do:
 
 - Grid. Built once and reverted for not following the spec; it comes back when
   a game needs it.
-- The perf suite ([salal#41](https://github.com/kcjonson/salal/pull/41)), run
-  alone when Kevin chooses, with the metrics it still lacks and perf scenes
-  for ui.
+- The metrics the perf suite ([salal#41](https://github.com/kcjonson/salal/pull/41),
+  with `perf_ui`) still lacks: flush and split reasons, texture binds and
+  culled counts (R13.12 to R13.14).
 - The scene diff and the happy-path scripts ([testing/README.md](testing/README.md)).
 
 ### Phase 4, dual-deck-builder Job B

@@ -17,6 +17,7 @@
 #include "graphics/PrimitiveStyles.h"
 #include "graphics/Rect.h"
 #include "math/Types.h"
+#include "metrics/GPUFrameTimer.h"
 #include "primitives/InstanceData.h"
 #include "primitives/Primitives.h"
 #include "primitives/Stroke.h"
@@ -221,7 +222,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// per run.
 		void flush();
 
-		// Frame lifecycle
+		// Frame lifecycle. beginFrameStats() starts the frame's statistics and GPU frame; beginFrame()
+		// starts a batch, which a frame may hold several of (an offscreen pass inside it).
+		void beginFrameStats();
 		void beginFrame();
 		void endFrame();
 
@@ -269,7 +272,19 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			uint32_t drawCalls = 0;
 			uint32_t vertexCount = 0;
 			uint32_t triangleCount = 0;
+			uint32_t instanceCount = 0;
+			uint64_t uploadBytes = 0;
+			uint32_t flushCount = 0;
+			float	 flushMs = 0.0F;
 		};
+
+		// GPU timing of flush(), drawInstanced(), the baked pass and whatever a caller brackets with
+		// begin/endGpuSpan() (Primitives::clear), as GPUFrameTimer spans, off until turned on.
+		void				 setGpuTiming(bool enabled);
+		bool				 getGpuTiming() const { return gpuTiming; }
+		void				 beginGpuSpan();
+		void				 endGpuSpan();
+		const GPUFrameTimer& getGpuTimer() const { return gpuTimer; }
 
 		// Statistics
 		size_t		getInstanceCount() const { return instances.size(); }
@@ -463,9 +478,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		TextSnapCache textSnapCache;
 
 		// Statistics
-		size_t drawCallCount = 0;
-		size_t frameVertexCount = 0;   // Cumulative vertex count for the frame
-		size_t frameTriangleCount = 0; // Cumulative triangle count for the frame
+		size_t	 drawCallCount = 0;
+		size_t	 frameVertexCount = 0;	 // Cumulative vertex count for the frame
+		size_t	 frameTriangleCount = 0; // Cumulative triangle count for the frame
+		size_t	 frameInstanceCount = 0; // The batch's quads and drawInstanced's mesh instances this frame
+		uint64_t frameUploadBytes = 0;	 // Quad and mesh instance bytes written to the backend this frame
+		size_t	 frameFlushCount = 0;	 // Flushes that submitted something this frame
+		double	 frameFlushSeconds = 0.0;
+
+		GPUFrameTimer gpuTimer;
+		bool		  gpuTiming = false;
 	};
 
 } // namespace Renderer

@@ -2,7 +2,7 @@
 // (Picker.h). --scene=<name> starts in that scene with the picker closed; without it the first scene
 // runs with the picker open. The dev server serves on 127.0.0.1:8090, or --http-port's port, in the
 // configurations it is compiled into; /api/control?action=scene&scene=<name> switches scene. Close the
-// window, or ask /api/control?action=exit, to quit.
+// window, or ask /api/control?action=exit, to quit. --no-vsync is for perf runs (scripts/perf.mjs).
 
 #include "BaseShader.h"
 #include "Picker.h"
@@ -25,15 +25,15 @@ namespace {
 
 	constexpr int kDevServerPort = 8090; // worldsim's ui-sandbox port
 
-	// The one family the sandbox loads (docs/app-api.md, decision 8), staged beside the exe by
-	// CMakeLists.txt.
-	constexpr Renderer::FontFamily				   kMonoFont{0};
-	const std::array<Renderer::FontAtlasSource, 1> kFontAtlases{{
-		{.family = kMonoFont, .pngPath = "fonts/JetBrainsMono-SDF.png", .jsonPath = "fonts/JetBrainsMono-SDF.json"},
+	// The sandbox's one font (docs/app-api.md, decision 8), staged beside the exe by CMakeLists.txt,
+	// loaded twice (Scenes.h).
+	const std::array<Renderer::FontAtlasSource, 2> kFontAtlases{{
+		{.family = sandbox::kMonoFont, .pngPath = "fonts/JetBrainsMono-SDF.png", .jsonPath = "fonts/JetBrainsMono-SDF.json"},
+		{.family = sandbox::kSecondFont, .pngPath = "fonts/JetBrainsMono-SDF.png", .jsonPath = "fonts/JetBrainsMono-SDF.json"},
 	}};
 
 	// In the picker's order; the first is where the sandbox starts without --scene.
-	const std::array<const sandbox::SceneInfo*, 20> kScenes{
+	const std::array<const sandbox::SceneInfo*, 24> kScenes{
 		// The renderer's, from worldsim.
 		&sandbox::kSdfMinimalScene,
 		&sandbox::kPolygonScene,
@@ -56,10 +56,15 @@ namespace {
 		&sandbox::kUiDisplayScene,
 		&sandbox::kUiControlsScene,
 		&sandbox::kUiOverlayComponentsScene,
+		// The perf suite's.
+		&sandbox::kPerfQuadsScene,
+		&sandbox::kPerfTextScene,
+		&sandbox::kPerfWorldScene,
+		&sandbox::kPerfUiScene,
 	};
 
 	void printUsage(std::FILE* stream) {
-		std::fprintf(stream, "Usage: sandbox [--scene=<name>] [--http-port <port>] [--help]\nScenes:");
+		std::fprintf(stream, "Usage: sandbox [--scene=<name>] [--http-port <port>] [--no-vsync] [--help]\nScenes:");
 		for (const sandbox::SceneInfo* scene : kScenes) {
 			std::fprintf(stream, " %s", scene->name);
 		}
@@ -82,7 +87,7 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	std::unique_ptr<app::Platform> platform = app::createGlfwPlatform({.title = "salal sandbox"});
+	std::unique_ptr<app::Platform> platform = app::createGlfwPlatform({.title = "salal sandbox", .vsync = commandLine.vsync});
 	if (platform == nullptr) {
 		return 1;
 	}
@@ -90,7 +95,7 @@ int main(int argc, char** argv) {
 		{.applicationName = "sandbox",
 		 .baseShader = base_shader::source(),
 		 .fontAtlases = kFontAtlases,
-		 .defaultFont = kMonoFont,
+		 .defaultFont = sandbox::kMonoFont,
 		 // On by default where the server is compiled in; elsewhere only --http-port asks for it, so a
 		 // build without it says nothing listens only when someone asked, and a Release launch logs nothing.
 		 .devServer =

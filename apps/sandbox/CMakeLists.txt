@@ -6,6 +6,10 @@ add_executable(salal_sandbox
     scenes/ArcScene.cpp
     scenes/BlendScene.cpp
     scenes/InputTestScene.cpp
+    scenes/PerfQuadsScene.cpp
+    scenes/PerfTextScene.cpp
+    scenes/PerfUiScene.cpp
+    scenes/PerfWorldScene.cpp
     scenes/PolygonScene.cpp
     scenes/PolylineScene.cpp
     scenes/SdfMinimalScene.cpp
