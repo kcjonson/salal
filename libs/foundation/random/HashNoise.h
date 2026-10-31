@@ -61,6 +61,11 @@ namespace foundation {
 			return t * t * t * (t * (t * 6.0F - 15.0F) + 10.0F);
 		}
 
+		// d/dt of quintic: 30t^2(t - 1)^2
+		inline float quinticDerivative(float t) {
+			return 30.0F * t * t * (t * (t - 2.0F) + 1.0F);
+		}
+
 		inline float lerp(float a, float b, float t) {
 			return a + t * (b - a);
 		}
@@ -253,6 +258,62 @@ namespace foundation {
 		return detail::lerp(x0, x1, uy);
 	}
 
+	// A noise value with its partial derivatives in x and y, per unit of input.
+	struct NoiseWithGradient {
+		float value = 0.0F;
+		float dx = 0.0F;
+		float dy = 0.0F;
+	};
+
+	// GradientNoise2WithGradient: gradientNoise2 and its analytic gradient. `value` is
+	// gradientNoise2 bit for bit.
+	inline NoiseWithGradient gradientNoise2WithGradient(float x, float y, uint32_t seed) {
+		int32_t ix = static_cast<int32_t>(x);
+		if (static_cast<float>(ix) > x)
+			--ix;
+		int32_t iy = static_cast<int32_t>(y);
+		if (static_cast<float>(iy) > y)
+			--iy;
+
+		const float fx = x - static_cast<float>(ix);
+		const float fy = y - static_cast<float>(iy);
+
+		const float ux = detail::quintic(fx);
+		const float uy = detail::quintic(fy);
+		const float dux = detail::quinticDerivative(fx);
+		const float duy = detail::quinticDerivative(fy);
+
+		struct Corner {
+			float dot;
+			float gx;
+			float gy;
+		};
+		auto corner = [](uint32_t h, float dx, float dy) -> Corner {
+			float gx{}, gy{}, gz{};
+			detail::gradient(h, gx, gy, gz);
+			return {gx * dx + gy * dy + gz * 0.0F, gx, gy};
+		};
+
+		const Corner c00 = corner(hash3(ix, iy, 0, seed), fx, fy);
+		const Corner c10 = corner(hash3(ix + 1, iy, 0, seed), fx - 1.0F, fy);
+		const Corner c01 = corner(hash3(ix, iy + 1, 0, seed), fx, fy - 1.0F);
+		const Corner c11 = corner(hash3(ix + 1, iy + 1, 0, seed), fx - 1.0F, fy - 1.0F);
+
+		const float x0 = detail::lerp(c00.dot, c10.dot, ux);
+		const float x1 = detail::lerp(c01.dot, c11.dot, ux);
+		// Each row's slope in x is its corner gradients blended plus the fade's slope
+		// times the rise along the row; in y only the gradients, until rows blend.
+		const float x0dx = detail::lerp(c00.gx, c10.gx, ux) + dux * (c10.dot - c00.dot);
+		const float x1dx = detail::lerp(c01.gx, c11.gx, ux) + dux * (c11.dot - c01.dot);
+		const float x0dy = detail::lerp(c00.gy, c10.gy, ux);
+		const float x1dy = detail::lerp(c01.gy, c11.gy, ux);
+		return {
+			.value = detail::lerp(x0, x1, uy),
+			.dx = detail::lerp(x0dx, x1dx, uy),
+			.dy = detail::lerp(x0dy, x1dy, uy) + duy * (x1 - x0),
+		};
+	}
+
 	// Two values of 2D gradient noise at one point, e.g. a domain warp's x and y.
 	struct NoisePair {
 		float first = 0.0F;
@@ -328,6 +389,28 @@ namespace foundation {
 			frequency *= lacunarity;
 		}
 		return maxAmp > 0.0F ? value / maxAmp : 0.0F;
+	}
+
+	// FractalNoise2WithGradient: fractalNoise2 and its analytic gradient, per unit of
+	// (x, y). `value` is fractalNoise2 bit for bit.
+	inline NoiseWithGradient fractalNoise2WithGradient(float x, float y, uint32_t seed, int octaves, float lacunarity, float gain) {
+		NoiseWithGradient sum;
+		float			  amplitude = 1.0F;
+		float			  frequency = 1.0F;
+		float			  maxAmp = 0.0F;
+		for (int i = 0; i < octaves; ++i) {
+			const detail::OctaveOffset offset = detail::octaveOffset(i);
+			const NoiseWithGradient	   n =
+				gradientNoise2WithGradient(x * frequency + offset.x, y * frequency + offset.y, seed + static_cast<uint32_t>(i));
+			sum.value += n.value * amplitude;
+			sum.dx += n.dx * frequency * amplitude;
+			sum.dy += n.dy * frequency * amplitude;
+			maxAmp += amplitude;
+			amplitude *= gain;
+			frequency *= lacunarity;
+		}
+		return maxAmp > 0.0F ? NoiseWithGradient{.value = sum.value / maxAmp, .dx = sum.dx / maxAmp, .dy = sum.dy / maxAmp}
+							 : NoiseWithGradient{};
 	}
 
 	// FractalNoise2SplitPair: two fBm fields over gradientNoise2PairCell, at

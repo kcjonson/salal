@@ -32,6 +32,25 @@ namespace {
 		return maxAmp > 0.0F ? value / maxAmp : 0.0F;
 	}
 
+	// Central differences over a 2^-10 step, divided by the step the floats actually took.
+	struct FiniteGradient {
+		double dx = 0.0;
+		double dy = 0.0;
+	};
+
+	template <typename Field>
+	FiniteGradient finiteGradient(Field field, float x, float y) {
+		constexpr float kStep = 1.0F / 1024.0F;
+		const float		xp = x + kStep;
+		const float		xm = x - kStep;
+		const float		yp = y + kStep;
+		const float		ym = y - kStep;
+		return {
+			.dx = (static_cast<double>(field(xp, y)) - static_cast<double>(field(xm, y))) / static_cast<double>(xp - xm),
+			.dy = (static_cast<double>(field(x, yp)) - static_cast<double>(field(x, ym))) / static_cast<double>(yp - ym),
+		};
+	}
+
 } // namespace
 
 // ============================================================================
@@ -237,7 +256,7 @@ TEST(HashNoiseTests, GradientNoise2MatchesGradientNoise3AtZeroZ) {
 }
 
 // ============================================================================
-// FractalNoise2
+// FractalNoise2 / gradients
 // ============================================================================
 
 TEST(HashNoiseTests, FractalNoise2GoldenBits) {
@@ -280,6 +299,57 @@ TEST(HashNoiseTests, OctaveOffsetsKeepLatticesApart) {
 				const int shift = (q - p + 16) % 16;
 				EXPECT_GE(distanceFromInteger((int64_t{table[p]} << shift) - table[q]), kMargin) << "p=" << p << " q=" << q;
 			}
+		}
+	}
+}
+
+TEST(HashNoiseTests, GradientNoise2WithGradientGoldenBits) {
+	const NoiseWithGradient a = gradientNoise2WithGradient(1.7F, 2.3F, 42U);
+	EXPECT_EQ(bitsOf(a.value), 0xbefe8ee5U);
+	EXPECT_EQ(bitsOf(a.dx), 0x3cac5fd0U);
+	EXPECT_EQ(bitsOf(a.dy), 0xbe86c653U);
+	const NoiseWithGradient b = gradientNoise2WithGradient(-3.14F, 2.72F, 999U);
+	EXPECT_EQ(bitsOf(b.value), 0xbd25f9b0U);
+	EXPECT_EQ(bitsOf(b.dx), 0x3f794274U);
+	EXPECT_EQ(bitsOf(b.dy), 0xbf407880U);
+	const NoiseWithGradient c = gradientNoise2WithGradient(0.5F, 0.5F, 0U);
+	EXPECT_EQ(c.value, 0.875F);
+	EXPECT_EQ(c.dx, -0.21875F);
+	EXPECT_EQ(c.dy, -0.46875F);
+}
+
+TEST(HashNoiseTests, FractalNoise2WithGradientGoldenBits) {
+	const NoiseWithGradient a = fractalNoise2WithGradient(1.7F, 2.3F, 42U, 4, 2.0F, 0.5F);
+	EXPECT_EQ(bitsOf(a.value), 0xbca05bc5U);
+	EXPECT_EQ(bitsOf(a.dx), 0xbfa9a95aU);
+	EXPECT_EQ(bitsOf(a.dy), 0x3f48aef3U);
+	const NoiseWithGradient b = fractalNoise2WithGradient(-3.14F, 2.72F, 999U, 5, 1.9F, 0.6F);
+	EXPECT_EQ(bitsOf(b.value), 0xbcdcd9bfU);
+	EXPECT_EQ(bitsOf(b.dx), 0x3b91b165U);
+	EXPECT_EQ(bitsOf(b.dy), 0x3ff7a14eU);
+}
+
+// The value is the plain function's bit for bit, and the gradient agrees with
+// central differences of it, across cell boundaries and negative coordinates. The
+// tolerances are about 3x the worst error over this grid, which float rounding over
+// the step sets; a wrong term is off by tenths.
+TEST(HashNoiseTests, NoiseGradientsMatchFiniteDifferences) {
+	for (int j = -40; j <= 40; ++j) {
+		for (int i = -40; i <= 40; ++i) {
+			const float x = static_cast<float>(i) * 0.23F - 1.0F;
+			const float y = static_cast<float>(j) * 0.19F + 0.5F;
+
+			const NoiseWithGradient single = gradientNoise2WithGradient(x, y, 13U);
+			ASSERT_EQ(bitsOf(single.value), bitsOf(gradientNoise2(x, y, 13U))) << "x=" << x << " y=" << y;
+			const FiniteGradient singleFd = finiteGradient([](float u, float v) { return gradientNoise2(u, v, 13U); }, x, y);
+			ASSERT_NEAR(single.dx, singleFd.dx, 2e-3) << "x=" << x << " y=" << y;
+			ASSERT_NEAR(single.dy, singleFd.dy, 2e-3) << "x=" << x << " y=" << y;
+
+			const NoiseWithGradient fbm = fractalNoise2WithGradient(x, y, 13U, 5, 2.0F, 0.5F);
+			ASSERT_EQ(bitsOf(fbm.value), bitsOf(fractalNoise2(x, y, 13U, 5, 2.0F, 0.5F))) << "x=" << x << " y=" << y;
+			const FiniteGradient fbmFd = finiteGradient([](float u, float v) { return fractalNoise2(u, v, 13U, 5, 2.0F, 0.5F); }, x, y);
+			ASSERT_NEAR(fbm.dx, fbmFd.dx, 6e-3) << "x=" << x << " y=" << y;
+			ASSERT_NEAR(fbm.dy, fbmFd.dy, 6e-3) << "x=" << x << " y=" << y;
 		}
 	}
 }
