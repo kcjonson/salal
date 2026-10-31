@@ -1,6 +1,6 @@
 #pragma once
 
-// The sandbox's scene picker, an overlay with a ui context of its own. Closed, it is a tab in the
+// The sandbox's scene picker, a debug layer with a ui context of its own. Closed, it is a tab in the
 // window's bottom-right corner; open, a panel of ListRows stands above the tab, one a scene, the
 // running one selected. F1 or a press on the tab opens and closes it; a row switches to its scene
 // and closes the list; Escape closes it. While it's open the arrows move focus along the rows and
@@ -10,7 +10,7 @@
 // and the wheel over them; every key while the list is open; and F1.
 
 #include <application/App.h>
-#include <scene/Overlay.h>
+#include <scene/DebugLayer.h>
 #include <ui/Context.h>
 #include <ui/components/Button.h>
 #include <ui/components/ListRow.h>
@@ -20,7 +20,7 @@
 
 namespace sandbox {
 
-	class Picker final : public app::Overlay {
+	class Picker final : public app::DebugLayer {
 	  public:
 		struct Args {
 			std::vector<std::string> scenes; // in the order listed, each a name the App's stack has

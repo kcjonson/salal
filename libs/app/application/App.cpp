@@ -365,8 +365,8 @@ namespace app {
 		}
 		resized = false;
 		const Renderer::Viewport& window = coordinates.viewport();
-		for (auto it = overlays.rbegin(); it != overlays.rend(); ++it) {
-			detail::guard("Overlay", "onResize", [&] { (*it)->onResize(window); });
+		for (auto it = debugLayers.rbegin(); it != debugLayers.rend(); ++it) {
+			detail::guard("DebugLayer", "onResize", [&] { (*it)->onResize(window); });
 		}
 		sceneStack.resized(window);
 	}
@@ -423,8 +423,8 @@ namespace app {
 		sceneStack.routeTopUi(inputState);
 		for (const foundation::InputEvent& event : inputState.events()) {
 			bool consumed = false;
-			for (auto it = overlays.rbegin(); it != overlays.rend() && !consumed; ++it) {
-				detail::guard("Overlay", "handleEvent", [&] { consumed = (*it)->handleEvent(event); });
+			for (auto it = debugLayers.rbegin(); it != debugLayers.rend() && !consumed; ++it) {
+				detail::guard("DebugLayer", "handleEvent", [&] { consumed = (*it)->handleEvent(event); });
 			}
 			if (consumed || isPaused) {
 				continue;
@@ -502,12 +502,12 @@ namespace app {
 			detail::guard(top->name(), "update", [&] { top->update(frame); });
 		}
 		sceneStack.updateTopUi(frameDelta);
-		for (const std::unique_ptr<Overlay>& overlay : overlays) {
-			detail::guard("Overlay", "update", [&] { overlay->update(frame); });
+		for (const std::unique_ptr<DebugLayer>& layer : debugLayers) {
+			detail::guard("DebugLayer", "update", [&] { layer->update(frame); });
 		}
 	}
 
-	// The stack, each scene's ui over it, then the overlays, each overlay its own sort domain over
+	// The stack, each scene's ui over it, then the debug layers, each debug layer its own sort domain over
 	// everything before it. The ui was laid out just before, paused or not, so a resize while paused
 	// draws right.
 	void App::render() {
@@ -517,9 +517,9 @@ namespace app {
 		}
 		Renderer::Primitives::clear(config.clearColor);
 		sceneStack.render(liveAlpha());
-		for (const std::unique_ptr<Overlay>& overlay : overlays) {
+		for (const std::unique_ptr<DebugLayer>& layer : debugLayers) {
 			Renderer::Primitives::sortBarrier();
-			detail::guard("Overlay", "render", [&] { overlay->render(); });
+			detail::guard("DebugLayer", "render", [&] { layer->render(); });
 		}
 
 		Renderer::Primitives::endFrame();
@@ -556,7 +556,7 @@ namespace app {
 	}
 
 	// What waits for the frame to be over: a resume asked for in it, so the frame stays paused and its
-	// tick reader is dropped, and the overlays added in it.
+	// tick reader is dropped, and the debug layers added in it.
 	void App::finishFrame() {
 		if (std::exchange(resumeAtFrameEnd, false)) {
 			if (pendingSteps > 0) {
@@ -564,10 +564,10 @@ namespace app {
 			}
 			resume();
 		}
-		for (std::unique_ptr<Overlay>& overlay : joiningOverlays) {
-			overlays.push_back(std::move(overlay));
+		for (std::unique_ptr<DebugLayer>& layer : joiningDebugLayers) {
+			debugLayers.push_back(std::move(layer));
 		}
-		joiningOverlays.clear();
+		joiningDebugLayers.clear();
 	}
 
 	// --- Running and stopping ---
@@ -638,10 +638,10 @@ namespace app {
 		}
 		isShutDown = true;
 		sceneStack.exitAll();
-		while (!overlays.empty()) {
-			const std::unique_ptr<Overlay> overlay = std::move(overlays.back());
-			overlays.pop_back();
-			detail::guard("Overlay", "onExit", [&] { overlay->onExit(); });
+		while (!debugLayers.empty()) {
+			const std::unique_ptr<DebugLayer> layer = std::move(debugLayers.back());
+			debugLayers.pop_back();
+			detail::guard("DebugLayer", "onExit", [&] { layer->onExit(); });
 		}
 		shuttingDown = false;
 	}
@@ -784,11 +784,11 @@ namespace app {
 		return metricsCollector.get();
 	}
 
-	void App::addOverlay(std::unique_ptr<Overlay> overlay) {
-		if (overlay == nullptr) {
+	void App::addDebugLayer(std::unique_ptr<DebugLayer> layer) {
+		if (layer == nullptr) {
 			return;
 		}
-		(inFrame ? joiningOverlays : overlays).push_back(std::move(overlay));
+		(inFrame ? joiningDebugLayers : debugLayers).push_back(std::move(layer));
 	}
 
 } // namespace app

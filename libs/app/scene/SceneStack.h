@@ -8,7 +8,7 @@
 //
 // Scenes are built when their change applies, so of two switches in one frame only the last is
 // built. Arguments, results and result callbacks are typed per scene and may be move-only. A push
-// with a result callback remembers the scene on top when it was asked for, whoever asks (an overlay
+// with a result callback remembers the scene on top when it was asked for, whoever asks (a debug layer
 // or game code too), and is dropped, logged, if that scene has left the stack by the time it applies,
 // so a callback never outlives its pusher. A push without a callback queues in order regardless, so
 // it can land over a scene that replaced the one that asked.
