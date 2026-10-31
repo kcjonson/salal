@@ -158,7 +158,8 @@ enum class VertexLayout : uint8_t { Batched, InstancedMesh }; // implies the ind
 enum class BufferUsage : uint8_t { Static, Dynamic, Stream }; // a Stream write at offset 0 starts the buffer over and grows it to fit
 enum class BlendState : uint8_t { Alpha }; // premultiplied over, which additive draws share since PR 3
 struct HookUniformBlock { const char* hook; const char* block; uint32_t binding; uint32_t size; }; // one per hook block, from the generated header
-struct ShaderSource { const char* vertex; const char* fragment; std::span<const HookUniformBlock> hookBlocks; }; // GLSL text, assembled at build time; file names under shaders/ until the hooks
+struct FillHook { const char* hook; uint32_t index; }; // one per fill hook, from the generated header
+struct ShaderSource { const char* vertex; const char* fragment; std::span<const HookUniformBlock> hookBlocks; std::span<const FillHook> fillHooks; }; // GLSL text, assembled at build time; file names under shaders/ until the hooks
 struct GeometryDesc { VertexLayout layout; BufferHandle vertices, indices, instances; };
 struct DrawCall { PipelineHandle pipeline; GeometryHandle geometry; BlendState blend; TextureHandle texture; uint32_t indexOffset; uint32_t indexCount; uint32_t instanceCount; };
 struct DrawUniforms { /* the 10 non-sampler uniforms, the std140 block in shaders/includes/uniforms.glsl: 176 bytes (16 and 208 until the grass deform left), every offset static_asserted */ };

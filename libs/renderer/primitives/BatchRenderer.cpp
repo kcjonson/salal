@@ -90,6 +90,13 @@ namespace Renderer {
 		}
 		instances.reserve(4096);
 		instanceTextures.reserve(4096);
+		for (const backend::FillHook& hook : baseShader.fillHooks) {
+			if (hook.index == 0 || hook.index >= pendingFills.size()) {
+				continue;
+			}
+			fillHooks.resize(std::max<size_t>(fillHooks.size(), hook.index));
+			fillHooks[hook.index - 1] = hook.hook != nullptr ? hook.hook : "";
+		}
 	}
 
 	BatchRenderer::~BatchRenderer() {
@@ -151,7 +158,9 @@ namespace Renderer {
 		float											 cornerRadius,
 		const std::optional<Foundation::LinearGradient>& gradient,
 		int32_t											 key,
-		Primitives::BlendMode							 blend
+		Primitives::BlendMode							 blend,
+		const Primitives::Fill&							 fill,
+		const char*										 id
 	) { // NOLINT(readability-convert-member-functions-to-static)
 		if (clipEmpty) {
 			return;
@@ -160,11 +169,22 @@ namespace Renderer {
 		const float	   halfW = bounds.width * 0.5F;
 		const float	   halfH = bounds.height * 0.5F;
 
+		// A hooked rect has one fill colour, corner 0's, and its params in the other three.
+		const uint8_t hookIndex = fill.hook != nullptr ? fillIndex(*fill.hook, id) : 0;
+		if (hookIndex != 0 && gradient.has_value() && warnedGradientIds.insert(id != nullptr ? id : "").second) {
+			LOG_WARNING(
+				Renderer,
+				"drawRect %s: a rect with fill hook %s has one fill colour, so its gradient is dropped (warned once per id)",
+				id != nullptr ? id : "(no id)",
+				fill.hook->hook
+			);
+		}
+
 		// Each corner's fill (TL, TR, BR, BL): the flat fill, or the gradient's stops on
 		// its corners, interpolated by the GPU, premultiplied first so a gradient to
 		// transparent doesn't darken on its way.
 		Foundation::Vec4 colors[4] = {fillColor.toVec4(), fillColor.toVec4(), fillColor.toVec4(), fillColor.toVec4()};
-		if (gradient.has_value()) {
+		if (gradient.has_value() && hookIndex == 0) {
 			const Foundation::Vec4 from = gradient->from.toVec4();
 			const Foundation::Vec4 to = gradient->to.toVec4();
 			if (gradient->horizontal) {
@@ -229,11 +249,42 @@ namespace Renderer {
 		for (int i = 0; i < 4; ++i) {
 			quad.fills[i] = premultiplied(colors[i]);
 		}
+		if (hookIndex != 0) {
+			std::copy(fill.params.begin(), fill.params.end(), std::begin(quad.fills) + 1);
+			quad.slot = hookIndex;
+			pendingFills.set(hookIndex);
+		}
 		quad.border = borderColor;
 		quad.shape[0] = halves(borderWidth, 0.0F);
 		quad.flags |= static_cast<uint8_t>(borderPosition << kQuadBorderShift);
 
 		recordGroup(groupStart, key, blend);
+	}
+
+	uint8_t BatchRenderer::fillIndex(const backend::FillHook& hook, const char* id) {
+		const std::string_view name = hook.hook != nullptr ? hook.hook : "";
+		if (hook.index != 0 && hook.index <= fillHooks.size() && fillHooks[hook.index - 1] == name && !name.empty()) {
+			return static_cast<uint8_t>(hook.index);
+		}
+		if (warnedForeignFillIds.insert(id != nullptr ? id : "").second) {
+			LOG_ERROR(
+				Renderer,
+				"drawRect %s: fill hook %.*s is not the base shader's; the rect draws its plain fill (logged once per id)",
+				id != nullptr ? id : "(no id)",
+				static_cast<int>(name.size()),
+				name.data()
+			);
+		}
+		return 0;
+	}
+
+	bool BatchRenderer::holdsFill(std::string_view hook) const {
+		for (size_t i = 0; i < fillHooks.size(); ++i) {
+			if (fillHooks[i] == hook) {
+				return pendingFills.test(i + 1);
+			}
+		}
+		return false;
 	}
 
 	void BatchRenderer::addShadowQuad(
@@ -709,6 +760,7 @@ namespace Renderer {
 		instances.clear();
 		instanceTextures.clear();
 		drawGroups.clear();
+		pendingFills.reset();
 		anyKey = false;
 		sortDomain = 0;
 	}
@@ -731,6 +783,7 @@ namespace Renderer {
 		instances.clear();
 		instanceTextures.clear();
 		drawGroups.clear();
+		pendingFills.reset();
 		anyKey = false;
 		sortDomain = 0;
 		clearClipBounds();

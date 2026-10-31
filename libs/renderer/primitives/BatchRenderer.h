@@ -24,10 +24,14 @@
 #include "vector/Tessellator.h"
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <cstdint>
 #include <glm/mat2x2.hpp>
 #include <optional>
+#include <set>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
@@ -54,8 +58,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	//
 	//   Flat    a triangle, its last corner repeated, or a quad; fills: each corner's colour
 	//   Rect    geometry: half size, then the quad's half extent; radii: the corners' (tl, tr,
-	//           br, bl); fills: each corner's, for a gradient; border: the border's colour;
-	//           shape.x: its width; flags: its position
+	//           br, bl); fills: each corner's, for a gradient, or with a fill hook its one fill
+	//           then its three params; slot: its fill hook's index, 0 for none; border: the
+	//           border's colour; shape.x: its width; flags: its position
 	//   Shadow  geometry: half size, then the quad's half extent; radii: the corners'; shape.z: the blur
 	//   Arc     geometry: inner and outer radius, half the sweep, the middle's angle; shape.y: how
 	//           far the quad reaches past the outer radius
@@ -115,7 +120,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Add shape quad to batch (with optional SDF border and corner radius).
 		// When `gradient` is set, the quad's four corners are colored from the
 		// gradient stops (interpolated by the GPU) instead of the flat fillColor;
-		// the border/SDF/corner radius are unaffected.
+		// the border/SDF/corner radius are unaffected. With `fill.hook`, one of this
+		// batch's base shader's fill hooks, the hook gives the colour over fillColor and a
+		// gradient is warned once per `id` and dropped; a hook from another shader is logged
+		// once per `id` and the quad drawn as if it named none.
 		void addQuad(
 			const Foundation::Rect&							 bounds,
 			const Foundation::Color&						 fillColor,
@@ -123,8 +131,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float											 cornerRadius = 0.0F,
 			const std::optional<Foundation::LinearGradient>& gradient = std::nullopt,
 			int32_t											 key = 0,
-			Primitives::BlendMode							 blend = Primitives::BlendMode::Alpha
+			Primitives::BlendMode							 blend = Primitives::BlendMode::Alpha,
+			const Primitives::Fill&							 fill = {},
+			const char*										 id = nullptr
 		);
+
+		// Whether a quad added since the last flush names `hook`, one of the base shader's fill
+		// hooks: then its block's new values would reach that quad, drawn before them.
+		bool holdsFill(std::string_view hook) const;
 
 		// Add an outer box-shadow / glow quad behind a rect. The SDF shader renders
 		// it as a soft falloff over `shadow.blur` px outside the (spread-grown)
@@ -399,6 +413,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		TextureHandle liveTexture;
 
 		bool warnedStale = false;
+
+		// The base shader's fill hooks by index, fillHooks[i] index i + 1's name, which a rect's
+		// Fill is checked against; the indexes the quads added since the last flush name; and
+		// the ids addQuad warned for, once each.
+		std::vector<std::string> fillHooks;
+		std::bitset<256>		 pendingFills;
+		std::set<std::string>	 warnedGradientIds;
+		std::set<std::string>	 warnedForeignFillIds;
+
+		// The index `hook` has in the base shader, or 0, logged once per `id`, when it is another's.
+		uint8_t fillIndex(const backend::FillHook& hook, const char* id);
 
 		// addTriangles' feather ring along `loops`, over meshPositions and meshColors.
 		void addFeather(const BoundaryLoops& loops, Primitives::BlendMode blend);

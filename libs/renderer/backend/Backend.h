@@ -33,7 +33,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		uint32_t		 border = 0; // rgba8, or a stroke's corner radius as a float
 		uint32_t		 shape[2];	 // NOLINT(modernize-avoid-c-arrays): four halves, or a stroke's half size as two floats
 		uint8_t			 mode = 0;
-		uint8_t			 slot = 0; // which of its draw's textures it samples, 0 to kTextureSlots - 1
+		uint8_t			 slot = 0; // which of its draw's textures it samples, 0 to kTextureSlots - 1; a rect's fill hook
 		uint8_t			 flags = 0;
 		uint8_t			 roundedClip = 0; // reserved for a rounded clip's entry, 0 for none
 	};
@@ -80,7 +80,7 @@ namespace Renderer::backend {
 
 	// A hook's uniform block in an assembled base shader (docs/shader-hooks.md), as the
 	// header salal_base_shader() generates names it: the hook (its file name before
-	// .vert.glsl), the block's name in the GLSL, the binding point the build gave it (1
+	// .vert.glsl or .frag.glsl), the block's name in the GLSL, the binding point the build gave it (1
 	// up; 0 is DrawUniforms'), its std140 size in bytes, padded to 16, and its members in
 	// offset order.
 	struct HookUniformBlock {
@@ -91,13 +91,23 @@ namespace Renderer::backend {
 		std::span<const HookUniformMember> members;
 	};
 
-	// A pipeline's GLSL source, one text per stage, and the hooks' uniform blocks its
-	// vertex stage declares. The base shader's is the generated <namespace>::source()
+	// A fill hook in an assembled base shader (docs/shader-hooks.md, "Fill hooks"), as the
+	// header salal_base_shader() generates names it: the hook (its file name before
+	// .frag.glsl) and the index the build gave it, 1 up in file-name order, which a rect
+	// names it by in its instance's texture-slot byte.
+	struct FillHook {
+		const char* hook = nullptr;
+		uint32_t	index = 0;
+	};
+
+	// A pipeline's GLSL source, one text per stage, the hooks' uniform blocks its stages
+	// declare, and its fill hooks. The base shader's is the generated <namespace>::source()
 	// of salal_base_shader().
 	struct ShaderSource {
 		const char*						  vertex = nullptr;
 		const char*						  fragment = nullptr;
 		std::span<const HookUniformBlock> hookBlocks;
+		std::span<const FillHook>		  fillHooks;
 	};
 
 	// Buffers to draw from in `layout`: for Batched, `vertices` holds the BatchInstances;

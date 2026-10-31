@@ -84,9 +84,11 @@ if(TARGET salal_renderer_tests)
     target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw salal_shader_assembly)
     # PngEncoder.test.cpp decodes what it encoded with stb_image.
     target_include_directories(salal_renderer_tests PRIVATE ${Stb_INCLUDE_DIR})
-    # The base shader as a consumer with no hooks gets it, for every fixture, and again
-    # with the test hook in tests/hooks/, which ShaderHooks.test.cpp draws with (its HEADER in a
-    # folder, as a consumer may put it).
+    # The base shader as a consumer with no hooks gets it, for every fixture; again with the test
+    # vertex hook in tests/hooks/, which ShaderHooks.test.cpp draws with (its HEADER in a folder, as
+    # a consumer may put it); and with the test fill hook in tests/fill_hooks/, which it and the
+    # sandbox's fill_hook scene draw with.
     salal_base_shader(salal_renderer_tests)
     salal_base_shader(salal_renderer_tests HOOKS tests/hooks NAMESPACE offset_hook_shader HEADER generated/OffsetHookShader.h)
+    salal_base_shader(salal_renderer_tests HOOKS tests/fill_hooks NAMESPACE stripes_shader HEADER generated/StripesShader.h)
 endif()
