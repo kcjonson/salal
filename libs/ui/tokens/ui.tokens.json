@@ -46,6 +46,7 @@
       "pill": { "$value": {"value": 9999, "unit": "px"} }
     },
     "fontSize": {
+      "11": { "$value": {"value": 11, "unit": "px"} },
       "12": { "$value": {"value": 12, "unit": "px"} },
       "14": { "$value": {"value": 14, "unit": "px"} },
       "16": { "$value": {"value": 16, "unit": "px"} },
@@ -169,6 +170,24 @@
         "letterSpacing": { "value": 0, "unit": "px" },
         "lineHeight": 1.4
       }
+    },
+    "label": {
+      "$value": {
+        "fontFamily": "{font.family.mono}",
+        "fontSize": "{base.fontSize.11}",
+        "fontWeight": 400,
+        "letterSpacing": { "value": 1, "unit": "px" },
+        "lineHeight": 1.2
+      }
+    }
+  },
+  "stat": {
+    "$description": "A Stat's value size for each control size.",
+    "$type": "dimension",
+    "valueSize": {
+      "sm": { "$value": {"value": 15, "unit": "px"} },
+      "md": { "$value": {"value": 22, "unit": "px"} },
+      "lg": { "$value": {"value": 38, "unit": "px"} }
     }
   },
   "motion": {
@@ -308,6 +327,18 @@
     "scrim": {
       "backgroundColor": { "$value": "{color.scrim}" }
     },
+    "badge": { "borderRadius": { "$value": "{radius.sm}" }, "borderWidth": { "$value": "{lineWidth.thin}" } },
+    "label": { "color": { "$value": "{color.text.secondary}" }, "font": { "$value": "{typography.label}" } },
+    "keycap": {
+      "backgroundColor": { "$value": "{color.surface.sunken}" }, "borderColor": { "$value": "{color.line.edge}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" }, "borderRadius": { "$value": "{radius.sm}" }
+    },
+    "keycapEdge": { "backgroundColor": { "$value": "{color.line.strong}" } },
+    "progressTrack": {
+      "backgroundColor": { "$value": "{color.surface.sunken}" }, "borderColor": { "$value": "{color.line.subtle}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" }
+    },
+    "statValue": { "color": { "$value": "{color.text.primary}" }, "fontFamily": { "$value": "{font.family.display}" } },
     "divider": {
       "backgroundColor": { "$value": "{color.line.subtle}" }
     },
