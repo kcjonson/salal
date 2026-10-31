@@ -83,6 +83,11 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	EXPECT_FLOAT_EQ(fill.borderRadius.value_or(-1.0F), 2.0F);
 	EXPECT_TRUE(dark.theme.style(theme_test::styles::healthBar::track.theme).backgroundColor.has_value());
 	expectColor(light.theme.get(theme_test::tokens::palette::slate::_900), 0.96F, 0.97F, 0.98F);
+	// The game's capitals on ui's button, from salal's extension on the style's group; ui sets none.
+	EXPECT_EQ(dark.theme.style(ui::styles::button.theme).textTransform, Foundation::TextTransform::Uppercase);
+	EXPECT_EQ(light.theme.style(ui::styles::button.theme).textTransform, Foundation::TextTransform::Uppercase);
+	EXPECT_FALSE(dark.theme.style(ui::styles::pane.theme).textTransform.has_value());
+	EXPECT_FALSE(ui::Theme::load({}).theme.style(ui::styles::button.theme).textTransform.has_value());
 }
 
 TEST(Theme, FontRolesMapToTheGamesFamilies) {
@@ -104,6 +109,15 @@ TEST(Theme, AnUnknownPathWarns) {
 	ASSERT_EQ(load.diagnostics.size(), 1U) << describe(load.diagnostics);
 	EXPECT_EQ(load.diagnostics[0].severity, ui::dtcg::Diagnostic::Severity::Warning);
 	EXPECT_EQ(load.diagnostics[0].path, "color.surface.raisd");
+
+	// A transform on a group that isn't a style, here the one text.body and its siblings sit in, which
+	// don't inherit it.
+	const HandTable		above(R"({ "styles": { "text": { "$extensions": { "salal": { "textTransform": "uppercase" } } } } })", {});
+	const ui::ThemeLoad aboveLoad = ui::Theme::load({.tokens = &above.table});
+	EXPECT_TRUE(aboveLoad.ok()) << describe(aboveLoad.diagnostics);
+	ASSERT_EQ(aboveLoad.diagnostics.size(), 1U) << describe(aboveLoad.diagnostics);
+	EXPECT_EQ(aboveLoad.diagnostics[0].path, "styles.text");
+	EXPECT_FALSE(aboveLoad.theme.style(ui::styles::text::body.theme).textTransform.has_value());
 }
 
 TEST(Theme, AMissingPathIsAnErrorWhenStrictAndADefaultEitherWay) {
@@ -120,12 +134,20 @@ TEST(Theme, AMissingPathIsAnErrorWhenStrictAndADefaultEitherWay) {
 	expectColor(lenient.theme.get(glow), 0.0F, 0.0F, 0.0F);
 }
 
-TEST(Theme, AWrongTypeFailsTheLoad) {
+TEST(Theme, AWrongTypeOrTextTransformFailsTheLoad) {
 	const HandTable		hand(R"({ "hud": { "glow": { "$type": "colour", "$value": "#fff" } } })", {});
 	const ui::ThemeLoad load = ui::Theme::load({.tokens = &hand.table});
 	EXPECT_FALSE(load.ok());
 	EXPECT_NE(describe(load.diagnostics).find("hand/hand.tokens.json: hud.glow: unknown $type \"colour\""), std::string::npos)
 		<< describe(load.diagnostics);
+
+	const HandTable		shouty(R"({ "styles": { "button": { "$extensions": { "salal": { "textTransform": "shouty" } } } } })", {});
+	const ui::ThemeLoad shoutyLoad = ui::Theme::load({.tokens = &shouty.table});
+	EXPECT_FALSE(shoutyLoad.ok());
+	EXPECT_NE(
+		describe(shoutyLoad.diagnostics).find("styles.button: $extensions.salal.textTransform \"shouty\" is not none or uppercase"),
+		std::string::npos
+	) << describe(shoutyLoad.diagnostics);
 }
 
 TEST(Theme, StateLayersTonesAndSizesReadTheTokens) {

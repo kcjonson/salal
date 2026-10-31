@@ -16,6 +16,10 @@
     }
   },
   "styles": {
+    "button": { "$extensions": { "salal": { "textTransform": "uppercase" } } },
+    "tab": { "$extensions": { "salal": { "textTransform": "uppercase" } } },
+    "segment": { "$extensions": { "salal": { "textTransform": "uppercase" } } },
+    "select": { "$extensions": { "salal": { "textTransform": "uppercase" } } },
     "healthBar": {
       "fill": {
         "backgroundColor": { "$value": "{palette.ember}" },

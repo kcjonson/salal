@@ -64,8 +64,25 @@ namespace ui::dtcg {
 		float rootFontSize = 16.0F; // px a rem is
 	};
 
+	// salal's extension on a group, `"$extensions": {"salal": {...}}`, as the group has it after
+	// $extends (docs/ui-design.md, "Theme"). The merge treats $extensions as one property, so a later
+	// file's replaces an earlier one's whole. Checked with the document's structure: it goes on a
+	// group, and holds nothing but a text transform by one of kTextTransforms' names.
+	struct SalalExtension {
+		std::optional<TextTransform> textTransform;
+		std::string					 file; // a file that set one of the group's $ properties, for messages
+	};
+
+	using SalalExtensions = std::map<std::string, SalalExtension, std::less<>>; // by the group's dot path
+
 	// Every token in `set`, keyed by dot path ($root included as a segment). A token that fails is
-	// left out with an error; so is one whose alias reaches it.
-	ResolvedTokens resolve(const TokenSet& set, const ResolveOptions& options, std::vector<Diagnostic>& diagnostics);
+	// left out with an error; so is one whose alias reaches it. Given `extensions`, fills it with
+	// every group that has salal's extension.
+	ResolvedTokens resolve(
+		const TokenSet&			 set,
+		const ResolveOptions&	 options,
+		std::vector<Diagnostic>& diagnostics,
+		SalalExtensions*		 extensions = nullptr
+	);
 
 } // namespace ui::dtcg

@@ -71,7 +71,8 @@ namespace ui {
 		dtcg::StrokeStyleValue get(StrokeStyleToken token) const;
 
 		// A theme style's fields as its tokens set them, its `font` filling the font fields its own
-		// don't; all unset for a style of a table the theme didn't load.
+		// don't, and its text transform from salal's extension on its group; all unset for a style of
+		// a table the theme didn't load.
 		const Style& style(StyleId id) const;
 
 		// `declared` as a component of a type whose theme style is `typeStyle` draws it: that style,

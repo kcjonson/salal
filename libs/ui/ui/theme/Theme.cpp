@@ -16,6 +16,16 @@ namespace ui {
 			return {color.r, color.g, color.b, color.a};
 		}
 
+		Foundation::TextTransform toTextTransform(dtcg::TextTransform transform) {
+			switch (transform) {
+				case dtcg::TextTransform::Uppercase:
+					return Foundation::TextTransform::Uppercase;
+				case dtcg::TextTransform::None:
+					break;
+			}
+			return Foundation::TextTransform::None;
+		}
+
 		std::string textOf(const EmbeddedFile& file) {
 			std::string text;
 			for (std::string_view piece : file.pieces) {
@@ -97,17 +107,30 @@ namespace ui {
 			layers.push_back(layerOf(*table));
 		}
 		const dtcg::TokenSet	   set = dtcg::loadLayers(layers, args.inputs, result.diagnostics);
-		const dtcg::ResolvedTokens resolved = dtcg::resolve(set, {.rootFontSize = args.rootFontSize}, result.diagnostics);
+		dtcg::SalalExtensions	   extensions;
+		const dtcg::ResolvedTokens resolved = dtcg::resolve(set, {.rootFontSize = args.rootFontSize}, result.diagnostics, &extensions);
 
 		std::set<std::string, std::less<>> known;
+		std::set<std::string, std::less<>> stylePaths;
 		for (const TokenTable* table : chain) {
 			for (const TokenEntry& entry : table->tokens) {
 				known.emplace(entry.path);
 			}
 			for (std::string_view style : table->styles) {
+				stylePaths.emplace(style);
 				for (const dtcg::StyleField& field : dtcg::kStyleFields) {
 					known.insert(stylePath(style, field.name));
 				}
+			}
+		}
+		for (const auto& [path, extension] : extensions) {
+			if (!stylePaths.contains(path)) {
+				result.diagnostics.push_back(
+					{.severity = Severity::Warning,
+					 .file = extension.file,
+					 .path = path,
+					 .message = "has salal's extension, but no table names it as a style, so nothing reads it"}
+				);
 			}
 		}
 		for (const auto& [path, token] : resolved) {
@@ -212,6 +235,10 @@ namespace ui {
 				number("fontWeight", dtcg::TokenType::FontWeight, themed.fontWeight);
 				number("lineHeight", dtcg::TokenType::Number, themed.lineHeight);
 				number("letterSpacing", dtcg::TokenType::Dimension, themed.letterSpacing);
+				if (const auto found = extensions.find(style); found != extensions.end() && found->second.textTransform.has_value()) {
+					themed.textTransform = toTextTransform(*found->second.textTransform);
+					any = true;
+				}
 				if (!any) {
 					missing(*table, style);
 				}
