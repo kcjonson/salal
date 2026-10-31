@@ -41,6 +41,7 @@ if(msdfgen_FOUND)
 endif()
 
 add_library(salal_ui STATIC
+    ui/Animator.cpp
     ui/components/Badge.cpp
     ui/components/Button.cpp
     ui/components/Checkbox.cpp
@@ -77,6 +78,7 @@ add_library(salal_ui STATIC
     ui/shapes/Text.cpp
     ui/theme/Theme.cpp
     ui/theme/Variants.cpp
+    ui/theme/StateColor.cpp
     ui/icons/IconAtlas.cpp
     ui/icons/IconService.cpp
 )

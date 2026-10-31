@@ -38,6 +38,7 @@ namespace app {
 			uiContext = std::make_unique<ui::Context>(stack != nullptr ? logicalSize(stack->app.viewport()) : Foundation::Vec2{0.0F, 0.0F});
 			if (stack != nullptr) {
 				uiContext->setScale(stack->app.uiScale());
+				uiContext->setReducedMotion(stack->app.reducedMotion());
 				App& app = stack->app;
 				uiContext->setClipboard({
 					.read = [&app] { return app.clipboard().getText(); },
@@ -223,6 +224,14 @@ namespace app {
 			return ui::Cursor::Default;
 		}
 		return entries.back().scene->uiContext->cursor();
+	}
+
+	void SceneStack::reduceMotionUi(bool reduced) {
+		for (Entry& entry : entries) {
+			if (entry.scene->uiContext != nullptr) {
+				entry.scene->uiContext->setReducedMotion(reduced);
+			}
+		}
 	}
 
 	void SceneStack::scaleUi(float scale) {

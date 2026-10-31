@@ -91,6 +91,10 @@ namespace app {
 		// handheld gets larger ui with no second layout.
 		void				setUiScale(float scale);
 		[[nodiscard]] float uiScale() const { return scaleOfUi; }
+		// Reduced motion (R11.13), kept in settings() as ui.reducedMotion: every scene's ui completes its
+		// tweens on their first tick. A game sets it from its options or the system's preference.
+		void			   setReducedMotion(bool reduced);
+		[[nodiscard]] bool reducedMotion() const { return motionReduced; }
 		// Fullscreen on the monitor at `monitor` (0 the primary), or windowed. Where the window resizes at
 		// once, the viewport, the coordinate system and Primitives take the new size at once too, as GL's
 		// viewport does, so the frame it's called in draws at that size; scenes and overlays hear of it
@@ -220,6 +224,7 @@ namespace app {
 		double	   sectionStart = 0.0;
 		Sections   sections;
 		float	   scaleOfUi = 1.0F;
+		bool	   motionReduced = false;
 		ui::Cursor shownCursor = ui::Cursor::Default;
 	};
 
