@@ -37,7 +37,9 @@ namespace ui {
 		[[nodiscard]] int			   getLineCount() const { return lineCount; }
 
 		[[nodiscard]] const char* typeName() const override { return "Text"; }
-		void					  describe(nlohmann::json& node) const override;
+		// ui::styles::text::body.
+		[[nodiscard]] StyleId themeStyle() const override;
+		void				  describe(nlohmann::json& node) const override;
 
 	  protected:
 		void onMount() override;
