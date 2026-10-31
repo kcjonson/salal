@@ -1,9 +1,9 @@
 // The overlay components through the dispatcher: a menu's choice, its keys and its disabled items; a
 // select's value and where focus goes after; a press outside a menu, focus leaving one, and a
 // context menu at the press; a dialog's modality, focus scope and the ways it closes; the hover
-// tooltip's delay and what closes it; toasts timing out, pressed, capped and brought to the front;
-// each one fading in to full opacity, as the tree snapshot reports it, and a fade that leaves the style
-// alone. Headless; nothing draws.
+// tooltip's delay, what closes it, and the width it fills; toasts timing out, pressed, capped and
+// brought to the front; each one fading in to full opacity, as the tree snapshot reports it, and a
+// fade that leaves the style alone. Headless; nothing draws.
 
 #include "ui/Context.h"
 #include "ui/components/Button.h"
@@ -34,6 +34,17 @@ namespace ui {
 		using foundation::InputEvent;
 		using foundation::Key;
 		using foundation::MouseButton;
+
+		// Takes all the width it's offered, as a long wrapping text does.
+		class Filler : public Component {
+		  public:
+			using Component::Component;
+
+		  protected:
+			[[nodiscard]] std::optional<Foundation::Vec2> intrinsicSize(std::optional<float> width, float availableWidth) const override {
+				return Foundation::Vec2{width.value_or(std::min(availableWidth, 1000.0F)), 20.0F};
+			}
+		};
 
 		// The opacity the tree snapshot gives the first node of a type under `node`.
 		std::optional<float> opacityOf(const nlohmann::json& node, std::string_view type) {
@@ -309,6 +320,14 @@ namespace ui {
 		click(over);
 		wait(1.0);
 		EXPECT_TRUE(context.overlays().empty()); // shut until the pointer leaves
+	}
+
+	TEST_F(UiOverlayComponentsTest, ATooltipFillsUpToItsMaxWidthNotItsOpenersBox) {
+		Ref<Button> save = root.addChild<Button>({.position = {100.0F, 100.0F}, .size = {40.0F, 24.0F}, .label = "Save"});
+		Tooltip::open(*save.get(), {20.0F, 12.0F}, {}, [](Tooltip& tip) { tip.addChild<Filler>({}); });
+		context.layout();
+		ASSERT_EQ(context.overlays().size(), 1U);
+		EXPECT_EQ(context.find(context.overlays().front())->getSize().x, 280.0F); // its maxWidth
 	}
 
 	// --- Toasts ---

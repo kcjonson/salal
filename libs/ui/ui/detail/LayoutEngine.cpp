@@ -351,7 +351,8 @@ namespace ui::detail {
 	}
 
 	// Against the parent's whole box: an inset edge anchors that side, both a pair stretch an auto
-	// size between them, and none falls back to `position`.
+	// size between them, and none falls back to `position`. An overlay entry goes on screen where its
+	// placement puts it, not in its opener's box, so only its own maxSize bounds the width it fills.
 	void LayoutEngine::placeAbsolute(Component& child, Foundation::Vec2 box) {
 		const Inset&		 inset = child.layout.inset;
 		std::optional<float> width;
@@ -363,7 +364,8 @@ namespace ui::detail {
 			height = std::max(box.y - *inset.top - *inset.bottom - child.margin.vertical(), 0.0F);
 		}
 		const float			   left = inset.left.value_or(inset.right ? 0.0F : child.position.x);
-		const Foundation::Vec2 childSize = measure(child, width, height, box, std::max(box.x - left, 0.0F));
+		const float			   available = child.isOverlay() ? kUnbounded : std::max(box.x - left, 0.0F);
+		const Foundation::Vec2 childSize = measure(child, width, height, box, available);
 		const Foundation::Vec2 margins = child.margin.total();
 		const float x = inset.left ? *inset.left : (inset.right ? box.x - *inset.right - childSize.x - margins.x : child.position.x);
 		const float y = inset.top ? *inset.top : (inset.bottom ? box.y - *inset.bottom - childSize.y - margins.y : child.position.y);
