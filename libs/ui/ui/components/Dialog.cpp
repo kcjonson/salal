@@ -99,6 +99,10 @@ namespace ui {
 		centre.alignItems = AlignItems::Center;
 		centre.justifyContent = JustifyContent::Center;
 		setLayout(centre);
+		// A panel has no scrim, so its cover is clear rather than a Rectangle's default fill.
+		if (!modal && !getDeclaredStyle().backgroundColor) {
+			setStyle(getDeclaredStyle().extend({.backgroundColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F)}));
+		}
 		const Theme& theme = getContext()->getTheme();
 		box = addChild<Rectangle>(
 			{.size = panelSize, .layout = {.display = Display::Flex, .flexDirection = FlexDirection::Column}, .style = styles::overlay}

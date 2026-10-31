@@ -49,10 +49,14 @@ namespace ui {
 		if (shadow) {
 			shadow->color = detail::withOpacity(shadow->color, alpha);
 		}
+		const Foundation::Color fill = detail::withOpacity(style.backgroundColor.value_or(kBackground), alpha);
+		// Nothing would show, so no quad: a clear cover over the screen costs nothing.
+		if (fill.a <= 0.0F && (!border || border->color.a <= 0.0F) && (!shadow || shadow->color.a <= 0.0F)) {
+			return;
+		}
 		Renderer::Primitives::drawRect({
 			.bounds = {0.0F, 0.0F, size.x, size.y},
-			.style =
-				{.fill = detail::withOpacity(style.backgroundColor.value_or(kBackground), alpha), .border = border, .boxShadow = shadow},
+			.style = {.fill = fill, .border = border, .boxShadow = shadow},
 			.id = getId().empty() ? nullptr : getId().c_str(),
 			.key = drawKey(),
 		});
