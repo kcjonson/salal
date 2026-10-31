@@ -401,11 +401,12 @@ namespace ui::detail {
 		return out;
 	}
 
-	void FocusManager::collectStops(Component& node, std::vector<Component*>& out, bool self) const {
+	void FocusManager::collectStops(Component& node, std::vector<Component*>& out, bool self, bool blocked) const {
 		if (!node.isShown() || !node.enabled) {
 			return;
 		}
-		if (self) {
+		blocked = blocked && !node.isOverlay();
+		if (self && !blocked) {
 			if (node.focusGroup) {
 				if (Component* stop = groupStop(node)) {
 					out.push_back(stop);
@@ -418,7 +419,7 @@ namespace ui::detail {
 		}
 		for (const ComponentId childId : node.children) {
 			if (Component* child = find(childId)) {
-				collectStops(*child, out, true);
+				collectStops(*child, out, true, blocked || !node.descendantsFocusable);
 			}
 		}
 	}
@@ -456,16 +457,17 @@ namespace ui::detail {
 
 	// --- Directional focus ---
 
-	void FocusManager::collectFocusable(Component& node, std::vector<Component*>& out) const {
+	void FocusManager::collectFocusable(Component& node, std::vector<Component*>& out, bool blocked) const {
 		if (!node.isShown() || !node.enabled) {
 			return;
 		}
-		if (node.focusable && node.tabIndex.value_or(0) >= 0) {
+		blocked = blocked && !node.isOverlay();
+		if (!blocked && node.focusable && node.tabIndex.value_or(0) >= 0) {
 			out.push_back(&node);
 		}
 		for (const ComponentId childId : node.children) {
 			if (Component* child = find(childId)) {
-				collectFocusable(*child, out);
+				collectFocusable(*child, out, blocked || !node.descendantsFocusable);
 			}
 		}
 	}

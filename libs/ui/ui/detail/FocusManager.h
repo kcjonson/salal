@@ -98,12 +98,12 @@ namespace ui::detail {
 		[[nodiscard]] ComponentId scopeRoot(int player) const;
 		[[nodiscard]] bool		  canFocus(const Component& component, int player) const;
 		// The Tab stops in the player's scope, in Tab order: a focus group is one, its member focused
-		// last or its first.
+		// last or its first. `blocked`: under a descendantsFocusable false, where only overlays count.
 		[[nodiscard]] std::vector<Component*> stops(int player) const;
-		void								  collectStops(Component& node, std::vector<Component*>& out, bool self) const;
-		[[nodiscard]] Component*			  groupStop(Component& group) const;
+		void					 collectStops(Component& node, std::vector<Component*>& out, bool self, bool blocked = false) const;
+		[[nodiscard]] Component* groupStop(Component& group) const;
 		// Every focusable that takes Tab, groups' members included, for directional focus.
-		void					 collectFocusable(Component& node, std::vector<Component*>& out) const;
+		void					 collectFocusable(Component& node, std::vector<Component*>& out, bool blocked = false) const;
 		[[nodiscard]] Component* groupOf(const Component& component, int player) const;
 		// A step inside `group`, along its orientation; none at an end without wrap, or off its axis.
 		[[nodiscard]] Component* stepInGroup(Component& group, Component& from, Direction direction) const;

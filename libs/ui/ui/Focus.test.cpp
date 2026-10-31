@@ -395,6 +395,35 @@ namespace ui {
 		EXPECT_EQ(focusedId(), "none");
 	}
 
+	// A game's HUD, driven by the pointer and hotkeys: nothing in it takes focus, by a press, Tab, a
+	// direction or code, so its keys stay the game's. The dialog it opens is its own, and focus that
+	// was nowhere when it opened is nowhere when it closes.
+	TEST_F(UiFocusTest, NothingUnderADescendantsFocusableFalseTakesFocusButItsOverlays) {
+		const Ref<Component> hud = root.addChild<Component>({.id = "hud", .size = {300.0F, 50.0F}, .descendantsFocusable = false});
+		const Ref<Component> menu = hud.addChild<Component>(button("menu", 0.0F, 0.0F));
+		context.layout();
+		context.dispatch({.type = InputEvent::Type::PointerDown, .mouseButton = foundation::MouseButton::Left, .position = {5.0F, 5.0F}});
+		context.dispatch({.type = InputEvent::Type::PointerUp, .mouseButton = foundation::MouseButton::Left, .position = {5.0F, 5.0F}});
+		EXPECT_EQ(focusedId(), "none");
+		EXPECT_FALSE(context.focusNext());
+		EXPECT_FALSE(context.focusDirection(Direction::Right));
+		EXPECT_FALSE(menu.get()->focus());
+
+		const Ref<Component> dialog = menu.get()->openOverlay<Component>(
+			{.id = "dialog", .size = {200.0F, 200.0F}}, {.kind = OverlayKind::Dialog, .placement = Absolute{.at = {300.0F, 300.0F}}}
+		);
+		dialog.addChild<Component>(button("resume", 0.0F, 0.0F));
+		dialog.addChild<Component>(button("quit", 100.0F, 0.0F));
+		context.layout();
+		context.pushScope(dialog);
+		EXPECT_EQ(focusedId(), "resume");
+		EXPECT_TRUE(context.focusDirection(Direction::Right));
+		EXPECT_EQ(focusedId(), "quit");
+		context.closeOverlay(dialog);
+		context.layout();
+		EXPECT_EQ(focusedId(), "none");
+	}
+
 	// --- Scrolling into view ---
 
 	TEST_F(UiFocusTest, FocusByKeysScrollsItIntoView) {
