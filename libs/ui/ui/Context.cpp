@@ -56,12 +56,42 @@ namespace ui {
 
 		const Foundation::Color kScrollThumb(1.0F, 1.0F, 1.0F, 0.35F);
 		const Foundation::Color kScrollTrack(1.0F, 1.0F, 1.0F, 0.06F);
+
+		// ui's tokens alone, loaded once; every context starts from them. They were checked when ui built.
+		const Theme& uiTheme() {
+			static const Theme kTheme = Theme::load({}).theme;
+			return kTheme;
+		}
 	} // namespace
 
 	Context::Context(Foundation::Vec2 viewportSize)
-		: windowSize(viewportSize),
+		: theme(uiTheme()),
+		  windowSize(viewportSize),
 		  viewport(viewportSize),
 		  dispatcher(std::make_unique<detail::Dispatcher>(*this)) {}
+
+	void Context::setTheme(Theme value) {
+		if (drawing) {
+			LOG_ERROR(UI, "setTheme while the ui draws; the theme is unchanged");
+			return;
+		}
+		theme = std::move(value);
+		for (const ComponentId rootId : roots) {
+			if (Component* rootComponent = registry.find(rootId)) {
+				restyle(*rootComponent);
+			}
+		}
+		geometryDirty = true;
+	}
+
+	void Context::restyle(Component& component) {
+		component.setStyle(component.declaredStyle);
+		for (const ComponentId childId : component.children) {
+			if (Component* child = registry.find(childId)) {
+				restyle(*child);
+			}
+		}
+	}
 
 	Context::~Context() = default;
 
@@ -91,6 +121,7 @@ namespace ui {
 		dirtyBoundaries.push_back(rootId);
 		geometryDirty = true;
 		orderDirty = true;
+		added.setStyle(added.declaredStyle);
 		{
 			const Registry::DispatchScope scope(registry);
 			added.onMount();

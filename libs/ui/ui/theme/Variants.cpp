@@ -53,13 +53,13 @@ namespace ui {
 		return colors(t::default_::color, t::default_::subtle, t::default_::onColor);
 	}
 
-	SizeMetrics sizeMetrics(const Theme& theme, Size size) {
+	SizeMetrics sizeMetrics(const Theme& theme, ControlSize size) {
 		switch (size) {
-			case Size::Sm:
+			case ControlSize::Sm:
 				return {.fontSize = theme.get(tokens::size::sm::fontSize), .controlHeight = theme.get(tokens::size::sm::controlHeight)};
-			case Size::Lg:
+			case ControlSize::Lg:
 				return {.fontSize = theme.get(tokens::size::lg::fontSize), .controlHeight = theme.get(tokens::size::lg::controlHeight)};
-			case Size::Md:
+			case ControlSize::Md:
 				break;
 		}
 		return {.fontSize = theme.get(tokens::size::md::fontSize), .controlHeight = theme.get(tokens::size::md::controlHeight)};

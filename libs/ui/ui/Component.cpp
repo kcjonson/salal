@@ -32,6 +32,7 @@ namespace ui {
 		};
 		transform = args.transform;
 		layout = args.layout;
+		declaredStyle = args.style;
 		style = args.style;
 		overflow = args.overflow;
 		zIndex = args.zIndex;
@@ -55,6 +56,11 @@ namespace ui {
 		}
 	}
 
+	void Component::setStyle(const Style& value) {
+		declaredStyle = value;
+		style = context != nullptr ? context->getTheme().resolve(value, themeStyle()) : value;
+	}
+
 	ComponentId Component::adopt(std::unique_ptr<Component> child) {
 		if (context == nullptr) {
 			LOG_ERROR(UI, "%s: addChild before it is mounted; add children in onMount, not the constructor", typeName());
@@ -72,6 +78,7 @@ namespace ui {
 		children.push_back(childId);
 		layoutChanged(false);
 		context->orderDirty = true;
+		added.setStyle(added.declaredStyle);
 		{
 			const Registry::DispatchScope scope(context->registry);
 			added.onMount();

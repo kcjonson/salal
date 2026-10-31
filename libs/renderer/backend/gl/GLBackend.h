@@ -107,6 +107,8 @@ namespace Renderer::backend::gl {
 		struct GeometrySlot {
 			GLVertexArray vertexArray;
 			VertexLayout  layout = VertexLayout::Batched;
+			GLuint		  instances = 0;	 // Batched: the BatchInstance buffer its attributes read
+			uint32_t	  firstInstance = 0; // Batched: the instance its attributes start at now
 		};
 
 		// setUniforms() and setHookUniforms() write slot after slot of one buffer per

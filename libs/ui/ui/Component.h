@@ -214,8 +214,9 @@ namespace ui {
 		// The clip its ancestors' Overflow::Clip put on it, in the viewport; none when nothing clips it.
 		[[nodiscard]] const std::optional<Foundation::Rect>& getClip() const { return clip; }
 
+		// The style it draws with: the one it was given, resolved against its scene's theme once mounted.
 		[[nodiscard]] const Style& getStyle() const { return style; }
-		virtual void			   setStyle(const Style& value) { style = value; }
+		virtual void			   setStyle(const Style& value);
 
 		[[nodiscard]] std::optional<int> getZIndex() const { return zIndex; }
 		void							 setZIndex(std::optional<int> value);
@@ -260,6 +261,8 @@ namespace ui {
 		[[nodiscard]] virtual const char* typeName() const { return "Component"; }
 		// How far past its box it may draw (a shadow, a glow), in px: ink, which isn't overflow (R8.8).
 		[[nodiscard]] virtual float inkExtent() const { return 0.0F; }
+		// The theme style the type draws with under whatever its own style sets; none by default.
+		[[nodiscard]] virtual StyleId themeStyle() const { return {}; }
 		// Adds the type's own fields to its tree snapshot node, or overwrites the common ones it knows
 		// better (the resolved `style`).
 		virtual void describe(nlohmann::json& /*node*/) const {}
@@ -365,6 +368,7 @@ namespace ui {
 		}
 
 		std::string					 id;
+		Style						 declaredStyle; // as given; `style` is it resolved
 		Size						 sizeSpec;
 		Size						 minSpec;
 		Size						 maxSpec;
