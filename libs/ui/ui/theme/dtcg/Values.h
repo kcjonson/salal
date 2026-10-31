@@ -162,4 +162,18 @@ namespace ui::dtcg {
 
 	const StyleField* findStyleField(std::string_view name);
 
+	// CSS text-transform, which the format has no type for. A style's group carries it in salal's
+	// extension, `"$extensions": {"salal": {"textTransform": "uppercase"}}`, by these names.
+	enum class TextTransform : std::uint8_t { None, Uppercase };
+
+	struct TextTransformName {
+		std::string_view name;
+		TextTransform	 value;
+	};
+
+	inline constexpr std::array kTextTransforms{
+		TextTransformName{.name = "none", .value = TextTransform::None},
+		TextTransformName{.name = "uppercase", .value = TextTransform::Uppercase},
+	};
+
 } // namespace ui::dtcg

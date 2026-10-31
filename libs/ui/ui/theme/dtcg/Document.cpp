@@ -34,6 +34,31 @@ namespace ui::dtcg {
 			return "\"" + std::string(text) + "\"";
 		}
 
+		constexpr const char* kSalal = "salal"; // salal's key in $extensions
+
+		std::optional<TextTransform> textTransformNamed(const json& value) {
+			if (value.is_string()) {
+				for (const TextTransformName& known : kTextTransforms) {
+					if (known.name == value.get<std::string>()) {
+						return known.value;
+					}
+				}
+			}
+			return std::nullopt;
+		}
+
+		// "none or uppercase", from the table.
+		std::string textTransformChoices() {
+			std::string choices;
+			for (size_t i = 0; i < kTextTransforms.size(); ++i) {
+				if (i > 0) {
+					choices += i + 1 == kTextTransforms.size() ? " or " : ", ";
+				}
+				choices += kTextTransforms[i].name;
+			}
+			return choices;
+		}
+
 		// Structural checks on one document before it merges: names, the $ properties, tokens without
 		// children (format 5.1, 5.2, 6.1, 6.3).
 		class Checker {
@@ -61,8 +86,27 @@ namespace ui::dtcg {
 				diagnostics.push_back({.severity = Severity::Warning, .file = file, .path = path, .message = std::move(message)});
 			}
 
+			// salal's extension: on a group, its text transform and nothing else.
+			void checkSalal(const json& salal, const std::string& path, bool token) {
+				if (token) {
+					error(path, "$extensions.salal goes on a style's group, not on a token");
+					return;
+				}
+				if (!salal.is_object()) {
+					error(path, "$extensions.salal is not an object");
+					return;
+				}
+				for (const auto& [key, value] : salal.items()) {
+					if (key != "textTransform") {
+						error(path, "$extensions.salal has no property " + inQuotes(key) + "; it takes textTransform");
+					} else if (!textTransformNamed(value).has_value()) {
+						error(path, "$extensions.salal.textTransform " + value.dump() + " is not " + textTransformChoices());
+					}
+				}
+			}
+
 			// The $ properties tokens and groups share. False if `key` is none of them.
-			bool checkShared(const std::string& key, const json& value, const std::string& path) {
+			bool checkShared(const std::string& key, const json& value, const std::string& path, bool token) {
 				if (key == "$type") {
 					if (!value.is_string()) {
 						error(path, "$type is not a string");
@@ -80,6 +124,8 @@ namespace ui::dtcg {
 				} else if (key == "$extensions") {
 					if (!value.is_object()) {
 						error(path, "$extensions is not an object");
+					} else if (value.contains(kSalal)) {
+						checkSalal(value.at(kSalal), path, token);
 					}
 				} else {
 					return false;
@@ -91,7 +137,7 @@ namespace ui::dtcg {
 				for (const auto& [key, value] : token.items()) {
 					if (!key.starts_with('$')) {
 						error(path, "has a $value and a child " + inQuotes(key) + "; a token can't hold tokens or groups");
-					} else if (key != "$value" && !checkShared(key, value, path)) {
+					} else if (key != "$value" && !checkShared(key, value, path, true)) {
 						warning(path, "unknown property " + key + " ignored");
 					}
 				}
@@ -124,7 +170,7 @@ namespace ui::dtcg {
 						if (!value.is_string()) {
 							error(path, "$extends is not a reference string");
 						}
-					} else if (!checkShared(key, value, path) && !(top && key == "$schema")) {
+					} else if (!checkShared(key, value, path, false) && !(top && key == "$schema")) {
 						warning(path, "unknown property " + key + " ignored");
 					}
 				}
@@ -1038,6 +1084,31 @@ namespace ui::dtcg {
 			std::map<std::string, Entry>			  entries;
 		};
 
+		// Every group under `group` with salal's extension, which the checker has held to its shape.
+		void collectExtensions(
+			const json&								  group,
+			const std::string&						  path,
+			const std::map<std::string, std::string>& origin,
+			SalalExtensions&						  out
+		) {
+			const auto extensions = group.find("$extensions");
+			if (extensions != group.end() && extensions->is_object() && extensions->contains(kSalal)) {
+				const json&	   salal = extensions->at(kSalal);
+				SalalExtension extension;
+				if (salal.is_object() && salal.contains("textTransform")) {
+					extension.textTransform = textTransformNamed(salal.at("textTransform"));
+				}
+				const auto file = origin.find(path);
+				extension.file = file == origin.end() ? "" : file->second;
+				out[path] = std::move(extension);
+			}
+			for (const auto& [key, value] : group.items()) {
+				if (isChildKey(key) && isGroup(value)) {
+					collectExtensions(value, join(path, key), origin, out);
+				}
+			}
+		}
+
 	} // namespace
 
 	nlohmann::json parseJson(std::string_view text, const std::string& file, std::vector<Diagnostic>& diagnostics) {
@@ -1107,10 +1178,14 @@ namespace ui::dtcg {
 		}
 	}
 
-	ResolvedTokens resolve(const TokenSet& set, const ResolveOptions& options, std::vector<Diagnostic>& diagnostics) {
+	ResolvedTokens
+	resolve(const TokenSet& set, const ResolveOptions& options, std::vector<Diagnostic>& diagnostics, SalalExtensions* extensions) {
 		json							   tree = set.root();
 		std::map<std::string, std::string> origin = set.origins();
 		Extender(tree, origin, diagnostics).expandWithin("");
+		if (extensions != nullptr) {
+			collectExtensions(tree, "", origin, *extensions);
+		}
 		return Resolution(tree, origin, options, diagnostics).run();
 	}
 

@@ -1,11 +1,13 @@
 // The controls through the dispatcher, where they hold logic: what a press, a key or a drag does to
-// each, and TextEditor's editing on its own. Headless; nothing draws.
+// each, and TextEditor's editing on its own; then a theme's text transform reaching the labels the
+// controls build from their styles, measured on the null backend. Headless; nothing draws.
 
 #include "ui/Context.h"
 #include "ui/components/Button.h"
 #include "ui/components/Checkbox.h"
 #include "ui/components/RadioGroup.h"
 #include "ui/components/SegmentedControl.h"
+#include "ui/components/Select.h"
 #include "ui/components/Slider.h"
 #include "ui/components/TabBar.h"
 #include "ui/components/TextEditor.h"
@@ -14,9 +16,22 @@
 #include "ui/components/TreeView.h"
 #include "ui/debug/TreeSnapshot.h"
 
+#include "BaseShader.h"
+#include "backend/NullBackend.h"
+#include "font/FontRenderer.h"
+#include "primitives/Primitives.h"
+
+#include <theme_test/Tokens.h>
+
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
+
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <random>
 
 namespace ui {
 
@@ -254,6 +269,124 @@ namespace ui {
 		limited.moveTo(3, true);
 		EXPECT_TRUE(limited.insert("Z"));
 		EXPECT_EQ(limited.text(), "aZ");
+	}
+
+	// --- Themed labels ---
+
+	namespace {
+
+		constexpr Renderer::FontFamily kBody{0};
+
+		// Advances only, capitals wider than small letters, so a measured width says which were measured.
+		constexpr const char* kAtlasJson = R"({
+			"atlas": { "type": "msdf", "distanceRange": 8, "size": 32, "width": 1, "height": 1 },
+			"metrics": { "emSize": 1, "ascender": 0.9, "descender": -0.25, "lineHeight": 1.2 },
+			"glyphs": {
+				" ": { "atlas": null, "advance": 0.3 }, "?": { "atlas": null, "advance": 0.5 },
+				"G": { "atlas": null, "advance": 0.8 }, "O": { "atlas": null, "advance": 0.8 },
+				"g": { "atlas": null, "advance": 0.5 }, "o": { "atlas": null, "advance": 0.5 }
+			}
+		})";
+
+		// stbi_load needs a real image; the null backend keeps none of its pixels.
+		constexpr unsigned char kOneTexelPng[] = {
+			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+			0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
+			0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x04, 0x00, 0x01, 0xc8,
+			0xea, 0xeb, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+		};
+
+		// The test theme, which puts capitals on ui's button, tab, segment and select, over a font on the
+		// null backend so labels measure.
+		class UiThemedLabelsTest : public UiControlsTest {
+		  protected:
+			void SetUp() override {
+				Renderer::Primitives::init(std::make_unique<Renderer::backend::NullBackend>(), base_shader::source());
+				std::filesystem::create_directories(folder);
+				const Renderer::FontAtlasSource body{
+					.family = kBody, .pngPath = (folder / "body.png").string(), .jsonPath = (folder / "body.json").string()
+				};
+				std::ofstream(body.jsonPath, std::ios::binary) << kAtlasJson;
+				std::ofstream(body.pngPath, std::ios::binary)
+					.write(reinterpret_cast<const char*>(kOneTexelPng), static_cast<std::streamsize>(sizeof(kOneTexelPng)));
+				fonts = std::make_unique<Renderer::FontRenderer>();
+				ASSERT_TRUE(fonts->Initialize(std::array{body}, kBody));
+				Renderer::Primitives::setFontRenderer(fonts.get());
+				ThemeLoad load = Theme::load({.tokens = &theme_test::tokenTable()});
+				ASSERT_TRUE(load.ok());
+				context.setTheme(std::move(load.theme));
+			}
+
+			void TearDown() override {
+				Renderer::Primitives::setFontRenderer(nullptr);
+				fonts.reset(); // its atlas goes while the backend is there
+				Renderer::Primitives::shutdown();
+				std::error_code ignored;
+				std::filesystem::remove_all(folder, ignored);
+			}
+
+			// The first Text under a control, depth first.
+			const Text* labelOf(const Component& control) const {
+				for (const ComponentId id : control.getChildren()) {
+					const Component* child = context.find(id);
+					if (const auto* text = dynamic_cast<const Text*>(child)) {
+						return text;
+					}
+					if (const Text* inner = child != nullptr ? labelOf(*child) : nullptr) {
+						return inner;
+					}
+				}
+				return nullptr;
+			}
+
+			std::filesystem::path folder =
+				std::filesystem::temp_directory_path() / ("salal-ui-labels-" + std::to_string(std::random_device{}()));
+			std::unique_ptr<Renderer::FontRenderer> fonts;
+		};
+
+	} // namespace
+
+	TEST_F(UiThemedLabelsTest, AThemesTextTransformReachesEachControlsLabelUnlessCodeSetsOne) {
+		const Ref<Button> themed = root.addChild<Button>({.label = "go"});
+		const Ref<Button> plain =
+			root.addChild<Button>({.position = {0.0F, 40.0F}, .style = {.textTransform = Foundation::TextTransform::None}, .label = "go"});
+		const Ref<TabBar>			bar = root.addChild<TabBar>({.position = {0.0F, 80.0F}, .tabs = {{.id = "crew", .label = "Crew"}}});
+		const Ref<SegmentedControl> segmented = root.addChild<SegmentedControl>({.position = {0.0F, 120.0F}, .options = {"A", "B"}});
+		const Ref<Select>			select =
+			root.addChild<Select>({.position = {0.0F, 160.0F}, .options = {{.label = "go", .value = "go"}}, .value = "go"});
+		const std::array<const Component*, 4> themedControls{themed.get(), bar.get(), segmented.get(), select.get()};
+		for (const Component* control : themedControls) {
+			const Text* label = labelOf(*control);
+			ASSERT_NE(label, nullptr) << control->typeName();
+			EXPECT_EQ(label->getStyle().textTransform, Foundation::TextTransform::Uppercase) << control->typeName();
+		}
+		EXPECT_EQ(labelOf(*plain.get())->getStyle().textTransform, Foundation::TextTransform::None);
+
+		// Each button's label measures what it draws, as the tree snapshot reports it.
+		const Style&			   labelStyle = labelOf(*themed.get())->getStyle();
+		const float				   scale = labelStyle.fontSize.value_or(16.0F) / 16.0F;
+		const Renderer::FontFamily family = labelStyle.fontFamily.value_or(Renderer::FontFamily::Default);
+		const float				   capitals = fonts->MeasureText("GO", scale, family).x;
+		const float				   smalls = fonts->MeasureText("go", scale, family).x;
+		ASSERT_GT(capitals, smalls);
+		const nlohmann::json nodes = snapshot();
+		const auto			 measuredLabel = [](const nlohmann::json& button) {
+			  for (const nlohmann::json& child : button["children"]) {
+				  if (child["type"] == "Text") {
+					  return child["text"]["measured"]["w"].get<float>();
+				  }
+			  }
+			  return -1.0F;
+		};
+		EXPECT_FLOAT_EQ(measuredLabel(nodes[0]), capitals);
+		EXPECT_FLOAT_EQ(measuredLabel(nodes[1]), smalls);
+
+		// A theme without it takes it off again.
+		context.setTheme(Theme::load({}).theme);
+		for (const Component* control : themedControls) {
+			EXPECT_FALSE(labelOf(*control)->getStyle().textTransform.has_value()) << control->typeName();
+		}
+		EXPECT_EQ(labelOf(*plain.get())->getStyle().textTransform, Foundation::TextTransform::None);
 	}
 
 } // namespace ui

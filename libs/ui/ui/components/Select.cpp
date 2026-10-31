@@ -48,6 +48,11 @@ namespace ui {
 		show();
 	}
 
+	void Select::setStyle(const Style& declared) {
+		Control::setStyle(declared);
+		show();
+	}
+
 	void Select::setValue(const std::string& newValue) {
 		value = newValue;
 		show();
@@ -82,6 +87,8 @@ namespace ui {
 			.color = chosen ? getStyle().color : std::optional(theme.get(tokens::color::text::secondary)),
 			.fontFamily = getStyle().fontFamily,
 			.fontSize = sizeMetrics(theme, controlSize).fontSize,
+			.letterSpacing = getStyle().letterSpacing,
+			.textTransform = getStyle().textTransform,
 		});
 	}
 

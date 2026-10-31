@@ -11,6 +11,7 @@ namespace {
 
 	struct Loaded {
 		ResolvedTokens			tokens;
+		SalalExtensions			extensions;
 		std::vector<Diagnostic> diagnostics;
 
 		bool hasError(std::string_view path, std::string_view words) const {
@@ -45,7 +46,7 @@ namespace {
 		};
 		Loaded		loaded;
 		const Layer layers[] = {layer};
-		loaded.tokens = resolve(loadLayers(layers, inputs, loaded.diagnostics), {}, loaded.diagnostics);
+		loaded.tokens = resolve(loadLayers(layers, inputs, loaded.diagnostics), {}, loaded.diagnostics, &loaded.extensions);
 		return loaded;
 	}
 
@@ -259,4 +260,37 @@ TEST(DesignTokens, GroupsExtendOtherGroups) {
 
 	const Loaded cycle = load({{"a.tokens.json", R"({ "a": { "$extends": "{b}" }, "b": { "$extends": "{a}" } })"}});
 	EXPECT_NE(cycle.all().find("circles back"), std::string::npos) << cycle.all();
+}
+
+// The format has no type for a text transform, so a style's group carries one in salal's extension,
+// checked with the document's structure: a bad one leaves the file out, as an unknown $type does.
+TEST(DesignTokens, SalalsExtensionGivesAGroupItsTextTransform) {
+	const Loaded loaded = load(
+		{{"a.tokens.json", R"({ "styles": {
+			"button": { "$extensions": { "salal": { "textTransform": "uppercase" } }, "fontSize": { "$type": "dimension", "$value": { "value": 14, "unit": "px" } } },
+			"bigButton": { "$extends": "{styles.button}" },
+			"tab": { "$extensions": { "salal": { "textTransform": "uppercase" } } }
+		} })"},
+		 {"b.tokens.json", R"({ "styles": { "tab": { "$extensions": { "salal": { "textTransform": "none" } } } } })"}}
+	);
+	ASSERT_FALSE(hasErrors(loaded.diagnostics)) << loaded.all();
+	EXPECT_EQ(loaded.extensions.at("styles.button").textTransform, TextTransform::Uppercase);
+	EXPECT_EQ(loaded.extensions.at("styles.bigButton").textTransform, TextTransform::Uppercase); // through $extends
+	EXPECT_EQ(loaded.extensions.at("styles.tab").textTransform, TextTransform::None);			 // the later file's
+	EXPECT_EQ(loaded.extensions.at("styles.tab").file, "b.tokens.json");
+	EXPECT_FALSE(loaded.extensions.contains("styles")); // nothing inherits one down the groups
+
+	const auto rejected = [](const std::string& button) {
+		return load({{"a.tokens.json", R"({ "styles": { "button": )" + button + " } }"}});
+	};
+	const Loaded shouty = rejected(R"({ "$extensions": { "salal": { "textTransform": "shouty" } } })");
+	EXPECT_TRUE(shouty.hasError("styles.button", "$extensions.salal.textTransform \"shouty\" is not none or uppercase")) << shouty.all();
+	EXPECT_TRUE(shouty.extensions.empty()); // its file left out whole
+
+	const Loaded misspelt = rejected(R"({ "$extensions": { "salal": { "textTransfrom": "uppercase" } } })");
+	EXPECT_TRUE(misspelt.hasError("styles.button", "has no property \"textTransfrom\"")) << misspelt.all();
+
+	const Loaded onAToken = rejected(R"({ "fontSize": { "$type": "dimension", "$value": { "value": 14, "unit": "px" },
+		"$extensions": { "salal": { "textTransform": "uppercase" } } } })");
+	EXPECT_TRUE(onAToken.hasError("styles.button.fontSize", "goes on a style's group, not on a token")) << onAToken.all();
 }

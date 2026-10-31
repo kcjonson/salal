@@ -211,6 +211,36 @@ the load; `dimension` in px (rem times a root size); `duration` in ms;
 game's `FontFamily` ids by name; `shadow` and `border` to the renderer's
 styles.
 
+A text transform (CSS's `text-transform`) has no type in the format, so it is
+salal's extension, in the place the format leaves for one: a style's group
+carries it under `salal` in `$extensions`, and a file that sets it stays valid
+for any other tool.
+
+```json
+{
+  "styles": {
+    "button": {
+      "$extensions": { "salal": { "textTransform": "uppercase" } }
+    }
+  }
+}
+```
+
+The values are `Foundation::TextTransform`'s, `none` and `uppercase`, and
+`none` takes off one a lower layer set. It is read on the style's own group,
+after `$extends`, and nothing inherits it down the groups; a later file's
+`$extensions` on a group replaces an earlier one's whole, as the merge does
+with every `$` property. An unknown value, anything else under `salal`, or the
+extension on a token is an error like a wrong `$type`, failing
+`salal_tokens()`'s build step and the load; on a group that isn't a style it
+is a warning. A control that draws its label in its own style (Button and
+DropdownButton, a tab, a segment, Select) passes the transform on with the
+colour, face, size and tracking, and a transform set in code wins over the
+theme's, as any field does. A label drawn in a text style (a list row's, a
+checkbox's, a menu item's) takes that style's. Badge, KeyCap, Divider, Stat's
+and ProgressBar's labels and Dialog's kicker set `uppercase` in code, so a
+theme doesn't change their case.
+
 What ui's tokens define, beyond palette roles (surfaces, text, lines, scrim,
 focus ring), spacing, radii and motion: font roles (display, body, mono), each
 naming a game family; a semantic tone set (default, accent, info, positive,
@@ -572,6 +602,9 @@ with the same names `Style` uses:
   }
 }
 ```
+
+A style's text transform, which the format has no type for, is salal's
+extension on its group (Theme, above).
 
 `salal_tokens(my_game tokens/)` generates a typed constant per style at build
 time, an index into the loaded theme, so code names `ui::styles::pane` and a

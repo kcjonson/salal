@@ -45,6 +45,8 @@ namespace ui {
 		[[nodiscard]] std::string getSelectedLabel() const;
 		[[nodiscard]] bool		  isOpen() const { return menu.get() != nullptr; }
 		[[nodiscard]] Ref<Menu>	  getMenu() const { return menu; }
+		// Restyles the label, so a theme change reaches it.
+		void setStyle(const Style& declared) override;
 
 		[[nodiscard]] const char* typeName() const override { return "Select"; }
 		[[nodiscard]] StyleId	  themeStyle() const override;
