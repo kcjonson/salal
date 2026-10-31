@@ -217,6 +217,8 @@ namespace ui {
 		// The style it draws with: the one it was given, resolved against its scene's theme once mounted.
 		[[nodiscard]] const Style& getStyle() const { return style; }
 		virtual void			   setStyle(const Style& value);
+		// The style as given, before the theme: what a component that tints itself leaves alone.
+		[[nodiscard]] const Style& getDeclaredStyle() const { return declaredStyle; }
 
 		[[nodiscard]] std::optional<int> getZIndex() const { return zIndex; }
 		void							 setZIndex(std::optional<int> value);
