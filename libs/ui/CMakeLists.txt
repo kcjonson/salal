@@ -43,12 +43,14 @@ endif()
 add_library(salal_ui STATIC
     ui/Component.cpp
     ui/Context.cpp
+    ui/Focus.cpp
     ui/Registry.cpp
     ui/Style.cpp
     ui/Transform.cpp
     ui/debug/LayoutLint.cpp
     ui/debug/TreeSnapshot.cpp
     ui/detail/Dispatcher.cpp
+    ui/detail/FocusManager.cpp
     ui/detail/LayoutEngine.cpp
     ui/shapes/Circle.cpp
     ui/shapes/Line.cpp

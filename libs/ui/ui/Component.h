@@ -29,6 +29,7 @@
 //       ui::Ref<ui::Rectangle> fill;
 //   };
 
+#include "ui/Focus.h"
 #include "ui/Input.h"
 #include "ui/Layout.h"
 #include "ui/Registry.h"
@@ -40,6 +41,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <algorithm>
 #include <concepts>
 #include <cstdint>
 #include <functional>
@@ -70,9 +72,16 @@
 //   zIndex     its place among everything in its nearest stacking context; unset takes its parent's
 //   isolation  true makes it a stacking context, whose subtree paints as one at its zIndex
 //   pointerEvents  what the pointer can hit (ui/Input.h); unset, the type's default
+//   focusable  it can take a player's focus (ui/Focus.h)
+//   tabIndex   above 0 comes first in Tab order, ascending; below 0 is focusable by code and the
+//              pointer only; unset is 0, tree order
+//   focusGroup makes it one Tab stop whose arrows move among its focusable members
 //   cursor     the window's cursor over it; unset, its parent's
 //   onClick, onPointerDown/Up/Move/Enter/Leave, onWheel  pointer callbacks, before the type's own
 //              handling; a click lands on the nearest common ancestor of the press and the release
+//   onKeyDown, onKeyUp  keys, characters and the navigation actions while it or a descendant has a
+//              player's focus; onKeyDown hears Down, Char, Activate, Cancel and Navigate
+//   onFocus, onBlur  a player's focus arriving and leaving; neither bubbles
 //   onLayout   called after a layout pass that moved or resized it
 #define UI_COMMON_ARGS                                                                                                                     \
 	::std::string							   id;                                                                                         \
@@ -90,6 +99,9 @@
 	::std::optional<int>					   zIndex;                                                                                     \
 	bool									   isolation = false;                                                                          \
 	::std::optional<::ui::PointerEvents>	   pointerEvents;                                                                              \
+	bool									   focusable = false;                                                                          \
+	::std::optional<int>					   tabIndex;                                                                                   \
+	::std::optional<::ui::FocusGroup>		   focusGroup;                                                                                 \
 	::std::optional<::ui::Cursor>			   cursor;                                                                                     \
 	::std::function<void(::ui::PointerEvent&)> onClick;                                                                                    \
 	::std::function<void(::ui::PointerEvent&)> onPointerDown;                                                                              \
@@ -98,6 +110,10 @@
 	::std::function<void(::ui::PointerEvent&)> onPointerEnter;                                                                             \
 	::std::function<void(::ui::PointerEvent&)> onPointerLeave;                                                                             \
 	::std::function<void(::ui::PointerEvent&)> onWheel;                                                                                    \
+	::std::function<void(::ui::KeyEvent&)>	   onKeyDown;                                                                                  \
+	::std::function<void(::ui::KeyEvent&)>	   onKeyUp;                                                                                    \
+	::std::function<void(::ui::Component&)>	   onFocus;                                                                                    \
+	::std::function<void(::ui::Component&)>	   onBlur;                                                                                     \
 	::std::function<void(::ui::Component&)>	   onLayout;
 
 namespace ui {
@@ -107,6 +123,7 @@ namespace ui {
 
 	namespace detail {
 		class Dispatcher;
+		class FocusManager;
 		class LayoutEngine;
 	} // namespace detail
 
@@ -249,6 +266,39 @@ namespace ui {
 		// handlesPointer, which the lint's unreachable-interactive rule reads).
 		[[nodiscard]] virtual bool handlesPointer() const;
 
+		// --- Focus ---
+
+		[[nodiscard]] bool							   isFocusable() const { return focusable; }
+		void										   setFocusable(bool value) { focusable = value; }
+		[[nodiscard]] std::optional<int>			   getTabIndex() const { return tabIndex; }
+		void										   setTabIndex(std::optional<int> value) { tabIndex = value; }
+		[[nodiscard]] const std::optional<FocusGroup>& getFocusGroup() const { return focusGroup; }
+		void										   setFocusGroup(std::optional<FocusGroup> value) { focusGroup = value; }
+		// Where a direction goes from here, ahead of the nearest-on-screen search (R9.26).
+		void setNeighbour(Direction direction, Ref<Component> neighbour);
+		// Takes the player's focus as code does, a ring shown unless the pointer drove input last; false
+		// when it can't take focus (canReceiveFocus, or outside the player's scope).
+		bool focus(int player = 0);
+		// Focusable, shown and enabled, under nothing hidden or disabled, and still in the tree.
+		[[nodiscard]] bool canReceiveFocus() const;
+		// Some player's focus is on it.
+		[[nodiscard]] bool isFocused() const { return focusedBy != 0; }
+		[[nodiscard]] bool isFocusedBy(int player) const { return ((focusedBy >> player) & 1U) != 0; }
+		// A player's focus is on it with a ring: that player got there by keys, a pad or code since
+		// they last used the pointer (CSS :focus-visible).
+		[[nodiscard]] bool isFocusVisible() const { return focusVisibleBy != 0; }
+		void			   setOnKeyDown(std::function<void(KeyEvent&)> callback);
+		void			   setOnKeyUp(std::function<void(KeyEvent&)> callback);
+		void			   setOnFocus(std::function<void(Component&)> callback);
+		void			   setOnBlur(std::function<void(Component&)> callback);
+
+		// Children kept in step with `items` by key (R8.27): a key still there keeps its component, so
+		// its focus, hover and state, and is passed to `update`; a new key is built by `create`, which
+		// adds it with addChild and returns its Ref; a key gone is removed; the children end in the
+		// items' order. It owns the whole child list, so children it didn't make go too.
+		template <typename Item, typename KeyOf, typename Create, typename Update>
+		void reconcileChildren(const std::vector<Item>& items, KeyOf keyOf, Create create, Update update);
+
 		// --- Scrolling, for Overflow::Scroll ---
 
 		[[nodiscard]] Foundation::Vec2 getScroll() const { return scroll; }
@@ -284,6 +334,8 @@ namespace ui {
 		void contentChanged();
 		// A pointer event the dispatcher delivers to it, after its callback; consume() stops the bubble.
 		virtual void handlePointer(PointerEvent& /*event*/) {}
+		// A key, character or action while it or a descendant has focus, after its callback.
+		virtual void handleKey(KeyEvent& /*event*/) {}
 		// Whether a point in its box hits it: the box, edges half-open (R8.12). A non-rectangular
 		// shape narrows it.
 		[[nodiscard]] virtual bool containsPoint(Foundation::Vec2 local) const;
@@ -300,6 +352,7 @@ namespace ui {
 	  private:
 		friend class Context;
 		friend class detail::Dispatcher;
+		friend class detail::FocusManager;
 		friend class detail::LayoutEngine;
 
 		// A measure the layout pass took, kept while nothing under the component changes.
@@ -321,9 +374,15 @@ namespace ui {
 			std::function<void(PointerEvent&)> onPointerEnter;
 			std::function<void(PointerEvent&)> onPointerLeave;
 			std::function<void(PointerEvent&)> onWheel;
+			std::function<void(KeyEvent&)>	   onKeyDown;
+			std::function<void(KeyEvent&)>	   onKeyUp;
+			std::function<void(Component&)>	   onFocus;
+			std::function<void(Component&)>	   onBlur;
 			std::function<void(Component&)>	   onLayout;
 		};
-		Handlers& handlersMade();
+		Handlers&				 handlersMade();
+		[[nodiscard]] Component* keyedChild(const std::string& childKey) const;
+		void					 finishReconcile(const std::vector<ComponentId>& kept);
 		// Its callback for an event type, if it has one.
 		[[nodiscard]] const std::function<void(PointerEvent&)>* callbackFor(PointerEvent::Type type) const;
 
@@ -355,6 +414,9 @@ namespace ui {
 				.zIndex = args.zIndex,
 				.isolation = args.isolation,
 				.pointerEvents = args.pointerEvents,
+				.focusable = args.focusable,
+				.tabIndex = args.tabIndex,
+				.focusGroup = args.focusGroup,
 				.cursor = args.cursor,
 				.onClick = args.onClick,
 				.onPointerDown = args.onPointerDown,
@@ -363,6 +425,10 @@ namespace ui {
 				.onPointerEnter = args.onPointerEnter,
 				.onPointerLeave = args.onPointerLeave,
 				.onWheel = args.onWheel,
+				.onKeyDown = args.onKeyDown,
+				.onKeyUp = args.onKeyUp,
+				.onFocus = args.onFocus,
+				.onBlur = args.onBlur,
 				.onLayout = args.onLayout,
 			};
 		}
@@ -378,8 +444,13 @@ namespace ui {
 		Overflow					 overflow = Overflow::Visible;
 		std::optional<int>			 zIndex;
 		std::optional<PointerEvents> pointerEvents;
+		std::optional<int>			 tabIndex;
+		std::optional<FocusGroup>	 focusGroup;
 		std::optional<Cursor>		 cursor;
-		std::unique_ptr<Handlers>	 handlers; // made when the first callback is set
+		std::unique_ptr<Handlers>	 handlers;		// made when the first callback is set
+		ComponentId					 neighbours[4]; // by Direction
+		ComponentId					 activeChild;	// a focus group's member focused last
+		std::string					 reconcileKey;	// its key among its parent's reconciled children
 		ComponentId					 selfId;
 		ComponentId					 parentId;
 		std::vector<ComponentId>	 children;
@@ -404,6 +475,9 @@ namespace ui {
 		bool							hitBlocked = false; // an ancestor's pointerEvents keeps the pointer off it
 		bool							hovered = false;
 		bool							pressed = false;
+		bool							focusable = false;
+		std::uint8_t					focusedBy = 0; // a bit for each player whose focus is on it
+		std::uint8_t					focusVisibleBy = 0;
 	};
 
 	// --- Templates ---
@@ -427,6 +501,27 @@ namespace ui {
 			return {};
 		}
 		return component->template addChild<C>(args);
+	}
+
+	template <typename Item, typename KeyOf, typename Create, typename Update>
+	void Component::reconcileChildren(const std::vector<Item>& items, KeyOf keyOf, Create create, Update update) {
+		std::vector<ComponentId> kept;
+		kept.reserve(items.size());
+		for (const Item& item : items) {
+			std::string itemKey = keyOf(item);
+			Component*	existing = keyedChild(itemKey);
+			if (existing != nullptr && std::ranges::find(kept, existing->selfId) == kept.end()) {
+				update(*existing, item);
+				kept.push_back(existing->selfId);
+				continue;
+			}
+			const Ref<Component> made = create(item);
+			if (Component* child = made.get(); child != nullptr && child->parentId == selfId) {
+				child->reconcileKey = std::move(itemKey);
+				kept.push_back(child->selfId);
+			}
+		}
+		finishReconcile(kept);
 	}
 
 	template <typename T>
