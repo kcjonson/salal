@@ -194,6 +194,9 @@ namespace app {
 		if (!devServerState.start(config.devServer)) {
 			return false;
 		}
+		// Registered first, so a game's own providers, registered after, answer instead.
+		uiTreeProvider = devServerState.stateProvider("ui.tree", [this] { return sceneStack.uiTreeJson(coordinates.viewport()); });
+		uiLintProvider = devServerState.stateProvider("ui.lint", [this] { return sceneStack.uiLintJson(coordinates.viewport()); });
 
 		LOG_INFO(
 			Engine,
@@ -485,13 +488,16 @@ namespace app {
 		if (Scene* top = sceneStack.top(); top != nullptr) {
 			detail::guard(top->name(), "update", [&] { top->update(frame); });
 		}
+		sceneStack.updateTopUi(frameDelta);
 		for (const std::unique_ptr<Overlay>& overlay : overlays) {
 			detail::guard("Overlay", "update", [&] { overlay->update(frame); });
 		}
 	}
 
-	// The stack, then the overlays, each overlay its own sort domain over everything before it.
+	// The stack, each scene's ui over it, then the overlays, each overlay its own sort domain over
+	// everything before it. The ui lays out first, paused or not, so a resize while paused draws right.
 	void App::render() {
+		sceneStack.layoutUi();
 		Renderer::Primitives::beginFrame();
 		if (fontRenderer != nullptr) {
 			fontRenderer->updateFrame();
