@@ -112,7 +112,7 @@ ported bit for bit (decision A).
 seven PRs [docs/app-api.md](docs/app-api.md) sequences. Salal PRs 1 to 6 are
 `v0.10.0` to `v0.15.0`: the input types, the accumulator and `ActionMap` in
 `foundation/input/`, then `app`'s clock, GLFW and headless platforms, frame,
-scene stack, overlays and context object, then the GLFW device layer with
+scene stack, debug layers and context object, then the GLFW device layer with
 gamepads, player slots, key names, capture, axis edges and the clipboard, then
 the dev server behind its compile flags, then the settings file and saves, then
 the sandbox harness, a scene picker drawn with `Primitives` over worldsim's

@@ -85,9 +85,9 @@ namespace app::testing {
 			CountedRect& operator=(CountedRect&&) = delete;
 		};
 
-		class RectOverlay final : public Overlay {
+		class RectDebugLayer final : public DebugLayer {
 		  public:
-			RectOverlay(float rectX, int rectZ)
+			RectDebugLayer(float rectX, int rectZ)
 				: x(rectX),
 				  z(rectZ) {}
 			void render() override { rectAt(x, z); }
@@ -276,9 +276,9 @@ namespace app::testing {
 		EXPECT_EQ(count("B.fixedUpdate"), 1);
 	}
 
-	TEST_F(AppTest, WhilePausedDispatchReachesOnlyOverlays) {
+	TEST_F(AppTest, WhilePausedDispatchReachesOnlyDebugLayers) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		take();
@@ -581,10 +581,10 @@ namespace app::testing {
 		EXPECT_TRUE(keyIn(top<SceneA>().ticks[1], Key::A).pressed());
 	}
 
-	TEST_F(AppTest, EventsGoToOverlaysLastAddedFirstThenTheTopScene) {
+	TEST_F(AppTest, EventsGoToDebugLayersLastAddedFirstThenTheTopScene) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("O2"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O1"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O2"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		take();
@@ -594,10 +594,10 @@ namespace app::testing {
 		EXPECT_EQ(head(3), expected);
 	}
 
-	TEST_F(AppTest, AConsumingOverlayKeepsTheEventFromWhatIsUnderIt) {
+	TEST_F(AppTest, AConsumingDebugLayerKeepsTheEventFromWhatIsUnderIt) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("Under"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("Menu", true));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("Under"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("Menu", true));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		platform->push(keyDown(Key::A));
@@ -609,7 +609,7 @@ namespace app::testing {
 
 	TEST_F(AppTest, SetDispatchReplacesTheDefaultEvenWhilePaused) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 
@@ -657,9 +657,9 @@ namespace app::testing {
 
 	// Step 2's onResize comes before the dev server's step 3, whose exit alone ends a frame early.
 	TEST_F(AppTest, RequestExitFromAnOnResizeFinishesTheFrame) {
-		class ExitingOverlay final : public Overlay {
+		class ExitingDebugLayer final : public DebugLayer {
 		  public:
-			explicit ExitingOverlay(App& owner)
+			explicit ExitingDebugLayer(App& owner)
 				: running(owner) {}
 			void render() override {}
 			void onResize(const Renderer::Viewport& /*viewport*/) override { running.requestExit(); }
@@ -668,7 +668,7 @@ namespace app::testing {
 			App& running;
 		};
 		start();
-		app->addOverlay(std::make_unique<ExitingOverlay>(*app));
+		app->addDebugLayer(std::make_unique<ExitingDebugLayer>(*app));
 		app->scenes().push<SceneA>();
 		frame();
 		take();
@@ -790,10 +790,10 @@ namespace app::testing {
 		EXPECT_EQ(count("A.render"), 3);
 	}
 
-	TEST_F(AppTest, ShutdownExitsScenesTopDownThenOverlaysLastAddedFirst) {
+	TEST_F(AppTest, ShutdownExitsScenesTopDownThenDebugLayersLastAddedFirst) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("O2"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O1"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O2"));
 		app->scenes().push<SceneA>();
 		app->scenes().push<SceneB>();
 		frame(0.0);
@@ -833,10 +833,10 @@ namespace app::testing {
 
 	// --- Resize ---
 
-	TEST_F(AppTest, ResizeReachesOverlaysThenEveryStackedSceneOnce) {
+	TEST_F(AppTest, ResizeReachesDebugLayersThenEveryStackedSceneOnce) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("O2"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O1"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O2"));
 		app->scenes().push<SceneA>();
 		app->scenes().push<SceneB>();
 		frame(0.0);
@@ -864,7 +864,7 @@ namespace app::testing {
 
 	TEST_F(AppTest, AMinimizedWindowsEmptyFramebufferResizesNothing) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		take();
@@ -882,13 +882,13 @@ namespace app::testing {
 		EXPECT_EQ(count("A.onResize 640x480"), 1);
 	}
 
-	// --- Overlays ---
+	// --- Debug layers ---
 
-	TEST_F(AppTest, AnOverlayAddedDuringAFrameJoinsOnceItIsOver) {
+	TEST_F(AppTest, ADebugLayerAddedDuringAFrameJoinsOnceItIsOver) {
 		start();
 		hooks()["A"].update = [](App& running, const FrameContext& /*frame*/) {
 			if (count("A.update") == 1) {
-				running.addOverlay(std::make_unique<RecordingOverlay>("Late"));
+				running.addDebugLayer(std::make_unique<RecordingDebugLayer>("Late"));
 			}
 		};
 		app->scenes().push<SceneA>();
@@ -899,17 +899,17 @@ namespace app::testing {
 		EXPECT_EQ(count("Late.render"), 1);
 	}
 
-	TEST_F(AppTest, OverlaysUpdateAfterTheTopSceneAndRenderAboveTheStack) {
+	TEST_F(AppTest, DebugLayersUpdateAfterTheTopSceneAndRenderAboveTheStack) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("O2"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O1"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O2"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		const std::vector<std::string> expected{"A.update", "O1.update", "O2.update", "A.render 0", "O1.render", "O2.render"};
 		EXPECT_EQ(tail(6), expected);
 	}
 
-	TEST_F(AppTest, EachStackedSceneAndEachOverlayDrawsOverWhatCameBeforeWhateverItsZ) {
+	TEST_F(AppTest, EachStackedSceneAndEachDebugLayerDrawsOverWhatCameBeforeWhateverItsZ) {
 		start();
 		hooks()["A"].render = [](App& /*running*/) {
 			rectAt(0.0F, 5);
@@ -917,15 +917,15 @@ namespace app::testing {
 		hooks()["Pause"].render = [](App& /*running*/) {
 			rectAt(20.0F, 0);
 		};
-		app->addOverlay(std::make_unique<RectOverlay>(40.0F, -5));
-		app->addOverlay(std::make_unique<RectOverlay>(60.0F, -10));
+		app->addDebugLayer(std::make_unique<RectDebugLayer>(40.0F, -5));
+		app->addDebugLayer(std::make_unique<RectDebugLayer>(60.0F, -10));
 		app->scenes().push<SceneA>();
 		app->scenes().push<PauseScene>();
 		frame(0.0);
 		clearDraws();
 		frame(0.0);
 
-		// The covered scene's z 5, the pause scene's z 0, then each overlay's lower z still over them.
+		// The covered scene's z 5, the pause scene's z 0, then each debug layer's lower z still over them.
 		EXPECT_EQ(drawnX(), (std::vector<float>{0.0F, 20.0F, 40.0F, 60.0F}));
 	}
 
@@ -946,7 +946,7 @@ namespace app::testing {
 		hooks()["Pause"].render = [](App& /*running*/) {
 			rectAt(20.0F, 1000);
 		};
-		app->addOverlay(std::make_unique<RectOverlay>(40.0F, -5));
+		app->addDebugLayer(std::make_unique<RectDebugLayer>(40.0F, -5));
 		app->scenes().push<SceneA>();
 		app->scenes().push<PauseScene>();
 		frame(0.0);

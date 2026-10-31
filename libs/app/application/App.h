@@ -1,6 +1,6 @@
 #pragma once
 
-// The application: the window and its frame, input, the scene stack with the overlays above it,
+// The application: the window and its frame, input, the scene stack with the debug layers above it,
 // the game's context object, the settings file and saves. A game's main makes the platform and the
 // App, adds its scenes and pushes the first, then run()s, shutdown()s, tears its own resources down
 // and destroys the App; a test drives tick() on a HeadlessPlatform, advancing its ManualClock.
@@ -14,7 +14,7 @@
 #include "input/Input.h"
 #include "platform/Platform.h"
 #include "saves/SaveStore.h"
-#include "scene/Overlay.h"
+#include "scene/DebugLayer.h"
 #include "scene/SceneStack.h"
 #include "settings/Settings.h"
 
@@ -59,14 +59,14 @@ namespace app {
 		// HeadlessPlatform's) has nothing to pace against, so run() doesn't wait on it; a minimized
 		// window sleeps a little each frame instead. Refused, logged, from inside a frame.
 		void run();
-		// The scenes exit top down, then the overlays, last added first, and all are destroyed; the
+		// The scenes exit top down, then the debug layers, last added first, and all are destroyed; the
 		// renderer and the window stay up for the game's teardown, until ~App. Inside a frame it asks
 		// for exit instead, logged, since scenes are mid-call.
 		void shutdown();
 		void requestExit();
 
-		// Fixed ticks and update stop for scenes and overlays, and scene changes wait; dispatch goes to
-		// overlays only, and render goes on. A pause from inside a fixed tick ends that frame's ticks.
+		// Fixed ticks and update stop for scenes and debug layers, and scene changes wait; dispatch goes to
+		// debug layers only, and render goes on. A pause from inside a fixed tick ends that frame's ticks.
 		void pause();
 		// Drops steps not run yet. Inside a frame, takes effect once the frame is over, so that frame stays
 		// paused and the press that resumed doesn't reach a tick.
@@ -78,7 +78,7 @@ namespace app {
 		// nothing, logged, while not paused.
 		void step(int ticks);
 
-		// Replaces step 5's default dispatch (each event to the overlays, last added first, then unless
+		// Replaces step 5's default dispatch (each event to the debug layers, last added first, then unless
 		// paused the top scene's ui, then the top scene). Runs every frame, paused or not; an empty
 		// function restores the default.
 		void setDispatch(std::function<void(App&)> dispatch);
@@ -97,7 +97,7 @@ namespace app {
 		[[nodiscard]] bool reducedMotion() const { return motionReduced; }
 		// Fullscreen on the monitor at `monitor` (0 the primary), or windowed. Where the window resizes at
 		// once, the viewport, the coordinate system and Primitives take the new size at once too, as GL's
-		// viewport does, so the frame it's called in draws at that size; scenes and overlays hear of it
+		// viewport does, so the frame it's called in draws at that size; scenes and debug layers hear of it
 		// through onResize after the next frame's poll, as of any resize.
 		void setFullscreen(std::optional<int> monitor);
 		// The monitor the window is fullscreen on now, which video.fullscreenMonitor needn't be (it keeps
@@ -136,7 +136,7 @@ namespace app {
 
 		// Persistent across scene changes, above the stack. One added during a frame joins once the frame
 		// is over.
-		void addOverlay(std::unique_ptr<Overlay> overlay);
+		void addDebugLayer(std::unique_ptr<DebugLayer> layer);
 
 	  private:
 		friend class DevServer; // at step 3, whether exit has been asked for
@@ -195,8 +195,8 @@ namespace app {
 		Input										inputState{*platform};
 		Clipboard									clipboardState{*platform};
 		SceneStack									sceneStack{*this};
-		std::vector<std::unique_ptr<Overlay>>		overlays;
-		std::vector<std::unique_ptr<Overlay>>		joiningOverlays;
+		std::vector<std::unique_ptr<DebugLayer>>	debugLayers;
+		std::vector<std::unique_ptr<DebugLayer>>	joiningDebugLayers;
 		std::function<void(App&)>					dispatch;
 		DevServer									devServerState;
 		DevServer::Registration						uiTreeProvider;
