@@ -32,6 +32,8 @@ namespace ui {
 		void				setValue(float fraction);
 		void				setTone(Tone toneValue);
 		void				setValueText(std::string text);
+		// A bar mounted with neither a label nor value text, and not inline, has no row to show one in.
+		void setLabel(std::string text);
 		// Colours the fill again, so a theme change reaches the tone.
 		void setStyle(const Style& declared) override;
 
@@ -50,6 +52,7 @@ namespace ui {
 		ControlSize	   controlSize;
 		bool		   inlineLabel;
 		Ref<Rectangle> bar;
+		Ref<Text>	   shownLabel;
 		Ref<Text>	   shownValue;
 	};
 
