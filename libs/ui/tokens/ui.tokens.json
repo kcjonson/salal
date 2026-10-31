@@ -260,7 +260,7 @@
     }
   },
   "state": {
-    "$description": "State layers, applied in this order over a component's base: hover, pressed, active (open or selected), then disabled's opacity; the focus ring is last.",
+    "$description": "State layers, applied in this order over a component's base: hover, pressed, active (open or selected); the focus ring is last. A disabled control draws whole, label and border too, at disabled's opacity.",
     "hover": {
       "wash": { "$type": "color", "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.06, "hex": "#ffffff"} }
     },

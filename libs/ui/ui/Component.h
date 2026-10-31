@@ -244,6 +244,8 @@ namespace ui {
 		// A factor on its opacity apart from its style, which an entrance tweens (ui/components/FadeIn.h).
 		[[nodiscard]] float getFade() const { return fade; }
 		void				setFade(float value) { fade = value; }
+		// A factor its state puts on its opacity, as its fade does: a disabled control's (Control).
+		[[nodiscard]] virtual float stateOpacity() const { return 1.0F; }
 
 		[[nodiscard]] std::optional<int> getZIndex() const { return zIndex; }
 		void							 setZIndex(std::optional<int> value);
@@ -387,7 +389,8 @@ namespace ui {
 		// Its pointerEvents when unset: Passthrough, a container's; a leaf or a widget says Auto.
 		[[nodiscard]] virtual PointerEvents defaultPointerEvents() const { return PointerEvents::Passthrough; }
 
-		// Its effective opacity, its own style's times its fade times its ancestors'. Valid in render().
+		// Its effective opacity, its own style's times its fade and state opacity times its ancestors'.
+		// Valid in render().
 		[[nodiscard]] float opacity() const { return effectiveOpacity; }
 
 		Foundation::Vec2 position{0.0F, 0.0F};

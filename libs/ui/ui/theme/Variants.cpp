@@ -76,9 +76,6 @@ namespace ui {
 		if (state.active) {
 			color = over(color, theme.get(tokens::state::active::wash));
 		}
-		if (state.disabled) {
-			color.a *= theme.get(tokens::state::disabled::opacity);
-		}
 		return color;
 	}
 

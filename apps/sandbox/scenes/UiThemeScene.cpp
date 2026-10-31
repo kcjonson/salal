@@ -137,18 +137,21 @@ namespace {
 			}
 
 			const Foundation::Color											  control = theme.get(ui::tokens::color::surface::control);
-			const std::array<std::pair<ui::InteractionState, const char*>, 5> states{{
+			const std::array<std::pair<ui::InteractionState, const char*>, 4> states{{
 				{{}, "base"},
 				{{.hovered = true}, "hover"},
 				{{.hovered = true, .pressed = true}, "pressed"},
 				{{.active = true}, "active"},
-				{{.disabled = true}, "disabled"},
 			}};
 			for (std::size_t i = 0; i < states.size(); ++i) {
 				swatch(
 					{520.0F + static_cast<float>(i) * 80.0F, 0.0F}, ui::applyStateLayers(theme, control, states[i].first), states[i].second
 				);
 			}
+			// A disabled control fades whole; here, its fill.
+			Foundation::Color disabled = control;
+			disabled.a *= theme.get(ui::tokens::state::disabled::opacity);
+			swatch({520.0F + static_cast<float>(states.size()) * 80.0F, 0.0F}, disabled, "disabled");
 
 			// The focus ring, drawn outside a control's box as its own outline, with the control inside it.
 			const ui::FocusRing ring = ui::focusRing(theme);

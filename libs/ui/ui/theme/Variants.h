@@ -32,11 +32,11 @@ namespace ui {
 		bool hovered = false;
 		bool pressed = false;
 		bool active = false; // open or selected
-		bool disabled = false;
 	};
 
 	// `base` under its state layers in R11.12's order: the hover, pressed and active washes
-	// composited over it, then the disabled opacity. The focus ring comes last, drawn apart.
+	// composited over it. The focus ring comes last, drawn apart, and a disabled control fades whole
+	// (Control::stateOpacity) rather than in its fill.
 	Foundation::Color applyStateLayers(const Theme& theme, Foundation::Color base, const InteractionState& state);
 
 	struct FocusRing {

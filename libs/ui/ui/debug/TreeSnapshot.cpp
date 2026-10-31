@@ -61,8 +61,9 @@ namespace ui {
 		// The common fields, then the type's own; opacity is the effective value the walk computes, as
 		// of the last frame drawn, so it reads from the parent's.
 		nlohmann::json node(const Context& context, const Component& component, float parentOpacity) {
-			const float opacity =
-				component.isShown() ? parentOpacity * component.getStyle().opacity.value_or(1.0F) * component.getFade() : 0.0F;
+			const float opacity = component.isShown() ? parentOpacity * component.getStyle().opacity.value_or(1.0F) * component.getFade() *
+															component.stateOpacity()
+													  : 0.0F;
 			nlohmann::json out;
 			out["id"] = component.getId().empty() ? nlohmann::json(nullptr) : nlohmann::json(component.getId());
 			out["type"] = component.typeName();
