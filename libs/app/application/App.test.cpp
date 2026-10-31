@@ -7,6 +7,7 @@
 
 #include <backend/NullBackend.h>
 #include <primitives/Primitives.h>
+#include <ui/shapes/Rectangle.h>
 #include <utils/Log.h>
 #include <utils/ResourcePath.h>
 
@@ -40,15 +41,53 @@ namespace app::testing {
 		using SceneB = Recording<kB>;
 		using PauseScene = Recording<kPause, NoArgs, NoResult, false>;
 
-		void rectAt(float x, int zIndex) {
-			Renderer::Primitives::drawRect(
-				{.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::white()}, .zIndex = zIndex}
-			);
+		void rectAt(float x, int32_t key) {
+			Renderer::Primitives::drawRect({.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::white()}, .key = key});
 		}
 
-		class RectOverlay final : public Overlay {
+		// Each rect's x in the last frame's one draw, in the order the batch paints them: the
+		// uploaded quads, each by its top-left corner.
+		std::vector<float> drawnX() {
+			auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
+			EXPECT_NE(gpu, nullptr);
+			EXPECT_EQ(gpu->draws().size(), 1U);
+			const Renderer::backend::GeometryDesc* geometry = gpu->geometry(gpu->draws().at(0).call.geometry);
+			EXPECT_NE(geometry, nullptr);
+			const std::span<const uint8_t>		 bytes = gpu->bufferContents(geometry->vertices);
+			std::vector<Renderer::BatchInstance> quads(bytes.size() / sizeof(Renderer::BatchInstance));
+			std::memcpy(quads.data(), bytes.data(), quads.size() * sizeof(Renderer::BatchInstance));
+			std::vector<float> drawn;
+			for (const Renderer::BatchInstance& quad : quads) {
+				drawn.push_back(quad.corners[0].x);
+			}
+			return drawn;
+		}
+
+		void clearDraws() {
+			auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
+			ASSERT_NE(gpu, nullptr);
+			gpu->clearRecord();
+		}
+
+		// Counts the ui rectangles alive, so a test sees the scene's ui go.
+		int& liveUiRects() {
+			static int count = 0;
+			return count;
+		}
+
+		class CountedRect final : public ui::Rectangle {
 		  public:
-			RectOverlay(float rectX, int rectZ)
+			CountedRect() { ++liveUiRects(); }
+			~CountedRect() override { --liveUiRects(); }
+			CountedRect(const CountedRect&) = delete;
+			CountedRect& operator=(const CountedRect&) = delete;
+			CountedRect(CountedRect&&) = delete;
+			CountedRect& operator=(CountedRect&&) = delete;
+		};
+
+		class RectDebugLayer final : public DebugLayer {
+		  public:
+			RectDebugLayer(float rectX, int rectZ)
 				: x(rectX),
 				  z(rectZ) {}
 			void render() override { rectAt(x, z); }
@@ -238,9 +277,9 @@ namespace app::testing {
 		EXPECT_EQ(count("B.fixedUpdate"), 1);
 	}
 
-	TEST_F(AppTest, WhilePausedDispatchReachesOnlyOverlays) {
+	TEST_F(AppTest, WhilePausedDispatchReachesOnlyDebugLayers) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		take();
@@ -543,10 +582,10 @@ namespace app::testing {
 		EXPECT_TRUE(keyIn(top<SceneA>().ticks[1], Key::A).pressed());
 	}
 
-	TEST_F(AppTest, EventsGoToOverlaysLastAddedFirstThenTheTopScene) {
+	TEST_F(AppTest, EventsGoToDebugLayersLastAddedFirstThenTheTopScene) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("O2"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O1"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O2"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		take();
@@ -556,10 +595,10 @@ namespace app::testing {
 		EXPECT_EQ(head(3), expected);
 	}
 
-	TEST_F(AppTest, AConsumingOverlayKeepsTheEventFromWhatIsUnderIt) {
+	TEST_F(AppTest, AConsumingDebugLayerKeepsTheEventFromWhatIsUnderIt) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("Under"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("Menu", true));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("Under"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("Menu", true));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		platform->push(keyDown(Key::A));
@@ -571,7 +610,7 @@ namespace app::testing {
 
 	TEST_F(AppTest, SetDispatchReplacesTheDefaultEvenWhilePaused) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 
@@ -619,9 +658,9 @@ namespace app::testing {
 
 	// Step 2's onResize comes before the dev server's step 3, whose exit alone ends a frame early.
 	TEST_F(AppTest, RequestExitFromAnOnResizeFinishesTheFrame) {
-		class ExitingOverlay final : public Overlay {
+		class ExitingDebugLayer final : public DebugLayer {
 		  public:
-			explicit ExitingOverlay(App& owner)
+			explicit ExitingDebugLayer(App& owner)
 				: running(owner) {}
 			void render() override {}
 			void onResize(const Renderer::Viewport& /*viewport*/) override { running.requestExit(); }
@@ -630,7 +669,7 @@ namespace app::testing {
 			App& running;
 		};
 		start();
-		app->addOverlay(std::make_unique<ExitingOverlay>(*app));
+		app->addDebugLayer(std::make_unique<ExitingDebugLayer>(*app));
 		app->scenes().push<SceneA>();
 		frame();
 		take();
@@ -752,10 +791,10 @@ namespace app::testing {
 		EXPECT_EQ(count("A.render"), 3);
 	}
 
-	TEST_F(AppTest, ShutdownExitsScenesTopDownThenOverlaysLastAddedFirst) {
+	TEST_F(AppTest, ShutdownExitsScenesTopDownThenDebugLayersLastAddedFirst) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("O2"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O1"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O2"));
 		app->scenes().push<SceneA>();
 		app->scenes().push<SceneB>();
 		frame(0.0);
@@ -795,10 +834,10 @@ namespace app::testing {
 
 	// --- Resize ---
 
-	TEST_F(AppTest, ResizeReachesOverlaysThenEveryStackedSceneOnce) {
+	TEST_F(AppTest, ResizeReachesDebugLayersThenEveryStackedSceneOnce) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("O2"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O1"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O2"));
 		app->scenes().push<SceneA>();
 		app->scenes().push<SceneB>();
 		frame(0.0);
@@ -826,7 +865,7 @@ namespace app::testing {
 
 	TEST_F(AppTest, AMinimizedWindowsEmptyFramebufferResizesNothing) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		take();
@@ -844,13 +883,13 @@ namespace app::testing {
 		EXPECT_EQ(count("A.onResize 640x480"), 1);
 	}
 
-	// --- Overlays ---
+	// --- Debug layers ---
 
-	TEST_F(AppTest, AnOverlayAddedDuringAFrameJoinsOnceItIsOver) {
+	TEST_F(AppTest, ADebugLayerAddedDuringAFrameJoinsOnceItIsOver) {
 		start();
 		hooks()["A"].update = [](App& running, const FrameContext& /*frame*/) {
 			if (count("A.update") == 1) {
-				running.addOverlay(std::make_unique<RecordingOverlay>("Late"));
+				running.addDebugLayer(std::make_unique<RecordingDebugLayer>("Late"));
 			}
 		};
 		app->scenes().push<SceneA>();
@@ -861,17 +900,17 @@ namespace app::testing {
 		EXPECT_EQ(count("Late.render"), 1);
 	}
 
-	TEST_F(AppTest, OverlaysUpdateAfterTheTopSceneAndRenderAboveTheStack) {
+	TEST_F(AppTest, DebugLayersUpdateAfterTheTopSceneAndRenderAboveTheStack) {
 		start();
-		app->addOverlay(std::make_unique<RecordingOverlay>("O1"));
-		app->addOverlay(std::make_unique<RecordingOverlay>("O2"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O1"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O2"));
 		app->scenes().push<SceneA>();
 		frame(0.0);
 		const std::vector<std::string> expected{"A.update", "O1.update", "O2.update", "A.render 0", "O1.render", "O2.render"};
 		EXPECT_EQ(tail(6), expected);
 	}
 
-	TEST_F(AppTest, EachStackedSceneAndEachOverlayDrawsOverWhatCameBeforeWhateverItsZ) {
+	TEST_F(AppTest, EachStackedSceneAndEachDebugLayerDrawsOverWhatCameBeforeWhateverItsZ) {
 		start();
 		hooks()["A"].render = [](App& /*running*/) {
 			rectAt(0.0F, 5);
@@ -879,33 +918,160 @@ namespace app::testing {
 		hooks()["Pause"].render = [](App& /*running*/) {
 			rectAt(20.0F, 0);
 		};
-		app->addOverlay(std::make_unique<RectOverlay>(40.0F, -5));
-		app->addOverlay(std::make_unique<RectOverlay>(60.0F, -10));
+		app->addDebugLayer(std::make_unique<RectDebugLayer>(40.0F, -5));
+		app->addDebugLayer(std::make_unique<RectDebugLayer>(60.0F, -10));
 		app->scenes().push<SceneA>();
 		app->scenes().push<PauseScene>();
 		frame(0.0);
-
-		auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
-		ASSERT_NE(gpu, nullptr);
-		gpu->clearRecord();
+		clearDraws();
 		frame(0.0);
-		ASSERT_EQ(gpu->draws().size(), 1U);
-		const Renderer::backend::GeometryDesc* geometry = gpu->geometry(gpu->draws()[0].call.geometry);
-		ASSERT_NE(geometry, nullptr);
-		const std::span<const uint8_t>	   vertexBytes = gpu->bufferContents(geometry->vertices);
-		const std::span<const uint8_t>	   indexBytes = gpu->bufferContents(geometry->indices);
-		std::vector<Renderer::BatchVertex> vertices(vertexBytes.size() / sizeof(Renderer::BatchVertex));
-		std::vector<uint32_t>			   indices(indexBytes.size() / sizeof(uint32_t));
-		std::memcpy(vertices.data(), vertexBytes.data(), vertices.size() * sizeof(Renderer::BatchVertex));
-		std::memcpy(indices.data(), indexBytes.data(), indices.size() * sizeof(uint32_t));
-		ASSERT_EQ(indices.size(), 24U);
 
-		// The covered scene's z 5, the pause scene's z 0, then each overlay's lower z still over them.
-		std::vector<float> drawn;
-		for (size_t i = 0; i < indices.size(); i += 6) {
-			drawn.push_back(vertices.at(indices[i]).position.x);
+		// The covered scene's z 5, the pause scene's z 0, then each debug layer's lower z still over them.
+		EXPECT_EQ(drawnX(), (std::vector<float>{0.0F, 20.0F, 40.0F, 60.0F}));
+	}
+
+	// --- The scenes' ui ---
+
+	TEST_F(AppTest, EachScenesUiDrawsOverItsSceneAndUnderTheSceneAbove) {
+		start();
+		const auto mount = [](float x) {
+			return [x](App& running) {
+				running.scenes().top()->root().addChild<ui::Rectangle>({.position = {x, 0.0F}, .size = {10.0F, 10.0F}});
+			};
+		};
+		hooks()["A"].onEnter = mount(10.0F);
+		hooks()["A"].render = [](App& /*running*/) {
+			rectAt(0.0F, 1000);
+		};
+		hooks()["Pause"].onEnter = mount(30.0F);
+		hooks()["Pause"].render = [](App& /*running*/) {
+			rectAt(20.0F, 1000);
+		};
+		app->addDebugLayer(std::make_unique<RectDebugLayer>(40.0F, -5));
+		app->scenes().push<SceneA>();
+		app->scenes().push<PauseScene>();
+		frame(0.0);
+		clearDraws();
+		frame(0.0);
+
+		// Each scene's z 1000 under its own ui's key 0, both under the scene pushed over them.
+		EXPECT_EQ(drawnX(), (std::vector<float>{0.0F, 10.0F, 20.0F, 30.0F, 40.0F}));
+	}
+
+	TEST_F(AppTest, ASceneUiFollowsTheWindowAndGoesOnceOnExitHasRun) {
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			running.scenes().top()->root().addChild<CountedRect>({.size = {10.0F, 10.0F}});
+		};
+		hooks()["A"].onExit = [](App& /*running*/) {
+			EXPECT_EQ(liveUiRects(), 1);
+		};
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		Scene* scene = app->scenes().top();
+		ASSERT_NE(scene, nullptr);
+		EXPECT_EQ(scene->root().get()->getSize(), Foundation::Vec2(800.0F, 600.0F));
+		EXPECT_EQ(liveUiRects(), 1);
+
+		platform->resize(1024, 768);
+		frame(0.0);
+		EXPECT_EQ(scene->root().get()->getSize(), Foundation::Vec2(1024.0F, 768.0F));
+
+		app->scenes().pop();
+		frame(0.0);
+		EXPECT_EQ(liveUiRects(), 0);
+		EXPECT_EQ(count("A.onExit"), 1);
+	}
+
+	TEST_F(AppTest, TheTopScenesUiTakesWhatItHitsAndTheSceneGetsTheRest) {
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			running.scenes().top()->root().addChild<ui::Rectangle>({.size = {100.0F, 100.0F}, .cursor = ui::Cursor::Pointer});
+		};
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		take();
+		platform->push({.type = InputEvent::Type::PointerMove, .position = {50.0F, 50.0F}});
+		frame(0.0);
+		EXPECT_EQ(count("A.handleEvent"), 0);
+		EXPECT_EQ(platform->cursor(), ui::Cursor::Pointer);
+		platform->push({.type = InputEvent::Type::PointerMove, .position = {300.0F, 300.0F}});
+		frame(0.0);
+		EXPECT_EQ(count("A.handleEvent"), 1);
+		EXPECT_EQ(platform->cursor(), ui::Cursor::Default);
+	}
+
+	TEST_F(AppTest, ACoveredScenesUiGetsACancelForWhatItHeld) {
+		class Held final : public ui::Rectangle {
+		  protected:
+			void handlePointer(ui::PointerEvent& event) override {
+				if (event.type == ui::PointerEvent::Type::Down) {
+					capturePointer();
+				} else if (event.type == ui::PointerEvent::Type::Cancel) {
+					record("held", "cancel");
+				}
+			}
+		};
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			running.scenes().top()->root().addChild<Held>({.size = {100.0F, 100.0F}});
+		};
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		platform->push({.type = InputEvent::Type::PointerDown, .mouseButton = foundation::MouseButton::Left, .position = {50.0F, 50.0F}});
+		frame(0.0);
+		take();
+		app->scenes().push<PauseScene>();
+		frame(0.0);
+		EXPECT_EQ(count("held.cancel"), 1);
+	}
+
+	// A context a constructor makes has no stack to size it from; it takes the window when it enters.
+	TEST_F(AppTest, AUiMadeBeforeTheSceneEntersIsSizedWhenItDoes) {
+		class EarlyScene final : public TypedScene<> {
+		  public:
+			EarlyScene() { ui(); }
+			const char* name() const override { return "Early"; }
+			void		render(float /*alpha*/) override {}
+		};
+		start();
+		app->scenes().push<EarlyScene>();
+		frame(0.0);
+		EXPECT_EQ(app->scenes().top()->ui().getViewport(), Foundation::Vec2(800.0F, 600.0F));
+	}
+
+	// The keyboard claimed for slot 0 drives player 0's focus, and a pad claimed for slot 1 once it
+	// connects drives player 1's.
+	TEST_F(AppTest, EachSlotsDeviceDrivesThatPlayersFocusInTheTopScenesUi) {
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			ui::Ref<ui::Component> root = running.scenes().top()->root();
+			root.addChild<ui::Rectangle>({.id = "a", .size = {40.0F, 20.0F}, .focusable = true});
+			root.addChild<ui::Rectangle>({.id = "b", .position = {100.0F, 0.0F}, .size = {40.0F, 20.0F}, .focusable = true});
+		};
+		app->scenes().push<SceneA>();
+		app->input().claim(0, {.kind = foundation::DeviceKind::Keyboard});
+		platform->connectGamepad({.id = padId(0), .name = "Pad", .modelGuid = "pad"});
+		frame(0.0);
+		app->input().claim(1, padId(0));
+		GamepadSample right;
+		right.buttons.at(static_cast<std::size_t>(foundation::GamepadButton::DpadRight)) = true;
+		const auto focusedId = [&](int player) {
+			const ui::Component* focused = app->scenes().top()->ui().focused(player).get();
+			return focused != nullptr ? focused->getId() : std::string("none");
+		};
+		for (int press = 0; press < 2; ++press) {
+			platform->setGamepad(0, right);
+			frame(0.0);
+			platform->setGamepad(0, {});
+			frame(0.0);
 		}
-		EXPECT_EQ(drawn, (std::vector<float>{0.0F, 20.0F, 40.0F, 60.0F}));
+		EXPECT_EQ(focusedId(1), "b");
+		EXPECT_EQ(focusedId(0), "none");
+		platform->push({.type = InputEvent::Type::KeyDown, .key = Key::Right});
+		frame(0.0);
+		EXPECT_EQ(focusedId(0), "a");
+		EXPECT_EQ(focusedId(1), "b");
 	}
 
 	// --- Exceptions ---

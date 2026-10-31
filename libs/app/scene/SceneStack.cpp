@@ -1,12 +1,18 @@
 #include "scene/SceneStack.h"
 
+#include "application/App.h"
 #include "detail/Guard.h"
+#include "input/Input.h"
 
 #include <primitives/Primitives.h>
+#include <ui/debug/LayoutLint.h>
+#include <ui/debug/TreeSnapshot.h>
 #include <utils/Log.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
+#include <span>
 #include <utility>
 
 namespace app {
@@ -22,7 +28,30 @@ namespace app {
 		  private:
 			SceneStack::Factory factory;
 		};
+		Foundation::Vec2 logicalSize(const Renderer::Viewport& viewport) {
+			return {static_cast<float>(viewport.logicalWidth), static_cast<float>(viewport.logicalHeight)};
+		}
 	} // namespace
+
+	ui::Context& Scene::ui() {
+		if (uiContext == nullptr) {
+			uiContext = std::make_unique<ui::Context>(stack != nullptr ? logicalSize(stack->app.viewport()) : Foundation::Vec2{0.0F, 0.0F});
+			if (stack != nullptr) {
+				uiContext->setScale(stack->app.uiScale());
+				uiContext->setReducedMotion(stack->app.reducedMotion());
+				App& app = stack->app;
+				uiContext->setClipboard({
+					.read = [&app] { return app.clipboard().getText(); },
+					.write = [&app](const std::string& text) { app.clipboard().setText(text); },
+				});
+			}
+		}
+		return *uiContext;
+	}
+
+	ui::Ref<ui::Component> Scene::root() {
+		return ui().root();
+	}
 
 	void Scene::finishWith(std::unique_ptr<detail::ResultBox> result) {
 		if (stack == nullptr) {
@@ -150,29 +179,115 @@ namespace app {
 	void SceneStack::resized(const Renderer::Viewport& viewport) {
 		for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
 			Scene& scene = *it->scene;
+			if (scene.uiContext != nullptr) {
+				scene.uiContext->setViewport(logicalSize(viewport));
+			}
 			detail::guard(scene.name(), "onResize", [&] { scene.onResize(viewport); });
 		}
 	}
 
-	// Each scene is its own sort domain, so what a covered scene draws at a high z stays under the
-	// scene over it.
-	void SceneStack::render(float liveAlpha) {
+	void SceneStack::updateTopUi(double dt) {
+		if (entries.empty() || entries.back().scene->uiContext == nullptr) {
+			return;
+		}
+		Scene& scene = *entries.back().scene;
+		detail::guard(scene.name(), "ui update", [&] { scene.uiContext->update(dt); });
+	}
+
+	static_assert(kMaxPlayerSlots == ui::kMaxPlayers, "a ui focus for each player slot");
+
+	void SceneStack::routeTopUi(const Input& input) {
+		if (entries.empty() || entries.back().scene->uiContext == nullptr) {
+			return;
+		}
+		ui::Context& context = *entries.back().scene->uiContext;
+		for (int slot = 0; slot < kMaxPlayerSlots; ++slot) {
+			const std::optional<foundation::DeviceId> device = input.slotConnected(slot) ? input.deviceForSlot(slot) : std::nullopt;
+			context.setPlayerDevices(
+				slot, device ? std::span<const foundation::DeviceId>(&*device, 1) : std::span<const foundation::DeviceId>{}
+			);
+		}
+	}
+
+	bool SceneStack::dispatchTopUi(const foundation::InputEvent& event) {
+		if (entries.empty() || entries.back().scene->uiContext == nullptr) {
+			return false;
+		}
+		Scene& scene = *entries.back().scene;
+		bool   consumed = false;
+		detail::guard(scene.name(), "ui dispatch", [&] { consumed = scene.uiContext->dispatch(event); });
+		return consumed;
+	}
+
+	ui::Cursor SceneStack::topUiCursor() const {
+		if (entries.empty() || entries.back().scene->uiContext == nullptr) {
+			return ui::Cursor::Default;
+		}
+		return entries.back().scene->uiContext->cursor();
+	}
+
+	void SceneStack::reduceMotionUi(bool reduced) {
+		for (Entry& entry : entries) {
+			if (entry.scene->uiContext != nullptr) {
+				entry.scene->uiContext->setReducedMotion(reduced);
+			}
+		}
+	}
+
+	void SceneStack::scaleUi(float scale) {
+		for (Entry& entry : entries) {
+			if (entry.scene->uiContext != nullptr) {
+				entry.scene->uiContext->setScale(scale);
+			}
+		}
+	}
+
+	std::size_t SceneStack::firstRendered() const {
 		std::size_t first = entries.size();
 		while (first > 0) {
-			Scene& scene = *entries[first - 1].scene;
-			bool   opaque = true;
+			const Scene& scene = *entries[first - 1].scene;
+			bool		 opaque = true;
 			detail::guard(scene.name(), "opaque", [&] { opaque = scene.opaque(); });
 			--first;
 			if (opaque) {
 				break;
 			}
 		}
-		for (std::size_t i = first; i < entries.size(); ++i) {
+		return first;
+	}
+
+	void SceneStack::layoutUi() {
+		for (std::size_t i = firstRendered(); i < entries.size(); ++i) {
+			Scene& scene = *entries[i].scene;
+			if (scene.uiContext != nullptr) {
+				detail::guard(scene.name(), "ui layout", [&] { scene.uiContext->layout(); });
+			}
+		}
+	}
+
+	// Each scene is its own sort domain, so what a covered scene draws at a high key stays under the
+	// scene over it, and so is each scene's ui, over the scene and under the next.
+	void SceneStack::render(float liveAlpha) {
+		for (std::size_t i = firstRendered(); i < entries.size(); ++i) {
 			Scene&		scene = *entries[i].scene;
 			const float alpha = i + 1 == entries.size() ? liveAlpha : entries[i].coveredAlpha;
 			Renderer::Primitives::sortBarrier();
 			detail::guard(scene.name(), "render", [&] { scene.render(alpha); });
+			if (scene.uiContext != nullptr) {
+				Renderer::Primitives::sortBarrier();
+				detail::guard(scene.name(), "ui render", [&] { scene.uiContext->render(); });
+			}
 		}
+	}
+
+	std::string SceneStack::uiTreeJson(const Renderer::Viewport& viewport) const {
+		const Scene* top = entries.empty() ? nullptr : entries.back().scene.get();
+		return ui::treeJson(top != nullptr ? top->uiContext.get() : nullptr, top != nullptr ? top->name() : "", logicalSize(viewport));
+	}
+
+	std::string SceneStack::uiLintJson(const Renderer::Viewport& viewport) const {
+		const Scene* top = entries.empty() ? nullptr : entries.back().scene.get();
+		return ui::lintJson(top != nullptr ? top->uiContext.get() : nullptr, logicalSize(viewport));
 	}
 
 	void SceneStack::pushBuilt(Change& change, float liveAlpha) {
@@ -187,6 +302,10 @@ namespace app {
 		if (!entries.empty()) {
 			Entry& covered = entries.back();
 			covered.coveredAlpha = liveAlpha;
+			// What the covered scene's ui had in hand ends now; its focus stays for when it's on top again.
+			if (covered.scene->uiContext != nullptr) {
+				detail::guard(covered.scene->name(), "ui cancel", [&] { covered.scene->uiContext->cancelInteraction(); });
+			}
 			detail::guard(covered.scene->name(), "onCovered", [&] { covered.scene->onCovered(); });
 		}
 		enter(std::move(scene), std::move(change.name), std::move(change.onResult));
@@ -253,6 +372,10 @@ namespace app {
 		entered.stack = this;
 		entered.stackId = nextId++;
 		entries.push_back({.scene = std::move(scene), .name = std::move(name), .onResult = std::move(onResult)});
+		if (entered.uiContext != nullptr) {
+			entered.uiContext->setViewport(logicalSize(app.viewport()));
+			entered.uiContext->setScale(app.uiScale());
+		}
 		LOG_INFO(Engine, "Entering scene: %s", entered.name());
 		detail::guard(entered.name(), "onEnter", [&] { entered.onEnter(app); });
 	}
@@ -263,6 +386,7 @@ namespace app {
 		Scene& exiting = *entries.back().scene;
 		LOG_INFO(Engine, "Exiting scene: %s", exiting.name());
 		detail::guard(exiting.name(), "onExit", [&] { exiting.onExit(); });
+		exiting.uiContext.reset();
 		exiting.stack = nullptr;
 		Entry entry = std::move(entries.back());
 		entries.pop_back();

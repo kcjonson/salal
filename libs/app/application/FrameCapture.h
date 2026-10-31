@@ -17,9 +17,10 @@ namespace app {
 
 	struct FrameSample {
 		float	 frameMs = 0.0F;   // start to start: the frame's work, present and pacing
-		float	 cpuMs = 0.0F;	   // poll, input, update and render: the frame's CPU work, without present
+		float	 cpuMs = 0.0F;	   // poll, input, update, layout and render: the frame's CPU work, without present
 		float	 presentMs = 0.0F; // step 11, which waits when the GPU or the compositor is behind
-		float	 renderMs = 0.0F;  // step 9: the scenes and overlays drawing, and the batch's flushes
+		float	 layoutMs = 0.0F;  // the ui layout pass before step 9
+		float	 renderMs = 0.0F;  // step 9: the scenes, their ui and the debug layers drawing, and the batch's flushes
 		float	 flushMs = 0.0F;   // of that, the flushes: the plan, the uploads and the draw calls
 		uint32_t drawCalls = 0;
 		uint32_t vertices = 0;
@@ -43,7 +44,7 @@ namespace app {
 		uint64_t droppedFrames = 0;	  // past kMaxFrames
 		uint64_t minimizedFrames = 0; // frames the window had no framebuffer
 		double	 seconds = 0.0;		  // the frames' times summed
-		Stat	 frameMs, cpuMs, presentMs, renderMs, flushMs;
+		Stat	 frameMs, cpuMs, presentMs, layoutMs, renderMs, flushMs;
 		Stat	 drawCalls, vertices, triangles, instances, uploadBytes;
 
 		// GPU frames that came back during the capture, a few frames behind, and those that didn't

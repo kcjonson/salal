@@ -109,6 +109,8 @@ namespace app {
 		constexpr std::string_view kFullscreenMonitor = "video.fullscreenMonitor";
 		constexpr std::string_view kWindowWidth = "video.windowWidth";
 		constexpr std::string_view kWindowHeight = "video.windowHeight";
+		constexpr std::string_view kUiScale = "ui.scale";
+		constexpr std::string_view kReducedMotion = "ui.reducedMotion";
 
 		using UserDir = std::filesystem::path (*)(std::string_view organization, std::string_view application);
 
@@ -194,6 +196,9 @@ namespace app {
 		if (!devServerState.start(config.devServer)) {
 			return false;
 		}
+		// Registered first, so a game's own providers, registered after, answer instead.
+		uiTreeProvider = devServerState.stateProvider("ui.tree", [this] { return sceneStack.uiTreeJson(coordinates.viewport()); });
+		uiLintProvider = devServerState.stateProvider("ui.lint", [this] { return sceneStack.uiLintJson(coordinates.viewport()); });
 
 		LOG_INFO(
 			Engine,
@@ -212,6 +217,8 @@ namespace app {
 		userSettings = Settings::load(
 			userPath(config.settingsFile, userConfigDir, config, "settings"), config.settingsVersion, config.migrateSettings
 		);
+		scaleOfUi = std::clamp(userSettings.get<float>(kUiScale, 1.0F), 0.25F, 4.0F);
+		motionReduced = userSettings.get<bool>(kReducedMotion, false);
 		saveStore = SaveStore(userPath(config.savesDirectory, userDataDir, config, "saves"), config.saveFormat);
 	}
 
@@ -311,6 +318,9 @@ namespace app {
 		runFixedTicks();
 		updateScenes();
 		endSection(sections.update);
+		sceneStack.layoutUi();
+		showCursor();
+		endSection(sections.layout);
 		render();
 		devServerPostRender();
 		endSection(sections.render);
@@ -338,7 +348,9 @@ namespace app {
 				const Renderer::Primitives::RenderStats stats = Renderer::Primitives::getStats();
 				metricsCollector->setRenderStats(stats.drawCalls, stats.vertexCount, stats.triangleCount);
 				metricsCollector->setBatchStats(stats.instanceCount, stats.uploadBytes, stats.flushCount, stats.flushMs);
-				metricsCollector->setMainLoopTimings(sections.poll, sections.input, sections.update, sections.render, sections.present);
+				metricsCollector->setMainLoopTimings(
+					sections.poll, sections.input, sections.update, sections.layout, sections.render, sections.present
+				);
 				metricsCollector->endFrame();
 			}
 			metricsCollector->beginFrame();
@@ -357,8 +369,9 @@ namespace app {
 		const Renderer::Primitives::RenderStats stats = Renderer::Primitives::getStats();
 		frameCapture.add({
 			.frameMs = static_cast<float>(frameSeconds * 1000.0),
-			.cpuMs = sections.poll + sections.input + sections.update + sections.render,
+			.cpuMs = sections.poll + sections.input + sections.update + sections.layout + sections.render,
 			.presentMs = sections.present,
+			.layoutMs = sections.layout,
 			.renderMs = static_cast<float>(renderSeconds * 1000.0),
 			.flushMs = stats.flushMs,
 			.drawCalls = stats.drawCalls,
@@ -382,8 +395,8 @@ namespace app {
 		}
 		resized = false;
 		const Renderer::Viewport& window = coordinates.viewport();
-		for (auto it = overlays.rbegin(); it != overlays.rend(); ++it) {
-			detail::guard("Overlay", "onResize", [&] { (*it)->onResize(window); });
+		for (auto it = debugLayers.rbegin(); it != debugLayers.rend(); ++it) {
+			detail::guard("DebugLayer", "onResize", [&] { (*it)->onResize(window); });
 		}
 		sceneStack.resized(window);
 	}
@@ -437,12 +450,16 @@ namespace app {
 			detail::guard("App", "dispatch", [&] { dispatch(*this); });
 			return;
 		}
+		sceneStack.routeTopUi(inputState);
 		for (const foundation::InputEvent& event : inputState.events()) {
 			bool consumed = false;
-			for (auto it = overlays.rbegin(); it != overlays.rend() && !consumed; ++it) {
-				detail::guard("Overlay", "handleEvent", [&] { consumed = (*it)->handleEvent(event); });
+			for (auto it = debugLayers.rbegin(); it != debugLayers.rend() && !consumed; ++it) {
+				detail::guard("DebugLayer", "handleEvent", [&] { consumed = (*it)->handleEvent(event); });
 			}
 			if (consumed || isPaused) {
+				continue;
+			}
+			if (sceneStack.dispatchTopUi(event)) {
 				continue;
 			}
 			if (Scene* top = sceneStack.top(); top != nullptr) {
@@ -514,14 +531,16 @@ namespace app {
 		if (Scene* top = sceneStack.top(); top != nullptr) {
 			detail::guard(top->name(), "update", [&] { top->update(frame); });
 		}
-		for (const std::unique_ptr<Overlay>& overlay : overlays) {
-			detail::guard("Overlay", "update", [&] { overlay->update(frame); });
+		sceneStack.updateTopUi(frameDelta);
+		for (const std::unique_ptr<DebugLayer>& layer : debugLayers) {
+			detail::guard("DebugLayer", "update", [&] { layer->update(frame); });
 		}
 	}
 
-	// The stack, then the overlays, each overlay its own sort domain over everything before it. The
-	// frame's statistics and GPU time start here, once, so a pass that begins a batch of its own
-	// inside the frame (an offscreen render) adds to them.
+	// The stack, each scene's ui over it, then the debug layers, each debug layer its own sort domain over
+	// everything before it. The ui was laid out just before, paused or not, so a resize while paused
+	// draws right. The frame's statistics and GPU time start here, once, so a pass that begins a batch of
+	// its own inside the frame (an offscreen render) adds to them.
 	void App::render() {
 		const double start = frameInCapture ? platform->clock().now() : 0.0;
 		Renderer::Primitives::beginFrameStats();
@@ -531,9 +550,9 @@ namespace app {
 		}
 		Renderer::Primitives::clear(config.clearColor);
 		sceneStack.render(liveAlpha());
-		for (const std::unique_ptr<Overlay>& overlay : overlays) {
+		for (const std::unique_ptr<DebugLayer>& layer : debugLayers) {
 			Renderer::Primitives::sortBarrier();
-			detail::guard("Overlay", "render", [&] { overlay->render(); });
+			detail::guard("DebugLayer", "render", [&] { layer->render(); });
 		}
 
 		Renderer::Primitives::endFrame();
@@ -560,12 +579,20 @@ namespace app {
 		sectionStart = now;
 	}
 
+	void App::showCursor() {
+		const ui::Cursor wanted = sceneStack.topUiCursor();
+		if (wanted != shownCursor) {
+			platform->setCursor(wanted);
+			shownCursor = wanted;
+		}
+	}
+
 	float App::liveAlpha() const {
 		return static_cast<float>(fixedAccumulator / config.frame.fixedStep);
 	}
 
 	// What waits for the frame to be over: a resume asked for in it, so the frame stays paused and its
-	// tick reader is dropped, and the overlays added in it.
+	// tick reader is dropped, and the debug layers added in it.
 	void App::finishFrame() {
 		if (std::exchange(resumeAtFrameEnd, false)) {
 			if (pendingSteps > 0) {
@@ -573,10 +600,10 @@ namespace app {
 			}
 			resume();
 		}
-		for (std::unique_ptr<Overlay>& overlay : joiningOverlays) {
-			overlays.push_back(std::move(overlay));
+		for (std::unique_ptr<DebugLayer>& layer : joiningDebugLayers) {
+			debugLayers.push_back(std::move(layer));
 		}
-		joiningOverlays.clear();
+		joiningDebugLayers.clear();
 	}
 
 	// --- Running and stopping ---
@@ -647,10 +674,10 @@ namespace app {
 		}
 		isShutDown = true;
 		sceneStack.exitAll();
-		while (!overlays.empty()) {
-			const std::unique_ptr<Overlay> overlay = std::move(overlays.back());
-			overlays.pop_back();
-			detail::guard("Overlay", "onExit", [&] { overlay->onExit(); });
+		while (!debugLayers.empty()) {
+			const std::unique_ptr<DebugLayer> layer = std::move(debugLayers.back());
+			debugLayers.pop_back();
+			detail::guard("DebugLayer", "onExit", [&] { layer->onExit(); });
 		}
 		shuttingDown = false;
 	}
@@ -699,6 +726,18 @@ namespace app {
 
 	void App::setDispatch(std::function<void(App&)> newDispatch) {
 		dispatch = std::move(newDispatch);
+	}
+
+	void App::setUiScale(float scale) {
+		scaleOfUi = std::clamp(scale, 0.25F, 4.0F);
+		userSettings.set(kUiScale, scaleOfUi);
+		sceneStack.scaleUi(scaleOfUi);
+	}
+
+	void App::setReducedMotion(bool reduced) {
+		motionReduced = reduced;
+		userSettings.set(kReducedMotion, motionReduced);
+		sceneStack.reduceMotionUi(motionReduced);
 	}
 
 	void App::setVsync(bool enabled) {
@@ -827,11 +866,11 @@ namespace app {
 		return frameCapture.active();
 	}
 
-	void App::addOverlay(std::unique_ptr<Overlay> overlay) {
-		if (overlay == nullptr) {
+	void App::addDebugLayer(std::unique_ptr<DebugLayer> layer) {
+		if (layer == nullptr) {
 			return;
 		}
-		(inFrame ? joiningOverlays : overlays).push_back(std::move(overlay));
+		(inFrame ? joiningDebugLayers : debugLayers).push_back(std::move(layer));
 	}
 
 } // namespace app

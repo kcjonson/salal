@@ -45,6 +45,7 @@ namespace Renderer::backend::gl {
 		TextureHandle createTexture(const TextureDesc& desc) override;
 		void		  updateTexture(TextureHandle texture, int x, int y, int width, int height, const void* pixels) override;
 		void		  destroyTexture(TextureHandle texture) override;
+		bool		  hasTexture(TextureHandle texture) const override { return textures.find(texture) != nullptr; }
 
 		RenderTargetHandle createRenderTarget(TextureHandle colour) override;
 		void			   setRenderTarget(RenderTargetHandle target) override;
@@ -106,6 +107,8 @@ namespace Renderer::backend::gl {
 		struct GeometrySlot {
 			GLVertexArray vertexArray;
 			VertexLayout  layout = VertexLayout::Batched;
+			GLuint		  instances = 0;	 // Batched: the BatchInstance buffer its attributes read
+			uint32_t	  firstInstance = 0; // Batched: the instance its attributes start at now
 		};
 
 		// setUniforms() and setHookUniforms() write slot after slot of one buffer per

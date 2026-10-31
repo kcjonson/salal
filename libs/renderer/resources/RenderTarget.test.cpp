@@ -123,7 +123,8 @@ namespace Renderer {
 		auto				  owned = std::make_unique<backend::NullBackend>();
 		backend::NullBackend& next = *owned;
 		Primitives::init(std::move(owned), base_shader::source());
-		const TextureHandle atlas = Primitives::createTexture({.width = 8, .height = 8});
+		const Texture		atlasTexture = Primitives::createTexture({.width = 8, .height = 8});
+		const TextureHandle atlas = atlasTexture.handle();
 		ASSERT_TRUE(atlas.isValid());
 		EXPECT_NE(atlas, kept.texture());
 		kept = RenderTarget(); // releases its stale handles through the new backend

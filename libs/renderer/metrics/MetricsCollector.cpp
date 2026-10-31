@@ -92,6 +92,7 @@ namespace Renderer {
 		metrics.pollEventsMs = m_pollEventsMs;
 		metrics.inputHandleMs = m_inputHandleMs;
 		metrics.sceneUpdateMs = m_sceneUpdateMs;
+		metrics.uiLayoutMs = m_uiLayoutMs;
 		metrics.sceneRenderMs = m_sceneRenderMs;
 		metrics.swapBuffersMs = m_swapBuffersMs;
 
@@ -145,12 +146,14 @@ namespace Renderer {
 		float pollEventsMs,
 		float inputHandleMs,
 		float sceneUpdateMs,
+		float uiLayoutMs,
 		float sceneRenderMs,
 		float swapBuffersMs
 	) {
 		m_pollEventsMs = pollEventsMs;
 		m_inputHandleMs = inputHandleMs;
 		m_sceneUpdateMs = sceneUpdateMs;
+		m_uiLayoutMs = uiLayoutMs;
 		m_sceneRenderMs = sceneRenderMs;
 		m_swapBuffersMs = swapBuffersMs;
 	}

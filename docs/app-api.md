@@ -32,7 +32,7 @@ Not in phase 2:
   which is game data (the mechanics of storing one are `app`'s, under "Game
   state and saves"). Particles. Screen transitions
   (dual-deck-builder's fade with input blocked, `ScreenManager.ts:144-173`),
-  which a game draws as an overlay over the stack. A fixed-aspect virtual
+  which a game draws over the stack itself. A fixed-aspect virtual
   resolution with letterboxing, which is the game's over `onResize` and the
   renderer's viewport and render targets until a second game wants the same
   one.
@@ -52,7 +52,7 @@ Not in phase 2:
 | worldsim `libs/engine/input` | `InputManager` (singleton, six GLFW callbacks, per-frame edge maps) | 903 |
 | worldsim `libs/engine/clipboard` | `ClipboardManager`, implementing `UI::IClipboard` over GLFW | 62 |
 | worldsim `libs/engine/debug`, `graphics/PngEncoder` | `DebugServer`, twelve routes, `LockFreeRingBuffer`, PNG encoding | 1,505 |
-| salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, overlays and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
+| salal `libs/app`, `apps/sandbox` | phase 2 PRs 2 and 3: the clock, the GLFW and headless platforms, the frame, the scene stack, debug layers and the context object; the device layer, slots, key names, capture and the clipboard; a sandbox that runs one scene on GLFW; tests not counted | 3,502 (the sandbox 117 of them) |
 | salal `libs/app/DevServer`, `libs/renderer/PngEncoder` | phase 2 PR 4: the dev server behind its flags, its registrations, the input grammar, and the PNG encoder; tests not counted | 1,914 |
 | salal `libs/app/settings`, `saves`, `storage` | phase 2 PR 5: the settings file and `ActionMap` bindings through it, saves, the per-user directories, control names, and the safe write the settings and saves share; tests not counted | 2,460 |
 | salal `apps/sandbox` | phase 2 PR 6: the picker, the six scenes and the atlas staging, in place of the one-scene sandbox above | 1,759 |
@@ -85,14 +85,14 @@ main()                                  the game's
     Platform     window, GL context, event callbacks, gamepads, clipboard, present
     Clock        seconds, monotonic; the platform's, or a ManualClock
     Input        events per frame, InputSnapshot per tick and per frame, devices, player slots
-    SceneStack   typed push, pop, replace; overlays above it
+    SceneStack   typed push, pop, replace; debug layers above it
     context      one game-defined object every scene can reach
     Settings     the user settings file
     Saves        slots, safe writes, versioned upgrades
     DevServer    development builds only
   the game's own resources, its scenes, the first scene
   app->run()                            native: while (tick()) pace();
-  app->shutdown()                       scenes and overlays exit; GL still alive for the game's teardown
+  app->shutdown()                       scenes and debug layers exit; GL still alive for the game's teardown
   the game's teardown, then ~App        fonts, Primitives, window, then the server (an exit request answers now)
 ```
 
@@ -200,9 +200,9 @@ public:
 	static std::unique_ptr<App> create(AppConfig, std::unique_ptr<Platform>); // also nullptr when a requested dev-server port is busy, or while another App lives (Primitives are module-static)
 	bool tick();              // one frame (below); false once exit is requested or the window closes
 	void run();               // the native runner: while (tick()) pace();
-	void shutdown();          // scenes top-down, then overlays, onExit; GL and the server stay up until ~App
+	void shutdown();          // scenes top-down, then debug layers, onExit; GL and the server stay up until ~App
 	void requestExit();
-	void pause();             // fixed ticks and update stop for scenes and overlays; render continues
+	void pause();             // fixed ticks and update stop for scenes and debug layers; render continues
 	void resume();
 	bool paused() const;
 	void step(int ticks);     // while paused: exactly `ticks` fixed ticks of the top scene, then one render
@@ -224,7 +224,7 @@ public:
 	void startCapture();                  // a perf capture of whole frames, GPU timing on (FrameCapture.h); render() starts each frame's statistics with Primitives::beginFrameStats()
 	std::optional<CaptureSummary> stopCapture();
 	bool capturing() const;
-	void addOverlay(std::unique_ptr<Overlay>); // persistent across scene changes, above the stack: dev menus, debug HUDs
+	void addDebugLayer(std::unique_ptr<DebugLayer>); // persistent across scene changes, above the stack: dev menus, debug HUDs
 };
 
 }
@@ -241,7 +241,7 @@ public:
    accumulator in arrival order; gamepads are polled once here and diffed into
    events (GLFW has no gamepad callbacks). A framebuffer resize updates the
    coordinate system and `Primitives`' viewport inside the callback, as today,
-   and once the poll returns overlays then every scene in the stack get
+   and once the poll returns debug layers then every scene in the stack get
    `onResize`.
 3. Dev server, pre-frame: control actions, then registered routes. Injected
    input joins the accumulator here, unless paused, when it stays queued in the
@@ -250,9 +250,15 @@ public:
    mid-frame break does (`Application.cpp:208-212`).
 4. The frame reader is consumed: `input().frame()` and `input().events()` now
    hold this frame.
-5. Dispatch. By default each event goes to the overlays top-down, then the top
-   scene, each `handleEvent` returning whether it consumed it; while paused,
-   only overlays receive them. A game can replace this step with
+5. Dispatch. By default each event goes to the debug layers top-down, then the top
+   scene's ui (which takes what it hits, and a press's gesture once it has
+   the press, and keys, pad buttons and axes for the focus of the player
+   holding the device), then the top scene, each returning whether it
+   consumed it; while paused, only debug layers receive them. Before the events,
+   each player slot's device from `input()` goes to the top scene's ui as
+   that player's, so a scene claims slots and never routes devices itself. The window's cursor follows the
+   top scene's ui after the layout pass, through `Platform::setCursor`, and a
+   scene covered by a push gets a cancel for anything its ui had in hand. A game can replace this step with
    `setDispatch`, which worldsim does (under "What worldsim keeps").
 6. Scene-stack changes requested so far apply here, after dispatch and before
    any update, which is where worldsim's deferred switch applies today
@@ -276,11 +282,15 @@ public:
    a paused or frozen frame the tick reader is consumed and discarded, so a
    press made during a pause doesn't fire on resume. A tick that pauses ends
    the frame's ticks, and the whole steps left are dropped as past the cap.
-8. `update(FrameContext)` on the top scene, then the overlays, with
-   `realDelta`, unless paused (worldsim's order). Its input is the frame
-   reader's, edges included, even for a scene that became top in step 6.
-9. `Primitives::beginFrame`, `clear(clearColor)`, render the stack from the
-   topmost opaque scene upward, then overlays, then `Primitives::endFrame`.
+8. `update(FrameContext)` on the top scene, then its ui context's update,
+   then the debug layers, with `realDelta`, unless paused (worldsim's order). Its
+   input is the frame reader's, edges included, even for a scene that became
+   top in step 6.
+9. The ui of every scene about to render is laid out, paused or not, timed as
+   its own metrics section (`uiLayoutMs`). Then
+   `Primitives::beginFrame`, `clear(clearColor)`, render the stack from the
+   topmost opaque scene upward, each scene's ui after it behind a sort
+   barrier, then debug layers, then `Primitives::endFrame`.
    The top scene renders with `alpha = accumulator / fixedStep`; a covered
    scene renders with the alpha it had when it was covered, so the arena under
    a pause menu holds still. `beginFrame` moves here from before update
@@ -314,7 +324,7 @@ and costs nothing. A discarded tick reader drops release edges as well as
 presses: a key held into a pause and let go during it reads up with no
 `released()`, so a sim reads held state across a pause, not edges.
 
-Pause stops fixed ticks and update, for scenes and overlays, as worldsim's
+Pause stops fixed ticks and update, for scenes and debug layers, as worldsim's
 pause skips `SceneManager::update` (and with it overlay update) today; render
 keeps going. Focus loss freezes only the fixed accumulator, so a backgrounded
 window doesn't replay ten seconds of ticks, and worldsim, which ticks nothing,
@@ -544,10 +554,10 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   the first frame, enters in that frame's step 6, where worldsim enters it
   inside `AppLauncher::initialize` (`:371`).
 - Only the top scene receives events, fixed ticks and update. Covered scenes
-  render, from the topmost opaque one up, then the overlays. Each scene and
-  each overlay renders behind a `Primitives::sortBarrier()`, so its `zIndex`
-  values sort only against its own draws and everything it draws lands over
-  what came before it, with no flush between them.
+  render, from the topmost opaque one up, then the debug layers. Each scene and
+  each debug layer renders behind a `Primitives::sortBarrier()`, so its draw keys
+  sort only against its own draws and everything it draws lands over what came
+  before it, with no flush between them.
 - Arguments and results are typed per scene and checked at compile time:
   `finish(R)` is how a scene returns, and the caller's callback runs before
   its `onUncovered`, with the finished scene off the stack but not yet
@@ -555,7 +565,7 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   stack type-erases them itself, so `Args`, `Result` and the callback may be
   move-only (a `std::unique_ptr` in an `Args`), which `std::function` and
   `std::any` couldn't hold. A push with a callback remembers the scene on top
-  when it was asked for, whoever asks (an overlay or game code too), and is
+  when it was asked for, whoever asks (a debug layer or game code too), and is
   dropped, logged, if that scene has left the stack by the time it applies (a
   scene stays on top until step 6, so it can ask to leave and then push), so a
   callback never outlives its pusher. A push without a callback queues in
@@ -681,7 +691,7 @@ void readBindings(const nlohmann::json& section, foundation::ActionMap&);
   the window inside the call on Windows and macOS, outside any poll, so the App
   takes the platform's new size at once, the coordinate system and `Primitives`
   with it, and the frame that asked draws at the size GL's viewport already has;
-  scenes and overlays hear of it through `onResize` after the next poll, as of
+  scenes and debug layers hear of it through `onResize` after the next poll, as of
   any resize. The GLFW platform's relay keeps a held resize in its place among
   the events held around it (the latest only), where it used to deliver it first.
 - `ActionMap` bindings round-trip through a section as
@@ -917,7 +927,7 @@ Routes:
 
 | route | answered | change |
 |---|---|---|
-| `/api/ui/tree`, `/api/ui/lint` | step 10 | by providers the game registers (`"ui.tree"`, `"ui.lint"`) until salal's `ui` registers its own in phase 3; with none registered, `{"viewport":{"width":w,"height":h},"roots":[]}` at the logical viewport and `{"count":0,"violations":[]}`, so an app with no ui (the sandbox, the asteroids prototype) still meets the inspector contract |
+| `/api/ui/tree`, `/api/ui/lint` | step 10 | by the App's own providers (`"ui.tree"`, `"ui.lint"`), registered at create, which answer from the top scene's ui context; a scene with none answers `{"roots":[],"scene":<name>,"viewport":{"height":h,"width":w}}` and `{"count":0,"violations":[]}`, so every app meets the inspector contract. A game's own providers, registered after, answer instead, as worldsim's do for its scenes on its own ui |
 | `/api/ui/screenshot` | step 10 | read before present; one readback answers every screenshot parked for the frame; 500 when there is no backbuffer to read |
 | `/api/input` | queued at once, joins at step 3 | grows `char,<codepoint>`, `pad,<device>,<button>,down\|up`, `axis,<device>,<axis>,<value>`, `connect,vpad<n>`, `disconnect,vpad<n>`; a request's events all queue or none do, and a malformed one is a 400 naming it; injected events go through the accumulator, so injected keys reach the ui the way typed ones do (today they skip the focus manager, `InputManager.cpp:371-375`) |
 | `/api/control` | step 3 | `exit`, `scene`, `pause`, `resume`, `reload`, `vsync` as today, plus `step&ticks=<n>` (one tick without `ticks`, 409 unless paused) and `capture&op=start|stop` (a perf capture of every whole frame between the two, with the renderer's GPU timing on meanwhile; `stop` answers with the summary, with the framebuffer, vsync and minimized frames the run had, 409 when none is running; [testing/README.md](testing/README.md), Performance); games register further actions, which is how world-sim keeps `camera` for `scripts/perf-capture.ps1:23` and `docs/testing/README.md:132`; an action answers once it has run, though `scene` and `reload` queue their change, which applies at step 6 (after resume while paused), so they answer before it takes effect, as today; an unknown action is a 404 at once (today a 400), a `scene` nothing was added under a 404 and a `reload` of a scene pushed with arguments a 409 |
@@ -1037,7 +1047,7 @@ not; then, unless paused, a mouse move every frame from the polled position
 (hover under a still cursor depends on it, `AppLauncher.cpp:61-63`), Left and
 Right edges only, modifiers rebuilt from held Shift, Control and Alt with no
 Super bit, and a scroll that is overwritten by each wheel event and
-re-dispatched every frame until something consumes it, through overlays then
+re-dispatched every frame until something consumes it, through debug layers then
 the top scene's `UI::InputEvent` handler. GameScene's zoom reads that
 consumable scroll from the bridge, not the snapshot, so scrolling a list in the
 game ui doesn't also zoom the camera (`Application.cpp:195-199`,
@@ -1053,7 +1063,7 @@ own dispatch.
 | `InputManager::Get()`, 10 sites | `app.input().frame()`, plus the bridge's scroll for GameScene |
 | `ClipboardManager` | `app::Clipboard` plus the `UI::IClipboard` adapter |
 | `DebugServer` and its drains: `UiStateDrain` in six scenes, ui-sandbox's overlay renderer, GameScene's dev verbs, camera and state | `app::DevServer` registrations: the tree and lint providers once at startup per app (asset-manager gains them; it has no drain today), GameScene's verbs, `camera` control and other state in its `onEnter`; `what=scene` needs nothing, the server answers it |
-| `NavigationMenu` and the two `glfwGetKey` scenes (`ClipScene.cpp:85-102`, `VectorPerfScene.cpp:52`) | an overlay taking `app.coordinateSystem()`; `app.input()` |
+| `NavigationMenu` and the two `glfwGetKey` scenes (`ClipScene.cpp:85-102`, `VectorPerfScene.cpp:52`) | a debug layer taking `app.coordinateSystem()`; `app.input()` |
 | the `glClear` in the loop (`Application.cpp:240-241`) | `AppConfig::clearColor`; the 37 scene files that clear for themselves keep doing it until touched |
 | `libs/engine/graphics/PngEncoder` | salal's, in `renderer` |
 
@@ -1122,7 +1132,7 @@ slice would leave worldsim with two loops.
 | PR | salal | worldsim | verified by |
 |---|---|---|---|
 | 1. Input types (`v0.10.0`) | `foundation/input/`: `Key` completed to GLFW's token set, dense, with `Unknown` and `Count`; `MouseButton` typed; the gamepad enums, `DeviceId`, `InputEvent`, `ButtonState`, `InputSnapshot`, `InputAccumulator`, `Binding`, `ActionMap` | builds at the new tag, no change | headless tests: transitions inside one tick at 120 Hz under 60 Hz frames, two ticks in a frame, a frame with no tick, the two readers apart, axis thresholds, two keys to an axis, radial and per-axis deadzones, split keyboard as two maps |
-| 2. The frame and scenes (`v0.11.0`) | `Clock`, `ManualClock`, `Platform` with the GLFW and headless implementations, `App::create/tick/run/shutdown`, the accumulator and alpha, pause, focus freeze, `step`, `setDispatch`, `setVsync`, `SceneStack` with typed args and results, overlays, the context object, `parseCommandLine`, metrics sections, empty font atlases as no text, the `ResourcePath` fixes | none | headless tests of exact tick counts, the clamp and the cap, pause, step, a covered scene's frozen alpha, change order within a frame, push, `finish` with a move-only result, replace, reset, by-name switching, resize, the context's type check; the sandbox stub runs one scene on GLFW |
+| 2. The frame and scenes (`v0.11.0`) | `Clock`, `ManualClock`, `Platform` with the GLFW and headless implementations, `App::create/tick/run/shutdown`, the accumulator and alpha, pause, focus freeze, `step`, `setDispatch`, `setVsync`, `SceneStack` with typed args and results, debug layers, the context object, `parseCommandLine`, metrics sections, empty font atlases as no text, the `ResourcePath` fixes | none | headless tests of exact tick counts, the clamp and the cap, pause, step, a covered scene's frozen alpha, change order within a frame, push, `finish` with a move-only result, replace, reset, by-name switching, resize, the context's type check; the sandbox stub runs one scene on GLFW |
 | 3. Devices (`v0.12.0`) | the GLFW device layer: keyboard, mouse, gamepads, hot-plug, slots and reconnects, key names, capture, axis edges in the snapshot and `ActionMap`, `Clipboard` | none | headless tests through the accumulator; a pad and a hot-plug by hand |
 | 4. Dev server (`v0.13.0`) | from worldsim into `app`, behind the flags; registrations with handles, control actions, providers and the empty defaults, `what=scene` from the stack; the new `/api/input` events; `step`; the fixes; `PngEncoder` into `renderer` | none | route tests against an `App` on the headless platform; a Release build links no httplib and opens no socket, and one built with `SALAL_DEV_SERVER_IN_RELEASE` serves |
 | 5. Settings and saves (`v0.14.0`) | `Settings`, `userConfigDir`, migration, `video.*` applied by `App`, `setFullscreen`, `ActionMap` bindings; `SaveStore`, `userDataDir`, envelopes, backups, upgrade chains | none | tests: round trip, unknown keys kept, corrupt file moved aside, migration, a newer file; a save upgraded across three versions, a failed upgrade leaving the original, a newer save refused untouched, a crash between temp and rename |
@@ -1167,5 +1177,5 @@ Reviewed with Kevin, 2026-10-27.
    with the font's licence text.
 9. The screenshot is read before present.
 10. The worldsim differences listed under "What worldsim keeps" are accepted.
-11. Pause freezes fixed ticks and update for scenes and overlays; focus loss
+11. Pause freezes fixed ticks and update for scenes and debug layers; focus loss
     freezes fixed ticks only.

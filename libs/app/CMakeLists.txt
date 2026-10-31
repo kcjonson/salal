@@ -40,12 +40,14 @@ target_include_directories(salal_app
 )
 
 # GLFW and GL are the GLFW platform's, in platform/GlfwPlatform.cpp and GlfwInput.cpp; no app
-# header names them, so they stay private (salal_check_layering checks both). nlohmann-json is in
+# header names them, so they stay private (salal_check_layering checks both). ui is public, since app
+# hosts a ui context in every scene (scene/Scene.h). nlohmann-json is in
 # the settings' and saves' headers, so it's public, in every configuration. winmm for
 # timeBeginPeriod, which run()'s frame cap needs; shell32 and ole32 for the known folders the
 # per-user directories fall back to.
 target_link_libraries(salal_app
     PUBLIC
+        salal::ui
         salal::renderer
         salal::foundation
         nlohmann_json::nlohmann_json

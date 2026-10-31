@@ -112,19 +112,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Textures ---
 		//
-		// Every texture the renderer samples lives in its texture table, keyed by
-		// TextureHandle; the handle is the texture to every caller outside the
-		// renderer. A destroyed handle is stale: later calls with it do nothing, and
-		// a draw that samples it gets no texture (warned once).
+		// Every texture the renderer samples lives in its texture table, owned by a
+		// Texture (Texture.h) and keyed by the TextureHandle draws carry. A freed
+		// handle is stale: later calls with it do nothing, and a draw that samples it
+		// draws nothing (warned once).
 
 		// A new texture from `desc`, uploaded from desc.pixels when given; invalid,
 		// with an error logged, if it could not be made.
-		TextureHandle createTexture(const TextureDesc& desc);
+		Texture createTexture(const TextureDesc& desc);
 
 		// Replace a rectangle of the texture with `pixels`, in the texture's format.
 		void updateTexture(TextureHandle handle, int x, int y, int width, int height, const void* pixels);
-
-		void destroyTexture(TextureHandle handle);
 
 		// --- Frame Lifecycle ---
 
@@ -156,11 +154,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void invalidateState();
 
 		// Draw-order barrier without a flush: every draw from here sorts after every
-		// draw before it, whatever their zIndex, so two passes (a covered scene and
-		// the one over it, the scenes and an overlay) keep their zIndex spaces apart
+		// draw before it, whatever their keys, so two passes (a covered scene and
+		// the one over it, the scenes and a debug layer) keep their key spaces apart
 		// and the later pass paints on top. It costs no draw call: the batch sorts on
-		// the barrier count ahead of z. The app sets one before each stacked scene
-		// and each overlay renders.
+		// the barrier count ahead of the key. The app sets one before each stacked
+		// scene and each debug layer renders.
 		void sortBarrier();
 
 		// Flush pending batched primitives now: upload them and submit their draw
@@ -193,6 +191,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		Foundation::Vec2 PercentPosition(float xPercent, float yPercent);
 
 		// --- Drawing Functions ---
+		//
+		// Every draw takes a `key`, its draw order: between sortBarrier() calls a draw
+		// paints over every draw with a lower key, and over the draws before it with
+		// the same key. Keys are whole numbers, so a draw that must land between two
+		// keys goes after the first at its key, or the caller spreads its keys.
 
 		// How a draw combines with what is under it. Colours are straight alpha at
 		// this API; the shader premultiplies, and every mode blends premultiplied.
@@ -208,7 +211,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::Rect	  bounds;
 			Foundation::RectStyle style;
 			const char*			  id = nullptr; // Optional: for inspection/debugging
-			int					  zIndex = 0;	// Optional: explicit draw order
+			int32_t				  key = 0;
 			BlendMode			  blend = BlendMode::Alpha;
 		};
 
@@ -218,7 +221,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::Vec2	  end;
 			Foundation::LineStyle style;
 			const char*			  id = nullptr;
-			int					  zIndex = 0;
+			int32_t				  key = 0;
 			BlendMode			  blend = BlendMode::Alpha;
 		};
 
@@ -231,7 +234,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::Color		 color;				 // Fill color (used if colors == nullptr)
 			const Foundation::Color* colors = nullptr;	 // Optional: per-vertex colors (array, same size as vertices)
 			const char*				 id = nullptr;		 // Optional: for inspection/debugging
-			int						 zIndex = 0;		 // Optional: explicit draw order
+			int32_t					 key = 0;
 			BlendMode				 blend = BlendMode::Alpha;
 			bool					 antiAlias = false; // Optional: feather the mesh's boundary
 		};
@@ -257,13 +260,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float					radius;
 			Foundation::CircleStyle style;
 			const char*				id = nullptr;
-			int						zIndex = 0;
+			int32_t					key = 0;
 			BlendMode				blend = BlendMode::Alpha;
 		};
 
 		// Draw a circle with optional fill and border, each one quad in drawArc's SDF mode
 		// and anti-aliased like it: the fill a disk, the border a ring drawn over it at the
-		// same z. Each edge ramps over a device pixel either side, so a circle a pixel or two
+		// same key. Each edge ramps over a device pixel either side, so a circle a pixel or two
 		// across carries more ink than its area: 1.8 times at a radius of half a device pixel,
 		// 1.2 at one.
 		//
@@ -274,7 +277,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   - style.border: Optional border; `position` puts its width inside the radius,
 		//     centred on it (the default) or outside it, and `cornerRadius` is unused
 		//   - id: Optional debug identifier
-		//   - zIndex: Draw order (higher values drawn later)
 		void drawCircle(const CircleArgs& args);
 
 		// How an open polyline's two ends finish: flat at the end point, a half disk
@@ -291,7 +293,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			std::span<const Foundation::Vec2> vertices; // One closed outline, in order; the last point joins the first
 			Foundation::PolygonStyle		  style;
 			const char*						  id = nullptr;
-			int								  zIndex = 0;
+			int32_t							  key = 0;
 			BlendMode						  blend = BlendMode::Alpha;
 		};
 
@@ -322,7 +324,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			LineJoin						  join = LineJoin::Round;
 			bool		closed = false; // Join the last point back to the first, uncapped; two points stay an open segment
 			const char* id = nullptr;
-			int			zIndex = 0;
+			int32_t		key = 0;
 			BlendMode	blend = BlendMode::Alpha;
 		};
 
@@ -350,7 +352,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float			  sweep = 2.0F * std::numbers::pi_v<float>;
 			Foundation::Color color = Foundation::Color::white();
 			const char*		  id = nullptr;
-			int				  zIndex = 0;
+			int32_t			  key = 0;
 			BlendMode		  blend = BlendMode::Alpha;
 		};
 
@@ -370,14 +372,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::Vec2  uvMax{1.0F, 1.0F};
 			Foundation::Color tint = Foundation::Color::white(); // Multiplies the texel; its alpha is the opacity
 			const char*		  id = nullptr;
-			int				  zIndex = 0;
+			int32_t			  key = 0;
 			BlendMode		  blend = BlendMode::Alpha;
 		};
 
 		// Draw a texture into a rectangle, sampled linearly or nearest as the texture
 		// was made. Texels are taken as premultiplied alpha, which a RenderTarget's
 		// output already is; upload straight-alpha pixels premultiplied. Images batch
-		// with everything else, splitting the draw only where the texture changes.
+		// with everything else; a draw call binds eight textures, and splits only for a ninth.
 		void drawImage(const ImageArgs& args);
 
 		// Arguments for DrawText
@@ -403,28 +405,25 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			// CSS text-transform applied to the string at draw time.
 			Foundation::TextTransform transform = Foundation::TextTransform::None;
 			const char*				  id = nullptr;
-			float					  zIndex = 0.0F;
+			int32_t					  key = 0;
 			BlendMode				  blend = BlendMode::Alpha;
 		};
 
-		// Draw text using the font renderer.
+		// Draw text using the font renderer, batched with shapes in key order.
 		//
 		// IMPORTANT: Requires SetFontRenderer() to be called during initialization.
-		// Text rendering uses batched command queue for proper z-ordering with shapes.
 		//
 		// Parameters:
 		//   - text: String to render
 		//   - position: Top-left position in current coordinate space
 		//   - scale: Text size scale (1.0F = 16px base font size)
 		//   - color: RGBA text color
-		//   - zIndex: Draw order (higher values drawn later, allows proper layering with shapes)
 		void drawText(const TextArgs& args);
 
 		// Batch glyph quads a caller laid out itself (FontRenderer::generateGlyphQuads
 		// and friends), each in its own colour, sampling the atlas it carries at that
-		// atlas's distance range, so one call can hold several families. Text is
-		// interleaved with shapes in submission order.
-		void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, float zIndex = 0.0F, BlendMode blend = BlendMode::Alpha);
+		// atlas's distance range, so one call can hold several families, at `key`.
+		void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, int32_t key = 0, BlendMode blend = BlendMode::Alpha);
 
 		// --- World-Space Instancing ---
 
@@ -471,13 +470,23 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- State Management ---
 
-		// Clip what is drawn from here to `bounds`, in screen coordinates whatever
-		// transform is pushed, intersected with the clip it is pushed in. The bounds
-		// ride on each vertex and the fragment shader discards outside them, so a clip
-		// costs no draw call and no GL state. A rect with no area, or one that misses
-		// the clip it is pushed in, is the empty clip: nothing draws under it, whatever
-		// is pushed over it, until it is popped. Instanced and baked draws ignore clips.
+		// Clip what is drawn from here to `bounds`, in the space of the current
+		// transform, intersected with the clip it is pushed in. The clip is mapped to
+		// the screen once, at the push, as the bounds of its four corners: exact under
+		// translation and axis-aligned scale, a box around it under a rotation or shear
+		// (which under-clips, and warns once). A transform pushed after it doesn't move
+		// it. The clip is half-open: a pixel survives when its centre is at or past
+		// the left and top edges and before the right and bottom ones. The bounds ride
+		// on each vertex and the fragment shader discards outside them, so a clip costs
+		// no draw call and no GL state. A rect with no area, a negative or NaN extent,
+		// or one that misses the clip it is pushed in, is the empty clip: nothing draws
+		// under it, whatever is pushed over it, until it is popped. Instanced and baked
+		// draws ignore clips.
 		void pushClip(const Foundation::Rect& bounds);
+
+		// A clip of none, whatever is pushed under it, until it is popped: what a ui overlay draws
+		// in, escaping its opener's clips. A clip pushed over it clips again.
+		void pushClipReset();
 
 		// Pop the most recent clip, restoring the one it was pushed in, if any.
 		void popClip();
@@ -489,11 +498,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Statistics ---
 
-		// The frame's batches since beginFrameStats(): draw calls, vertices and triangles (an
-		// instanced draw counting each instance's), the instances drawInstanced drew,
-		// the vertex, index and instance bytes written to the backend, and the flushes
-		// that submitted something with the CPU time they took (the plan, the uploads
-		// and the draw calls).
+		// The frame's batches since beginFrameStats(): draw calls; instances, each batched
+		// quad one and each of drawInstanced's meshes one per copy; the vertices and
+		// triangles they drew (six and two a quad, a mesh's for each copy); the quad and
+		// mesh instance bytes written to the backend; and the flushes that submitted
+		// something with the CPU time they took (the plan, the upload and the draw calls).
 		struct RenderStats {
 			uint32_t drawCalls = 0;
 			uint32_t vertexCount = 0;

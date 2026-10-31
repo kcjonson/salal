@@ -7,6 +7,7 @@
 
 #include "Scenes.h"
 
+#include <Texture.h>
 #include <graphics/Color.h>
 #include <primitives/Primitives.h>
 #include <random/Rng.h>
@@ -114,12 +115,7 @@ namespace {
 			}
 		}
 
-		void onExit() override {
-			for (Renderer::TextureHandle& icon : icons) {
-				Renderer::Primitives::destroyTexture(icon);
-				icon = {};
-			}
-		}
+		void onExit() override { icons = {}; }
 
 		void fixedUpdate(const app::TickContext& context) override { tick = context.tick; }
 
@@ -137,7 +133,7 @@ namespace {
 			for (std::size_t i = 0; i < rows.size(); ++i) {
 				const Row& row = rows[i];
 				P::drawRect({.bounds = row.background, .style = {.fill = (i % 2 == 0) ? kRowEven : kRowOdd}});
-				P::drawImage({.texture = icons[i % kIcons], .bounds = row.icon, .tint = row.tint});
+				P::drawImage({.texture = icons[i % kIcons].handle(), .bounds = row.icon, .tint = row.tint});
 				P::drawText({.text = row.label, .position = row.labelAt, .scale = row.scale, .color = kLabel, .font = sandbox::kMonoFont});
 				P::drawText(
 					{.text = row.value, .position = row.valueAt, .scale = row.scale, .color = kValue, .font = sandbox::kSecondFont}
@@ -157,10 +153,10 @@ namespace {
 			Foundation::Vec2 position;
 		};
 
-		std::vector<Header>							headers;
-		std::vector<Row>							rows;
-		std::array<Renderer::TextureHandle, kIcons> icons{};
-		uint64_t									tick = 0;
+		std::vector<Header>					  headers;
+		std::vector<Row>					  rows;
+		std::array<Renderer::Texture, kIcons> icons;
+		uint64_t							  tick = 0;
 	};
 
 } // namespace

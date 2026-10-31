@@ -1,7 +1,7 @@
 // input_test: the frame's input as a scene sees it. The pointer, its delta, the mouse buttons, scroll
 // and a row of keys come from the frame reader's InputSnapshot; the drag (from the left button's press
 // to now) and the list of recent events come from the frame's events, App::input().events(), which
-// hold what an overlay consumed too. exportState gives the same as JSON, for /api/state?what=scene.
+// hold what a debug layer consumed too. exportState gives the same as JSON, for /api/state?what=scene.
 
 #include "Scenes.h"
 

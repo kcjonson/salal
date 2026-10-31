@@ -20,8 +20,8 @@ frame, the platforms, the scene stack, the devices, the dev server, settings and
 saves, and the sandbox harness are in (salal PRs 1 to 6, `v0.10.0` to
 `v0.15.0`), and worldsim pinned `v0.15.0` ([worldsim#313](https://github.com/kcjonson/worldsim/pull/313))
 and converted its GUI apps onto `app` ([worldsim#314](https://github.com/kcjonson/worldsim/pull/314)).
-Audio is next, once its decision is made, then phase 3, `ui`, which is a
-placeholder until then.
+Phase 3, `ui` ([docs/ui-design.md](docs/ui-design.md)), is done: worldsim runs
+entirely on salal's ui at `v0.29.0`. Audio is next, once its decision is made.
 CI builds and tests on Windows, macOS and Linux.
 
 The engine is being extracted from [worldsim](https://github.com/kcjonson/worldsim),

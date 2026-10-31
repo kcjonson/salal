@@ -220,7 +220,7 @@ namespace {
 					 .style =
 						 {.fill = entity.color,
 						  .border = entity.bordered ? std::optional<Foundation::LineStyle>({.color = kInk, .width = 1.5F}) : std::nullopt},
-					 .zIndex = static_cast<int>(entity.position.y)}
+					 .key = static_cast<int32_t>(entity.position.y)}
 				);
 				P::PopTransform();
 			}

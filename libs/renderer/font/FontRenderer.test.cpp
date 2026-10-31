@@ -30,6 +30,7 @@
 #include "primitives/Primitives.h"
 #include "utils/Log.h"
 
+#include <glm/gtc/packing.hpp>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -474,12 +475,12 @@ namespace Renderer {
 		Primitives::drawGlyphs(quads.data(), quads.size());
 		Primitives::endFrame();
 
+		// One draw with both atlases bound, each glyph sampling its own.
 		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
-		ASSERT_EQ(draws.size(), 2U);
-		EXPECT_EQ(draws[0].call.texture, mono);
-		EXPECT_EQ(draws[0].call.indexCount, 24U); // four glyphs of six indices
-		EXPECT_EQ(draws[1].call.texture, body);
-		EXPECT_EQ(draws[1].call.indexCount, 24U);
+		ASSERT_EQ(draws.size(), 1U);
+		EXPECT_EQ(draws[0].call.textures[0], mono);
+		EXPECT_EQ(draws[0].call.textures[1], body);
+		EXPECT_EQ(draws[0].call.instanceCount, 8U); // eight glyphs, a quad each
 	}
 
 	TEST_F(FontRendererInitializeTest, EachQuadDrawsAtItsOwnAtlassDistanceRange) {
@@ -504,16 +505,16 @@ namespace Renderer {
 		Primitives::drawGlyphs(quads.data(), quads.size());
 		Primitives::endFrame();
 
-		// One upload; its vertices run in submission order, four per quad.
+		// One upload; its quads run in submission order, each with its range in shape.z.
 		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
 		ASSERT_FALSE(draws.empty());
 		const std::span<const uint8_t> bytes = nullBackend->bufferContents(nullBackend->geometry(draws[0].call.geometry)->vertices);
-		std::vector<BatchVertex>	   vertices(bytes.size() / sizeof(BatchVertex));
-		std::memcpy(vertices.data(), bytes.data(), vertices.size() * sizeof(BatchVertex));
-		ASSERT_EQ(vertices.size(), 20U);
+		std::vector<BatchInstance>	   glyphs(bytes.size() / sizeof(BatchInstance));
+		std::memcpy(glyphs.data(), bytes.data(), glyphs.size() * sizeof(BatchInstance));
+		ASSERT_EQ(glyphs.size(), 5U);
 		const float expected[] = {2.0F, 2.0F, 4.0F, 4.0F, 6.0F};
-		for (size_t i = 0; i < vertices.size(); ++i) {
-			EXPECT_EQ(vertices[i].data2.x, expected[i / 4]) << "vertex " << i;
+		for (size_t i = 0; i < glyphs.size(); ++i) {
+			EXPECT_EQ(glm::unpackHalf2x16(glyphs[i].shape[1]).x, expected[i]) << "glyph " << i;
 		}
 	}
 
@@ -666,29 +667,38 @@ namespace Renderer {
 	}
 
 #ifdef DEVELOPMENT_BUILD
-	TEST_F(FontRendererInitializeTest, LoadingWarnsOncePerCrampedAtlasNamingItsGlyphs) {
-		struct Captured {
-			std::vector<std::string> warnings;
-		} captured;
-		// Declared after captured, so the sink is cleared before captured goes, however the test ends.
-		struct SinkReset {
-			~SinkReset() { foundation::Logger::setSink(nullptr, nullptr); }
-		} reset;
-		foundation::Logger::setSink(
-			[](void* context, const foundation::LogRecord& record) {
-				if (record.category == foundation::LogCategory::UI && record.level == foundation::LogLevel::Warning) {
-					static_cast<Captured*>(context)->warnings.emplace_back(record.message);
-				}
-			},
-			&captured
-		);
+	// The UI warnings logged while it lives.
+	class UiWarnings {
+	  public:
+		UiWarnings() {
+			foundation::Logger::setSink(
+				[](void* context, const foundation::LogRecord& record) {
+					if (record.category == foundation::LogCategory::UI && record.level == foundation::LogLevel::Warning) {
+						static_cast<UiWarnings*>(context)->warnings.emplace_back(record.message);
+					}
+				},
+				this
+			);
+		}
+		~UiWarnings() { foundation::Logger::setSink(nullptr, nullptr); }
 
-		// Two cramped atlases and a roomy one between them.
+		UiWarnings(const UiWarnings&) = delete;
+		UiWarnings& operator=(const UiWarnings&) = delete;
+		UiWarnings(UiWarnings&&) = delete;
+		UiWarnings& operator=(UiWarnings&&) = delete;
+
+		std::vector<std::string> warnings;
+	};
+
+	TEST_F(FontRendererInitializeTest, LoadingWarnsOncePerCrampedAtlasNamingItsGlyphs) {
+		const UiWarnings captured;
+
+		// Two cramped atlases and a roomy one between them, at a range wide enough for small text.
 		constexpr FontFamily kDisplay{5};
 		const std::array	 sources{
-			folder.write(kBody, "body", {.room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}}}),
-			folder.write(kMono, "mono"),
-			folder.write(kDisplay, "display", {.room = {{'[', roomAround(1.0F)}}}),
+			folder.write(kBody, "body", {.distanceRange = 6.0F, .room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}}}),
+			folder.write(kMono, "mono", {.distanceRange = 6.0F}),
+			folder.write(kDisplay, "display", {.distanceRange = 6.0F, .room = {{'[', roomAround(1.0F)}}}),
 		};
 		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody));
 		ASSERT_EQ(captured.warnings.size(), 2U);
@@ -696,6 +706,21 @@ namespace Renderer {
 		EXPECT_TRUE(captured.warnings[0].ends_with(": ()")) << captured.warnings[0];
 		EXPECT_TRUE(captured.warnings[1].starts_with("SDF atlas display.json: ")) << captured.warnings[1];
 		EXPECT_TRUE(captured.warnings[1].ends_with(": [")) << captured.warnings[1];
+	}
+
+	TEST_F(FontRendererInitializeTest, AnAtlasWhoseRangeIsUnderASixthOfItsEmWarns) {
+		const UiWarnings captured;
+
+		// The test atlases' em is 32 texels: a range of 4 is under a sixth of it, 6 is not.
+		ASSERT_TRUE(
+			fontRenderer->Initialize(std::array{folder.write(kBody, "body", {.distanceRange = 6.0F}), folder.write(kMono, "mono")}, kBody)
+		);
+		ASSERT_EQ(captured.warnings.size(), 1U);
+		EXPECT_EQ(
+			captured.warnings[0],
+			"SDF atlas mono.json: a distance range of 4.0 texels is under a sixth of its 32-texel em, too thin for small text; generate "
+			"it with 6 or more"
+		);
 	}
 #endif
 

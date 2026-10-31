@@ -23,8 +23,8 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		uint32_t drawCalls{};	   // Number of draw calls this frame
 		uint32_t vertexCount{};	   // Number of vertices rendered this frame
 		uint32_t triangleCount{};  // Number of triangles rendered this frame
-		uint32_t instanceCount{};  // Instances drawn by instanced draws this frame
-		uint64_t uploadBytes{};	   // Vertex, index and instance bytes the batch wrote this frame
+		uint32_t instanceCount{};  // Batched quads and mesh instances drawn this frame
+		uint64_t uploadBytes{};	   // Quad and mesh instance bytes the batch wrote this frame
 		uint32_t flushCount{};	   // Batch flushes that submitted something this frame
 		float	 flushMs{};		   // CPU time in those flushes (plan, uploads, draw calls)
 
@@ -66,6 +66,7 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		float pollEventsMs{};  // Time for glfwPollEvents
 		float inputHandleMs{}; // Time for input handling
 		float sceneUpdateMs{}; // Time for scene update
+		float uiLayoutMs{};	   // Time for the ui layout pass
 		float sceneRenderMs{}; // Time for scene render
 		float swapBuffersMs{}; // Time for buffer swap (includes VSync wait)
 

@@ -3,14 +3,15 @@
 Surveyed 2026-10-25, revised the same day after Kevin's decision to migrate
 dual-deck-builder to C++, and revised again the same day after the Phase 0
 surveys. Updated 2026-10-26 with what phase 0.5 landed in worldsim, and again
-with how phase 1 is being executed and what scoping it turned up, and 2026-10-28
-with phase 2 done.
+with how phase 1 is being executed and what scoping it turned up, 2026-10-28
+with phase 2 done, and 2026-10-30 with phase 3 done.
 
 This is the engine repo. `foundation` and `renderer` are imported (plain copies
 of worldsim at `870dd755` and `2cc7e40a`); phase 2 is done, with `app` in
-(`v0.10.0` to `v0.15.0`) and worldsim converted onto it, and `ui` is a
-placeholder until phase 3. Next is phase 2b, audio, once decision B is settled,
-then phase 3, `ui`. "Sequencing" below says where each stands.
+(`v0.10.0` to `v0.15.0`) and worldsim converted onto it; phase 3 is done,
+with `ui` built in salal and worldsim running on it at `v0.29.0`. Next is
+phase 2b, audio, once decision B is settled. "Sequencing" below says where each
+stands.
 
 ## Corrections in this revision (2026-10-25)
 
@@ -722,15 +723,33 @@ prototype can start here.
 
 ### Phase 2b, audio
 
-Decision B, and next now that phase 2 is done. After `app`, before `ui`, because
-the feel prototype wants audible thrust and nothing in `ui` depends on it.
+Decision B, and next now that phase 3 is done. Planned for after `app` and before
+`ui`, because the feel prototype wants audible thrust and nothing in `ui`
+depends on it; `ui` went first once it blocked every game's feature work.
 
-### Phase 3, extract `ui`
+### Phase 3, extract `ui` (done 2026-10-30)
 
-Largest and least certain, and nothing upstream waits on it. Against the
-adopted spec (decision C), with multi-device focus (I) and the storage model
-(F) settled on the way, and the spec's conformance scorecard as the acceptance
-test.
+The largest phase and the least certain, and from 2026-10-30 it blocked feature
+work on every game until it landed. Designed in [ui-design.md](ui-design.md),
+which takes dual-deck-builder's spec (decision C) rule by rule, and sequenced
+in [ui-plan.md](ui-plan.md) as parallel tracks: four renderer PRs (the integer
+sort key, GPU resource owners, the per-draw instance and eight texture slots),
+then `ui` built in salal (the core in a scene's slot map with one paint order,
+layout, input, focus, theme and tokens, icons, animation, the overlay stack,
+and the display, control and overlay components), up to `v0.29.0`. Worldsim
+converted in three PRs: ui-sandbox and asset-manager ([worldsim#322](https://github.com/kcjonson/worldsim/pull/322)), the pre-game
+scenes ([worldsim#323](https://github.com/kcjonson/worldsim/pull/323)), then the
+game ui ([worldsim#324](https://github.com/kcjonson/worldsim/pull/324)), which deleted worldsim's `libs/ui`, `UiBridge` and
+`UiScene`. Worldsim runs entirely on salal's ui, keyboard and mouse only.
+
+Deferred, and still to do:
+
+- Grid. Built once and reverted for not following the spec; it comes back when
+  a game needs it.
+- The perf suite ([salal#41](https://github.com/kcjonson/salal/pull/41)), run
+  alone when Kevin chooses, with the metrics it still lacks and perf scenes
+  for ui.
+- The scene diff and the happy-path scripts ([testing/README.md](testing/README.md)).
 
 ### Phase 4, dual-deck-builder Job B
 
@@ -768,7 +787,8 @@ test and a harder one, since it is UI-heavy where asteroids is
 simulation-heavy.
 
 **Extraction stalls every game and ships nothing.** The sequencing exists for
-this. Phases 0.5 and 1 are small PRs, phase 3 is optional for a long time,
+this. Phases 0.5 and 1 are small PRs, phase 3 ran as parallel tracks because
+every game's feature work waited on it,
 phase 4 is its own project, and the prototype runs throughout.
 
 **Versioning.** Three consumers, one developer, pinned tags. Manageable now,

@@ -63,6 +63,7 @@ namespace Foundation {
 		json << "\"pollEventsMs\":" << pollEventsMs << ",";
 		json << "\"inputHandleMs\":" << inputHandleMs << ",";
 		json << "\"sceneUpdateMs\":" << sceneUpdateMs << ",";
+		json << "\"uiLayoutMs\":" << uiLayoutMs << ",";
 		json << "\"sceneRenderMs\":" << sceneRenderMs << ",";
 		json << "\"swapBuffersMs\":" << swapBuffersMs;
 		json << "}";
