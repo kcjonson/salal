@@ -215,6 +215,31 @@ namespace ui {
 		context->openPopup(entry, selfId, std::move(options));
 	}
 
+	void Component::requestUpdate() {
+		if (context != nullptr && !updateRequested) {
+			updateRequested = true;
+			context->updateRequests.push_back(selfId);
+		}
+	}
+
+	Animator* Component::animatorOf() const {
+		if (context == nullptr) {
+			LOG_ERROR(UI, "%s: a tween or timer before it is mounted; start them in onMount or later", typeName());
+			return nullptr;
+		}
+		return context->animator.get();
+	}
+
+	TimerId Component::after(double delayMs, std::function<void()> callback) {
+		Animator* animator = animatorOf();
+		return animator != nullptr ? animator->after(delayMs, std::move(callback), selfId) : TimerId{};
+	}
+
+	TimerId Component::every(double intervalMs, std::function<void()> callback) {
+		Animator* animator = animatorOf();
+		return animator != nullptr ? animator->every(intervalMs, std::move(callback), selfId) : TimerId{};
+	}
+
 	Component::Handlers& Component::handlersMade() {
 		if (!handlers) {
 			handlers = std::make_unique<Handlers>();

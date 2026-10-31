@@ -78,7 +78,16 @@ namespace ui {
 		[[nodiscard]] float			   getScale() const { return scale; }
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }
 
-		void update(double dt);
+		// The update phase (R8.16): the clock advances by `dt` seconds, clamped to a quarter of a second
+		// (R13.9), due timers fire, tweens advance, and each component that asked for an update gets it,
+		// once, unless it's hidden.
+		void					   update(double dt);
+		[[nodiscard]] Clock&	   getClock() { return clock; }
+		[[nodiscard]] const Clock& getClock() const { return clock; }
+		[[nodiscard]] Animator&	   getAnimator() { return *animator; }
+		// Every tween completes on its first tick (R11.13); the App sets it from its settings.
+		void			   setReducedMotion(bool value) { animator->setReducedMotion(value); }
+		[[nodiscard]] bool isReducedMotion() const { return animator->isReducedMotion(); }
 		// Layout, screen transforms and the paint order, where something changed since the last; then
 		// onLayout for what moved.
 		void layout();
@@ -171,6 +180,7 @@ namespace ui {
 		[[nodiscard]] bool pointerInert() const { return modalFloor() > 0; }
 		[[nodiscard]] bool within(ComponentId id, ComponentId root) const;
 		void			   removing(ComponentId root);
+		void			   applyMotion();
 		void			   capture(ComponentId captor);
 		ComponentId		   captor() const;
 		void			   drawScrollbar(const Component& scroller) const;
@@ -180,15 +190,18 @@ namespace ui {
 		void			   renderComponent(Component& component, float parentOpacity);
 		void			   restyle(Component& component);
 
-		mutable Registry		 registry;
-		Theme					 theme;
-		IconService				 iconService;
-		std::vector<ComponentId> roots;
-		ComponentId				 defaultRoot;
-		Foundation::Vec2		 windowSize;
-		Foundation::Vec2		 viewport;
-		float					 scale = 1.0F;
-		std::vector<ComponentId> order;
+		// Ahead of the registry, so the tweens components hold are released into a live animator.
+		Clock					  clock;
+		std::unique_ptr<Animator> animator;
+		mutable Registry		  registry;
+		Theme					  theme;
+		IconService				  iconService;
+		std::vector<ComponentId>  roots;
+		ComponentId				  defaultRoot;
+		Foundation::Vec2		  windowSize;
+		Foundation::Vec2		  viewport;
+		float					  scale = 1.0F;
+		std::vector<ComponentId>  order;
 		// The paint order as the pointer meets it: each component, and each scroller's bar after the
 		// last of its subtree, where it paints.
 		struct HitEntry {
@@ -206,6 +219,7 @@ namespace ui {
 		std::vector<PopupEntry>	 popupStack;	   // in stack order
 		int						 paintingSlot = 0; // the slot buildOrder fills
 		std::vector<ComponentId> dirtyBoundaries;  // where the next pass lays out from
+		std::vector<ComponentId> updateRequests;   // for the next update
 		std::uint32_t			 layoutPass = 0;
 		std::vector<OrderItem>	 orderScratch;
 		bool					 geometryDirty = true;

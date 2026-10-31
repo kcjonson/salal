@@ -29,6 +29,7 @@
 //       ui::Ref<ui::Rectangle> fill;
 //   };
 
+#include "ui/Animator.h"
 #include "ui/Focus.h"
 #include "ui/Input.h"
 #include "ui/Layout.h"
@@ -250,6 +251,17 @@ namespace ui {
 		void setOnClick(std::function<void(PointerEvent&)> callback);
 		void setOnPointer(PointerEvent::Type type, std::function<void(PointerEvent&)> callback);
 
+		// --- Time (ui/Animator.h) ---
+
+		// update(dt) on the next frame, once (R8.17); an animation asks again from its update.
+		void requestUpdate();
+		// A tween it owns, cancelled when it's removed; empty, logged, before it's mounted.
+		template <typename T>
+		[[nodiscard]] Tween<T> tween(TweenArgs<T> args);
+		// Timers it owns, dropped when it's removed.
+		TimerId after(double delayMs, std::function<void()> callback);
+		TimerId every(double intervalMs, std::function<void()> callback);
+
 		// --- Pointer ---
 
 		[[nodiscard]] PointerEvents			getPointerEvents() const { return pointerEvents.value_or(defaultPointerEvents()); }
@@ -351,6 +363,8 @@ namespace ui {
 		// Its content changed in a way that changes what it measures (a text's string, its font).
 		void contentChanged();
 		// A pointer event the dispatcher delivers to it, after its callback; consume() stops the bubble.
+		// Its update phase, `dt` seconds, on the frame after it called requestUpdate.
+		virtual void update(float /*dt*/) {}
 		virtual void handlePointer(PointerEvent& /*event*/) {}
 		// A key, character or action while it or a descendant has focus, after its callback.
 		virtual void handleKey(KeyEvent& /*event*/) {}
@@ -398,6 +412,7 @@ namespace ui {
 			std::function<void(Component&)>	   onBlur;
 			std::function<void(Component&)>	   onLayout;
 		};
+		[[nodiscard]] Animator*	 animatorOf() const;
 		Handlers&				 handlersMade();
 		[[nodiscard]] Component* keyedChild(const std::string& childKey) const;
 		void					 finishReconcile(const std::vector<ComponentId>& kept);
@@ -500,6 +515,7 @@ namespace ui {
 		bool							focusable = false;
 		std::uint8_t					focusedBy = 0; // a bit for each player whose focus is on it
 		std::uint8_t					focusVisibleBy = 0;
+		bool							updateRequested = false;
 	};
 
 	// --- Templates ---
@@ -553,6 +569,16 @@ namespace ui {
 			registerPopup(entry.componentId(), std::move(options));
 		}
 		return entry.get() != nullptr ? entry : Ref<T>();
+	}
+
+	template <typename T>
+	Tween<T> Component::tween(TweenArgs<T> args) {
+		Animator* animator = animatorOf();
+		if (animator == nullptr) {
+			return {};
+		}
+		args.owner = selfId;
+		return animator->tween(args);
 	}
 
 	template <typename T>
