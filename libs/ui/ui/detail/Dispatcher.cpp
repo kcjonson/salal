@@ -212,6 +212,7 @@ namespace ui::detail {
 		Component* target = find(hit);
 		pressOwned = target != nullptr || context.pointerInert();
 		if (target == nullptr) {
+			context.pointerPressed({});
 			return pressOwned;
 		}
 		if (onThumb) {
@@ -230,6 +231,7 @@ namespace ui::detail {
 		}
 		setPressed(hit, true);
 		deliver(*target, event);
+		context.pointerPressed(hit);
 		return true;
 	}
 

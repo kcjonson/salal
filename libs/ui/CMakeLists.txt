@@ -41,15 +41,23 @@ if(msdfgen_FOUND)
 endif()
 
 add_library(salal_ui STATIC
+    ui/components/Badge.cpp
+    ui/components/Divider.cpp
+    ui/components/KeyCap.cpp
+    ui/components/Panel.cpp
+    ui/components/ProgressBar.cpp
+    ui/components/Stat.cpp
     ui/Component.cpp
     ui/Context.cpp
     ui/Popup.cpp
+    ui/Focus.cpp
     ui/Registry.cpp
     ui/Style.cpp
     ui/Transform.cpp
     ui/debug/LayoutLint.cpp
     ui/debug/TreeSnapshot.cpp
     ui/detail/Dispatcher.cpp
+    ui/detail/FocusManager.cpp
     ui/detail/LayoutEngine.cpp
     ui/shapes/Circle.cpp
     ui/shapes/Line.cpp

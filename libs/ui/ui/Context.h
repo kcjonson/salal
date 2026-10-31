@@ -22,18 +22,21 @@
 
 #include <math/Types.h>
 
-#include <cstddef>
-#include <cstdint>
+#include <input/ActionMap.h>
 #include <input/InputTypes.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace ui {
 
 	namespace detail {
 		class Dispatcher;
+		class FocusManager;
 	} // namespace detail
 
 	// A draw key is (slot << kRankBits) | rank. The scene is slot 0; popup stack entries and the tiers
@@ -83,7 +86,8 @@ namespace ui {
 		void render();
 
 		// One platform event; true when the ui took it, so the scene shouldn't. Pointer events go to
-		// the topmost hit, a press's gesture stays with whoever had the press, and the wheel scrolls.
+		// the topmost hit, a press's gesture stays with whoever had the press, and the wheel scrolls;
+		// keys, characters, pad buttons and axes go to the focus of the player holding the device.
 		bool dispatch(const foundation::InputEvent& event);
 		// The topmost component the pointer hits at a point, in the ui's px; none for empty space. A
 		// scroller is the hit over its scrollbar, which sets `onScrollbar`.
@@ -104,6 +108,29 @@ namespace ui {
 		void bringToFront(Ref<Component> entry);
 		// The open entries in stack order, bottom to top.
 		[[nodiscard]] std::vector<ComponentId> popups() const;
+		// --- Focus (ui/Focus.h) ---
+
+		// One focus per player slot, 0 to kMaxPlayers - 1. focus is refused, false, for a component
+		// that can't take it (Component::canReceiveFocus) or is outside the player's scope.
+		bool						 focus(Ref<Component> target, int player = 0);
+		void						 clearFocus(int player = 0);
+		[[nodiscard]] Ref<Component> focused(int player = 0);
+		// Tab order, wrapping (R9.18, R9.19); false when there's nothing to focus.
+		bool focusNext(int player = 0);
+		bool focusPrevious(int player = 0);
+		// What a direction does when nothing consumes it: a neighbour, the focus group, the nearest.
+		bool focusDirection(Direction direction, int player = 0);
+		// Navigation stays inside `scopeRoot` until popScope, or until it goes; focus moves in, and
+		// comes back to where it was when the scope closes (gap 11).
+		void pushScope(Ref<Component> scopeRoot, int player = 0);
+		void popScope(int player = 0);
+		// The player's navigation actions (Focus.h's actions); defaultNavigation() until set.
+		void setNavigation(int player, foundation::ActionMap map);
+		// The devices whose keys, buttons and axes drive the player's focus. While no player holds any,
+		// player 0 holds them all; once one does, a device no player holds drives nothing. The pointer
+		// isn't routed: a press focuses for the player holding the mouse, else player 0.
+		void					setPlayerDevices(int player, std::span<const foundation::DeviceId> devices);
+		[[nodiscard]] InputMode inputMode() const;
 
 		// Every visible component, bottom to top, as of the last layout.
 		[[nodiscard]] const std::vector<ComponentId>& paintOrder() const { return order; }
@@ -114,6 +141,7 @@ namespace ui {
 	  private:
 		friend class Component;
 		friend class detail::Dispatcher;
+		friend class detail::FocusManager;
 		friend Registry* detail::registryOf(const Context& context);
 
 		struct OrderItem {
@@ -130,7 +158,9 @@ namespace ui {
 				   bool									  blocked
 			   );
 		void resizeRoots();
-		void refreshGeometry(bool& changed);
+		// Screen maps, clips and enabled flags again if anything moved; true when it ran.
+		bool refreshGeometry();
+		void pointerPressed(ComponentId hit);
 		void openPopup(ComponentId entry, ComponentId opener, PopupOptions options);
 		void dismiss(ComponentId entry);
 		void placePopups();
@@ -165,8 +195,9 @@ namespace ui {
 			ComponentId id;
 			bool		scrollbar;
 		};
-		std::vector<HitEntry>				hitList;
-		std::unique_ptr<detail::Dispatcher> dispatcher;
+		std::vector<HitEntry>				  hitList;
+		std::unique_ptr<detail::Dispatcher>	  dispatcher;
+		std::unique_ptr<detail::FocusManager> focusManager;
 		struct PopupEntry {
 			ComponentId	 id;
 			ComponentId	 opener;

@@ -52,10 +52,12 @@ namespace ui {
 			return component.getOverflow() == Overflow::Clip || component.getOverflow() == Overflow::Scroll;
 		}
 
-		// Something the pointer is meant to reach: it answers the pointer and its box can be hit.
+		// Something a player is meant to reach: it takes focus, or it answers the pointer and its box can
+		// be hit.
 		bool interactive(const Component& component) {
 			const PointerEvents pointer = component.getPointerEvents();
-			return component.handlesPointer() && (pointer == PointerEvents::Auto || pointer == PointerEvents::Unit);
+			return component.isFocusable() ||
+				   (component.handlesPointer() && (pointer == PointerEvents::Auto || pointer == PointerEvents::Unit));
 		}
 
 		struct Sibling {

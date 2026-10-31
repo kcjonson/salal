@@ -38,6 +38,9 @@ namespace ui {
 		zIndex = args.zIndex;
 		isolation = args.isolation;
 		pointerEvents = args.pointerEvents;
+		focusable = args.focusable;
+		tabIndex = args.tabIndex;
+		focusGroup = args.focusGroup;
 		cursor = args.cursor;
 		const auto take = [this](const std::function<void(PointerEvent&)>& from, std::function<void(PointerEvent&)> Handlers::* to) {
 			if (from) {
@@ -51,6 +54,18 @@ namespace ui {
 		take(args.onPointerEnter, &Handlers::onPointerEnter);
 		take(args.onPointerLeave, &Handlers::onPointerLeave);
 		take(args.onWheel, &Handlers::onWheel);
+		if (args.onKeyDown) {
+			setOnKeyDown(args.onKeyDown);
+		}
+		if (args.onKeyUp) {
+			setOnKeyUp(args.onKeyUp);
+		}
+		if (args.onFocus) {
+			setOnFocus(args.onFocus);
+		}
+		if (args.onBlur) {
+			setOnBlur(args.onBlur);
+		}
 		if (args.onLayout) {
 			setOnLayout(args.onLayout);
 		}
@@ -280,6 +295,67 @@ namespace ui {
 	bool Component::handlesPointer() const {
 		return handlers && (handlers->onClick || handlers->onPointerDown || handlers->onPointerUp || handlers->onPointerMove ||
 							handlers->onPointerEnter || handlers->onPointerLeave || handlers->onWheel);
+	}
+
+	void Component::setOnKeyDown(std::function<void(KeyEvent&)> callback) {
+		handlersMade().onKeyDown = std::move(callback);
+	}
+
+	void Component::setOnKeyUp(std::function<void(KeyEvent&)> callback) {
+		handlersMade().onKeyUp = std::move(callback);
+	}
+
+	void Component::setOnFocus(std::function<void(Component&)> callback) {
+		handlersMade().onFocus = std::move(callback);
+	}
+
+	void Component::setOnBlur(std::function<void(Component&)> callback) {
+		handlersMade().onBlur = std::move(callback);
+	}
+
+	void Component::setNeighbour(Direction direction, Ref<Component> neighbour) {
+		neighbours[static_cast<int>(direction)] = neighbour.componentId();
+	}
+
+	bool Component::focus(int player) {
+		return context != nullptr && context->focus(self(), player);
+	}
+
+	bool Component::canReceiveFocus() const {
+		if (!focusable || context == nullptr || context->registry.find(selfId) != this) {
+			return false;
+		}
+		for (const Component* node = this; node != nullptr; node = node->parentComponent()) {
+			if (!node->isShown() || !node->enabled) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	Component* Component::keyedChild(const std::string& childKey) const {
+		for (const ComponentId childId : children) {
+			Component* child = context->registry.find(childId);
+			if (child != nullptr && !child->reconcileKey.empty() && child->reconcileKey == childKey) {
+				return child;
+			}
+		}
+		return nullptr;
+	}
+
+	// Removes the children not kept, then puts the rest in the items' order.
+	void Component::finishReconcile(const std::vector<ComponentId>& kept) {
+		const std::vector<ComponentId> before = children;
+		for (const ComponentId childId : before) {
+			if (std::ranges::find(kept, childId) == kept.end()) {
+				removeChild(Ref<Component>(childId, &context->registry));
+			}
+		}
+		if (children != kept) {
+			children = kept;
+			layoutChanged(false);
+			orderChanged();
+		}
 	}
 
 	void Component::setPointerEvents(std::optional<PointerEvents> value) {
