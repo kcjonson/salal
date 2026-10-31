@@ -87,6 +87,26 @@ namespace ui {
 		EXPECT_EQ(changes, (std::vector<bool>{true, false}));
 	}
 
+	// The knob eases over motion.duration.fast, 100 ms in ui's tokens, and snaps under reduced motion.
+	TEST_F(UiControlsTest, AToggleKnobSlidesThroughTheAnimator) {
+		Ref<Toggle> toggle = root.addChild<Toggle>({.label = "Music"});
+		context.layout();
+		const Component& track = *context.find(toggle.get()->getChildren().front());
+		const Component& knob = *context.find(track.getChildren().front());
+		click(middleOf(*toggle.get()));
+		EXPECT_FLOAT_EQ(knob.getPosition().x, 2.0F); // no time has passed
+		context.update(0.05);
+		EXPECT_GT(knob.getPosition().x, 2.0F);
+		EXPECT_LT(knob.getPosition().x, 16.0F);
+		context.update(1.0);
+		EXPECT_FLOAT_EQ(knob.getPosition().x, 16.0F);
+
+		context.setReducedMotion(true);
+		click(middleOf(*toggle.get()));
+		context.update(0.016);
+		EXPECT_FLOAT_EQ(knob.getPosition().x, 2.0F);
+	}
+
 	TEST_F(UiControlsTest, ExclusiveChoicesSelectOneAndReportOnlyAChange) {
 		std::vector<int>		 radios;
 		std::vector<int>		 segments;

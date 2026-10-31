@@ -32,7 +32,23 @@ namespace ui {
 		row.gap = kGap;
 		setLayout(row);
 		track = addChild<Rectangle>({.size = {kTrackWidth, kTrackHeight}});
-		knob = track.addChild<Circle>({.position = {kInset, kInset}, .size = {kKnob, kKnob}});
+		const float start = on ? kTrackWidth - kInset - kKnob : kInset;
+		knob = track.addChild<Circle>({.position = {start, kInset}, .size = {kKnob, kKnob}});
+		slide = tween<float>({.from = start, .to = start, .onUpdate = [this](const float& x) {
+								  if (Circle* shown = knob.get()) {
+									  shown->setPosition({x, kInset});
+								  }
+							  }});
+		const Foundation::Color fill = trackFill();
+		fade = tween<Foundation::Color>(
+			{.from = fill, .to = fill, .onUpdate = [this](const Foundation::Color& fill) {
+				 if (Rectangle* shown = track.get()) {
+					 shown->setStyle(
+						 styles::toggleTrack.extend({.backgroundColor = fill, .borderColor = on ? std::optional(fill) : std::nullopt})
+					 );
+				 }
+			 }}
+		);
 		if (!label.empty()) {
 			addChild<Text>({.style = styles::text::body, .text = label});
 		}
@@ -56,6 +72,12 @@ namespace ui {
 		}
 	}
 
+	Foundation::Color Toggle::trackFill() const {
+		const Theme& theme = getContext()->getTheme();
+		return on ? toneColors(theme, Tone::Accent).color
+				  : theme.style(styles::toggleTrack.theme).backgroundColor.value_or(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F));
+	}
+
 	void Toggle::show() {
 		Rectangle* shownTrack = track.get();
 		Circle*	   shownKnob = knob.get();
@@ -64,11 +86,10 @@ namespace ui {
 		}
 		const Theme&	 theme = getContext()->getTheme();
 		const ToneColors accent = toneColors(theme, Tone::Accent);
-		shownTrack->setStyle(
-			on ? styles::toggleTrack.extend({.backgroundColor = accent.color, .borderColor = accent.color}) : styles::toggleTrack
-		);
+		const float		 fast = theme.get(tokens::motion::duration::fast);
+		fade.retarget(trackFill(), fast);
 		shownKnob->setStyle({.backgroundColor = on ? accent.onColor : theme.get(tokens::color::text::secondary)});
-		shownKnob->setPosition({on ? kTrackWidth - kInset - kKnob : kInset, kInset});
+		slide.retarget(on ? kTrackWidth - kInset - kKnob : kInset, fast);
 	}
 
 } // namespace ui

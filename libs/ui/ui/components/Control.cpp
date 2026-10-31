@@ -12,14 +12,20 @@ namespace ui {
 		if (!getCursor()) {
 			setCursor(Cursor::Pointer);
 		}
+		background.attach(*this, style.backgroundColor.value_or(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F)), interaction());
+	}
+
+	InteractionState Control::interaction() const {
+		return {.hovered = isHovered(), .pressed = isPressed(), .active = active, .disabled = !isEnabledInTree()};
 	}
 
 	void Control::render() {
-		const Theme&			theme = getContext()->getTheme();
-		const InteractionState	state{.hovered = isHovered(), .pressed = isPressed(), .active = active, .disabled = !isEnabledInTree()};
-		const Foundation::Color base = style.backgroundColor.value_or(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F));
+		const Theme& theme = getContext()->getTheme();
+		// Retargeted as it draws, which is a no-op while nothing changed; the tween ticks in the next update.
+		background.setBase(style.backgroundColor.value_or(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F)));
+		background.setState(interaction());
 		const std::optional<Foundation::Color> declared = style.backgroundColor;
-		style.backgroundColor = applyStateLayers(theme, base, state);
+		style.backgroundColor = background.value();
 		Rectangle::render();
 		style.backgroundColor = declared;
 

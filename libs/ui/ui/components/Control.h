@@ -4,9 +4,11 @@
 // cursor, answers the pointer as one unit, draws its background under the theme's state layers in
 // R11.12's order (hover, pressed, active, disabled) with the focus ring outside its box while a
 // player's focus shows one, and has one activation: a click or a player's activate action, while
-// it's enabled. Button, ListRow, Checkbox, Toggle, a radio option, a segment and a tab are Controls.
+// it's enabled. The state layers ease through the animator (a StateColor), so hover in and out
+// fades. Button, ListRow, Checkbox, Toggle, a radio option, a segment and a tab are Controls.
 
 #include "ui/shapes/Rectangle.h"
+#include "ui/theme/StateColor.h"
 
 namespace ui {
 
@@ -29,7 +31,10 @@ namespace ui {
 		void		 setActive(bool value) { active = value; }
 
 	  private:
-		bool active = false;
+		[[nodiscard]] InteractionState interaction() const;
+
+		bool	   active = false;
+		StateColor background;
 	};
 
 } // namespace ui

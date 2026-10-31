@@ -2,7 +2,8 @@
 
 // A switch (R12.9): a pill track with a knob at its left when off and its right, the track filled
 // with the accent, when on; a label beside it, the whole row pressable. A press flips it and calls
-// onChange with the new state. The track is ui::styles::toggleTrack.
+// onChange with the new state; the knob slides and the track fades over motion.duration.fast. The
+// track is ui::styles::toggleTrack.
 
 #include "ui/components/Control.h"
 #include "ui/shapes/Circle.h"
@@ -37,13 +38,16 @@ namespace ui {
 		void activate() override;
 
 	  private:
-		void show();
+		void							show();
+		[[nodiscard]] Foundation::Color trackFill() const;
 
 		std::string				  label;
 		bool					  on;
 		std::function<void(bool)> onChange;
 		Ref<Rectangle>			  track;
 		Ref<Circle>				  knob;
+		Tween<float>			  slide;
+		Tween<Foundation::Color>  fade;
 	};
 
 } // namespace ui
