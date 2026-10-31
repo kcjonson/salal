@@ -1,6 +1,7 @@
 #include "resources/RenderTarget.h"
 
 #include "backend/Backend.h"
+#include "primitives/Primitives.h"
 #include "utils/Log.h"
 
 #include <vector>
@@ -38,7 +39,7 @@ namespace Renderer {
 
 	struct RenderTarget::Impl {
 		RenderTargetHandle target;
-		TextureHandle	   texture;
+		Texture			   texture; // freed after the target, as a member is after the destructor's body
 		int				   width = 0;
 		int				   height = 0;
 		bool			   inUse = false;
@@ -51,7 +52,6 @@ namespace Renderer {
 			}
 			if (backend::Backend* gpu = backend::active(); gpu != nullptr) {
 				gpu->destroyRenderTarget(target);
-				gpu->destroyTexture(texture);
 			}
 		}
 
@@ -81,13 +81,13 @@ namespace Renderer {
 		auto impl = std::make_unique<Impl>();
 		impl->width = width;
 		impl->height = height;
-		impl->texture = gpu->createTexture({.width = width, .height = height, .format = format});
+		impl->texture = Primitives::createTexture({.width = width, .height = height, .format = format});
 		if (!impl->texture.isValid()) {
 			return target;
 		}
-		impl->target = gpu->createRenderTarget(impl->texture);
+		impl->target = gpu->createRenderTarget(impl->texture.handle());
 		if (!impl->target.isValid()) {
-			return target; // the Impl's destructor destroys the texture
+			return target; // the Impl frees the texture
 		}
 
 		target.impl = std::move(impl);
@@ -115,7 +115,7 @@ namespace Renderer {
 	}
 
 	TextureHandle RenderTarget::texture() const {
-		return impl ? impl->texture : TextureHandle{};
+		return impl ? impl->texture.handle() : TextureHandle{};
 	}
 
 	int RenderTarget::width() const {

@@ -205,7 +205,8 @@ namespace Renderer::backend::gl {
 	}
 
 	TEST_F(GLBackendTest, NameResolvesThroughTheBackendPrimitivesHolds) {
-		const TextureHandle handle = Primitives::createTexture({.width = 2, .height = 2});
+		const Texture		texture = Primitives::createTexture({.width = 2, .height = 2});
+		const TextureHandle handle = texture.handle();
 		ASSERT_NE(name(handle), 0U);
 		{
 			// A second backend made and dropped (a test's, say) leaves name() answering from Primitives' one.
@@ -214,7 +215,6 @@ namespace Renderer::backend::gl {
 		}
 		EXPECT_EQ(name(handle), gpu->textureName(handle));
 		EXPECT_NE(name(handle), 0U);
-		Primitives::destroyTexture(handle);
 	}
 
 	TEST_F(GLBackendTest, FormatsAndFiltering) {
