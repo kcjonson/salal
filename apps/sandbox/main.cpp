@@ -49,6 +49,7 @@ namespace {
 		&sandbox::kUiThemeScene,
 		&sandbox::kUiIconsScene,
 		&sandbox::kUiDisplayScene,
+		&sandbox::kUiFocusScene,
 	};
 
 	void printUsage(std::FILE* stream) {

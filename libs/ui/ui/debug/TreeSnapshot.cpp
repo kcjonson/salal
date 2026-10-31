@@ -66,15 +66,14 @@ namespace ui {
 			const Foundation::Vec2 scroll = component.getScroll();
 			out["contentOffset"] = scrolls ? nlohmann::json{{"x", -scroll.x}, {"y", -scroll.y}} : nlohmann::json(nullptr);
 			out["transform"] = transformJson(component.getTransform());
-			out["focusable"] = false;
+			out["focusable"] = component.isFocusable();
 			out["pointerEvents"] = pointerEventsName(component.getPointerEvents());
 			out["handlesPointer"] = component.handlesPointer();
-			// Focus arrives with the focus manager; until then its flags are unknown.
 			out["state"] = {
 				{"hovered", component.isHovered()},
 				{"pressed", component.isPressed()},
-				{"focused", nullptr},
-				{"focusVisible", nullptr},
+				{"focused", component.isFocused()},
+				{"focusVisible", component.isFocusVisible()},
 				{"selected", nullptr},
 				{"open", nullptr},
 				{"active", nullptr},

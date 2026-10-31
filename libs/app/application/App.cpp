@@ -418,6 +418,7 @@ namespace app {
 			detail::guard("App", "dispatch", [&] { dispatch(*this); });
 			return;
 		}
+		sceneStack.routeTopUi(inputState);
 		for (const foundation::InputEvent& event : inputState.events()) {
 			bool consumed = false;
 			for (auto it = overlays.rbegin(); it != overlays.rend() && !consumed; ++it) {
