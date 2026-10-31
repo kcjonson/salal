@@ -3,7 +3,8 @@
 // context menu at the press; a dialog's modality, focus scope and the ways it closes; the hover
 // tooltip's delay, what closes it, and the width it fills; toasts timing out, pressed, capped and
 // brought to the front; each one fading in to full opacity, as the tree snapshot reports it, and a
-// fade that leaves the style alone. Headless; nothing draws.
+// fade that leaves the style alone. Headless; only the last, a panel dialog's clear cover against a
+// modal one's scrim, draws, on the null backend.
 
 #include "ui/Context.h"
 #include "ui/components/Button.h"
@@ -17,12 +18,20 @@
 #include "ui/components/Tooltip.h"
 #include "ui/debug/TreeSnapshot.h"
 
+#include "BaseShader.h"
+#include "backend/NullBackend.h"
+#include "primitives/Primitives.h"
+
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -415,6 +424,58 @@ namespace ui {
 		wait(0.5);
 		EXPECT_EQ(reportedOpacity("Rectangle"), 0.5F);
 		EXPECT_EQ(box.get()->getStyle().opacity, 0.5F);
+	}
+
+	// --- Drawing ---
+
+	class UiOverlayComponentsDrawTest : public ::testing::Test {
+	  protected:
+		void SetUp() override {
+			auto owned = std::make_unique<Renderer::backend::NullBackend>();
+			gpu = owned.get();
+			Renderer::Primitives::init(std::move(owned), base_shader::source());
+			Renderer::Primitives::setCoordinateSystem(nullptr);
+			Renderer::Primitives::setViewport(800, 600);
+			gpu->clearRecord();
+		}
+
+		void TearDown() override { Renderer::Primitives::shutdown(); }
+
+		// A frame past the fade, and how many of its quads cover the whole viewport.
+		int coversDrawn() {
+			for (int step = 0; step < 5; ++step) {
+				context.update(0.1);
+			}
+			context.layout();
+			Renderer::Primitives::beginFrame();
+			context.render();
+			Renderer::Primitives::endFrame();
+			int covers = 0;
+			for (const Renderer::backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
+				const std::span<const uint8_t>		 bytes = gpu->bufferContents(gpu->geometry(draw.call.geometry)->vertices);
+				std::vector<Renderer::BatchInstance> quads(bytes.size() / sizeof(Renderer::BatchInstance));
+				std::memcpy(quads.data(), bytes.data(), quads.size() * sizeof(Renderer::BatchInstance));
+				for (std::uint32_t i = draw.call.firstInstance; i < draw.call.firstInstance + draw.call.instanceCount; ++i) {
+					if (quads[i].corners[0] == Foundation::Vec2(0.0F, 0.0F) && quads[i].corners[2] == Foundation::Vec2(800.0F, 600.0F)) {
+						++covers;
+					}
+				}
+			}
+			gpu->clearRecord();
+			return covers;
+		}
+
+		Renderer::backend::NullBackend* gpu = nullptr;
+		Context							context{{800.0F, 600.0F}};
+	};
+
+	TEST_F(UiOverlayComponentsDrawTest, APanelDialogDrawsNoCoverWhereAModalOneDrawsItsScrim) {
+		Ref<Dialog> panel = Dialog::open(*context.root().get(), {.title = "Colonist", .panelSize = {200.0F, 100.0F}, .modal = false});
+		EXPECT_EQ(coversDrawn(), 0);
+		EXPECT_EQ(panel.get()->getStyle().backgroundColor.value_or(Foundation::Color::white()).a, 0.0F); // its tree node's fill
+		panel.get()->close();
+		Dialog::open(*context.root().get(), {.title = "Abandon run?", .panelSize = {200.0F, 100.0F}});
+		EXPECT_EQ(coversDrawn(), 1);
 	}
 
 } // namespace ui
