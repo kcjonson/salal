@@ -43,6 +43,7 @@ namespace ui {
 				}
 				if (Text* shown = count.get()) {
 					shown->setText(node.count ? std::to_string(*node.count) : std::string());
+					shown->setVisible(node.count.has_value());
 				}
 				// The caret points right when closed and down when open; a leaf keeps its room.
 				if (Chevron* shown = caret.get()) {
