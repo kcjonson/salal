@@ -564,7 +564,7 @@ namespace Renderer {
 		// sort domain, then key, and their quads copied out in that order. Domains rise
 		// in submission order, so the fast path already has them in order, and costs
 		// nothing beyond the group records.
-		std::span<const BatchInstance> emit = instances;
+		std::span<BatchInstance> emit = instances;
 		if (anyKey) {
 			std::stable_sort(drawGroups.begin(), drawGroups.end(), [](const DrawGroup& a, const DrawGroup& b) {
 				return a.order < b.order;
@@ -579,17 +579,19 @@ namespace Renderer {
 			emit = sortedInstances;
 		}
 
-		// Run splitting.
+		// Run splitting and texture slots.
 		//
 		// Text and image quads are tagged in `instanceTextures` with the texture they
-		// sample; everything else is tagged invalid (it ignores the bound texture).
-		// Walking the groups in emit order, a new run starts where a quad needs a
-		// texture other than the bound one, or where a group's GPU blend state differs
-		// from the run's. Quads are never reordered, so key order is exact, and with one
-		// texture and one blend state (all text from the default atlas, any mix of Alpha
-		// and Additive) the frame is one run.
+		// sample; everything else is tagged invalid (it ignores the textures bound).
+		// Walking the groups in emit order, each textured quad takes its texture's slot
+		// in the run, adding it when it's new; a new run starts where a quad needs a
+		// texture the run has no slot left for, or where a group's GPU blend state
+		// differs from the run's. Quads are never reordered, so key order is exact, and
+		// with up to kTextureSlots textures and one blend state (any mix of Alpha and
+		// Additive) the frame is one run.
 		runs.clear();
-		DrawRun	   current{.instanceStart = 0, .instanceCount = 0, .texture = defaultFontAtlas, .blendState = backend::BlendState::Alpha};
+		DrawRun	   current{.instanceStart = 0, .instanceCount = 0, .blendState = backend::BlendState::Alpha};
+		uint8_t	   slotsUsed = 0;
 		uint32_t   emitted = 0;
 		const auto cutAt = [&](uint32_t at) {
 			if (at > current.instanceStart) {
@@ -597,6 +599,8 @@ namespace Renderer {
 				runs.push_back(current);
 			}
 			current.instanceStart = at;
+			current.textures = {};
+			slotsUsed = 0;
 		};
 		for (const DrawGroup& group : drawGroups) {
 			const backend::BlendState state = blendState(group.blend);
@@ -606,10 +610,20 @@ namespace Renderer {
 			}
 			for (uint32_t i = 0; i < group.instanceCount; ++i) {
 				const TextureHandle required = instanceTextures[group.instanceStart + i];
-				if (required.isValid() && required != current.texture) {
-					cutAt(emitted + i);
-					current.texture = required;
+				if (!required.isValid()) {
+					continue;
 				}
+				const auto bound = std::find(current.textures.begin(), current.textures.begin() + slotsUsed, required);
+				uint8_t	   slot = static_cast<uint8_t>(bound - current.textures.begin());
+				if (slot == slotsUsed) {
+					if (slotsUsed == backend::kTextureSlots) {
+						cutAt(emitted + i);
+						slot = 0;
+					}
+					current.textures[slot] = required;
+					slotsUsed = static_cast<uint8_t>(slot + 1);
+				}
+				emit[emitted + i].slot = slot;
 			}
 			emitted += group.instanceCount;
 		}
@@ -668,7 +682,7 @@ namespace Renderer {
 				{.pipeline = pipeline,
 				 .geometry = geometry,
 				 .blend = run.blendState,
-				 .texture = run.texture,
+				 .textures = run.textures,
 				 .firstInstance = run.instanceStart,
 				 .instanceCount = run.instanceCount}
 			);

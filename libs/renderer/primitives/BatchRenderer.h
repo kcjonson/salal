@@ -22,6 +22,7 @@
 #include "primitives/Stroke.h"
 #include "vector/Tessellator.h"
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <glm/mat2x2.hpp>
 #include <optional>
@@ -77,14 +78,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		return backend::BlendState::Alpha;
 	}
 
-	// One draw call: `instanceCount` quads from `instanceStart` in the emit order,
-	// sampling `texture` (bound for the run; invalid binds nothing) in one GPU
-	// blend state.
+	// One draw call: `instanceCount` quads from `instanceStart` in the emit order, in
+	// one GPU blend state, binding up to kTextureSlots textures, which its quads pick
+	// by their slot; the rest invalid, binding nothing.
 	struct DrawRun {
-		uint32_t			instanceStart = 0;
-		uint32_t			instanceCount = 0;
-		TextureHandle		texture;
-		backend::BlendState blendState = backend::BlendState::Alpha;
+		uint32_t										  instanceStart = 0;
+		uint32_t										  instanceCount = 0;
+		std::array<TextureHandle, backend::kTextureSlots> textures{};
+		backend::BlendState								  blendState = backend::BlendState::Alpha;
 	};
 
 	// What flush() submits: the quads in emit order and the runs they split into.
@@ -173,8 +174,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   glyph edges stable without disturbing advances/kerning.
 		// atlas: MSDF atlas this glyph samples from. An invalid handle selects the
 		//   default atlas set via setFontAtlas(), the game's default family's. A
-		//   frame may mix multiple atlases; flush() splits draws by atlas so each
-		//   glyph samples the right texture. A stale atlas adds nothing, warned once.
+		//   frame may mix atlases; plan() gives each glyph its atlas's texture slot in
+		//   its draw. A stale atlas adds nothing, warned once.
 		// pixelRange: that atlas's distance range in texels, which the shader turns
 		//   into the edge width. With an invalid atlas, setFontAtlas()'s range instead.
 		void addTextQuad(
@@ -206,9 +207,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// The emit order and draw runs of what has been added; flush() submits
 		// exactly this. Groups are stable-sorted by sort domain, then key, when any
 		// carries a non-zero key (submission order otherwise), and the emit order is
-		// cut into a new run wherever a quad needs a texture other than the bound
-		// one or a group's GPU blend state differs. Shapes, arcs and the like need no
-		// texture and never split.
+		// cut into a new run where a quad needs a texture when the run already binds
+		// kTextureSlots others, or where a group's GPU blend state differs. Each
+		// textured quad's slot is set to its texture's in its run. Shapes, arcs and the
+		// like need no texture and never split.
 		DrawPlan plan();
 
 		// Start a new sort domain: everything added from here sorts after everything
