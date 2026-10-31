@@ -71,6 +71,8 @@ namespace app {
 		virtual void present() = 0;
 
 		virtual void setVsync(bool enabled) = 0;
+		// Whether present waits for the display now: the WindowConfig's, or setVsync's since.
+		virtual bool vsync() const = 0;
 
 		// Fullscreen on the connected monitor at `monitor` at its current video mode, or windowed at the
 		// size and place the window had before it went fullscreen. A monitor is its position in the window

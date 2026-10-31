@@ -26,3 +26,6 @@ Thumbs.db
 
 .claude/worktrees/
 .claude/settings.local.json
+
+build-perf/
+perf-results/local/

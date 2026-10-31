@@ -177,7 +177,13 @@ namespace Renderer::Primitives {
 	void clear(const Foundation::Color& color) {
 		// Targets hold premultiplied colour, as everything drawn into them is.
 		if (g_backend != nullptr) {
+			if (g_batchRenderer != nullptr) {
+				g_batchRenderer->beginGpuSpan();
+			}
 			g_backend->clear({color.r * color.a, color.g * color.a, color.b * color.a, color.a});
+			if (g_batchRenderer != nullptr) {
+				g_batchRenderer->endGpuSpan();
+			}
 		}
 	}
 
@@ -236,6 +242,12 @@ namespace Renderer::Primitives {
 		}
 		if (g_backend != nullptr) {
 			g_backend->endFrame();
+		}
+	}
+
+	void beginFrameStats() {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->beginFrameStats();
 		}
 	}
 
@@ -816,9 +828,31 @@ namespace Renderer::Primitives {
 			stats.drawCalls = batchStats.drawCalls;
 			stats.vertexCount = batchStats.vertexCount;
 			stats.triangleCount = batchStats.triangleCount;
+			stats.instanceCount = batchStats.instanceCount;
+			stats.uploadBytes = batchStats.uploadBytes;
+			stats.flushCount = batchStats.flushCount;
+			stats.flushMs = batchStats.flushMs;
 		}
 
 		return stats;
+	}
+
+	void setGpuTiming(bool enabled) {
+		if (g_batchRenderer != nullptr) {
+			g_batchRenderer->setGpuTiming(enabled);
+		}
+	}
+
+	bool getGpuTiming() {
+		return g_batchRenderer != nullptr && g_batchRenderer->getGpuTiming();
+	}
+
+	GpuFrameTime getGpuFrameTime() {
+		if (g_batchRenderer == nullptr) {
+			return {};
+		}
+		const GPUFrameTimer& timer = g_batchRenderer->getGpuTimer();
+		return {.ms = timer.lastFrameMs(), .frames = timer.framesTimed(), .dropped = timer.framesDropped(), .supported = timer.supported()};
 	}
 
 } // namespace Renderer::Primitives

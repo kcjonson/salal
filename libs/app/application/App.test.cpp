@@ -133,7 +133,8 @@ namespace app::testing {
 				++presents;
 				time.advance(presentSeconds);
 			}
-			void					   setVsync(bool enabled) override { vsync = enabled; }
+			void					   setVsync(bool enabled) override { swapInterval = enabled; }
+			bool					   vsync() const override { return swapInterval; }
 			void					   setFullscreen(std::optional<int> /*monitor*/) override {}
 			std::optional<int>		   fullscreenMonitor() const override { return std::nullopt; }
 			void					   setWindowSize(int /*width*/, int /*height*/) override {}
@@ -147,7 +148,7 @@ namespace app::testing {
 			bool		throwOnPoll = false;
 			int			presents = 0;
 			double		presentSeconds = 0.0;
-			bool		vsync = true;
+			bool		swapInterval = true;
 		};
 
 #ifdef DEVELOPMENT_BUILD
@@ -712,7 +713,7 @@ namespace app::testing {
 		EXPECT_EQ(window.presents, 2);
 
 		app->setVsync(false);
-		EXPECT_FALSE(window.vsync);
+		EXPECT_FALSE(window.vsync());
 		app.reset();
 		journal().clear();
 	}

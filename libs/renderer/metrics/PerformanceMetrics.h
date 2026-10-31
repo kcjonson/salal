@@ -23,6 +23,10 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		uint32_t drawCalls{};	   // Number of draw calls this frame
 		uint32_t vertexCount{};	   // Number of vertices rendered this frame
 		uint32_t triangleCount{};  // Number of triangles rendered this frame
+		uint32_t instanceCount{};  // Batched quads and mesh instances drawn this frame
+		uint64_t uploadBytes{};	   // Quad and mesh instance bytes the batch wrote this frame
+		uint32_t flushCount{};	   // Batch flushes that submitted something this frame
+		float	 flushMs{};		   // CPU time in those flushes (plan, uploads, draw calls)
 
 		// Timing breakdown (for profiling bottlenecks)
 		float	 tileRenderMs{};	  // Time spent rendering tiles

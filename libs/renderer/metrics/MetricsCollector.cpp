@@ -47,6 +47,10 @@ namespace Renderer {
 		metrics.drawCalls = drawCalls + entityDrawCalls;
 		metrics.vertexCount = vertexCount;
 		metrics.triangleCount = triangleCount + entityTriangleCount;
+		metrics.instanceCount = instanceCount;
+		metrics.uploadBytes = uploadBytes;
+		metrics.flushCount = flushCount;
+		metrics.flushMs = flushMs;
 
 		// Timing breakdown
 		metrics.tileRenderMs = tileRenderMs;
@@ -99,6 +103,13 @@ namespace Renderer {
 		drawCalls = inDrawCalls;
 		vertexCount = inVertexCount;
 		triangleCount = inTriangleCount;
+	}
+
+	void MetricsCollector::setBatchStats(uint32_t inInstanceCount, uint64_t inUploadBytes, uint32_t inFlushCount, float inFlushMs) {
+		instanceCount = inInstanceCount;
+		uploadBytes = inUploadBytes;
+		flushCount = inFlushCount;
+		flushMs = inFlushMs;
 	}
 
 	void MetricsCollector::setTimingBreakdown(

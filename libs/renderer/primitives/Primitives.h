@@ -138,8 +138,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// for the next one. Synchronous by design: it waits for the GPU.
 		void readBackbuffer(std::span<uint8_t> rgba, int& width, int& height);
 
+		// A batch: beginFrame() clears what is pending and the clip and transform stacks,
+		// endFrame() flushes. A frame may hold several (an offscreen pass inside the
+		// app's frame), so the frame's statistics and GPU time start apart from them, at
+		// beginFrameStats(), which the app calls once a frame.
 		void beginFrame();
 		void endFrame(); // Flushes all batches
+		void beginFrameStats();
 
 		// GPU code outside the renderer left depth test, culling or scissor on, or bound
 		// a uniform buffer to binding point 0, which is the renderer's: set the fixed
@@ -493,13 +498,40 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Statistics ---
 
+		// The frame's batches since beginFrameStats(): draw calls; instances, each batched
+		// quad one and each of drawInstanced's meshes one per copy; the vertices and
+		// triangles they drew (six and two a quad, a mesh's for each copy); the quad and
+		// mesh instance bytes written to the backend; and the flushes that submitted
+		// something with the CPU time they took (the plan, the upload and the draw calls).
 		struct RenderStats {
 			uint32_t drawCalls = 0;
 			uint32_t vertexCount = 0;
 			uint32_t triangleCount = 0;
+			uint32_t instanceCount = 0;
+			uint64_t uploadBytes = 0;
+			uint32_t flushCount = 0;
+			float	 flushMs = 0.0F;
 		};
 
 		RenderStats getStats();
+
+		// GPU timing of the batch, off until turned on: each clear, flush, instanced draw
+		// and baked pass is bracketed by a pair of timestamp queries and a frame's spans are
+		// summed (GPUFrameTimer), so a frame the CPU holds up reads only what the GPU did.
+		// Off, no query is written. Results come back a few frames late; turning it off
+		// drops the ones still on their way.
+		void setGpuTiming(bool enabled);
+		bool getGpuTiming();
+
+		// A frame is beginFrameStats() to the next.
+		struct GpuFrameTime {
+			float	 ms = 0.0F;		   // the latest frame whose spans have come back
+			uint64_t frames = 0;	   // frames timed since init(); a new result has arrived when it moves
+			uint64_t dropped = 0;	   // frames whose results weren't back in time, never timed
+			bool	 supported = true; // false where the backend has no timestamps
+		};
+
+		GpuFrameTime getGpuFrameTime();
 
 	} // namespace Primitives
 } // namespace Renderer

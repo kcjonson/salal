@@ -125,8 +125,8 @@ sequences: four renderer PRs, then `ui` built in salal (core, layout, input,
 focus, theme and tokens, icons, animation, overlays, and the display, control
 and overlay components), then worldsim's conversion in three PRs, [worldsim#322](https://github.com/kcjonson/worldsim/pull/322)
 to [worldsim#324](https://github.com/kcjonson/worldsim/pull/324). Worldsim runs entirely on salal's ui at `v0.29.0`, keyboard and
-mouse only, with its `libs/ui` and the bridge deleted. Grid, the perf suite,
-the scene diff and the happy-path scripts were deferred and are still to do.
+mouse only, with its `libs/ui` and the bridge deleted. Grid, the scene diff and the
+happy-path scripts were deferred and are still to do; the perf suite is in.
 Next is phase 2b, audio, once decision B is settled. The extraction doc has the
 detail and the reasoning for the order.
 
@@ -223,9 +223,10 @@ removing legacy code. One way to do each thing.
 There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
 renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
-`blend` and `input_test`) and ui's (`ui_order`, `ui_text`, `ui_theme`,
+`blend` and `input_test`), ui's (`ui_order`, `ui_text`, `ui_theme`,
 `ui_layout`, `ui_clip`, `ui_scroll`, `ui_input`, `ui_focus`, `ui_icons`, `ui_motion`, `ui_display`,
-`ui_controls`, `ui_overlays` and `ui_overlay_components`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
+`ui_controls`, `ui_overlays` and `ui_overlay_components`) and the perf suite's (`perf_quads`, `perf_text`,
+`perf_world` and `perf_ui`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
 has its state and the tab's and rows' bounds). It serves the dev server on
 127.0.0.1:8090 in Debug and RelWithDebInfo (`--http-port <port>` for another).
 Run `build/apps/sandbox/Debug/sandbox.exe --scene=<name>` in the background,
@@ -347,7 +348,7 @@ is protected pixel for pixel.
 - Drawing or rendering changes also diff the sandbox scenes against `main`,
   locally, never in CI, with no baselines committed.
 - Batching, shader, ui walk or app frame changes run the perf suite against
-  `main`. Performance is strict.
+  `main` (`node scripts/perf.mjs compare`). Performance is strict.
 - Unit tests (gtest) on real math, bounded: check for duplicates first. GL
   tests assert computed values, never stored images.
 

@@ -89,13 +89,15 @@ namespace app {
 
 		class GlfwPlatform final : public Platform {
 		  public:
-			// `fullscreenOn` is the monitor the window was made fullscreen on, and `windowedRect` where it
-			// goes when it leaves fullscreen until it has been windowed itself.
-			GlfwPlatform(GLFWwindow* glfwWindow, std::optional<int> fullscreenOn, WindowRect windowedRect)
+			// `fullscreenOn` is the monitor the window was made fullscreen on, `windowedRect` where it
+			// goes when it leaves fullscreen until it has been windowed itself, and `vsync` the swap
+			// interval the context was given.
+			GlfwPlatform(GLFWwindow* glfwWindow, std::optional<int> fullscreenOn, WindowRect windowedRect, bool vsync)
 				: window(glfwWindow),
 				  hasFocus(glfwGetWindowAttrib(glfwWindow, GLFW_FOCUSED) == GLFW_TRUE),
 				  fullscreenIndex(fullscreenOn),
-				  windowed(windowedRect) {
+				  windowed(windowedRect),
+				  swapInterval(vsync) {
 				g_glfwPlatform = this;
 				glfwSetWindowUserPointer(window, this);
 				glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
@@ -169,7 +171,11 @@ namespace app {
 			bool focused() const override { return hasFocus; }
 			bool closeRequested() const override { return glfwWindowShouldClose(window) == GLFW_TRUE; }
 			void present() override { glfwSwapBuffers(window); }
-			void setVsync(bool enabled) override { glfwSwapInterval(enabled ? 1 : 0); }
+			void setVsync(bool enabled) override {
+				glfwSwapInterval(enabled ? 1 : 0);
+				swapInterval = enabled;
+			}
+			bool vsync() const override { return swapInterval; }
 
 			// glfwSetWindowMonitor resizes the window inside the call on Windows and macOS, outside any
 			// poll, so the framebuffer callback's resize is held by the relay, in order, for the next one.
@@ -397,6 +403,7 @@ namespace app {
 			bool																		  hasFocus;
 			std::optional<int>															  fullscreenIndex;
 			WindowRect																	  windowed;
+			bool																		  swapInterval;
 			glm::vec2																	  cursor{};
 			EventRelay																	  relay;
 			GamepadTracker																  gamepads;
@@ -495,7 +502,7 @@ namespace app {
 		}
 		glfwMakeContextCurrent(created.window);
 		glfwSwapInterval(config.vsync ? 1 : 0);
-		return std::make_unique<GlfwPlatform>(created.window, created.fullscreenOn, created.windowed);
+		return std::make_unique<GlfwPlatform>(created.window, created.fullscreenOn, created.windowed, config.vsync);
 	}
 
 } // namespace app

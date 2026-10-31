@@ -140,6 +140,7 @@ namespace app::testing {
 			bool					   closeRequested() const override { return false; }
 			void					   present() override { record("platform", "present"); }
 			void					   setVsync(bool enabled) override { record("platform", enabled ? "vsync on" : "vsync off"); }
+			bool					   vsync() const override { return false; }
 			void					   setFullscreen(std::optional<int> /*monitor*/) override {}
 			std::optional<int>		   fullscreenMonitor() const override { return std::nullopt; }
 			void					   setWindowSize(int /*width*/, int /*height*/) override {}
@@ -661,6 +662,41 @@ namespace app::testing {
 		EXPECT_EQ(reply.status, 400);
 		EXPECT_EQ(reply.body, R"json({"error":"Vsync action requires 'value' parameter (0 or 1)"})json");
 		EXPECT_EQ(server().parkedRequests(), 0U);
+	}
+
+	TEST_F(DevServerTest, ACaptureHoldsTheWholeFramesBetweenStartAndStop) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		EXPECT_EQ(ask("/api/control?action=capture&op=start").body, R"({"status":"ok","action":"capture","op":"start"})");
+		EXPECT_TRUE(app->capturing());
+		frame();
+		frame();
+		frame();
+		const nlohmann::json stopped = nlohmann::json::parse(ask("/api/control?action=capture&op=stop").body);
+		EXPECT_EQ(stopped.at("op"), "stop");
+		const nlohmann::json& capture = stopped.at("capture");
+		EXPECT_EQ(capture.at("frames"), 3); // the three after the one that started it
+		EXPECT_EQ(capture.at("framebuffer").at("width"), 800);
+		EXPECT_EQ(capture.at("vsync"), true);  // the headless platform's, never set
+		EXPECT_EQ(capture.at("gpuFrames"), 0); // the first comes back four frames in
+		EXPECT_TRUE(capture.at("gpuMs").is_null());
+		EXPECT_FALSE(app->capturing());
+		EXPECT_FALSE(Renderer::Primitives::getGpuTiming()); // as the capture found it
+
+		Renderer::Primitives::setGpuTiming(true); // the game's own timing survives a capture
+		app->startCapture();
+		frame();
+		ASSERT_TRUE(app->stopCapture().has_value());
+		EXPECT_TRUE(Renderer::Primitives::getGpuTiming());
+		Renderer::Primitives::setGpuTiming(false);
+
+		Reply reply = ask("/api/control?action=capture&op=stop");
+		EXPECT_EQ(reply.status, 409);
+		EXPECT_EQ(reply.body, R"({"error":"no capture is running"})");
+		reply = get("/api/control?action=capture");
+		EXPECT_EQ(reply.status, 400);
+		EXPECT_EQ(reply.body, R"json({"error":"Capture action requires 'op' parameter (start or stop)"})json");
 	}
 
 	TEST_F(DevServerTest, AGameControlActionGetsItsParamsAndShapesItsReply) {

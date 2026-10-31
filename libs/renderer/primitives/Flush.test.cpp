@@ -664,6 +664,64 @@ namespace Renderer {
 		ASSERT_EQ(uploaded.size(), 1U); // the stream buffer holds the second flush only
 		EXPECT_EQ(uploaded[0].corners[0].x, 40.0F);
 		EXPECT_EQ(gpu->uniformWrites().size(), 2U);
+
+		const Primitives::RenderStats stats = Primitives::getStats();
+		EXPECT_EQ(stats.flushCount, 2U);
+		EXPECT_EQ(stats.uploadBytes, 3 * sizeof(BatchInstance)); // each flush's quads, once
+		EXPECT_EQ(stats.instanceCount, 3U);
+		EXPECT_EQ(stats.vertexCount, 18U);
+		EXPECT_GE(stats.flushMs, 0.0F);
+	}
+
+	TEST_F(FlushTest, GpuTimingBracketsEachSubmissionOnceTurnedOn) {
+		Primitives::beginFrameStats();
+		Primitives::beginFrame();
+		rect(0.0F);
+		Primitives::endFrame();
+		EXPECT_EQ(gpu->timestampsWritten(), 0); // off by default
+
+		Primitives::setGpuTiming(true);
+		for (int frame = 0; frame < 5; ++frame) {
+			Primitives::beginFrameStats();
+			Primitives::beginFrame();
+			rect(0.0F);
+			Primitives::flush();
+			rect(20.0F);
+			Primitives::endFrame();
+		}
+		EXPECT_EQ(gpu->timestampsWritten(), 20); // two flushes a frame, a pair each
+		EXPECT_EQ(Primitives::getGpuFrameTime().frames, 1U);
+		EXPECT_TRUE(Primitives::getGpuTiming());
+
+		Primitives::setGpuTiming(false);
+		Primitives::beginFrameStats();
+		Primitives::beginFrame();
+		rect(0.0F);
+		Primitives::endFrame();
+		EXPECT_EQ(gpu->timestampsWritten(), 20);
+	}
+
+	TEST_F(FlushTest, ABatchBegunInsideAFrameAddsToItsStatisticsAndGpuFrame) {
+		Primitives::setGpuTiming(true);
+		for (int frame = 0; frame < 5; ++frame) {
+			Primitives::beginFrameStats();
+			Primitives::beginFrame();
+			rect(0.0F);
+			Primitives::endFrame();
+			Primitives::beginFrame(); // an offscreen pass inside the app's frame
+			rect(20.0F);
+			rect(40.0F);
+			Primitives::endFrame();
+		}
+		const Primitives::RenderStats stats = Primitives::getStats();
+		EXPECT_EQ(stats.drawCalls, 2U);
+		EXPECT_EQ(stats.instanceCount, 3U);
+		EXPECT_EQ(stats.flushCount, 2U);
+		EXPECT_EQ(Primitives::getGpuFrameTime().frames, 1U); // five frames, not ten: the first is back four later
+		Primitives::setGpuTiming(false);
+
+		Primitives::beginFrameStats();
+		EXPECT_EQ(Primitives::getStats().drawCalls, 0U);
 	}
 
 	TEST_F(FlushTest, InstancedDrawsCarryTheirCameraAndInstances) {
@@ -705,6 +763,8 @@ namespace Renderer {
 			EXPECT_EQ(draw.uniforms.pixelsPerMeter, 16.0F);
 			EXPECT_EQ(draw.uniforms.viewportSize, Foundation::Vec2(static_cast<float>(kWidth), static_cast<float>(kHeight)));
 			EXPECT_EQ(draw.uniforms.bakedAlpha, 1.0F);
+			EXPECT_EQ(Primitives::getStats().instanceCount, 2U);
+			EXPECT_EQ(Primitives::getStats().uploadBytes, 2 * sizeof(InstanceData)); // what was drawn, not the capacity
 		}
 		EXPECT_EQ(gpu->live().buffers, before.buffers);
 		EXPECT_EQ(gpu->live().geometries, before.geometries);

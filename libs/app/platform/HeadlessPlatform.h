@@ -50,7 +50,7 @@ namespace app {
 		// A monitor of width x height, at the next index setFullscreen takes; there are none until one is added.
 		void addMonitor(int width, int height);
 		// What setVsync last set; true until it's called.
-		bool vsync() const { return swapInterval; }
+		bool vsync() const override { return swapInterval; }
 		// What setCursor last set.
 		ui::Cursor cursor() const { return shownCursor; }
 
