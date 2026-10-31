@@ -1,5 +1,8 @@
 #include "ui/theme/Theme.h"
 
+#include "ui/Context.h"
+#include "ui/shapes/Rectangle.h"
+#include "ui/shapes/Text.h"
 #include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
 #include "ui/theme/dtcg/Codegen.h"
@@ -52,13 +55,13 @@ namespace {
 TEST(Theme, UiDefaultsLoadOnTheirOwn) {
 	const ui::ThemeLoad load = ui::Theme::load({});
 	ASSERT_TRUE(load.diagnostics.empty()) << describe(load.diagnostics);
-	const ui::ThemeStyle& pane = load.theme.style(ui::styles::pane);
+	const ui::Style& pane = load.theme.style(ui::styles::pane.theme);
 	ASSERT_TRUE(pane.backgroundColor.has_value());
 	// styles.pane.backgroundColor -> color.surface.raised -> base.color.gray850, #181c24
 	expectColor(*pane.backgroundColor, 0.0941F, 0.1098F, 0.1412F);
 	EXPECT_FLOAT_EQ(pane.borderRadius.value_or(-1.0F), 4.0F);
 	EXPECT_FALSE(pane.fontSize.has_value());
-	EXPECT_FLOAT_EQ(load.theme.style(ui::styles::text::body).fontSize.value_or(-1.0F), 14.0F); // from its font
+	EXPECT_FLOAT_EQ(load.theme.style(ui::styles::text::body.theme).fontSize.value_or(-1.0F), 14.0F); // from its font
 	EXPECT_FLOAT_EQ(load.theme.get(ui::tokens::motion::duration::normal), 200.0F);
 }
 
@@ -70,15 +73,15 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	EXPECT_TRUE(dark.diagnostics.empty()) << describe(dark.diagnostics);
 
 	// ui's pane, its background aliased by the game to its own palette, which the mode swaps.
-	expectColor(*dark.theme.style(ui::styles::pane).backgroundColor, 0.1F, 0.12F, 0.16F);
-	expectColor(*light.theme.style(ui::styles::pane).backgroundColor, 0.96F, 0.97F, 0.98F);
+	expectColor(*dark.theme.style(ui::styles::pane.theme).backgroundColor, 0.1F, 0.12F, 0.16F);
+	expectColor(*light.theme.style(ui::styles::pane.theme).backgroundColor, 0.96F, 0.97F, 0.98F);
 	// What the game leaves alone falls back to ui's.
-	expectColor(*light.theme.style(ui::styles::pane).borderColor, 1.0F, 1.0F, 1.0F, 0.12F);
+	expectColor(*light.theme.style(ui::styles::pane.theme).borderColor, 1.0F, 1.0F, 1.0F, 0.12F);
 	// The game's own style, its p3 colour drawn through its hex, its radius one of ui's.
-	const ui::ThemeStyle& fill = dark.theme.style(theme_test::styles::healthBar::fill);
+	const ui::Style& fill = dark.theme.style(theme_test::styles::healthBar::fill.theme);
 	expectColor(*fill.backgroundColor, 230.0F / 255.0F, 102.0F / 255.0F, 26.0F / 255.0F);
 	EXPECT_FLOAT_EQ(fill.borderRadius.value_or(-1.0F), 2.0F);
-	EXPECT_TRUE(dark.theme.style(theme_test::styles::healthBar::track).backgroundColor.has_value());
+	EXPECT_TRUE(dark.theme.style(theme_test::styles::healthBar::track.theme).backgroundColor.has_value());
 	expectColor(light.theme.get(theme_test::tokens::palette::slate::_900), 0.96F, 0.97F, 0.98F);
 }
 
@@ -87,7 +90,7 @@ TEST(Theme, FontRolesMapToTheGamesFamilies) {
 	const ui::FontFamilyName	   names[] = {{.name = "body", .family = kBody}};
 	const ui::ThemeLoad			   load = ui::Theme::load({.fontFamilies = names});
 	ASSERT_TRUE(load.ok()) << describe(load.diagnostics);
-	EXPECT_EQ(load.theme.style(ui::styles::text::body).fontFamily, kBody);
+	EXPECT_EQ(load.theme.style(ui::styles::text::body.theme).fontFamily, kBody);
 	EXPECT_EQ(load.theme.get(ui::tokens::typography::caption).family, kBody);
 	// display and mono name families the game didn't register: the default family, and a warning.
 	EXPECT_EQ(load.theme.get(ui::tokens::font::family::display), Renderer::FontFamily::Default);
@@ -141,9 +144,26 @@ TEST(Theme, StateLayersTonesAndSizesReadTheTokens) {
 	EXPECT_EQ(ui::resolveTone(theme, ui::Tone::Info, 0.1F), ui::Tone::Info);
 	expectColor(ui::toneColors(theme, ui::Tone::Danger).color, 0.8784F, 0.3255F, 0.2353F);
 
-	EXPECT_FLOAT_EQ(ui::sizeMetrics(theme, ui::Size::Lg).controlHeight, 40.0F);
-	EXPECT_FLOAT_EQ(ui::sizeMetrics(theme, ui::Size::Sm).fontSize, 12.0F);
+	EXPECT_FLOAT_EQ(ui::sizeMetrics(theme, ui::ControlSize::Lg).controlHeight, 40.0F);
+	EXPECT_FLOAT_EQ(ui::sizeMetrics(theme, ui::ControlSize::Sm).fontSize, 12.0F);
 	EXPECT_FLOAT_EQ(ui::focusRing(theme).width, 2.0F);
+}
+
+// A component resolves its style against its scene's theme when it mounts and again on a mode
+// switch: its type's theme style, then the one its style extends, then its own fields.
+TEST(Theme, MountedComponentsResolveAgainstTheScenesTheme) {
+	ui::Context context({800.0F, 600.0F});
+	const auto	pane =
+		context.root().addChild<ui::Rectangle>({.size = {10.0F, 10.0F}, .style = ui::styles::pane.extend({.borderRadius = 9.0F})});
+	const auto label = context.root().addChild<ui::Text>({.text = "hi"});
+	expectColor(*pane.get()->getStyle().backgroundColor, 0.0941F, 0.1098F, 0.1412F);
+	EXPECT_FLOAT_EQ(pane.get()->getStyle().borderRadius.value_or(-1.0F), 9.0F);
+	EXPECT_FLOAT_EQ(label.get()->getStyle().fontSize.value_or(-1.0F), 14.0F); // Text's own theme style, text.body
+
+	context.setTheme(ui::Theme::load({.tokens = &theme_test::tokenTable(), .inputs = {{"theme", "light"}}}).theme);
+	expectColor(*pane.get()->getStyle().backgroundColor, 0.96F, 0.97F, 0.98F);
+	EXPECT_FLOAT_EQ(pane.get()->getStyle().borderRadius.value_or(-1.0F), 9.0F);
+	expectColor(*label.get()->getStyle().color, 0.08F, 0.09F, 0.11F);
 }
 
 // Every tokens folder in the repo, the way salal_tokens() loads it: over ui's tokens, in every mode

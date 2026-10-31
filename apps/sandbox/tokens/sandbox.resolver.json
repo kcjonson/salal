@@ -1,0 +1,15 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/resolver.json",
+  "version": "2025.10",
+  "description": "The sandbox's theme: ui's tokens, dark as they are, with a light mode over them for ui_theme.",
+  "modifiers": {
+    "theme": {
+      "contexts": {
+        "dark": [],
+        "light": [{ "$ref": "light.tokens.json" }]
+      },
+      "default": "dark"
+    }
+  },
+  "resolutionOrder": [{ "$ref": "#/modifiers/theme" }]
+}

@@ -9,11 +9,8 @@
 // build and a warning otherwise, and reads as the type's default. A path ui names and a game's
 // file leaves out falls back to ui's value, since ui's tokens are always the bottom layer.
 
+#include "ui/Style.h"
 #include "ui/theme/TokenTable.h"
-
-#include <graphics/Color.h>
-#include <graphics/PrimitiveStyles.h>
-#include <primitives/FontFamily.h>
 
 #include <optional>
 #include <span>
@@ -34,23 +31,6 @@ namespace ui {
 		float				 fontWeight = 400.0F;
 		float				 letterSpacing = 0.0F;
 		float				 lineHeight = 1.2F; // a multiple of fontSize
-	};
-
-	// A style's fields as the theme resolved them; unset where its tokens don't set them. A style's
-	// `font` fills the font fields its own font fields don't.
-	struct ThemeStyle {
-		std::optional<Foundation::Color>	 backgroundColor;
-		std::optional<Foundation::Color>	 borderColor;
-		std::optional<float>				 borderWidth;
-		std::optional<float>				 borderRadius;
-		std::optional<Foundation::BoxShadow> boxShadow;
-		std::optional<float>				 opacity;
-		std::optional<Foundation::Color>	 color;
-		std::optional<Renderer::FontFamily>	 fontFamily;
-		std::optional<float>				 fontSize;
-		std::optional<float>				 fontWeight;
-		std::optional<float>				 lineHeight;
-		std::optional<float>				 letterSpacing;
 	};
 
 #ifdef DEVELOPMENT_BUILD
@@ -90,7 +70,13 @@ namespace ui {
 		dtcg::GradientValue	   get(GradientToken token) const;
 		dtcg::StrokeStyleValue get(StrokeStyleToken token) const;
 
-		const ThemeStyle& style(StyleId id) const;
+		// A theme style's fields as its tokens set them, its `font` filling the font fields its own
+		// don't; all unset for a style of a table the theme didn't load.
+		const Style& style(StyleId id) const;
+
+		// `declared` as a component of a type whose theme style is `typeStyle` draws it: that style,
+		// then the one `declared` extends, then `declared`'s own set fields.
+		Style resolve(const Style& declared, StyleId typeStyle) const;
 
 	  private:
 		struct Slot {
@@ -99,9 +85,9 @@ namespace ui {
 		};
 
 		struct Table {
-			const TokenTable*		table = nullptr;
-			std::vector<Slot>		tokens;
-			std::vector<ThemeStyle> styles;
+			const TokenTable*  table = nullptr;
+			std::vector<Slot>  tokens;
+			std::vector<Style> styles;
 		};
 
 		const Slot* slot(const TokenTable* table, std::uint32_t index) const;

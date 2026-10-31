@@ -1,12 +1,15 @@
 // Batch Renderer implementation.
-// Accumulates 2D geometry (shapes + text) and renders in optimized batches.
+// Accumulates 2D geometry (shapes + text) as one instance a quad and renders it in
+// optimized batches.
 
 #include "primitives/BatchRenderer.h"
 #include "CoordinateSystem/CoordinateSystem.h"
 #include "primitives/BoundaryLoops.h"
 #include "utils/Log.h"
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <glm/gtc/packing.hpp>
 #include <iostream>
 #include <numbers>
 #include <utility>
@@ -30,9 +33,19 @@ namespace Renderer {
 		// How far a feather ring's outer edge may run out at a sharp corner, in pixels.
 		constexpr float kFeatherMiterLimit = 4.0F;
 
-		// The stream buffers' first size; the backend grows them as a flush needs.
-		constexpr size_t kInitialVertexBytes = 4096 * sizeof(BatchVertex);
-		constexpr size_t kInitialIndexBytes = 6144 * sizeof(uint32_t);
+		// The stream buffer's first size; the backend grows it as a flush needs.
+		constexpr size_t kInitialInstanceBytes = 2048 * sizeof(BatchInstance);
+
+		// A straight-alpha colour premultiplied, as rgba8.
+		uint32_t premultiplied(const Foundation::Vec4& color) {
+			const float alpha = std::clamp(color.a, 0.0F, 1.0F);
+			return glm::packUnorm4x8(Foundation::Vec4(glm::clamp(Foundation::Vec3(color), 0.0F, 1.0F) * alpha, alpha));
+		}
+
+		// Two values as halves, the first in the low 16 bits.
+		uint32_t halves(float low, float high) {
+			return glm::packHalf2x16(Foundation::Vec2(low, high));
+		}
 	} // namespace
 
 	// --- InstancedMeshHandle ---
@@ -68,30 +81,24 @@ namespace Renderer {
 	BatchRenderer::BatchRenderer(backend::Backend& renderBackend, const backend::ShaderSource& baseShader)
 		: gpu(renderBackend),
 		  pipeline(renderBackend.createPipeline(baseShader)),
-		  vertexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialVertexBytes, nullptr)),
-		  indexBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialIndexBytes, nullptr)),
-		  geometry(
-			  renderBackend.createGeometry({.layout = backend::VertexLayout::Batched, .vertices = vertexBuffer, .indices = indexBuffer})
-		  ) {
+		  instanceBuffer(renderBackend.createBuffer(backend::BufferUsage::Stream, kInitialInstanceBytes, nullptr)),
+		  geometry(renderBackend.createGeometry({.layout = backend::VertexLayout::Batched, .vertices = instanceBuffer})) {
 		if (!pipeline.isValid()) {
 			std::cerr << "Failed to load the base shader!" << std::endl;
 		}
-		// Reserve space for vertices to minimize allocations
-		vertices.reserve(10000);
-		indices.reserve(15000);
-		vertexAtlas.reserve(10000);
+		instances.reserve(4096);
+		instanceTextures.reserve(4096);
 	}
 
 	BatchRenderer::~BatchRenderer() {
 		freePending();
 		gpu.destroyGeometry(geometry);
-		gpu.destroyBuffer(indexBuffer);
-		gpu.destroyBuffer(vertexBuffer);
+		gpu.destroyBuffer(instanceBuffer);
 		gpu.destroyPipeline(pipeline);
 	}
 
 	void BatchRenderer::recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend) {
-		const uint32_t end = static_cast<uint32_t>(indices.size());
+		const uint32_t end = static_cast<uint32_t>(instances.size());
 		if (end <= groupStart) {
 			return;
 		}
@@ -101,36 +108,38 @@ namespace Renderer {
 		// stays one group.
 		if (!drawGroups.empty()) {
 			DrawGroup& last = drawGroups.back();
-			if (last.indexStart + last.indexCount == groupStart && last.order == order && last.blend == blend) {
-				last.indexCount = end - last.indexStart;
+			if (last.instanceStart + last.instanceCount == groupStart && last.order == order && last.blend == blend) {
+				last.instanceCount = end - last.instanceStart;
 				return;
 			}
 		}
-		drawGroups.push_back({.indexStart = groupStart, .indexCount = end - groupStart, .order = order, .blend = blend});
+		drawGroups.push_back({.instanceStart = groupStart, .instanceCount = end - groupStart, .order = order, .blend = blend});
 		if (key != 0) {
 			anyKey = true;
 		}
 	}
 
-	void BatchRenderer::pushQuad(
-		const Foundation::Vec2 (&corners)[4],
-		const Foundation::Vec2 (&texCoords)[4],
-		const Foundation::Vec4& color,
-		const Foundation::Vec4& data1,
-		const Foundation::Vec4& data2,
-		TextureHandle			texture
-	) {
-		const uint32_t baseIndex = static_cast<uint32_t>(vertices.size());
-		const bool	   isIdentity = transformClass == TransformClass::kIdentity;
-		for (int i = 0; i < 4; ++i) {
-			vertices.push_back(
-				{TransformPosition(corners[i], currentTransform, isIdentity), texCoords[i], color, data1, data2, currentClipBounds}
-			);
-		}
-		for (const uint32_t corner : {0U, 1U, 2U, 0U, 2U, 3U}) {
-			indices.push_back(baseIndex + corner);
-		}
-		vertexAtlas.insert(vertexAtlas.end(), 4, texture);
+	BatchInstance&
+	BatchRenderer::pushQuad(QuadMode mode, const Foundation::Vec2 (&corners)[4], Primitives::BlendMode blend, TextureHandle texture) {
+		const bool			   isIdentity = transformClass == TransformClass::kIdentity;
+		const Foundation::Vec2 onScreen[4] = {
+			TransformPosition(corners[0], currentTransform, isIdentity),
+			TransformPosition(corners[1], currentTransform, isIdentity),
+			TransformPosition(corners[2], currentTransform, isIdentity),
+			TransformPosition(corners[3], currentTransform, isIdentity),
+		};
+		return pushScreenQuad(mode, onScreen, blend, texture);
+	}
+
+	BatchInstance&
+	BatchRenderer::pushScreenQuad(QuadMode mode, const Foundation::Vec2 (&corners)[4], Primitives::BlendMode blend, TextureHandle texture) {
+		BatchInstance& quad = instances.emplace_back();
+		std::copy(std::begin(corners), std::end(corners), std::begin(quad.corners));
+		quad.clip = currentClipBounds;
+		quad.mode = static_cast<uint8_t>(mode);
+		quad.flags = blend == Primitives::BlendMode::Additive ? kQuadAdditive : 0U;
+		instanceTextures.push_back(texture);
+		return quad;
 	}
 
 	void BatchRenderer::addQuad( // NOLINT(readability-convert-member-functions-to-static)
@@ -145,156 +154,82 @@ namespace Renderer {
 		if (clipEmpty) {
 			return;
 		}
-		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
-		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
+		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
+		const float	   halfW = bounds.width * 0.5F;
+		const float	   halfH = bounds.height * 0.5F;
 
-		// Calculate rect center and half-dimensions for SDF
-		float halfW = bounds.width * 0.5F;
-		float halfH = bounds.height * 0.5F;
-
-		// Per-corner fill colors (vertex order: TL, TR, BR, BL). Without a gradient
-		// all four are the flat fill, matching prior behavior exactly. With one, the
-		// stops are placed on the corners and the GPU interpolates across the quad.
-		Foundation::Vec4 colorTL = fillColor.toVec4();
-		Foundation::Vec4 colorTR = colorTL;
-		Foundation::Vec4 colorBR = colorTL;
-		Foundation::Vec4 colorBL = colorTL;
+		// Each corner's fill (TL, TR, BR, BL): the flat fill, or the gradient's stops on
+		// its corners, interpolated by the GPU, premultiplied first so a gradient to
+		// transparent doesn't darken on its way.
+		Foundation::Vec4 colors[4] = {fillColor.toVec4(), fillColor.toVec4(), fillColor.toVec4(), fillColor.toVec4()};
 		if (gradient.has_value()) {
 			const Foundation::Vec4 from = gradient->from.toVec4();
 			const Foundation::Vec4 to = gradient->to.toVec4();
 			if (gradient->horizontal) {
-				colorTL = from;
-				colorBL = from;
-				colorTR = to;
-				colorBR = to;
+				colors[0] = from;
+				colors[3] = from;
+				colors[1] = to;
+				colors[2] = to;
 			} else {
-				colorTL = from;
-				colorTR = from;
-				colorBR = to;
-				colorBL = to;
+				colors[0] = from;
+				colors[1] = from;
+				colors[2] = to;
+				colors[3] = to;
 			}
 		}
 
-		// Pack border data (color RGB + width); its alpha goes in the mode
-		Foundation::Vec4 borderData(0.0F, 0.0F, 0.0F, 0.0F);
-		float			 borderWidth = 0.0F;
-		float			 borderAlpha = 1.0F;
-		float			 borderPosEnum = 1.0F; // Default to Center
+		// The border: its colour, width and position, centred when there is none
+		uint32_t borderColor = 0;
+		float	 borderWidth = 0.0F;
+		uint8_t	 borderPosition = 1;
 		if (border.has_value()) {
-			borderData = Foundation::Vec4(border->color.r, border->color.g, border->color.b, border->width);
+			borderColor = premultiplied(border->color.toVec4());
 			borderWidth = border->width;
-			borderAlpha = border->color.a;
-			// Use corner radius from border if provided
 			if (border->cornerRadius > 0.0F) {
 				cornerRadius = border->cornerRadius;
 			}
 			switch (border->position) {
 				case Foundation::BorderPosition::Inside:
-					borderPosEnum = 0.0F;
+					borderPosition = 0;
 					break;
 				case Foundation::BorderPosition::Center:
-					borderPosEnum = 1.0F;
+					borderPosition = 1;
 					break;
 				case Foundation::BorderPosition::Outside:
-					borderPosEnum = 2.0F;
+					borderPosition = 2;
 					break;
 			}
 		}
 
-		// Calculate how much the border extends outside the shape bounds
-		// Inside (0): border entirely inside, no expansion needed
-		// Center (1): border straddles edge, half extends outside
-		// Outside (2): border entirely outside, full width extends outside
+		// The quad grows to cover the part of the border outside the shape: half of a
+		// centred one, all of an outside one.
 		float borderOuterExtent = 0.0F;
-		if (borderPosEnum == 1.0F) {
-			borderOuterExtent = borderWidth * 0.5F; // Center: half outside
-		} else if (borderPosEnum == 2.0F) {
-			borderOuterExtent = borderWidth; // Outside: full width outside
+		if (borderPosition == 1) {
+			borderOuterExtent = borderWidth * 0.5F;
+		} else if (borderPosition == 2) {
+			borderOuterExtent = borderWidth;
 		}
+		const float			   extentW = halfW + borderOuterExtent;
+		const float			   extentH = halfH + borderOuterExtent;
+		const float			   centerX = bounds.x + halfW;
+		const float			   centerY = bounds.y + halfH;
+		const Foundation::Vec2 corners[4] = {
+			{centerX - extentW, centerY - extentH},
+			{centerX + extentW, centerY - extentH},
+			{centerX + extentW, centerY + extentH},
+			{centerX - extentW, centerY + extentH},
+		};
 
-		// Expand the quad to cover the border that extends outside the shape
-		float expandedHalfW = halfW + borderOuterExtent;
-		float expandedHalfH = halfH + borderOuterExtent;
-
-		// Calculate expanded screen-space bounds
-		float centerX = bounds.x + halfW;
-		float centerY = bounds.y + halfH;
-
-		// Pack shape parameters (halfWidth, halfHeight, cornerRadius, borderPosition and alpha)
-		// Note: shapeParams still uses the ORIGINAL halfW/halfH for SDF calculation
-		Foundation::Vec4 shapeParams(halfW, halfH, cornerRadius, shapeMode(borderPosEnum, borderAlpha, blend));
-
-		// Add 4 vertices with expanded screen positions but rect-local coordinates
-		// that extend beyond the original shape bounds.
-		// Positions are transformed by currentTransform to support scrolling/offset.
-
-		// Top-left corner
-		vertices.push_back(
-			{TransformPosition(
-				 Foundation::Vec2(centerX - expandedHalfW, centerY - expandedHalfH),
-				 currentTransform,
-				 transformClass == TransformClass::kIdentity
-			 ),
-			 Foundation::Vec2(-expandedHalfW, -expandedHalfH), // Rect-local: top-left (expanded)
-			 colorTL,
-			 borderData,
-			 shapeParams,
-			 currentClipBounds}
-		);
-
-		// Top-right corner
-		vertices.push_back(
-			{TransformPosition(
-				 Foundation::Vec2(centerX + expandedHalfW, centerY - expandedHalfH),
-				 currentTransform,
-				 transformClass == TransformClass::kIdentity
-			 ),
-			 Foundation::Vec2(expandedHalfW, -expandedHalfH), // Rect-local: top-right (expanded)
-			 colorTR,
-			 borderData,
-			 shapeParams,
-			 currentClipBounds}
-		);
-
-		// Bottom-right corner
-		vertices.push_back(
-			{TransformPosition(
-				 Foundation::Vec2(centerX + expandedHalfW, centerY + expandedHalfH),
-				 currentTransform,
-				 transformClass == TransformClass::kIdentity
-			 ),
-			 Foundation::Vec2(expandedHalfW, expandedHalfH), // Rect-local: bottom-right (expanded)
-			 colorBR,
-			 borderData,
-			 shapeParams,
-			 currentClipBounds}
-		);
-
-		// Bottom-left corner
-		vertices.push_back(
-			{TransformPosition(
-				 Foundation::Vec2(centerX - expandedHalfW, centerY + expandedHalfH),
-				 currentTransform,
-				 transformClass == TransformClass::kIdentity
-			 ),
-			 Foundation::Vec2(-expandedHalfW, expandedHalfH), // Rect-local: bottom-left (expanded)
-			 colorBL,
-			 borderData,
-			 shapeParams,
-			 currentClipBounds}
-		);
-
-		// Add 6 indices (2 triangles)
-		indices.push_back(baseIndex + 0);
-		indices.push_back(baseIndex + 1);
-		indices.push_back(baseIndex + 2);
-
-		indices.push_back(baseIndex + 0);
-		indices.push_back(baseIndex + 2);
-		indices.push_back(baseIndex + 3);
-
-		// Shapes ignore the bound atlas (shader branches on data2.w); tag invalid.
-		vertexAtlas.insert(vertexAtlas.end(), 4, TextureHandle{});
+		BatchInstance& quad = pushQuad(QuadMode::Rect, corners, blend);
+		quad.geometry = {halfW, halfH, extentW, extentH};
+		quad.radii[0] = halves(cornerRadius, cornerRadius);
+		quad.radii[1] = quad.radii[0];
+		for (int i = 0; i < 4; ++i) {
+			quad.fills[i] = premultiplied(colors[i]);
+		}
+		quad.border = borderColor;
+		quad.shape[0] = halves(borderWidth, 0.0F);
+		quad.flags |= static_cast<uint8_t>(borderPosition << kQuadBorderShift);
 
 		recordGroup(groupStart, key, blend);
 	}
@@ -306,7 +241,7 @@ namespace Renderer {
 		int32_t						 key,
 		Primitives::BlendMode		 blend
 	) {
-		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
+		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
 		// The shadow's SDF shape is the rect grown by `spread`; the quad is grown a
 		// further `blur` so the shader has room to fade the falloff to zero.
 		const float halfW = (bounds.width * 0.5F) + shadow.spread;
@@ -314,61 +249,23 @@ namespace Renderer {
 		if (clipEmpty || halfW <= 0.0F || halfH <= 0.0F) {
 			return;
 		}
-		const float blur = shadow.blur > 0.0F ? shadow.blur : 0.5F;
-		const float cr = cornerRadius + shadow.spread;
-		const float cx = bounds.x + (bounds.width * 0.5F) + shadow.offset.x;
-		const float cy = bounds.y + (bounds.height * 0.5F) + shadow.offset.y;
-		const float qHalfW = halfW + blur;
-		const float qHalfH = halfH + blur;
+		const float			   blur = shadow.blur > 0.0F ? shadow.blur : 0.5F;
+		const float			   radius = cornerRadius + shadow.spread;
+		const float			   cx = bounds.x + (bounds.width * 0.5F) + shadow.offset.x;
+		const float			   cy = bounds.y + (bounds.height * 0.5F) + shadow.offset.y;
+		const float			   extentW = halfW + blur;
+		const float			   extentH = halfH + blur;
+		const Foundation::Vec2 corners[4] = {
+			{cx - extentW, cy - extentH}, {cx + extentW, cy - extentH}, {cx + extentW, cy + extentH}, {cx - extentW, cy + extentH}
+		};
 
-		const uint32_t		   baseIndex = static_cast<uint32_t>(vertices.size());
-		const Foundation::Vec4 colorVec = shadow.color.toVec4();
-		const Foundation::Vec4 data1(blur, 0.0F, 0.0F, 0.0F);
-		const Foundation::Vec4 data2(halfW, halfH, cr, renderMode(kRenderModeShadow, blend));
-
-		// Corners TL, TR, BR, BL. rectLocalPos is the SDF coordinate from the shadow
-		// center: the shape edge sits at +-halfSize, the falloff runs out to +-blur.
-		vertices.push_back(
-			{TransformPosition(Foundation::Vec2(cx - qHalfW, cy - qHalfH), currentTransform, transformClass == TransformClass::kIdentity),
-			 Foundation::Vec2(-qHalfW, -qHalfH),
-			 colorVec,
-			 data1,
-			 data2,
-			 currentClipBounds}
-		);
-		vertices.push_back(
-			{TransformPosition(Foundation::Vec2(cx + qHalfW, cy - qHalfH), currentTransform, transformClass == TransformClass::kIdentity),
-			 Foundation::Vec2(qHalfW, -qHalfH),
-			 colorVec,
-			 data1,
-			 data2,
-			 currentClipBounds}
-		);
-		vertices.push_back(
-			{TransformPosition(Foundation::Vec2(cx + qHalfW, cy + qHalfH), currentTransform, transformClass == TransformClass::kIdentity),
-			 Foundation::Vec2(qHalfW, qHalfH),
-			 colorVec,
-			 data1,
-			 data2,
-			 currentClipBounds}
-		);
-		vertices.push_back(
-			{TransformPosition(Foundation::Vec2(cx - qHalfW, cy + qHalfH), currentTransform, transformClass == TransformClass::kIdentity),
-			 Foundation::Vec2(-qHalfW, qHalfH),
-			 colorVec,
-			 data1,
-			 data2,
-			 currentClipBounds}
-		);
-
-		indices.push_back(baseIndex + 0);
-		indices.push_back(baseIndex + 1);
-		indices.push_back(baseIndex + 2);
-		indices.push_back(baseIndex + 0);
-		indices.push_back(baseIndex + 2);
-		indices.push_back(baseIndex + 3);
-
-		vertexAtlas.insert(vertexAtlas.end(), 4, TextureHandle{});
+		BatchInstance& quad = pushQuad(QuadMode::Shadow, corners, blend);
+		quad.geometry = {halfW, halfH, extentW, extentH};
+		quad.radii[0] = halves(radius, radius);
+		quad.radii[1] = quad.radii[0];
+		const uint32_t color = premultiplied(shadow.color.toVec4());
+		std::fill(std::begin(quad.fills), std::end(quad.fills), color);
+		quad.shape[1] = halves(blur, 0.0F);
 
 		recordGroup(groupStart, key, blend);
 	}
@@ -377,48 +274,37 @@ namespace Renderer {
 		if (clipEmpty) {
 			return;
 		}
-		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
-		uint32_t	   baseIndex = static_cast<uint32_t>(vertices.size());
-
-		Foundation::Vec4 uniformColorVec = mesh.color.toVec4();
-
-		// Default data (not used for tessellated shapes, but required for vertex format)
-		// Use borderPosition=1 (Center) so shader treats these as shapes, not text
-		Foundation::Vec2 zeroVec2(0.0F, 0.0F);
-		Foundation::Vec4 zeroVec4(0.0F, 0.0F, 0.0F, 0.0F);
-		Foundation::Vec4 shapeParams(0.0F, 0.0F, 0.0F, renderMode(1.0F, mesh.blend)); // borderPos=1 marks as shape
-
-		// Add all vertices (positions transformed by currentTransform)
+		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
+		const bool	   isIdentity = transformClass == TransformClass::kIdentity;
+		const uint32_t uniformColor = premultiplied(mesh.color.toVec4());
+		meshPositions.resize(mesh.vertices.size());
+		meshColors.resize(mesh.vertices.size());
 		for (size_t i = 0; i < mesh.vertices.size(); ++i) {
-			// Use per-vertex color if provided, otherwise uniform color
-			Foundation::Vec4 colorVec = (mesh.colors != nullptr) ? mesh.colors[i].toVec4() : uniformColorVec;
-
-			vertices.push_back({
-				TransformPosition(mesh.vertices[i], currentTransform, transformClass == TransformClass::kIdentity),
-				zeroVec2, // texCoord (unused for triangles)
-				colorVec,
-				zeroVec4,		  // data1 (unused)
-				shapeParams,	  // data2 with borderPos >= 0 marks as shape
-				currentClipBounds // clip bounds
-			});
+			meshPositions[i] = TransformPosition(mesh.vertices[i], currentTransform, isIdentity);
+			meshColors[i] = mesh.colors != nullptr ? premultiplied(mesh.colors[i].toVec4()) : uniformColor;
 		}
 
-		// Add all indices (offset by baseIndex)
-		for (const uint16_t index : mesh.indices) {
-			indices.push_back(baseIndex + index);
+		// A flat quad a triangle, its last corner repeated
+		for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+			const uint16_t		   a = mesh.indices[t];
+			const uint16_t		   b = mesh.indices[t + 1];
+			const uint16_t		   c = mesh.indices[t + 2];
+			const Foundation::Vec2 corners[4] = {meshPositions[a], meshPositions[b], meshPositions[c], meshPositions[c]};
+			BatchInstance&		   quad = pushScreenQuad(QuadMode::Flat, corners, mesh.blend);
+			quad.fills[0] = meshColors[a];
+			quad.fills[1] = meshColors[b];
+			quad.fills[2] = meshColors[c];
+			quad.fills[3] = meshColors[c];
 		}
-
-		// Tessellated shapes ignore the bound atlas; tag every vertex invalid.
-		vertexAtlas.insert(vertexAtlas.end(), mesh.vertices.size(), TextureHandle{});
 
 		if (mesh.feather != nullptr && !mesh.feather->empty()) {
-			addFeather(baseIndex, *mesh.feather);
+			addFeather(*mesh.feather, mesh.blend);
 		}
 
 		recordGroup(groupStart, mesh.key, mesh.blend);
 	}
 
-	void BatchRenderer::addFeather(uint32_t meshBase, const BoundaryLoops& loops) {
+	void BatchRenderer::addFeather(const BoundaryLoops& loops, Primitives::BlendMode blend) {
 		const float pixel = 1.0F / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
 		// The loops keep the mesh on their left; a mirroring transform turns it to the right.
 		const float determinant = (currentTransform[0][0] * currentTransform[1][1]) - (currentTransform[0][1] * currentTransform[1][0]);
@@ -429,17 +315,17 @@ namespace Renderer {
 			 return length > 0.0F ? Foundation::Vec2(direction.y, -direction.x) * (side / length) : Foundation::Vec2(0.0F, 0.0F);
 		};
 
-		// One outer vertex per boundary vertex, the fill's own vertex its inner one.
-		const uint32_t ringBase = static_cast<uint32_t>(vertices.size());
 		for (size_t loop = 0; loop < loops.count(); ++loop) {
 			const uint32_t start = loops.starts[loop];
 			const uint32_t size = loops.starts[loop + 1] - start;
+			// One outer point per boundary vertex, the fill's own vertex its inner one.
+			featherOuter.resize(size);
 			for (uint32_t v = 0; v < size; ++v) {
-				const Foundation::Vec2 previous = vertices[meshBase + loops.vertices[start + ((v + size - 1) % size)]].position;
-				const Foundation::Vec2 next = vertices[meshBase + loops.vertices[start + ((v + 1) % size)]].position;
-				BatchVertex			   outer = vertices[meshBase + loops.vertices[start + v]];
-				Foundation::Vec2	   normalIn = outward(previous, outer.position);
-				Foundation::Vec2	   normalOut = outward(outer.position, next);
+				const Foundation::Vec2 previous = meshPositions[loops.vertices[start + ((v + size - 1) % size)]];
+				const Foundation::Vec2 here = meshPositions[loops.vertices[start + v]];
+				const Foundation::Vec2 next = meshPositions[loops.vertices[start + ((v + 1) % size)]];
+				Foundation::Vec2	   normalIn = outward(previous, here);
+				Foundation::Vec2	   normalOut = outward(here, next);
 				if (normalIn == Foundation::Vec2(0.0F, 0.0F)) {
 					normalIn = normalOut;
 				} else if (normalOut == Foundation::Vec2(0.0F, 0.0F)) {
@@ -449,28 +335,20 @@ namespace Renderer {
 				// itself has no miter and goes a pixel along its last edge's normal.
 				const Foundation::Vec2 sum = normalIn + normalOut;
 				const float			   sumLength = glm::length(sum);
-				const Foundation::Vec2 offset =
-					sumLength > 1e-6F ? sum * (pixel * std::min(kFeatherMiterLimit, 2.0F / sumLength) / sumLength) : normalOut * pixel;
-				outer.position += offset;
-				outer.color.a = 0.0F;
-				vertices.push_back(outer);
+				featherOuter[v] = here + (sumLength > 1e-6F ? sum * (pixel * std::min(kFeatherMiterLimit, 2.0F / sumLength) / sumLength)
+															: normalOut * pixel);
 			}
-		}
-		for (size_t loop = 0; loop < loops.count(); ++loop) {
-			const uint32_t start = loops.starts[loop];
-			const uint32_t size = loops.starts[loop + 1] - start;
+			// A quad an edge, its inner side the fill's colour fading to transparent outside
 			for (uint32_t v = 0; v < size; ++v) {
-				const uint32_t w = (v + 1) % size;
-				const uint32_t innerA = meshBase + loops.vertices[start + v];
-				const uint32_t innerB = meshBase + loops.vertices[start + w];
-				const uint32_t outerA = ringBase + start + v;
-				const uint32_t outerB = ringBase + start + w;
-				for (const uint32_t corner : {innerA, innerB, outerB, innerA, outerB, outerA}) {
-					indices.push_back(corner);
-				}
+				const uint32_t		   w = (v + 1) % size;
+				const uint32_t		   innerA = loops.vertices[start + v];
+				const uint32_t		   innerB = loops.vertices[start + w];
+				const Foundation::Vec2 corners[4] = {meshPositions[innerA], meshPositions[innerB], featherOuter[w], featherOuter[v]};
+				BatchInstance&		   quad = pushScreenQuad(QuadMode::Flat, corners, blend);
+				quad.fills[0] = meshColors[innerA];
+				quad.fills[1] = meshColors[innerB];
 			}
 		}
-		vertexAtlas.insert(vertexAtlas.end(), vertices.size() - ringBase, TextureHandle{});
 	}
 
 	void BatchRenderer::addStroke(
@@ -479,37 +357,39 @@ namespace Renderer {
 		int32_t						 key,
 		Primitives::BlendMode		 blend
 	) {
-		if (clipEmpty) {
+		if (clipEmpty || !invertible) {
 			return;
 		}
-		const uint32_t		   groupStart = static_cast<uint32_t>(indices.size());
-		const Foundation::Vec4 colorVec = color.toVec4();
-		const Foundation::Vec4 noBorder(0.0F, 0.0F, 0.0F, 0.0F);
-		// Border position 1 (center) with a zero border width: a plain filled SDF box.
-		const float mode = renderMode(1.0F, blend);
-		const bool	isIdentity = transformClass == TransformClass::kIdentity;
+		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
+		const uint32_t fill = premultiplied(color.toVec4());
+		const bool	   isIdentity = transformClass == TransformClass::kIdentity;
 		for (const StrokePiece& piece : pieces) {
-			// Box-local x runs along the axis, y along its normal.
-			const uint32_t		   baseIndex = static_cast<uint32_t>(vertices.size());
-			const Foundation::Vec2 normal(-piece.axis.y, piece.axis.x);
-			const Foundation::Vec4 shape(piece.halfLength, piece.halfWidth, piece.cornerRadius, mode);
+			Foundation::Vec2 onScreen[StrokePiece::kMaxCorners];
 			for (uint8_t k = 0; k < piece.cornerCount; ++k) {
-				const Foundation::Vec2 local = piece.corners[k] - piece.center;
-				vertices.push_back(
-					{TransformPosition(piece.corners[k], currentTransform, isIdentity),
-					 Foundation::Vec2(glm::dot(local, piece.axis), glm::dot(local, normal)),
-					 colorVec,
-					 noBorder,
-					 shape,
-					 currentClipBounds}
-				);
+				onScreen[k] = TransformPosition(piece.corners[k], currentTransform, isIdentity);
 			}
-			for (uint32_t k = 1; k + 1 < piece.cornerCount; ++k) {
-				indices.push_back(baseIndex);
-				indices.push_back(baseIndex + k);
-				indices.push_back(baseIndex + k + 1);
+			// The piece's frame from a screen offset: box-local x runs along the axis, y
+			// along its normal, both through the inverse of the transform's linear part.
+			const bool			   flat = !(piece.halfLength > 0.0F) && !(piece.halfWidth > 0.0F);
+			const Foundation::Vec2 normal(-piece.axis.y, piece.axis.x);
+			const Foundation::Vec2 alongAxis = glm::transpose(inverseLinear) * piece.axis;
+			const Foundation::Vec2 alongNormal = glm::transpose(inverseLinear) * normal;
+			const Foundation::Vec2 center = TransformPosition(piece.center, currentTransform, isIdentity);
+			// A fan over the corners, two triangles a quad, the last corner repeated when one is over.
+			for (uint8_t k = 1; k + 1 < piece.cornerCount; k += 2) {
+				const uint8_t		   last = std::min<uint8_t>(k + 2, piece.cornerCount - 1);
+				const Foundation::Vec2 corners[4] = {onScreen[0], onScreen[k], onScreen[k + 1], onScreen[last]};
+				BatchInstance&		   quad = pushScreenQuad(flat ? QuadMode::Flat : QuadMode::Stroke, corners, blend);
+				std::fill(std::begin(quad.fills), std::end(quad.fills), fill);
+				if (!flat) {
+					quad.geometry = {alongAxis.x, alongAxis.y, alongNormal.x, alongNormal.y};
+					quad.radii[0] = std::bit_cast<uint32_t>(center.x);
+					quad.radii[1] = std::bit_cast<uint32_t>(center.y);
+					quad.shape[0] = std::bit_cast<uint32_t>(piece.halfLength);
+					quad.shape[1] = std::bit_cast<uint32_t>(piece.halfWidth);
+					quad.border = std::bit_cast<uint32_t>(piece.cornerRadius);
+				}
 			}
-			vertexAtlas.insert(vertexAtlas.end(), piece.cornerCount, TextureHandle{});
 		}
 		recordGroup(groupStart, key, blend);
 	}
@@ -527,30 +407,23 @@ namespace Renderer {
 			return;
 		}
 
-		// The quad's local coordinates are turned so the arc's middle lies along +x,
-		// which leaves the shader one symmetric wedge test and no angle to add.
-		const float halfSweep = sweep * 0.5F;
-		const float middle = start + halfSweep;
-		const float cosMiddle = std::cos(middle);
-		const float sinMiddle = std::sin(middle);
-		const auto	arcLocal = [&](const Foundation::Vec2& offset) {
-			 return Foundation::Vec2((cosMiddle * offset.x) + (sinMiddle * offset.y), (cosMiddle * offset.y) - (sinMiddle * offset.x));
-		};
+		// The quad reaches a pixel past the outer radius, so the edge ramp fits; base.vert
+		// turns its local coordinates so the arc's middle lies along +x, which leaves the
+		// shader one symmetric wedge test and no angle to add.
+		const float			   halfSweep = sweep * 0.5F;
 		const float			   reach = args.outerRadius + pixelPadding;
-		const Foundation::Vec2 offsets[4] = {{-reach, -reach}, {reach, -reach}, {reach, reach}, {-reach, reach}};
 		const Foundation::Vec2 corners[4] = {
-			args.center + offsets[0], args.center + offsets[1], args.center + offsets[2], args.center + offsets[3]
+			args.center + Foundation::Vec2(-reach, -reach),
+			args.center + Foundation::Vec2(reach, -reach),
+			args.center + Foundation::Vec2(reach, reach),
+			args.center + Foundation::Vec2(-reach, reach),
 		};
-		const Foundation::Vec2 local[4] = {arcLocal(offsets[0]), arcLocal(offsets[1]), arcLocal(offsets[2]), arcLocal(offsets[3])};
 
-		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
-		pushQuad(
-			corners,
-			local,
-			args.color.toVec4(),
-			{0.0F, 0.0F, 0.0F, 0.0F},
-			{innerRadius, args.outerRadius, halfSweep, renderMode(kRenderModeArc, args.blend)}
-		);
+		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
+		BatchInstance& quad = pushQuad(QuadMode::Arc, corners, args.blend);
+		quad.geometry = {innerRadius, args.outerRadius, halfSweep, start + halfSweep};
+		std::fill(std::begin(quad.fills), std::end(quad.fills), premultiplied(args.color.toVec4()));
+		quad.shape[0] = halves(0.0F, pixelPadding);
 		recordGroup(groupStart, args.key, args.blend);
 	}
 
@@ -560,19 +433,11 @@ namespace Renderer {
 		}
 		const Foundation::Rect& b = args.bounds;
 		const Foundation::Vec2	corners[4] = {{b.x, b.y}, {b.x + b.width, b.y}, {b.x + b.width, b.y + b.height}, {b.x, b.y + b.height}};
-		const Foundation::Vec2	uv[4] = {
-			 {args.uvMin.x, args.uvMin.y}, {args.uvMax.x, args.uvMin.y}, {args.uvMax.x, args.uvMax.y}, {args.uvMin.x, args.uvMax.y}
-		 };
 
-		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
-		pushQuad(
-			corners,
-			uv,
-			args.tint.toVec4(),
-			{0.0F, 0.0F, 0.0F, 0.0F},
-			{0.0F, 0.0F, 0.0F, renderMode(kRenderModeImage, args.blend)},
-			args.texture
-		);
+		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
+		BatchInstance& quad = pushQuad(QuadMode::Image, corners, args.blend, args.texture);
+		quad.geometry = {args.uvMin.x, args.uvMin.y, args.uvMax.x, args.uvMax.y};
+		std::fill(std::begin(quad.fills), std::end(quad.fills), premultiplied(args.tint.toVec4()));
 		recordGroup(groupStart, args.key, args.blend);
 	}
 
@@ -591,7 +456,7 @@ namespace Renderer {
 		if (clipEmpty) {
 			return;
 		}
-		const uint32_t groupStart = static_cast<uint32_t>(indices.size());
+		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
 		// Resolve the atlas this glyph samples, and its range. An invalid handle
 		// means the default atlas (the game's default family's, set via setFontAtlas)
 		// at the default's range.
@@ -600,16 +465,6 @@ namespace Renderer {
 		if (resolvedAtlas.isValid() && !sampleable(resolvedAtlas)) {
 			return;
 		}
-
-		uint32_t baseIndex = static_cast<uint32_t>(vertices.size());
-
-		Foundation::Vec4 colorVec = color.toVec4();
-
-		// Text data packing:
-		// data1 = unused (0,0,0,0)
-		// data2 = (pixelRange, 0, 0, -1) where -1 signals text rendering mode
-		Foundation::Vec4 zeroVec4(0.0F, 0.0F, 0.0F, 0.0F);
-		Foundation::Vec4 textParams(resolvedPixelRange, 0.0F, 0.0F, renderMode(kRenderModeText, blend));
 
 		// Under identity/translate-only transforms, snap the RUN origin (not the
 		// glyph) to the device pixel grid: every glyph of a run computes the same
@@ -644,62 +499,16 @@ namespace Renderer {
 			}
 			return Foundation::Vec2(snappedPosition.x + dx, snappedPosition.y + dy);
 		};
+		const Foundation::Vec2 corners[4] = {
+			cornerPosition(0.0F, 0.0F), cornerPosition(size.x, 0.0F), cornerPosition(size.x, size.y), cornerPosition(0.0F, size.y)
+		};
 
-		// Add 4 vertices for glyph quad
-		// Note: UV Y coordinates are flipped for OpenGL coordinate system
-
-		// Top-left
-		vertices.push_back(
-			{cornerPosition(0.0F, 0.0F),
-			 Foundation::Vec2(uvMin.x, uvMax.y), // UV flipped
-			 colorVec,
-			 zeroVec4,
-			 textParams,
-			 currentClipBounds}
-		);
-
-		// Top-right
-		vertices.push_back(
-			{cornerPosition(size.x, 0.0F),
-			 Foundation::Vec2(uvMax.x, uvMax.y), // UV flipped
-			 colorVec,
-			 zeroVec4,
-			 textParams,
-			 currentClipBounds}
-		);
-
-		// Bottom-right
-		vertices.push_back(
-			{cornerPosition(size.x, size.y),
-			 Foundation::Vec2(uvMax.x, uvMin.y), // UV flipped
-			 colorVec,
-			 zeroVec4,
-			 textParams,
-			 currentClipBounds}
-		);
-
-		// Bottom-left
-		vertices.push_back(
-			{cornerPosition(0.0F, size.y),
-			 Foundation::Vec2(uvMin.x, uvMin.y), // UV flipped
-			 colorVec,
-			 zeroVec4,
-			 textParams,
-			 currentClipBounds}
-		);
-
-		// Add 6 indices (2 triangles)
-		indices.push_back(baseIndex + 0);
-		indices.push_back(baseIndex + 1);
-		indices.push_back(baseIndex + 2);
-
-		indices.push_back(baseIndex + 0);
-		indices.push_back(baseIndex + 2);
-		indices.push_back(baseIndex + 3);
-
-		// Tag all 4 vertices with the atlas they sample, so flush() can group
-		// this glyph into the matching per-atlas draw run.
-		vertexAtlas.insert(vertexAtlas.end(), 4, resolvedAtlas);
+		// The glyph's uv rect, flipped in v: the atlas is uploaded bottom row first.
+		// Tagged with its atlas, so flush() can group it into the matching run.
+		BatchInstance& quad = pushScreenQuad(QuadMode::Text, corners, blend, resolvedAtlas);
+		quad.geometry = {uvMin.x, uvMax.y, uvMax.x, uvMin.y};
+		std::fill(std::begin(quad.fills), std::end(quad.fills), premultiplied(color.toVec4()));
+		quad.shape[1] = halves(resolvedPixelRange, 0.0F);
 
 		recordGroup(groupStart, key, blend);
 	}
@@ -716,7 +525,7 @@ namespace Renderer {
 		if (texture == liveTexture) {
 			liveTexture = {};
 		}
-		if (vertices.empty()) {
+		if (instances.empty()) {
 			gpu.destroyTexture(texture);
 		} else {
 			pendingFrees.push_back(texture);
@@ -752,41 +561,42 @@ namespace Renderer {
 	DrawPlan BatchRenderer::plan() {
 		// Resolve draw order. Submission ("organic") order is kept unless some draw
 		// carried a non-zero key; then the per-draw-call groups are stable-sorted by
-		// sort domain, then key, and the emit-order index list is rebuilt (groups, not
-		// triangles). Domains rise in submission order, so the fast path already has
-		// them in order, and costs nothing beyond the group records.
-		std::span<const uint32_t> emit = indices;
+		// sort domain, then key, and their quads copied out in that order. Domains rise
+		// in submission order, so the fast path already has them in order, and costs
+		// nothing beyond the group records.
+		std::span<const BatchInstance> emit = instances;
 		if (anyKey) {
 			std::stable_sort(drawGroups.begin(), drawGroups.end(), [](const DrawGroup& a, const DrawGroup& b) {
 				return a.order < b.order;
 			});
-			sortedIndices.clear();
-			sortedIndices.reserve(indices.size());
+			sortedInstances.clear();
+			sortedInstances.reserve(instances.size());
 			for (const DrawGroup& g : drawGroups) {
-				sortedIndices.insert(sortedIndices.end(), indices.begin() + g.indexStart, indices.begin() + g.indexStart + g.indexCount);
+				sortedInstances.insert(
+					sortedInstances.end(), instances.begin() + g.instanceStart, instances.begin() + g.instanceStart + g.instanceCount
+				);
 			}
-			emit = sortedIndices;
+			emit = sortedInstances;
 		}
 
 		// Run splitting.
 		//
-		// All draws share one VBO/IBO and one draw order. Text and image vertices are
-		// tagged in `vertexAtlas` with the texture they sample; everything else is
-		// tagged invalid (it ignores the bound texture, the shader branches on
-		// data2.w). Walking the groups in emit order, a new run starts where a
-		// triangle needs a texture other than the bound one, or where a group's GL
-		// blend state differs from the run's. Triangles are never reordered, so
-		// key order is exact, and with one texture and one blend state (all text from
-		// the default atlas, any mix of Alpha and Additive) the frame is one run.
+		// Text and image quads are tagged in `instanceTextures` with the texture they
+		// sample; everything else is tagged invalid (it ignores the bound texture).
+		// Walking the groups in emit order, a new run starts where a quad needs a
+		// texture other than the bound one, or where a group's GPU blend state differs
+		// from the run's. Quads are never reordered, so key order is exact, and with one
+		// texture and one blend state (all text from the default atlas, any mix of Alpha
+		// and Additive) the frame is one run.
 		runs.clear();
-		DrawRun	   current{.indexStart = 0, .indexCount = 0, .texture = defaultFontAtlas, .blendState = backend::BlendState::Alpha};
+		DrawRun	   current{.instanceStart = 0, .instanceCount = 0, .texture = defaultFontAtlas, .blendState = backend::BlendState::Alpha};
 		uint32_t   emitted = 0;
 		const auto cutAt = [&](uint32_t at) {
-			if (at > current.indexStart) {
-				current.indexCount = at - current.indexStart;
+			if (at > current.instanceStart) {
+				current.instanceCount = at - current.instanceStart;
 				runs.push_back(current);
 			}
-			current.indexStart = at;
+			current.instanceStart = at;
 		};
 		for (const DrawGroup& group : drawGroups) {
 			const backend::BlendState state = blendState(group.blend);
@@ -794,38 +604,29 @@ namespace Renderer {
 				cutAt(emitted);
 				current.blendState = state;
 			}
-			for (uint32_t tri = 0; tri < group.indexCount; tri += 3) {
-				// A triangle's vertices are all untextured or all the same texture; the
-				// first valid tag is the texture if any, else invalid.
-				TextureHandle required = vertexAtlas[indices[group.indexStart + tri]];
-				if (!required.isValid()) {
-					required = vertexAtlas[indices[group.indexStart + tri + 1]];
-				}
-				if (!required.isValid()) {
-					required = vertexAtlas[indices[group.indexStart + tri + 2]];
-				}
+			for (uint32_t i = 0; i < group.instanceCount; ++i) {
+				const TextureHandle required = instanceTextures[group.instanceStart + i];
 				if (required.isValid() && required != current.texture) {
-					cutAt(emitted + tri);
+					cutAt(emitted + i);
 					current.texture = required;
 				}
 			}
-			emitted += group.indexCount;
+			emitted += group.instanceCount;
 		}
 		cutAt(emitted);
 
-		return {.indices = emit, .runs = runs};
+		return {.instances = emit, .runs = runs};
 	}
 
 	void BatchRenderer::flush() {
-		if (vertices.empty()) {
+		if (instances.empty()) {
 			return;
 		}
 
 		const DrawPlan drawPlan = plan();
 
-		// The whole batch, every flush: the stream buffers start over
-		gpu.updateBuffer(vertexBuffer, 0, vertices.size() * sizeof(BatchVertex), vertices.data());
-		gpu.updateBuffer(indexBuffer, 0, drawPlan.indices.size_bytes(), drawPlan.indices.data());
+		// The whole batch, every flush: the stream buffer starts over
+		gpu.updateBuffer(instanceBuffer, 0, drawPlan.instances.size_bytes(), drawPlan.instances.data());
 
 		// Create projection matrix
 		// If CoordinateSystem is set, use it for DPI-aware projection (logical pixels)
@@ -838,7 +639,7 @@ namespace Renderer {
 		}
 
 		uniforms.projection = projection;
-		// Transform is identity since transforms are baked into vertex positions at add time
+		// Transform is identity since transforms are baked into the corners at add time
 		// This allows different parts of the scene to have different transforms within one batch
 		uniforms.transform = Foundation::Mat4(1.0F);
 
@@ -868,22 +669,21 @@ namespace Renderer {
 				 .geometry = geometry,
 				 .blend = run.blendState,
 				 .texture = run.texture,
-				 .indexOffset = run.indexStart,
-				 .indexCount = run.indexCount}
+				 .firstInstance = run.instanceStart,
+				 .instanceCount = run.instanceCount}
 			);
 		}
 		gpu.draw(drawCalls);
 		drawCallCount += drawCalls.size();
 		freePending();
 
-		// Accumulate stats before clearing
-		frameVertexCount += vertices.size();
-		frameTriangleCount += indices.size() / 3;
+		// Accumulate stats before clearing: six vertices and two triangles a quad
+		frameVertexCount += instances.size() * 6;
+		frameTriangleCount += instances.size() * 2;
 
 		// Clear buffers for next batch
-		vertices.clear();
-		indices.clear();
-		vertexAtlas.clear();
+		instances.clear();
+		instanceTextures.clear();
 		drawGroups.clear();
 		anyKey = false;
 		sortDomain = 0;
@@ -894,9 +694,8 @@ namespace Renderer {
 		drawCallCount = 0;
 		frameVertexCount = 0;
 		frameTriangleCount = 0;
-		vertices.clear();
-		indices.clear();
-		vertexAtlas.clear();
+		instances.clear();
+		instanceTextures.clear();
 		drawGroups.clear();
 		anyKey = false;
 		sortDomain = 0;
@@ -971,6 +770,10 @@ namespace Renderer {
 		} else {
 			transformClass = TransformClass::kTranslateOnly;
 		}
+		const glm::mat2 linear(transform[0][0], transform[0][1], transform[1][0], transform[1][1]);
+		const float		linearDeterminant = glm::determinant(linear);
+		invertible = linearDeterminant != 0.0F && std::isfinite(linearDeterminant);
+		inverseLinear = invertible ? glm::inverse(linear) : glm::mat2(1.0F);
 	}
 
 	// --- GPU Instancing Methods ---
