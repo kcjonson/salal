@@ -46,6 +46,7 @@ namespace sandbox {
 	extern const SceneInfo kPerfQuadsScene;
 	extern const SceneInfo kPerfTextScene;
 	extern const SceneInfo kPerfWorldScene;
+	extern const SceneInfo kPerfUiScene;
 
 	// The families main.cpp loads. The second is the same atlas loaded again, so perf_text has two font
 	// atlases to alternate between, as a game with a body and a mono font does.
