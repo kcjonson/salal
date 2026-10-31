@@ -215,47 +215,70 @@ The fastest of five matched or beat the median everywhere: `perf_quads` lands
 about one launch in four 2 to 7% slow (0.96 to 1.01 ms against 0.94), which
 the fastest ignores and which leaves the median's middle runs apart, so over
 40% of its no-op compares came out inconclusive at every threshold from 2 to
-4%. At 3%, the
-scenes but `perf_ui` catch a 5% regression in all but a fraction of a percent
-of splits without a false fail; 2% does too, but leaves no room for a session
-noisier than this one. `perf_ui` varies launch to launch by itself (2.90 to
+4%. At 3%, the scenes but `perf_ui` catch a 5% regression in all but a
+fraction of a percent of splits without a false fail; 2% does too, but leaves
+no room for a session noisier than this one. `perf_ui` varies launch to launch by itself (2.90 to
 3.16 ms over the 20 runs, with no outlier or step), so `cpuMs` and `gpuMs`
 need 4% (`renderMs` passes at 3% and is held at 4% with them), where a 5%
 regression fails two compares in three on `cpuMs` and `gpuMs` and nine in
 ten on `renderMs`, and a 10% one 93 to 98% of them.
 
-The mask is the one thing not settled. `0x0550`, one logical CPU on each
-of four cores, is the one measured, and tight. The same noise on `0x0FF0`
-(logical CPUs 4 to 11, both threads of each core) started straight after it
-and was discarded half a minute in, when another Claude session started
-building on the machine; it didn't get another 15 quiet minutes before the
-window closed at 14:00 UTC. So `0x0550` is the default without having been
-measured against `0x0FF0`, and the next idle window should run
-`noise --affinity 0x0FF0` and keep whichever is tighter. That session had
-been building and testing dual-deck-builder every few minutes since 09:55 UTC,
-which left one 15-minute gap in four hours; runs taken while it worked were
-thrown away, since perf runs only while no other session works.
+The mask stays `0x0550`, one logical CPU on each of cores 2 to 5. The
+same noise on `0x0FF0` (both threads of those cores) got only the end of the
+window, 10 runs of `perf_quads` and `perf_text`, and came out mixed: tighter
+on `perf_quads` (cv 0.7% against 2.2%; none of the slow launches) and looser
+on `perf_text` (0.9% against 0.6%, its GPU time 1.3% against 0.9%), with
+both scenes 10% and 25% slower on the CPU (1.04 against 0.94 ms, 0.50 against
+0.40), where the sandbox's threads share cores. Nothing there beats a mask
+calibrated across all four scenes; a full `noise --affinity 0x0FF0` in an
+idle window would settle it.
+
+The window was 09:55 to 14:00 UTC, and another session built and tested
+dual-deck-builder every few minutes through it, which left two stretches of 15
+quiet minutes: the noise ran from 12:50, the full `0x0FF0` noise was
+discarded half a minute in at 13:05 when that session started building again,
+and the compare, the merged head's result and the short `0x0FF0` noise ran
+from 13:41. Runs taken while it worked were thrown away, since perf runs only
+while no other session works.
 
 ### The instanced batch, before and after
 
-Not measured yet: the interleaved compare of the suite before the merge
-(`8b9ae5f`, in a scratch worktree) against the merged head, and the merged
-head's result for `perf-results/`, were queued behind the noise and didn't
-get a quiet window before 14:00 UTC. The counts don't need one:
+`compare --base-exe` the suite before the merge (`8b9ae5f`, built Release
+with the dev server in a scratch worktree) against the merged head
+(`1909134`), interleaved, five runs a side pinned to `0x0550`, on
+2026-10-31 from 13:41 UTC. Each timing is the fastest of five runs' figures,
+in ms, before then after; `perf_ui` is new, so it has the head's only:
+
+| scene | `cpuMs` p50 | `cpuMs` p99 | `gpuMs` p50 | `gpuMs` p99 | `renderMs` p50 | `flushMs` p50 |
+|---|---|---|---|---|---|---|
+| `perf_quads` | 0.794, 0.937 (+18%) | 1.099, 1.590 (+45%) | 0.206, 0.290 (+41%) | 0.535, 0.294 (-45%) | 0.788, 0.930 (+18%) | 0.154, 0.101 (-35%) |
+| `perf_text` | 0.474, 0.396 (-16%) | 0.722, 0.654 (-9%) | 0.074, 0.083 (+12%) | 0.080, 0.096 (+21%) | 0.467, 0.389 (-17%) | 0.091, 0.057 (-37%) |
+| `perf_world` | 4.030, 3.674 (-9%) | 5.548, 4.929 (-11%) | 0.205, 0.290 (+42%) | 0.529, 1.187 (+124%) | 4.017, 3.658 (-9%) | 0.735, 0.483 (-34%) |
+| `perf_ui` (new) | 2.920 | 5.015 | 0.366 | 2.032 | 2.779 | 0.276 |
 
 | scene | draw calls | vertices before, instances after | upload bytes a frame |
 |---|---|---|---|
 | `perf_quads` | 1, 1 | 42,108 vertices, 10,527 instances | 3,621,288, 1,094,808 (-70%) |
 | `perf_text` | 671, 38 | 20,012 vertices, 5,003 instances | 1,721,032, 520,312 (-70%) |
-| `perf_world` | 3, 3 | 185,578 vertices, 97,125 instances (3,000 of them trees) | about 12.86 MB, 9.89 MB (-23%) |
+| `perf_world` | 3, 3 | 185,294 vertices, 97,124 instances (3,000 of them trees) | 12,833,404, 9,884,896 (-23%) |
 | `perf_ui` | new: 1 | 16,504 instances | 1,716,416 |
 
-Read from a capture of each build; the counts are the same in every run and
-every frame but `perf_world`'s, which its camera moves by a few hundred
-bytes.
+The rework did what it was for on the bus and the draw calls: a 70% smaller
+upload, 94% fewer draw calls in `perf_text`, and a third less flush time
+everywhere, which takes `perf_text` and `perf_world` 16% and 9% below the
+old CPU time. It cost elsewhere. `perf_quads`, one draw call either way, takes
+18% more CPU a frame, all of it outside the flush (`renderMs` up 0.14 ms while
+`flushMs` fell 0.05): adding a rect as an instance costs more than its four
+vertices and six indices did. And the GPU's time is up in every scene, 41 and
+42% in the rect-heavy ones and 12% in `perf_text`; where it goes isn't
+measured here. By the gate the merged head regresses `perf_quads` (CPU and
+GPU) and `perf_world`'s GPU time; `perf_text`'s GPU comparison came out
+inconclusive (the head's two fastest runs 4.9% apart). Counts went up by
+design, so this compare ran with `--allow-counts`.
 
-To run it: `node scripts/perf.mjs compare --base 8b9ae5f --allow-counts`
-from a checkout of the merged head, which runs `perf_ui` on the head only.
+The merged head's own result, `perf-results/kevinsgamingdesktop/v0.30.1-8-g1909134.json`,
+was run straight after (`run --exe`, five runs a scene), in the same quiet
+stretch.
 
 ### Results
 
