@@ -2,6 +2,7 @@
 
 #include "application/App.h"
 #include "detail/Guard.h"
+#include "input/Input.h"
 
 #include <primitives/Primitives.h>
 #include <ui/debug/LayoutLint.h>
@@ -10,6 +11,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
+#include <span>
 #include <utility>
 
 namespace app {
@@ -184,6 +187,21 @@ namespace app {
 		}
 		Scene& scene = *entries.back().scene;
 		detail::guard(scene.name(), "ui update", [&] { scene.uiContext->update(dt); });
+	}
+
+	static_assert(kMaxPlayerSlots == ui::kMaxPlayers, "a ui focus for each player slot");
+
+	void SceneStack::routeTopUi(const Input& input) {
+		if (entries.empty() || entries.back().scene->uiContext == nullptr) {
+			return;
+		}
+		ui::Context& context = *entries.back().scene->uiContext;
+		for (int slot = 0; slot < kMaxPlayerSlots; ++slot) {
+			const std::optional<foundation::DeviceId> device = input.slotConnected(slot) ? input.deviceForSlot(slot) : std::nullopt;
+			context.setPlayerDevices(
+				slot, device ? std::span<const foundation::DeviceId>(&*device, 1) : std::span<const foundation::DeviceId>{}
+			);
+		}
 	}
 
 	bool SceneStack::dispatchTopUi(const foundation::InputEvent& event) {

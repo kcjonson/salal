@@ -32,6 +32,8 @@
 
 namespace app {
 
+	class Input;
+
 	namespace detail {
 		struct SceneBuilder {
 			virtual ~SceneBuilder() = default;
@@ -192,6 +194,8 @@ namespace app {
 		void resized(const Renderer::Viewport& viewport);
 		// The top scene's ui update, after its own.
 		void updateTopUi(double dt);
+		// Each player slot's device, from Input, to the top scene's ui, whose focus it drives.
+		void routeTopUi(const Input& input);
 		// An event for the top scene's ui; true when the ui took it.
 		bool dispatchTopUi(const foundation::InputEvent& event);
 		// The cursor the top scene's ui asks for.

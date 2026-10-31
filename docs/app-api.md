@@ -248,8 +248,11 @@ public:
    hold this frame.
 5. Dispatch. By default each event goes to the overlays top-down, then the top
    scene's ui (which takes what it hits, and a press's gesture once it has
-   the press), then the top scene, each returning whether it consumed it;
-   while paused, only overlays receive them. The window's cursor follows the
+   the press, and keys, pad buttons and axes for the focus of the player
+   holding the device), then the top scene, each returning whether it
+   consumed it; while paused, only overlays receive them. Before the events,
+   each player slot's device from `input()` goes to the top scene's ui as
+   that player's, so a scene claims slots and never routes devices itself. The window's cursor follows the
    top scene's ui after the layout pass, through `Platform::setCursor`, and a
    scene covered by a push gets a cancel for anything its ui had in hand. A game can replace this step with
    `setDispatch`, which worldsim does (under "What worldsim keeps").

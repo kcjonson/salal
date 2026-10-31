@@ -42,23 +42,33 @@ endif()
 
 add_library(salal_ui STATIC
     ui/Animator.cpp
+    ui/components/Badge.cpp
+    ui/components/Divider.cpp
+    ui/components/KeyCap.cpp
+    ui/components/Panel.cpp
+    ui/components/ProgressBar.cpp
+    ui/components/Stat.cpp
     ui/Component.cpp
     ui/Context.cpp
+    ui/Focus.cpp
     ui/Registry.cpp
     ui/Style.cpp
     ui/Transform.cpp
     ui/debug/LayoutLint.cpp
     ui/debug/TreeSnapshot.cpp
     ui/detail/Dispatcher.cpp
+    ui/detail/FocusManager.cpp
     ui/detail/LayoutEngine.cpp
     ui/shapes/Circle.cpp
     ui/shapes/Line.cpp
     ui/shapes/Rectangle.cpp
+    ui/shapes/Icon.cpp
     ui/shapes/Text.cpp
     ui/theme/Theme.cpp
     ui/theme/Variants.cpp
     ui/theme/StateColor.cpp
     ui/icons/IconAtlas.cpp
+    ui/icons/IconService.cpp
 )
 add_library(salal::ui ALIAS salal_ui)
 
