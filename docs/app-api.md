@@ -272,11 +272,14 @@ public:
    a paused or frozen frame the tick reader is consumed and discarded, so a
    press made during a pause doesn't fire on resume. A tick that pauses ends
    the frame's ticks, and the whole steps left are dropped as past the cap.
-8. `update(FrameContext)` on the top scene, then the overlays, with
-   `realDelta`, unless paused (worldsim's order). Its input is the frame
-   reader's, edges included, even for a scene that became top in step 6.
-9. `Primitives::beginFrame`, `clear(clearColor)`, render the stack from the
-   topmost opaque scene upward, then overlays, then `Primitives::endFrame`.
+8. `update(FrameContext)` on the top scene, then its ui context's update,
+   then the overlays, with `realDelta`, unless paused (worldsim's order). Its
+   input is the frame reader's, edges included, even for a scene that became
+   top in step 6.
+9. The ui of every scene about to render is laid out, paused or not. Then
+   `Primitives::beginFrame`, `clear(clearColor)`, render the stack from the
+   topmost opaque scene upward, each scene's ui after it behind a sort
+   barrier, then overlays, then `Primitives::endFrame`.
    The top scene renders with `alpha = accumulator / fixedStep`; a covered
    scene renders with the alpha it had when it was covered, so the arena under
    a pause menu holds still. `beginFrame` moves here from before update
@@ -913,7 +916,7 @@ Routes:
 
 | route | answered | change |
 |---|---|---|
-| `/api/ui/tree`, `/api/ui/lint` | step 10 | by providers the game registers (`"ui.tree"`, `"ui.lint"`) until salal's `ui` registers its own in phase 3; with none registered, `{"viewport":{"width":w,"height":h},"roots":[]}` at the logical viewport and `{"count":0,"violations":[]}`, so an app with no ui (the sandbox, the asteroids prototype) still meets the inspector contract |
+| `/api/ui/tree`, `/api/ui/lint` | step 10 | by the App's own providers (`"ui.tree"`, `"ui.lint"`), registered at create, which answer from the top scene's ui context; a scene with none answers `{"roots":[],"scene":<name>,"viewport":{"height":h,"width":w}}` and `{"count":0,"violations":[]}`, so every app meets the inspector contract. A game's own providers, registered after, answer instead, as worldsim's do for its scenes on its own ui |
 | `/api/ui/screenshot` | step 10 | read before present; one readback answers every screenshot parked for the frame; 500 when there is no backbuffer to read |
 | `/api/input` | queued at once, joins at step 3 | grows `char,<codepoint>`, `pad,<device>,<button>,down\|up`, `axis,<device>,<axis>,<value>`, `connect,vpad<n>`, `disconnect,vpad<n>`; a request's events all queue or none do, and a malformed one is a 400 naming it; injected events go through the accumulator, so injected keys reach the ui the way typed ones do (today they skip the focus manager, `InputManager.cpp:371-375`) |
 | `/api/control` | step 3 | `exit`, `scene`, `pause`, `resume`, `reload`, `vsync` as today, plus `step&ticks=<n>` (one tick without `ticks`, 409 unless paused); games register further actions, which is how world-sim keeps `camera` for `scripts/perf-capture.ps1:23` and `docs/testing/README.md:132`; an action answers once it has run, though `scene` and `reload` queue their change, which applies at step 6 (after resume while paused), so they answer before it takes effect, as today; an unknown action is a 404 at once (today a 400), a `scene` nothing was added under a 404 and a `reload` of a scene pushed with arguments a 409 |

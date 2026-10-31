@@ -188,14 +188,23 @@ namespace app {
 		// For the App. Step 6, with the top scene's alpha now, which a scene it covers keeps.
 		void   apply(float liveAlpha);
 		Entry* topEntry() { return entries.empty() ? nullptr : &entries.back(); }
-		// Every stacked scene's onResize, top down.
+		// Every stacked scene's ui viewport, then its onResize, top down.
 		void resized(const Renderer::Viewport& viewport);
+		// The top scene's ui update, after its own.
+		void updateTopUi(double dt);
+		// The ui of every scene render() draws, laid out.
+		void layoutUi();
 		// The stack from its topmost opaque scene up, the top at liveAlpha and each covered scene at the
-		// alpha it had when covered.
+		// alpha it had when covered, each scene's ui after it.
 		void render(float liveAlpha);
+		// /api/ui/tree and /api/ui/lint for the top scene's ui, at the window's logical size.
+		std::string uiTreeJson(const Renderer::Viewport& viewport) const;
+		std::string uiLintJson(const Renderer::Viewport& viewport) const;
 		// App::shutdown: every scene exits, top down, and nothing queued applies.
 		void exitAll();
 
+		// The first scene render() draws: the topmost opaque one.
+		std::size_t			   firstRendered() const;
 		void				   pushBuilt(Change& change, float liveAlpha);
 		void				   popTop();
 		void				   finishTop(Change& change);

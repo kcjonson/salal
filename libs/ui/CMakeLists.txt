@@ -41,13 +41,25 @@ if(msdfgen_FOUND)
 endif()
 
 add_library(salal_ui STATIC
-    Ui.cpp
+    ui/Component.cpp
+    ui/Context.cpp
+    ui/Registry.cpp
+    ui/Style.cpp
+    ui/Transform.cpp
+    ui/debug/LayoutLint.cpp
+    ui/debug/TreeSnapshot.cpp
+    ui/shapes/Circle.cpp
+    ui/shapes/Line.cpp
+    ui/shapes/Rectangle.cpp
+    ui/shapes/Text.cpp
     ui/theme/Theme.cpp
     ui/theme/Variants.cpp
     ui/icons/IconAtlas.cpp
 )
 add_library(salal::ui ALIAS salal_ui)
 
+# Headers are included as <ui/...> (docs/ui-plan.md, "ui headers under ui/"), so they can't collide with
+# a game's own layout/ or components/ folders, or with worldsim's ui while both are linked.
 target_compile_features(salal_ui PUBLIC cxx_std_20)
 target_include_directories(salal_ui
     PUBLIC
@@ -57,10 +69,12 @@ target_include_directories(salal_ui
         ${Stb_INCLUDE_DIR} # IconAtlas decodes its PNG with the renderer's stb_image
 )
 
+# nlohmann-json is public for Component::describe, whose header names it through json_fwd.hpp.
 target_link_libraries(salal_ui
     PUBLIC
         salal::renderer
         salal::foundation
+        nlohmann_json::nlohmann_json
     PRIVATE
         salal_ui_dtcg
 )
@@ -73,6 +87,8 @@ salal_tokens(salal_ui tokens NAMESPACE ui HEADER ui/theme/Tokens.h)
 
 salal_add_tests(ui)
 if(TARGET salal_ui_tests)
+    # The draw-order tests run Primitives on the null backend with the base shader.
+    salal_base_shader(salal_ui_tests)
     # The tests drive the loader directly, and load every tokens file under the source tree.
     target_link_libraries(salal_ui_tests PRIVATE salal_ui_dtcg)
     target_compile_definitions(salal_ui_tests PRIVATE "SALAL_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")

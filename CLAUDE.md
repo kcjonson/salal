@@ -10,7 +10,8 @@ games. See [README.md](README.md).
 
 It is being **extracted from worldsim**, which has already implemented this
 architecture and is where the code comes from. `foundation`, `renderer` and
-`app` are in and worldsim runs on all three; `ui` is a placeholder until phase 3.
+`app` are in and worldsim runs on all three; `ui` is being built in phase 3,
+its core in and hosted by `app`.
 
 ## Project management: Specboard
 
@@ -83,7 +84,8 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 The build skeleton is in, with CI on Windows, macOS and Linux. **`foundation`
 and `renderer` are imported** (plain copies of worldsim at `870dd755` and
 `2cc7e40a`, 2026-10-26); `app` is built from worldsim's `libs/engine` slice
-(phase 2, below); `ui` is a placeholder.
+(phase 2, below); `ui` is being built to [docs/ui-design.md](docs/ui-design.md),
+its core (components in a scene's slot map, one paint order) in.
 **Phase 0, the audit, is done** (2026-10-25); findings in
 [docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
@@ -214,7 +216,8 @@ removing legacy code. One way to do each thing.
 There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
 renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
-`blend` and `input_test`) on the GLFW platform, under a scene picker drawn with
+`blend` and `input_test`) and ui's (`ui_order` and `ui_text`) on the GLFW
+platform, under a scene picker drawn with
 `Primitives` (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
 has its state and the tab's and rows' bounds). It serves the dev server on
 127.0.0.1:8090 in Debug and RelWithDebInfo (`--http-port <port>` for another).
@@ -266,12 +269,13 @@ or delete `build/`.
 
 `foundation` and `renderer` are worldsim's code, imported as plain copies.
 `app` is worldsim's `libs/engine` slice rebuilt to [docs/app-api.md](docs/app-api.md),
-in namespace `app`. `ui` is a placeholder until phase 3 moves its code in: one
-translation unit and one gtest, there to exercise the wiring. Its placeholder
-namespace (`ui`, lowercase per the coding-standards doc) is not a decision
-about the namespaces of moved worldsim code; that casing (the
-imported renderer has both `Renderer` and `renderer`) is an open worldsim
-follow-up. Blame and history for imported code live in worldsim;
+in namespace `app`. `ui` is built in salal to [docs/ui-design.md](docs/ui-design.md),
+ported from worldsim's `libs/ui` where its code still applies, in namespace
+`ui` with its headers under `ui/` (`#include <ui/Component.h>`), so they
+can't collide with worldsim's ui while both are linked. `app` links it and
+gives every scene a context (`Scene::ui()`). The casing of the imported
+renderer's namespaces (it has both `Renderer` and `renderer`) is an open
+worldsim follow-up. Blame and history for imported code live in worldsim;
 `git remote add worldsim ../worldsim && git fetch worldsim` makes
 `git blame worldsim/main -- libs/<lib>/<file>` work from here.
 
