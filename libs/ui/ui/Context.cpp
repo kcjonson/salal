@@ -200,6 +200,7 @@ namespace ui {
 	void Context::update(double dt) {
 		const Registry::DispatchScope scope(registry);
 		const double				  seconds = std::isfinite(dt) ? std::clamp(dt, 0.0, kMaxUpdateDt) : 0.0;
+		updateTooltip(); // a hover since the last update started then, not now
 		clock.advance(seconds * 1000.0);
 		animator->tick();
 		const std::vector<ComponentId> requested = std::exchange(updateRequests, {});
@@ -217,6 +218,7 @@ namespace ui {
 				component->update(static_cast<float>(seconds));
 			}
 		}
+		updateTooltip();
 	}
 
 	// From each relayout boundary something under changed, a root's box being the viewport; then the
@@ -447,6 +449,10 @@ namespace ui {
 			case Type::Axis:
 			case Type::DeviceDisconnected:
 				return focusManager->dispatch(event);
+			case Type::PointerDown:
+				closeTooltip();
+				tipHeld = true;
+				return dispatcher->dispatch(event, scale);
 			default:
 				return dispatcher->dispatch(event, scale);
 		}
@@ -497,9 +503,10 @@ namespace ui {
 		dispatcher->cancel();
 	}
 
-	// The subtree's tweens and timers go with it.
+	// The subtree's tweens and timers go with it. Focus goes first, while the entries it reads are open.
 	void Context::removing(ComponentId root) {
 		dispatcher->removing(root);
+		focusManager->removing(root);
 		std::erase_if(overlayStack, [&](const OverlayEntry& entry) { return within(entry.id, root); });
 		std::vector<ComponentId> subtree{root};
 		for (std::size_t i = 0; i < subtree.size(); ++i) {
@@ -508,7 +515,6 @@ namespace ui {
 			}
 		}
 		animator->ownersRemoved(subtree);
-		focusManager->removing(root);
 	}
 
 	bool Context::shownInTree(const Component& component) const {
@@ -563,7 +569,8 @@ namespace ui {
 				}
 			}
 		}
-		overlayStack.push_back({.id = entryId, .opener = opener, .options = std::move(options)});
+		const ComponentId restore = focusManager->focused(options.player);
+		overlayStack.push_back({.id = entryId, .opener = opener, .options = std::move(options), .restore = restore});
 		for (const ComponentId id : closing) {
 			dismiss(id);
 		}
@@ -658,10 +665,10 @@ namespace ui {
 	// A press outside the pointer player's menus closes them; it is consumed unless it is a secondary
 	// press or lands on an overlay trigger (R9.13).
 	bool Context::pressOutside(ComponentId hit, foundation::MouseButton button) {
-		constexpr int			 kPointerPlayer = 0;
+		const int				 pointerPlayer = focusManager->mousePlayer();
 		std::vector<ComponentId> closing;
 		for (auto it = overlayStack.rbegin(); it != overlayStack.rend(); ++it) {
-			if (it->options.kind == OverlayKind::Menu && it->options.player == kPointerPlayer && !within(hit, it->id)) {
+			if (it->options.kind == OverlayKind::Menu && it->options.player == pointerPlayer && !within(hit, it->id)) {
 				closing.push_back(it->id);
 			}
 		}
@@ -679,15 +686,90 @@ namespace ui {
 	}
 
 	int Context::modalFloor() const {
-		constexpr int kPointerPlayer = 0;
-		int			  floor = 0;
+		const int pointerPlayer = focusManager->mousePlayer();
+		int		  floor = 0;
 		for (const OverlayEntry& open : overlayStack) {
 			const Component* entry = registry.find(open.id);
-			if (entry != nullptr && open.options.kind == OverlayKind::Dialog && open.options.player == kPointerPlayer && entry->isShown()) {
+			if (entry != nullptr && open.options.kind == OverlayKind::Dialog && open.options.player == pointerPlayer && entry->isShown()) {
 				floor = std::max(floor, entry->slot);
 			}
 		}
 		return floor;
+	}
+
+	bool Context::cancelOverlay(int player) {
+		ComponentId target;
+		for (const Component* node = registry.find(focusManager->focused(player)); node != nullptr && !target.valid();
+			 node = registry.find(node->parentId)) {
+			if (node->overlayKind && *node->overlayKind != OverlayKind::Toast && *node->overlayKind != OverlayKind::Tooltip) {
+				target = node->selfId;
+			}
+		}
+		for (auto it = overlayStack.rbegin(); it != overlayStack.rend() && !target.valid(); ++it) {
+			if (it->options.kind == OverlayKind::Menu && it->options.player == player) {
+				target = it->id;
+			}
+		}
+		if (!target.valid()) {
+			return false;
+		}
+		dismiss(target);
+		return true;
+	}
+
+	void Context::focusMoved(int player, ComponentId from) {
+		const ComponentId		 to = focusManager->focused(player);
+		std::vector<ComponentId> closing;
+		for (auto it = overlayStack.rbegin(); it != overlayStack.rend(); ++it) {
+			if (it->options.kind == OverlayKind::Menu && it->options.player == player && within(from, it->id) && !within(to, it->id)) {
+				closing.push_back(it->id);
+			}
+		}
+		for (const ComponentId id : closing) {
+			dismiss(id);
+		}
+	}
+
+	ComponentId Context::overlayRestore(ComponentId focusedId, ComponentId root) const {
+		ComponentId restore;
+		for (const Component* node = registry.find(focusedId); node != nullptr; node = registry.find(node->parentId)) {
+			if (const auto open = std::ranges::find(overlayStack, node->selfId, &OverlayEntry::id); open != overlayStack.end()) {
+				restore = open->restore;
+			}
+			if (node->selfId == root) {
+				break;
+			}
+		}
+		return restore;
+	}
+
+	// The innermost hovered component with a tooltip owns the tier's one hover tooltip.
+	void Context::updateTooltip() {
+		ComponentId owner;
+		for (const ComponentId id : dispatcher->hovered()) {
+			if (const Component* node = registry.find(id); node != nullptr && node->tooltip) {
+				owner = id;
+				break;
+			}
+		}
+		if (owner != tipOwner) {
+			closeTooltip();
+			tipOwner = owner;
+			tipSince = clock.now();
+			tipHeld = false;
+		}
+		Component* component = registry.find(tipOwner);
+		if (component == nullptr || tipHeld || registry.find(tipEntry) != nullptr || clock.now() - tipSince < kTooltipDelayMs) {
+			return;
+		}
+		tipEntry = component->tooltip(*component, component->screenToLocal(dispatcher->pointerAt())).componentId();
+	}
+
+	void Context::closeTooltip() {
+		if (registry.find(tipEntry) != nullptr) {
+			closeOverlay({tipEntry, &registry});
+		}
+		tipEntry = {};
 	}
 
 	void Context::pointerPressed(ComponentId hit) {

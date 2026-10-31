@@ -25,12 +25,17 @@ namespace ui {
 	inline constexpr int kTooltipSlot = 2046;
 	inline constexpr int kDragSlot = 2047; // reserved for the drag service
 
+	// How long the pointer rests on a component before its tooltip opens.
+	inline constexpr double kTooltipDelayMs = 500.0;
+
 	enum class OverlayKind : std::uint8_t {
 		// Exclusive for its player (opening one closes the others not holding it); closed by a press
 		// outside it, which it consumes (R9.13).
 		Menu,
 		// Modal for its player: what's under it takes no pointer; a press outside doesn't close it.
 		Dialog,
+		// A non-modal dialog: what's under it stays live, and a press outside doesn't close it.
+		Panel,
 		// Neither modal nor closed by a press; brought to the front as it arrives.
 		Toast,
 		// In the tooltip tier, above every entry, and never hit by the pointer.

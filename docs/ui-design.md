@@ -51,6 +51,14 @@ that slot's stacking contexts.
 - **Modality per focus context.** Modal input blocking and menu exclusivity
   belong to a focus context, not the screen, so one player's confirm dialog
   doesn't close or block the other's menu.
+- **Dismissal and focus.** A menu closes on a press outside it and when its
+  player's focus leaves it; cancel closes the innermost menu, dialog or
+  non-modal panel around the focus (R9.13, R9.14). Focus inside an overlay as
+  it closes goes back to where it was when the overlay opened, and a modal
+  dialog holds its player's focus in its subtree with a scope until then. An
+  event that bubbles out of an overlay into the control that opened it, a
+  click on a menu's padding or an activate the dialog's content didn't take,
+  doesn't activate that control.
 
 Renderer side, ui never forwards component z: the per-call key becomes an
 integer ui sets from its walk, and world passes keep their own integer keys in

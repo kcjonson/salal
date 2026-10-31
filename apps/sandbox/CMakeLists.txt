@@ -15,6 +15,7 @@ add_executable(salal_sandbox
     scenes/UiFocusScene.cpp
     scenes/UiInputScene.cpp
     scenes/UiMotionScene.cpp
+    scenes/UiOverlayComponentsScene.cpp
     scenes/UiOverlaysScene.cpp
     scenes/UiLayoutScene.cpp
     scenes/UiOrderScene.cpp

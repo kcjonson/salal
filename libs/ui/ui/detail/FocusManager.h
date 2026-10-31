@@ -28,8 +28,11 @@ namespace ui::detail {
 		// A key, character, pad button or axis event; true when the ui took it.
 		bool dispatch(const foundation::InputEvent& event);
 		// The mouse pressed `hit`, none for empty space: its player's focus goes to the nearest focusable
-		// at or above it, with no ring, or off the ui. Inside a scope a press can't take focus out.
+		// at or above it, with no ring, or off the ui. Inside a scope a press can't take focus out, and a
+		// press in an overlay with nothing to focus leaves focus where it is.
 		void pointerPressed(ComponentId hit);
+		// The player holding the mouse, else player 0.
+		[[nodiscard]] int mousePlayer() const;
 
 		bool		focus(ComponentId target, int player);
 		void		clear(int player);
@@ -88,7 +91,6 @@ namespace ui::detail {
 		[[nodiscard]] std::pair<int, Action> route(const foundation::InputEvent& event, float previous) const;
 		[[nodiscard]] bool					 holds(int player, foundation::DeviceId device) const;
 		[[nodiscard]] Action actionOf(const foundation::ActionMap& map, const foundation::InputEvent& event, float previous) const;
-		[[nodiscard]] int	 mousePlayer() const;
 		float&				 axisValue(foundation::DeviceId device, foundation::GamepadAxis axis);
 
 		[[nodiscard]] Component*  find(ComponentId id) const;
