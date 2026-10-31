@@ -426,7 +426,7 @@ namespace Renderer {
 		EXPECT_EQ(static_cast<QuadMode>(uploaded[2].mode), QuadMode::Arc);
 	}
 
-	TEST_F(FlushTest, AtlasChangesSplitIntoDrawCallsOverOneUpload) {
+	TEST_F(FlushTest, AtlasesAndImagesShareADrawCall) {
 		const Texture		atlasTexture = Primitives::createTexture({.width = 4, .height = 4, .format = TextureFormat::Rgb8});
 		const Texture		imageTexture = Primitives::createTexture({.width = 4, .height = 4});
 		const TextureHandle atlas = atlasTexture.handle();
@@ -441,24 +441,18 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		const std::vector<backend::NullBackend::RecordedDraw>& draws = gpu->draws();
-		ASSERT_EQ(draws.size(), 3U);
-		EXPECT_EQ(draws[0].call.texture, atlas);
+		ASSERT_EQ(draws.size(), 1U);
+		EXPECT_EQ(draws[0].call.textures[0], atlas);
+		EXPECT_EQ(draws[0].call.textures[1], image);
 		EXPECT_EQ(draws[0].call.firstInstance, 0U);
-		EXPECT_EQ(draws[0].call.instanceCount, 2U);
-		EXPECT_EQ(draws[1].call.texture, image);
-		EXPECT_EQ(draws[1].call.firstInstance, 2U);
-		EXPECT_EQ(draws[1].call.instanceCount, 1U);
-		EXPECT_EQ(draws[2].call.texture, atlas);
-		EXPECT_EQ(draws[2].call.firstInstance, 3U);
-		EXPECT_EQ(draws[2].call.instanceCount, 1U);
-		// One submission, one upload, one set of uniforms
-		for (const backend::NullBackend::RecordedDraw& draw : draws) {
-			EXPECT_EQ(draw.submission, 0);
-			EXPECT_EQ(draw.call.pipeline, draws[0].call.pipeline);
-			EXPECT_EQ(draw.call.geometry, draws[0].call.geometry);
+		EXPECT_EQ(draws[0].call.instanceCount, 4U);
+		std::vector<uint8_t> slots;
+		for (const BatchInstance& quad : quads(draws[0])) {
+			slots.push_back(quad.slot);
 		}
+		EXPECT_EQ(slots, (std::vector<uint8_t>{0, 0, 1, 0}));
 		EXPECT_EQ(gpu->uniformWrites().size(), 1U);
-		EXPECT_EQ(Primitives::getStats().drawCalls, 3U);
+		EXPECT_EQ(Primitives::getStats().drawCalls, 1U);
 	}
 
 	TEST_F(FlushTest, ClipBoundsRideOnTheQuadsAndTheUniformsCarryTheFlip) {
@@ -627,7 +621,7 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		EXPECT_EQ(gpu->draws()[0].call.texture, handle);
+		EXPECT_EQ(gpu->draws()[0].call.textures[0], handle);
 		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 1U);
 		EXPECT_EQ(gpu->texture(handle), nullptr);
 		EXPECT_EQ(gpu->live().textures, 0U);
@@ -673,7 +667,7 @@ namespace Renderer {
 			EXPECT_EQ(draw.call.instanceCount, 2U);
 			EXPECT_EQ(draw.call.indexOffset, 0U);
 			EXPECT_EQ(draw.call.indexCount, 3U);
-			EXPECT_FALSE(draw.call.texture.isValid());
+			EXPECT_FALSE(draw.call.textures[0].isValid());
 			const backend::GeometryDesc* geometry = gpu->geometry(draw.call.geometry);
 			ASSERT_NE(geometry, nullptr);
 			EXPECT_EQ(geometry->layout, backend::VertexLayout::InstancedMesh);
