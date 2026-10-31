@@ -187,13 +187,14 @@ races these on worldsim's main. Between B1 and B2, world-sim runs both ui
 libraries, switched per scene: `UiScene` installs the bridge with `setDispatch`
 in `onEnter`, a converted scene clears it (an empty function restores app's
 default dispatch, `App.h:81-83`), and state providers stack with the newest
-answering.
+answering. Worldsim is keyboard and mouse only and takes no controller, so no
+conversion PR binds, routes or tests a pad.
 
 | PR | worldsim | gate |
 |---|---|---|
 | A. Theme, icons, ui-sandbox, asset-manager | `gen-cpp-theme.mjs` also emits a Design Tokens file for `salal_tokens()`; the 43 stroked glyphs of `IconGlyphs.h`'s 51 outlined into filled SVGs, with the eight filled ones and `assets/ui/icons`' ten, in an `icons/` folder for `salal_icons()`; worldsim's own components on salal's ui (Avatar, Panel's kicker and bracket ticks); ui-sandbox's 16 pure-ui scenes deleted, since salal's sandbox has them, its two Salvage scenes and its navigation menu converted, and its seven other scenes (Arena, Grass, Handle, Planet, Svg, Tree, VectorPerf) moved off `UiScene` onto `app::Scene::handleEvent`, so ui-sandbox no longer uses the bridge; asset-manager converted | ctest; each converted scene through the dev server (tree, lint at 0, screenshot) against the pin before; the seven scenes' input by hand, PlanetScene's orbit drag included; asset-manager by hand |
-| B1. Pre-game scenes | splash, landing, menu, settings, scenario-select, party-select, loading, world-creator and `scenes/shared`, each clearing the bridge on entry | the flows from launch to a started game, pad and mouse, driven through `/api/input`; tree, lint at 0 and screenshots; the game scene, still on the bridge, through its usual scripted runs |
-| B2. The game scene | `GameUI`, its views, dialogs and components, with worldsim's SectionHeader and StatusTextLine ported beside their user, `TaskListView`; then `libs/ui`, `UiBridge`, `UiScene`, `UiOverlay`, `UiClipboard`, `Tokens.h` and `IconGlyphs.h` deleted | scripted `/api/input` runs before and after: a dialog from a menu, a tooltip over it, Tab and pad focus kept inside a dialog, a list in the game ui scrolled without zooming, a toast over a dialog; tree and lint; screenshots judged by a subagent for intended differences only |
+| B1. Pre-game scenes | splash, landing, menu, settings, scenario-select, party-select, loading, world-creator and `scenes/shared`, each clearing the bridge on entry | the flows from launch to a started game, keyboard and mouse, driven through `/api/input`; tree, lint at 0 and screenshots; the game scene, still on the bridge, through its usual scripted runs |
+| B2. The game scene | `GameUI`, its views, dialogs and components, with worldsim's SectionHeader and StatusTextLine ported beside their user, `TaskListView`; then `libs/ui`, `UiBridge`, `UiScene`, `UiOverlay`, `UiClipboard`, `Tokens.h` and `IconGlyphs.h` deleted | scripted `/api/input` runs before and after: a dialog from a menu, a tooltip over it, Tab focus kept inside a dialog, a list in the game ui scrolled without zooming, a toast over a dialog; tree and lint; screenshots judged by a subagent for intended differences only |
 
 What changes where a player or worldsim's tooling can see, known now; each
 conversion PR owns its part in its description:
@@ -202,8 +203,8 @@ conversion PR owns its part in its description:
   toast comes to the front when it arrives, instead of literal z values.
 - Tab stays inside an open dialog, and tab order follows the tree, not
   registration order.
-- A pad and the arrow keys move focus between controls; Enter, Space and
-  Escape arrive as `ActionMap` actions, rebindable.
+- The arrow keys move focus between controls; Enter, Space and Escape arrive
+  as `ActionMap` actions, rebindable.
 - A click lands on the topmost painted control in every case, so the scenes'
   hand-ordered dispatch goes.
 - Hover follows content moving under a still cursor, with no move synthesised
