@@ -39,6 +39,7 @@ namespace ui {
 		isolation = args.isolation;
 		pointerEvents = args.pointerEvents;
 		focusable = args.focusable;
+		descendantsFocusable = args.descendantsFocusable;
 		tabIndex = args.tabIndex;
 		focusGroup = args.focusGroup;
 		cursor = args.cursor;
@@ -350,10 +351,15 @@ namespace ui {
 		if (!focusable || context == nullptr || context->registry.find(selfId) != this) {
 			return false;
 		}
+		bool ownContext = false; // past an overlay entry, which is its own: what's above it blocks nothing
 		for (const Component* node = this; node != nullptr; node = node->parentComponent()) {
 			if (!node->isShown() || !node->enabled) {
 				return false;
 			}
+			if (!ownContext && node != this && !node->descendantsFocusable) {
+				return false;
+			}
+			ownContext = ownContext || node->isOverlay();
 		}
 		return true;
 	}

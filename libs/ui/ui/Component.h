@@ -75,6 +75,8 @@
 //   isolation  true makes it a stacking context, whose subtree paints as one at its zIndex
 //   pointerEvents  what the pointer can hit (ui/Input.h); unset, the type's default
 //   focusable  it can take a player's focus (ui/Focus.h)
+//   descendantsFocusable  false keeps focus off everything under it but the overlays opened from
+//              inside it, each its own: a game's HUD, driven by the pointer and hotkeys
 //   tabIndex   above 0 comes first in Tab order, ascending; below 0 is focusable by code and the
 //              pointer only; unset is 0, tree order
 //   focusGroup makes it one Tab stop whose arrows move among its focusable members
@@ -102,6 +104,7 @@
 	bool									   isolation = false;                                                                          \
 	::std::optional<::ui::PointerEvents>	   pointerEvents;                                                                              \
 	bool									   focusable = false;                                                                          \
+	bool									   descendantsFocusable = true;                                                                \
 	::std::optional<int>					   tabIndex;                                                                                   \
 	::std::optional<::ui::FocusGroup>		   focusGroup;                                                                                 \
 	::std::optional<::ui::Cursor>			   cursor;                                                                                     \
@@ -308,6 +311,8 @@ namespace ui {
 
 		[[nodiscard]] bool							   isFocusable() const { return focusable; }
 		void										   setFocusable(bool value) { focusable = value; }
+		[[nodiscard]] bool							   getDescendantsFocusable() const { return descendantsFocusable; }
+		void										   setDescendantsFocusable(bool value) { descendantsFocusable = value; }
 		[[nodiscard]] std::optional<int>			   getTabIndex() const { return tabIndex; }
 		void										   setTabIndex(std::optional<int> value) { tabIndex = value; }
 		[[nodiscard]] const std::optional<FocusGroup>& getFocusGroup() const { return focusGroup; }
@@ -457,6 +462,7 @@ namespace ui {
 				.isolation = args.isolation,
 				.pointerEvents = args.pointerEvents,
 				.focusable = args.focusable,
+				.descendantsFocusable = args.descendantsFocusable,
 				.tabIndex = args.tabIndex,
 				.focusGroup = args.focusGroup,
 				.cursor = args.cursor,
@@ -524,6 +530,7 @@ namespace ui {
 		bool							detached = false; // an Absolute overlay: in screen space, apart from its opener
 		TooltipOpener					tooltip;
 		bool							focusable = false;
+		bool							descendantsFocusable = true;
 		std::uint8_t					focusedBy = 0; // a bit for each player whose focus is on it
 		std::uint8_t					focusVisibleBy = 0;
 		bool							updateRequested = false;

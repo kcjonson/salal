@@ -392,6 +392,17 @@ and constructors touch no service. The draw API stays process-wide.
 - **Modals make content below them inert,** for the player who opened them:
   no new events, focus trapped in the modal, and a cancel for anything
   mid-interaction. Inert content still updates and renders.
+- **A subtree can keep focus out.** `descendantsFocusable` false on a node
+  means nothing under it takes focus, by a press, Tab, a direction or code,
+  while the overlays opened from inside it are their own and take focus as
+  ever. A game's HUD sets it on its root: it's driven by the pointer and
+  hotkeys, so a click leaves no focus behind for Space or Enter to press
+  again, and a dialog that closes finds no HUD control to hand focus to. Its
+  hotkeys then read only the keys the ui didn't take, Godot's
+  `_unhandled_input`. Engines that let a click focus a HUD button all carry
+  this bug and the same per-widget fix (Unreal's `IsFocusable`, Godot's
+  `focus_mode`, Unity deselecting after a click); one flag on the HUD's root
+  covers every control in it, including ones added later.
 
 Why: one focus owner per user is the pattern everywhere (the web's
 `activeElement` with `inert` under a modal, Godot's focus owner per viewport,
@@ -483,8 +494,8 @@ root().removeChild(row);   // health.get() is null from here on
   - look: `style`, `overflow` (Visible, Clip or Scroll; scrolling is a
     property of any component, not a separate container)
   - ordering: `zIndex` and `isolation` (Ordering, above)
-  - input: `pointerEvents`, `focusable`, `tabIndex`, `cursor`, and the
-    callbacks (`onClick`, `onPointerDown`/`Up`/`Move`/`Enter`/`Leave`,
+  - input: `pointerEvents`, `focusable`, `descendantsFocusable`, `tabIndex`,
+    `cursor`, and the callbacks (`onClick`, `onPointerDown`/`Up`/`Move`/`Enter`/`Leave`,
     `onWheel`, `onKeyDown`/`Up`, `onFocus`, `onBlur`, `onLayout`), whose
     storage is allocated the first time one is set
 - **`style` is look only**, with CSS-like names (`backgroundColor`,
