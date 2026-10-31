@@ -8,7 +8,7 @@
 // Options:
 //   --exe <path>          a sandbox binary to run instead of building this checkout
 //   --base <ref>          compare: the commit to build in a scratch worktree outside the repo (default: the
-//                         merge-base of HEAD and main)
+//                         merge-base of HEAD and origin/main, fetched first, or of HEAD and main without one)
 //   --base-exe <path>     compare: a base sandbox binary instead of --base
 //   --scenes <a,b>        the scenes (default every perf_ scene)
 //   --runs <n>            launches per scene and build (default RUNS; 20 for noise)
@@ -20,14 +20,17 @@
 //   --out <path>          where the JSON goes (default under perf-results/local/)
 //   --record              run: write perf-results/<machine>/<tag>.json, the file a tag's result is committed
 //                         as; refused unless HEAD is exactly a tag with nothing uncommitted, or with --exe
-//   --wait-busy <seconds> how long to wait before a run for another build or sandbox to finish and the CPUs it
-//                         runs on to fall below BUSY_LOAD_PCT busy (default 900)
+//   --wait-busy <seconds> how long to wait before a run for builds, tests and other apps to finish and the
+//                         CPUs it runs on to fall below BUSY_LOAD_PCT busy (default 900)
 //   --affinity <mask>     the logical CPUs the sandbox may run on, a hex mask (default: defaultAffinity());
 //                         none to leave it to the scheduler
+//   --note <text>         written into the result, for what the runner can't see (another machine's load)
+//   --from <file>         noise: calibrate the runs of an earlier noise result instead of making new ones
 //
 // Exit codes: 0 within the gates, 1 a regression, 2 invalid data or a run that couldn't be made (a bad
-// option, a missing scene, a port in use, a run with vsync on or too few frames), 3 inconclusive (a side
-// spread wider than its gate, a run that went ahead on a busy machine, scene content that differs).
+// option, a missing scene, a port in use, a sandbox that didn't start, a run with vsync on or too few
+// frames), 3 inconclusive (a side's spread wider than its gate, a run that went ahead on a busy machine
+// or was still disturbed after its retries, scene content or window size that differs).
 //
 // The sandbox is built Release with SALAL_DEV_SERVER_IN_RELEASE in build-perf/, beside build/, so a perf
 // run measures what ships and leaves the developer's build alone. Each run launches the sandbox with
@@ -43,24 +46,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SCENES = ['perf_quads', 'perf_text', 'perf_world'];
+const SCENES = ['perf_quads', 'perf_text', 'perf_world', 'perf_ui'];
 const FORBIDDEN_PORT = 8090;
 const EXIT = { pass: 0, regressed: 1, invalid: 2, inconclusive: 3 };
 
-// The gate: a build's figure for a statistic is the fastest of its RUNS runs, which interference only
-// slows, and a head figure more than the scene's threshold (percent) above the base's fails compare. A
-// side whose two fastest runs differ by more than the threshold hasn't reproduced its figure, and the
-// compare is inconclusive. Set from measured noise; docs/testing/README.md has the error rates.
-// perf_world's GPU time isn't gated: launch to launch it runs at one of two levels a third apart.
+// The gate: a build's figure for a timing is the STATISTIC of its RUNS runs' values, and a head figure
+// more than the scene's threshold (percent) above the base's fails compare. A side whose spread (below)
+// is wider than the threshold hasn't reproduced its figure, and the compare is inconclusive. Set from
+// measured noise; docs/testing/README.md has the error rates behind each number.
 const RUNS = 5;
-const STATISTIC = 'min';
+const STATISTIC = 'median';
 const GATES = {
 	perf_quads: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
 	perf_text: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
-	perf_world: { 'cpuMs.p50': 3, 'renderMs.p50': 3 },
+	perf_world: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
+	perf_ui: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
 };
-// Deterministic for fixed content: a head that draws more, uploads more or makes more draw calls fails,
-// unless --allow-counts.
+// Fixed for fixed content: a head that draws more, uploads more or makes more draw calls fails, unless
+// --allow-counts. A moving camera culls a little differently in each capture window, so a count fails
+// only when every head run is above every base run.
 const COUNTS = ['drawCalls.p50', 'uploadBytes.p50', 'instances.p50', 'vertices.p50'];
 // Reported beside them, not gated.
 const REPORTED = [
@@ -68,18 +72,27 @@ const REPORTED = [
 	'renderMs.p99',
 	'gpuMs.p50',
 	'gpuMs.p99',
+	'layoutMs.mean',
+	'flushMs.p50',
 	'frameMs.p50',
 	'frameMs.p99',
 	'presentMs.p50',
 	'presentMs.mean',
-	'flushMs.p50',
 	'triangles.p50',
+	'gpuDropped',
 ];
 const MIN_FRAMES = 200;
 const MIN_GPU_COVERAGE = 0.9; // GPU results per frame, for a gated GPU statistic
 const BUSY_LOAD_PCT = 25;
-const BUSY = ['cl.exe', 'link.exe', 'ninja.exe', 'sandbox.exe', 'cl', 'ninja', 'cc1plus', 'clang', 'clang++', 'ld', 'sandbox'];
+// Past this on the CPUs a run isn't pinned to, during its capture, something else ran meanwhile (a build
+// starting): the run is made again, up to ATTEMPTS times, then kept and flagged.
+const OTHER_LOAD_PCT = 20;
+const ATTEMPTS = 3;
+// Builds, tests and apps that would share the machine with a run.
+const BUSY =
+	/^(cl|link|lld-link|clang|clang\+\+|clang-cl|cc1plus|ld|ninja|cmake|ctest|msbuild|sandbox|world-sim|ui-sandbox|asset-manager|.*_tests)(\.exe)?$/;
 const FLAGS = ['record', 'allow-counts'];
+const THRESHOLDS = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
 
 class Invalid extends Error {}
 
@@ -93,8 +106,8 @@ function fail(message, code = EXIT.invalid) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function run(command, args, cwd) {
-	return execFileSync(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+function run(command, args, cwd, timeout = 0) {
+	return execFileSync(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout }).trim();
 }
 
 // --- Options ---
@@ -128,21 +141,44 @@ function number(options, key, fallback, { integer = false, min = 0, exclusive = 
 	}
 	const value = Number(options[key]);
 	const low = exclusive ? value <= min : value < min;
-	if (!Number.isFinite(value) || low || (integer && !Number.isInteger(value))) {
+	if (options[key] === '' || !Number.isFinite(value) || low || (integer && !Number.isInteger(value))) {
 		throw new Invalid(`--${key} ${options[key]} isn't a ${integer ? 'whole number' : 'number'} ${exclusive ? 'above' : 'from'} ${min}`);
 	}
 	return value;
 }
 
-// Pinned to a fixed set of cores, a launch can't land on a different core or CCD from the last, which
-// on a 5950X moved a run's CPU time by up to a third. Logical CPUs 4 to 11 where there are 16 or more,
-// clear of CPU 0's interrupts and inside the first CCD; none on a smaller machine or on macOS, which
-// has no affinity, and the runner says so.
+// Pinned to a fixed set of cores, a launch can't land on a different core or CCD from the last. One
+// logical CPU on each of four cores, 4, 6, 8 and 10, where there are 16 or more: clear of CPU 0's
+// interrupts, inside a 5950X's first CCD, and no two of the sandbox's threads sharing a core, which
+// left the old 0x0FF0 mask's runs at two levels (README, Performance). None on a smaller machine or on
+// macOS, which has no affinity, and the runner says so.
 function defaultAffinity() {
-	return os.cpus().length >= 16 && process.platform !== 'darwin' ? '0x0FF0' : null;
+	return os.cpus().length >= 16 && process.platform !== 'darwin' ? '0x0550' : null;
 }
 
 function settingsFrom(mode, options) {
+	const known = [
+		'exe',
+		'base',
+		'base-exe',
+		'scenes',
+		'runs',
+		'warmup',
+		'window',
+		'port',
+		'threshold',
+		'allow-counts',
+		'out',
+		'record',
+		'wait-busy',
+		'affinity',
+		'note',
+		'from',
+	];
+	const unknownOption = Object.keys(options).find((key) => !known.includes(key));
+	if (unknownOption !== undefined) {
+		throw new Invalid(`unknown option --${unknownOption}`);
+	}
 	const port = number(options, 'port', 8094, { integer: true });
 	if (port === FORBIDDEN_PORT || port > 65535) {
 		throw new Invalid(`port ${port}: 8090 is the sandbox default other sessions use, and a port is at most 65535`);
@@ -159,6 +195,9 @@ function settingsFrom(mode, options) {
 	if (affinity !== null && process.platform === 'darwin') {
 		throw new Invalid('macOS has no CPU affinity; pass --affinity none');
 	}
+	if (affinity !== null && cpusIn(affinity).length === 0) {
+		throw new Invalid(`--affinity ${affinity} names none of this machine's ${os.cpus().length} logical CPUs`);
+	}
 	const threshold = options.threshold === undefined ? null : number(options, 'threshold', null);
 	if (affinity === null) {
 		console.warn('perf: unpinned; launch-to-launch noise is far larger (docs/testing/README.md)');
@@ -166,7 +205,14 @@ function settingsFrom(mode, options) {
 			throw new Invalid('an unpinned compare needs its own --threshold, measured with noise --affinity none');
 		}
 	}
-	const runs = number(options, 'runs', mode === 'noise' ? 20 : RUNS, { integer: true, min: mode === 'run' ? 1 : 3, exclusive: false });
+	const runs = number(options, 'runs', mode === 'noise' ? 20 : RUNS, {
+		integer: true,
+		min: mode === 'run' ? 1 : mode === 'noise' ? 2 * RUNS : 3,
+		exclusive: false,
+	});
+	if (options.note !== undefined && options.note.trim() === '') {
+		throw new Invalid('--note needs some text');
+	}
 	return {
 		port,
 		scenes,
@@ -177,6 +223,7 @@ function settingsFrom(mode, options) {
 		window: number(options, 'window', 5),
 		waitBusy: number(options, 'wait-busy', 900, { exclusive: false }),
 		allowCounts: options['allow-counts'] === true,
+		note: options.note ?? null,
 	};
 }
 
@@ -201,14 +248,61 @@ function build(sourceDir) {
 	return exeIn(buildDir);
 }
 
-// The commit to compare against: --base as given, warned about when it isn't an ancestor of HEAD, or
-// by default where HEAD left main, so commits landed on main since don't count against the change.
+// A sandbox binary as given, which must exist.
+function exeOption(value, option) {
+	const exe = path.resolve(value);
+	if (!fs.existsSync(exe)) {
+		throw new Invalid(`--${option} ${value}: no such file`);
+	}
+	return exe;
+}
+
+// The scenes a sandbox binary has, from its --help.
+function scenesOf(exe) {
+	let usage = '';
+	try {
+		usage = run(exe, ['--help'], path.dirname(exe), 30000);
+	} catch (error) {
+		throw new Invalid(`couldn't run ${exe} --help: ${error.message}`);
+	}
+	const line = usage.split(/\r?\n/).find((text) => text.startsWith('Scenes:'));
+	if (line === undefined) {
+		throw new Invalid(`${exe} --help lists no scenes`);
+	}
+	return line.slice('Scenes:'.length).trim().split(/\s+/);
+}
+
+// main as the remote has it, fetched first so a stale local main doesn't make the base older than where
+// HEAD left it; local main when there is no remote one.
+function upstreamMain() {
+	try {
+		run('git', ['fetch', '--quiet', 'origin', 'main'], ROOT, 60000);
+	} catch {
+		console.warn("perf: couldn't fetch origin main; using the origin/main this checkout has");
+	}
+	for (const ref of ['origin/main', 'main']) {
+		try {
+			run('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], ROOT);
+			return ref;
+		} catch {}
+	}
+	throw new Invalid('there is no origin/main or main to take the merge-base with; pass --base');
+}
+
+// The commit to compare against: --base as given, warned about when it isn't an ancestor of HEAD, or by
+// default where HEAD left main, so commits landed on main since don't count against the change.
 function baseCommit(options) {
 	const head = run('git', ['rev-parse', 'HEAD'], ROOT);
 	if (options.base === undefined) {
-		return { ref: 'merge-base of HEAD and main', commit: run('git', ['merge-base', 'HEAD', 'main'], ROOT), head };
+		const main = upstreamMain();
+		return { ref: `merge-base of HEAD and ${main}`, commit: run('git', ['merge-base', 'HEAD', main], ROOT), head };
 	}
-	const commit = run('git', ['rev-parse', '--verify', `${options.base}^{commit}`], ROOT);
+	let commit;
+	try {
+		commit = run('git', ['rev-parse', '--verify', `${options.base}^{commit}`], ROOT);
+	} catch {
+		throw new Invalid(`--base ${options.base} is no commit here`);
+	}
 	try {
 		run('git', ['merge-base', '--is-ancestor', commit, head], ROOT);
 	} catch {
@@ -218,7 +312,7 @@ function baseCommit(options) {
 }
 
 // A scratch worktree of `commit` outside the repo, one per checkout and ref, kept so its next build is
-// incremental. A worktree whose folder was cleaned away is pruned first.
+// incremental. Worktrees whose folders were cleaned away are pruned first, so one can be made again.
 function baseCheckout(ref, commit) {
 	const repo = createHash('sha1').update(ROOT.toLowerCase()).digest('hex').slice(0, 8);
 	const dir = path.join(os.tmpdir(), 'salal-perf', repo, ref.replace(/[^A-Za-z0-9._-]/g, '_'));
@@ -274,6 +368,30 @@ function machine() {
 	};
 }
 
+// The busiest processes over two seconds, as a percentage of the whole machine (on Windows; elsewhere ps's
+// own figure), recorded once a session so a result says what else was running.
+function topProcesses() {
+	try {
+		if (process.platform === 'win32') {
+			const script =
+				'$n = [Environment]::ProcessorCount; $a = @{}; Get-Process | ForEach-Object { $a[$_.Id] = $_.CPU }; Start-Sleep -Seconds 2; ' +
+				'Get-Process | Where-Object { $a.ContainsKey($_.Id) -and $null -ne $_.CPU } | ' +
+				'ForEach-Object { [pscustomobject]@{ name = $_.ProcessName; pct = [math]::Round(($_.CPU - $a[$_.Id]) / 2 / $n * 100, 1) } } | ' +
+				'Sort-Object pct -Descending | Select-Object -First 6 | ConvertTo-Json -Compress';
+			return JSON.parse(run('powershell', ['-NoProfile', '-Command', script], undefined, 30000));
+		}
+		return run('ps', ['-A', '-o', 'pcpu=,comm='])
+			.split('\n')
+			.map((line) => line.trim().match(/^([\d.]+)\s+(.*)$/))
+			.filter(Boolean)
+			.map(([, pct, name]) => ({ name: path.basename(name), pct: Number(pct) }))
+			.sort((a, b) => b.pct - a.pct)
+			.slice(0, 6);
+	} catch {
+		return null;
+	}
+}
+
 function busyProcesses() {
 	try {
 		const names =
@@ -282,7 +400,7 @@ function busyProcesses() {
 						.split(/\r?\n/)
 						.map((line) => line.split('","')[0].replace(/^"/, '').toLowerCase())
 				: run('ps', ['-A', '-o', 'comm=']).split('\n').map((line) => path.basename(line.trim()).toLowerCase());
-		return [...new Set(names.filter((name) => BUSY.includes(name)))];
+		return [...new Set(names.filter((name) => BUSY.test(name)))];
 	} catch {
 		return [];
 	}
@@ -318,8 +436,8 @@ async function load(cpus) {
 	return busyPct(before, cpuTimes(), cpus);
 }
 
-// Another session's build, tests or sandbox steal the cores a run measures: wait for them, and note a
-// wait that ran out.
+// Another session's build, tests or app steal the cores a run measures: wait for them, and note a wait
+// that ran out.
 async function waitForQuiet(settings) {
 	const deadline = Date.now() + settings.waitBusy * 1000;
 	const cpus = cpusIn(settings.affinity);
@@ -387,13 +505,20 @@ async function launch(exe, scene, settings) {
 	});
 	liveChild = child;
 	let stderr = '';
-	child.stderr.on('data', (chunk) => (stderr = (stderr + chunk).slice(-4000)));
+	child.stderr?.on('data', (chunk) => (stderr = (stderr + chunk).slice(-4000)));
 	let failed = null;
 	child.once('error', (error) => (failed = error));
-	const exited = new Promise((resolve) => child.once('exit', resolve));
+	const exited = new Promise((resolve) => {
+		child.once('exit', resolve);
+		child.once('error', resolve);
+	});
 	const gone = () => child.exitCode !== null || child.signalCode !== null || failed !== null;
 
 	try {
+		if (child.pid === undefined) {
+			await sleep(0); // the spawn's error arrives on the next tick
+			throw new Invalid(`couldn't start ${taskset ? 'taskset' : exe}: ${failed?.message ?? 'no process'}`);
+		}
 		if (settings.affinity !== null && process.platform === 'win32') {
 			try {
 				run('powershell', ['-NoProfile', '-Command', `(Get-Process -Id ${child.pid}).ProcessorAffinity = ${settings.affinity}`]);
@@ -469,14 +594,35 @@ function problems(capture) {
 	return found;
 }
 
+// A run disturbed after it started: a build or another app still running once it's over, or the rest
+// of the machine busy during the capture.
+async function disturbance(capture) {
+	const busy = busyProcesses();
+	if (busy.length > 0 || capture.otherCpusLoadPct > OTHER_LOAD_PCT) {
+		return [...busy, `${capture.otherCpusLoadPct}% load elsewhere`].join(', ');
+	}
+	return null;
+}
+
 async function runs(exe, scene, settings, count, label) {
 	const out = [];
 	for (let r = 0; r < count; ++r) {
 		console.log(`perf: ${scene}${label} run ${r + 1}/${count}`);
-		const capture = await launch(exe, scene, settings);
-		const found = problems(capture);
-		if (found.length > 0) {
-			throw new Invalid(`${scene} run ${r + 1}: ${found.join('; ')}`);
+		let capture;
+		for (let attempt = 1; ; ++attempt) {
+			capture = await launch(exe, scene, settings);
+			const found = problems(capture);
+			if (found.length > 0) {
+				throw new Invalid(`${scene} run ${r + 1}: ${found.join('; ')}`);
+			}
+			capture.disturbed = await disturbance(capture);
+			if (capture.disturbed === null || attempt === ATTEMPTS) {
+				break;
+			}
+			console.log(`perf: disturbed (${capture.disturbed}); again`);
+		}
+		if (capture.disturbed !== null) {
+			console.warn(`perf: still disturbed after ${ATTEMPTS} attempts (${capture.disturbed}); the run is flagged`);
 		}
 		out.push(capture);
 	}
@@ -486,14 +632,29 @@ async function runs(exe, scene, settings, count, label) {
 // --- Statistics ---
 
 const pick = (summary, key) => key.split('.').reduce((value, part) => value?.[part], summary);
+const ascending = (values) => [...values].sort((a, b) => a - b);
 
 function median(values) {
-	const sorted = [...values].sort((a, b) => a - b);
+	const sorted = ascending(values);
 	const mid = Math.floor(sorted.length / 2);
 	return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 const statistics = { min: (values) => Math.min(...values), median };
+
+// How far a side is from reproducing its figure, in percent: for the fastest run, how far the next
+// fastest is above it; for the median, the range of the middle runs (the second to the fourth of five)
+// over it. Past the threshold, a compare is inconclusive.
+function spreadPct(values, statistic) {
+	const sorted = ascending(values);
+	if (statistic === 'min') {
+		return (100 * (sorted[1] - sorted[0])) / sorted[0];
+	}
+	const q = Math.floor(sorted.length / 4);
+	return (100 * (sorted[sorted.length - 1 - q] - sorted[q])) / median(sorted);
+}
+
+const rangePct = (values) => (100 * (Math.max(...values) - Math.min(...values))) / median(values);
 
 // Every run's value of `key`, or the reason they can't be used: each must be a finite positive number,
 // and a GPU figure needs its runs' GPU results to cover most of their frames.
@@ -503,7 +664,7 @@ function valuesOf(captures, key) {
 		return { error: `${key}: ${values.map(String).join(', ')}, not all finite and positive` };
 	}
 	if (key.startsWith('gpuMs.')) {
-		const low = captures.find((capture) => capture.gpuFrames / capture.frames < MIN_GPU_COVERAGE);
+		const low = captures.find((capture) => !(capture.gpuFrames / capture.frames >= MIN_GPU_COVERAGE));
 		if (low !== undefined) {
 			return { error: `${key}: GPU results for ${low.gpuFrames} of ${low.frames} frames, under ${MIN_GPU_COVERAGE * 100}%` };
 		}
@@ -511,60 +672,141 @@ function valuesOf(captures, key) {
 	return { values };
 }
 
-const spreadPct = (values) => (100 * (Math.max(...values) - Math.min(...values))) / median(values);
-
-// How far the second-fastest run is above the fastest: under the gate, the fastest is reproduced.
-function reproducedPct(values) {
-	const [fastest, next] = [...values].sort((a, b) => a - b);
-	return (100 * (next - fastest)) / fastest;
+// A count's value in every run, each a finite number from 0, or why not.
+function countsOf(captures, key) {
+	const values = captures.map((capture) => pick(capture, key));
+	if (values.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+		return { error: `${key}: ${values.map(String).join(', ')}, not all counts` };
+	}
+	return { values };
 }
 
 function summarise(captures, keys) {
 	const out = {};
 	for (const key of keys) {
 		const values = captures.map((capture) => pick(capture, key)).filter((v) => typeof v === 'number' && Number.isFinite(v));
-		out[key] = values.length === captures.length ? { [STATISTIC]: statistics[STATISTIC](values), median: median(values), spreadPct: spreadPct(values) } : null;
+		out[key] =
+			values.length === captures.length && values.length > 0
+				? { [STATISTIC]: statistics[STATISTIC](values), median: median(values), min: Math.min(...values), rangePct: rangePct(values) }
+				: null;
 	}
 	return out;
 }
 
-// How often the gate errs, by resampling these runs with replacement: a compare of the build against
-// itself failing (no-op), and a head slower by `pct` passing (missed).
-function errorRates(values, statistic, thresholdPct, trials = 100000) {
-	const draw = () => statistics[statistic](Array.from({ length: RUNS }, () => values[Math.floor(Math.random() * values.length)]));
-	let noOp = 0;
-	const missed = { 5: 0, 10: 0 };
-	for (let i = 0; i < trials; ++i) {
-		const base = draw();
-		if ((100 * (draw() - base)) / base > thresholdPct) {
-			++noOp;
+// Every way of picking `k` of `n` runs, as bit masks.
+function subsetMasks(n, k) {
+	const masks = [];
+	const pickFrom = (start, left, mask) => {
+		if (left === 0) {
+			masks.push(mask);
+			return;
 		}
-		for (const pct of Object.keys(missed)) {
-			if ((100 * (draw() * (1 + pct / 100) - base)) / base <= thresholdPct) {
-				++missed[pct];
+		for (let i = start; i <= n - left; ++i) {
+			pickFrom(i + 1, left - 1, mask | (1 << i));
+		}
+	};
+	pickFrom(0, k, 0);
+	return masks;
+}
+
+// How the gate would have judged these runs of one build, over every split of them into a base and a
+// head of RUNS runs each (a random two million splits when there are too many): a compare against itself
+// failing (no-op fail) or coming out inconclusive, and the head made 5% or 10% slower failing
+// (detected), at each threshold in THRESHOLDS.
+function calibrate(values, statistic) {
+	const n = values.length;
+	if (n < 2 * RUNS || n > 30) {
+		return null;
+	}
+	const masks = subsetMasks(n, RUNS);
+	const figure = new Float64Array(masks.length);
+	const spread = new Float64Array(masks.length);
+	masks.forEach((mask, s) => {
+		const chosen = values.filter((_, i) => ((mask >> i) & 1) === 1);
+		figure[s] = statistics[statistic](chosen);
+		spread[s] = spreadPct(chosen, statistic);
+	});
+	const counts = THRESHOLDS.map(() => ({ noOpFail: 0, noOpInconclusive: 0, detected5: 0, detected10: 0 }));
+	let splits = 0;
+	const judge = (a, b) => {
+		++splits;
+		const ratio = figure[b] / figure[a];
+		const widest = Math.max(spread[a], spread[b]);
+		for (let t = 0; t < THRESHOLDS.length; ++t) {
+			const limit = 1 + THRESHOLDS[t] / 100;
+			const c = counts[t];
+			if (widest > THRESHOLDS[t]) {
+				++c.noOpInconclusive;
+				continue;
+			}
+			if (ratio > limit) {
+				++c.noOpFail;
+			}
+			if (ratio * 1.05 > limit) {
+				++c.detected5;
+			}
+			if (ratio * 1.1 > limit) {
+				++c.detected10;
+			}
+		}
+	};
+	if (masks.length * masks.length <= 4e8) {
+		for (let a = 0; a < masks.length; ++a) {
+			for (let b = 0; b < masks.length; ++b) {
+				if ((masks[a] & masks[b]) === 0) {
+					judge(a, b);
+				}
+			}
+		}
+	} else {
+		while (splits < 2e6) {
+			const a = Math.floor(Math.random() * masks.length);
+			const b = Math.floor(Math.random() * masks.length);
+			if ((masks[a] & masks[b]) === 0) {
+				judge(a, b);
 			}
 		}
 	}
-	return { noOpFailPct: (100 * noOp) / trials, missed5Pct: (100 * missed[5]) / trials, missed10Pct: (100 * missed[10]) / trials };
+	const pct = (count) => Math.round((10000 * count) / splits) / 100;
+	return THRESHOLDS.map((threshold, t) => ({
+		threshold,
+		noOpFailPct: pct(counts[t].noOpFail),
+		noOpInconclusivePct: pct(counts[t].noOpInconclusive),
+		detected5Pct: pct(counts[t].detected5),
+		detected10Pct: pct(counts[t].detected10),
+		splits,
+	}));
+}
+
+// The tightest threshold whose no-op compares fail under 5% of the time and come out inconclusive under
+// 10%, and which catches a 5% regression in most; null if none on the grid does.
+function suggest(rows) {
+	return rows?.find((row) => row.noOpFailPct < 5 && row.noOpInconclusivePct < 10 && row.detected5Pct > 50)?.threshold ?? null;
 }
 
 // --- Modes ---
 
-function header(settings, captures) {
+// The machine and what else was busy on it, taken as a session starts.
+function header(settings) {
 	return {
-		schema: 2,
+		schema: 3,
 		date: new Date().toISOString(),
 		machine: machine(),
-		settings: {
-			warmupSeconds: settings.warmup,
-			windowSeconds: settings.window,
-			runs: settings.runs,
-			statistic: STATISTIC,
-			affinity: settings.affinity,
-			vsync: captures.some((capture) => capture.vsync),
-			framebuffer: captures[0]?.framebuffer ?? null,
-		},
+		load: topProcesses(),
+		note: settings.note,
 		build: 'Release, SALAL_DEV_SERVER_IN_RELEASE=ON',
+	};
+}
+
+function settingsOf(settings, captures) {
+	return {
+		warmupSeconds: settings.warmup,
+		windowSeconds: settings.window,
+		runs: settings.runs,
+		statistic: STATISTIC,
+		affinity: settings.affinity,
+		vsync: captures.some((capture) => capture.vsync),
+		framebuffer: captures[0]?.framebuffer ?? null,
 	};
 }
 
@@ -575,7 +817,7 @@ function write(file, result) {
 }
 
 const fmt = (v) => (v === null || v === undefined ? '-' : Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(3));
-const signed = (pct) => (pct === null ? '-' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`);
+const signed = (pct) => (pct === null || pct === undefined ? '-' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`);
 
 async function runMode(options) {
 	const settings = settingsFrom('run', options);
@@ -587,68 +829,205 @@ async function runMode(options) {
 	if (record && source.tag === null) {
 		throw new Invalid(`--record measures a tag: HEAD (${source.describe}) is no tag, or has uncommitted changes`);
 	}
-	const exe = options.exe ? path.resolve(options.exe) : build(ROOT);
+	const exe = options.exe ? exeOption(options.exe, 'exe') : build(ROOT);
+	const missing = settings.scenes.filter((scene) => !scenesOf(exe).includes(scene));
+	if (missing.length > 0) {
+		throw new Invalid(`${exe} has no ${missing.join(', ')}`);
+	}
+	const top = header(settings);
 	const scenes = {};
 	for (const scene of settings.scenes) {
 		const captures = await runs(exe, scene, settings, settings.runs, '');
 		scenes[scene] = { summary: summarise(captures, allKeys(scene)), runs: captures };
 		console.log(`  ${gatedKeys(scene).map((k) => `${k} ${fmt(scenes[scene].summary[k]?.[STATISTIC])}`).join('  ')}`);
 	}
-	const result = { ...header(settings, Object.values(scenes).flatMap((s) => s.runs)), source, scenes };
+	const captures = Object.values(scenes).flatMap((s) => s.runs);
+	const result = { ...top, settings: settingsOf(settings, captures), source, scenes };
 	const file = record ? path.join(ROOT, 'perf-results', machine().name, `${source.tag}.json`) : path.join(ROOT, 'perf-results/local', `${source?.describe ?? 'exe'}.json`);
 	write(options.out ?? file, result);
 }
 
+function noiseReport(scene, captures) {
+	const stats = {};
+	console.log(`  ${scene}`);
+	for (const key of [...new Set([...gatedKeys(scene), 'gpuMs.p50'])]) {
+		const { values, error } = valuesOf(captures, key);
+		if (error) {
+			console.log(`    ${key.padEnd(14)} ${error}`);
+			stats[key] = { error };
+			continue;
+		}
+		const mean = values.reduce((a, b) => a + b, 0) / values.length;
+		const sd = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (values.length - 1));
+		const calibration = {};
+		const suggested = {};
+		for (const statistic of Object.keys(statistics)) {
+			calibration[statistic] = calibrate(values, statistic);
+			suggested[statistic] = suggest(calibration[statistic]);
+		}
+		stats[key] = { median: median(values), min: Math.min(...values), rangePct: rangePct(values), cvPct: (100 * sd) / mean, suggested, calibration, values };
+		console.log(
+			`    ${key.padEnd(14)} median ${fmt(median(values))} min ${fmt(Math.min(...values))} range ${rangePct(values).toFixed(1)}% cv ${stats[key].cvPct.toFixed(1)}%` +
+				`  tightest threshold: min of ${RUNS} ${suggested.min ?? 'none'}%, median of ${RUNS} ${suggested.median ?? 'none'}%`
+		);
+		for (const statistic of Object.keys(statistics)) {
+			const row = (t) => calibration[statistic]?.find((r) => r.threshold === t);
+			const cells = [2, 3, 4, 5].map((t) => `${t}%: ${row(t)?.noOpFailPct}/${row(t)?.noOpInconclusivePct}/${row(t)?.detected5Pct}`);
+			console.log(`      ${statistic.padEnd(6)} no-op fail/inconclusive/+5% caught  ${cells.join('  ')}`);
+		}
+	}
+	return stats;
+}
+
 async function noiseMode(options) {
 	const settings = settingsFrom('noise', options);
-	const exe = options.exe ? path.resolve(options.exe) : build(ROOT);
+	if (options.from !== undefined) {
+		let earlier;
+		try {
+			earlier = JSON.parse(fs.readFileSync(options.from, 'utf8'));
+		} catch (error) {
+			throw new Invalid(`--from ${options.from}: ${error.message}`);
+		}
+		const scenes = {};
+		for (const [scene, data] of Object.entries(earlier.scenes ?? {})) {
+			if (GATES[scene] && Array.isArray(data.runs)) {
+				scenes[scene] = { stats: noiseReport(scene, data.runs), runs: data.runs };
+			}
+		}
+		write(options.out ?? path.join(ROOT, 'perf-results/local', `noise-recalibrated-${Date.now()}.json`), { ...earlier, recalibrated: new Date().toISOString(), scenes });
+		return;
+	}
+	const exe = options.exe ? exeOption(options.exe, 'exe') : build(ROOT);
+	const top = header(settings);
 	const scenes = {};
 	for (const scene of settings.scenes) {
 		const captures = await runs(exe, scene, settings, settings.runs, '');
-		const stats = {};
-		console.log(`  ${scene}`);
-		for (const key of [...new Set([...gatedKeys(scene), 'gpuMs.p50'])]) {
-			const { values, error } = valuesOf(captures, key);
-			if (error) {
-				console.log(`    ${key.padEnd(14)} ${error}`);
-				continue;
-			}
-			const mean = values.reduce((a, b) => a + b, 0) / values.length;
-			const sd = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (values.length - 1));
-			const gates = {};
-			for (const statistic of Object.keys(statistics)) {
-				for (const threshold of [2, 3, 4, 5]) {
-					gates[`${statistic}@${threshold}`] = errorRates(values, statistic, threshold);
-				}
-			}
-			stats[key] = { median: median(values), min: Math.min(...values), rangePct: spreadPct(values), cvPct: (100 * sd) / mean, gates, values };
-			const at = (g) => `${g.noOpFailPct.toFixed(1)}/${g.missed5Pct.toFixed(1)}`;
-			console.log(
-				`    ${key.padEnd(14)} median ${fmt(median(values))} min ${fmt(Math.min(...values))} range ${spreadPct(values).toFixed(1)}% cv ${stats[key].cvPct.toFixed(1)}%` +
-					`  no-op fail / +5% missed: min@3 ${at(gates['min@3'])}  min@4 ${at(gates['min@4'])}  median@3 ${at(gates['median@3'])}  median@4 ${at(gates['median@4'])}`
-			);
-		}
-		scenes[scene] = { stats, runs: captures };
+		scenes[scene] = { stats: noiseReport(scene, captures), runs: captures };
 	}
-	const result = { ...header(settings, Object.values(scenes).flatMap((s) => s.runs)), source: options.exe ? null : describe(ROOT), scenes };
+	const captures = Object.values(scenes).flatMap((s) => s.runs);
+	const result = { ...top, settings: settingsOf(settings, captures), source: options.exe ? { exe } : describe(ROOT), scenes };
 	write(options.out ?? path.join(ROOT, 'perf-results/local', `noise-${Date.now()}.json`), result);
+}
+
+// One scene's verdict and rows from its base and head runs.
+function judgeScene(scene, baseRuns, headRuns, settings) {
+	const rows = {};
+	const notes = [];
+	let verdict = 'pass';
+	const worsen = (to) => {
+		const rank = { pass: 0, inconclusive: 1, regressed: 2, invalid: 3 };
+		if (rank[to] > rank[verdict]) {
+			verdict = to;
+		}
+	};
+	const gpuSupported = [...baseRuns, ...headRuns].every((capture) => capture.gpuSupported !== false);
+	for (const [key, gate] of Object.entries(GATES[scene])) {
+		const threshold = settings.threshold ?? gate;
+		if (key.startsWith('gpuMs.') && !gpuSupported) {
+			notes.push(`${key}: no GPU timestamps on this machine, not gated`);
+			continue;
+		}
+		const b = valuesOf(baseRuns, key);
+		const h = valuesOf(headRuns, key);
+		if (b.error || h.error) {
+			notes.push(`invalid: ${b.error ?? h.error}`);
+			worsen('invalid');
+			continue;
+		}
+		const baseFigure = statistics[STATISTIC](b.values);
+		const headFigure = statistics[STATISTIC](h.values);
+		const deltaPct = (100 * (headFigure - baseFigure)) / baseFigure;
+		const spreads = { base: spreadPct(b.values, STATISTIC), head: spreadPct(h.values, STATISTIC) };
+		let state = deltaPct > threshold ? 'regressed' : 'pass';
+		if (Math.max(spreads.base, spreads.head) > threshold) {
+			state = 'inconclusive';
+			notes.push(`${key}: a side's spread is ${Math.max(spreads.base, spreads.head).toFixed(1)}%, past its ${threshold}% gate`);
+		}
+		worsen(state);
+		rows[key] = { base: baseFigure, head: headFigure, deltaPct, threshold, spreads, state, baseValues: b.values, headValues: h.values };
+	}
+	for (const key of COUNTS) {
+		const b = countsOf(baseRuns, key);
+		const h = countsOf(headRuns, key);
+		if (b.error || h.error) {
+			notes.push(`invalid: ${b.error ?? h.error}`);
+			worsen('invalid');
+			continue;
+		}
+		const up = Math.min(...h.values) > Math.max(...b.values);
+		const bm = median(b.values);
+		const hm = median(h.values);
+		const state = up && !settings.allowCounts ? 'regressed' : 'pass';
+		if (up && settings.allowCounts) {
+			notes.push(`${key} went up, allowed by --allow-counts`);
+		}
+		worsen(state);
+		rows[key] = { base: bm, head: hm, deltaPct: bm > 0 ? (100 * (hm - bm)) / bm : null, state };
+	}
+	for (const key of REPORTED.filter((k) => rows[k] === undefined)) {
+		const b = baseRuns.map((capture) => pick(capture, key)).filter(Number.isFinite);
+		const h = headRuns.map((capture) => pick(capture, key)).filter(Number.isFinite);
+		const bm = b.length === baseRuns.length ? statistics[STATISTIC](b) : null;
+		const hm = h.length === headRuns.length ? statistics[STATISTIC](h) : null;
+		rows[key] = { base: bm, head: hm, deltaPct: bm && hm !== null ? (100 * (hm - bm)) / bm : null, state: 'reported' };
+	}
+	const dropped = (side) => side.reduce((sum, capture) => sum + (capture.gpuDropped ?? 0), 0);
+	if (dropped(baseRuns) + dropped(headRuns) > 0) {
+		notes.push(`GPU results not back in time: base ${dropped(baseRuns)}, head ${dropped(headRuns)}, over the runs`);
+	}
+	const same = (field) => JSON.stringify(baseRuns[0]?.[field] ?? null) === JSON.stringify(headRuns[0]?.[field] ?? null);
+	for (const field of ['content', 'framebuffer']) {
+		if (!same(field)) {
+			notes.push(`the ${field} differs: base ${JSON.stringify(baseRuns[0]?.[field])}, head ${JSON.stringify(headRuns[0]?.[field])}`);
+			worsen('inconclusive');
+		}
+	}
+	const flagged = [...baseRuns, ...headRuns].filter((capture) => capture.quietTimedOut || (capture.disturbed ?? null) !== null).length;
+	if (flagged > 0) {
+		notes.push(`${flagged} runs went ahead on a busy machine or were disturbed`);
+		worsen('inconclusive');
+	}
+	return { verdict, rows, notes };
 }
 
 async function compareMode(options) {
 	const settings = settingsFrom('compare', options);
-	const headExe = options.exe ? path.resolve(options.exe) : build(ROOT);
-	let baseExe = options['base-exe'] ? path.resolve(options['base-exe']) : null;
-	let base = { exe: baseExe };
-	if (!baseExe) {
+	const headExe = options.exe ? exeOption(options.exe, 'exe') : build(ROOT);
+	let base = {};
+	let baseExe;
+	if (options['base-exe']) {
+		baseExe = exeOption(options['base-exe'], 'base-exe');
+		base = { exe: baseExe };
+		console.log(`perf: base ${baseExe}, head ${headExe}`);
+	} else {
 		const resolved = baseCommit(options);
 		baseExe = build(baseCheckout(options.base ?? 'merge-base', resolved.commit));
 		base = { exe: baseExe, ref: resolved.ref, commit: resolved.commit };
-		console.log(`perf: base ${resolved.commit.slice(0, 12)} (${resolved.ref}), head ${resolved.head.slice(0, 12)}`);
+		console.log(`perf: base ${resolved.commit} (${resolved.ref})`);
+		console.log(`perf: head ${resolved.head}${options.exe ? ` (--exe ${headExe})` : ''}`);
+	}
+	const top = header(settings);
+	const baseScenes = scenesOf(baseExe);
+	const headScenes = scenesOf(headExe);
+	const missingHead = settings.scenes.filter((scene) => !headScenes.includes(scene));
+	if (missingHead.length > 0) {
+		throw new Invalid(`the head build has no ${missingHead.join(', ')}`);
 	}
 
 	const verdicts = [];
 	const scenes = {};
 	for (const scene of settings.scenes) {
+		if (!baseScenes.includes(scene)) {
+			// New in the head: its figures, nothing to gate them against.
+			const headRuns = await runs(headExe, scene, settings, settings.runs, ' head (new),');
+			const summary = summarise(headRuns, allKeys(scene));
+			console.log(`  ${scene}: new, not in the base build; head only`);
+			for (const [key, row] of Object.entries(summary)) {
+				console.log(`    ${key.padEnd(16)} ${'-'.padStart(12)} ${fmt(row?.[STATISTIC]).padStart(12)}`);
+			}
+			scenes[scene] = { verdict: 'new', summary, notes: ['not in the base build'], base: [], head: headRuns };
+			continue;
+		}
 		const baseRuns = [];
 		const headRuns = [];
 		// Interleaved, alternating which goes first, so drift over the session lands on both.
@@ -659,73 +1038,10 @@ async function compareMode(options) {
 				(side === 'base' ? baseRuns : headRuns).push(capture);
 			}
 		}
-
-		const rows = {};
-		const notes = [];
-		let verdict = 'pass';
-		const worsen = (to) => {
-			const rank = { pass: 0, inconclusive: 1, regressed: 2, invalid: 3 };
-			if (rank[to] > rank[verdict]) {
-				verdict = to;
-			}
-		};
-		const gpuSupported = [...baseRuns, ...headRuns].every((capture) => capture.gpuSupported !== false);
-		for (const [key, gate] of Object.entries(GATES[scene])) {
-			const threshold = settings.threshold ?? gate;
-			if (key.startsWith('gpuMs.') && !gpuSupported) {
-				notes.push(`${key}: no GPU timestamps on this machine, not gated`);
-				continue;
-			}
-			const b = valuesOf(baseRuns, key);
-			const h = valuesOf(headRuns, key);
-			if (b.error || h.error) {
-				notes.push(`invalid: ${b.error ?? h.error}`);
-				worsen('invalid');
-				continue;
-			}
-			const baseFigure = statistics[STATISTIC](b.values);
-			const headFigure = statistics[STATISTIC](h.values);
-			const deltaPct = (100 * (headFigure - baseFigure)) / baseFigure;
-			const spreads = { base: spreadPct(b.values), head: spreadPct(h.values) };
-			const gaps = { base: reproducedPct(b.values), head: reproducedPct(h.values) };
-			let state = deltaPct > threshold ? 'regressed' : 'pass';
-			if (Math.max(gaps.base, gaps.head) > threshold) {
-				state = 'inconclusive';
-				notes.push(`${key}: a side's two fastest runs differ by ${Math.max(gaps.base, gaps.head).toFixed(1)}%, past its ${threshold}% gate`);
-			}
-			worsen(state);
-			rows[key] = { base: baseFigure, head: headFigure, deltaPct, threshold, spreads, gaps, state, baseValues: b.values, headValues: h.values };
-		}
-		for (const key of COUNTS) {
-			const b = median(baseRuns.map((capture) => pick(capture, key) ?? 0));
-			const h = median(headRuns.map((capture) => pick(capture, key) ?? 0));
-			const state = h > b && !settings.allowCounts ? 'regressed' : 'pass';
-			worsen(state);
-			rows[key] = { base: b, head: h, deltaPct: b > 0 ? (100 * (h - b)) / b : null, state };
-		}
-		for (const key of REPORTED.filter((k) => rows[k] === undefined)) {
-			const b = baseRuns.map((capture) => pick(capture, key)).filter(Number.isFinite);
-			const h = headRuns.map((capture) => pick(capture, key)).filter(Number.isFinite);
-			const bm = b.length > 0 ? median(b) : null;
-			const hm = h.length > 0 ? median(h) : null;
-			rows[key] = { base: bm, head: hm, deltaPct: bm && hm !== null ? (100 * (hm - bm)) / bm : null, state: 'reported' };
-		}
-		const content = (runsOf) => JSON.stringify(runsOf[0]?.content ?? null);
-		if (content(baseRuns) !== content(headRuns)) {
-			notes.push(`the scene's content differs: base ${content(baseRuns)}, head ${content(headRuns)}`);
-			worsen('inconclusive');
-		}
-		const flagged = [...baseRuns, ...headRuns].filter((capture) => capture.quietTimedOut).length;
-		if (flagged > 0) {
-			notes.push(`${flagged} runs went ahead on a busy machine`);
-			worsen('inconclusive');
-		}
-
+		const { verdict, rows, notes } = judgeScene(scene, baseRuns, headRuns, settings);
 		console.log(`  ${scene}: ${verdict}`);
 		for (const [key, row] of Object.entries(rows)) {
-			const spread = row.spreads
-				? `  spread ${row.spreads.base.toFixed(1)}% / ${row.spreads.head.toFixed(1)}%, two fastest ${row.gaps.base.toFixed(1)}% / ${row.gaps.head.toFixed(1)}%`
-				: '';
+			const spread = row.spreads ? `  spread ${row.spreads.base.toFixed(1)}% / ${row.spreads.head.toFixed(1)}%` : '';
 			const gate = row.threshold ? `  gate ${row.threshold}%` : '';
 			const flag = ['regressed', 'inconclusive'].includes(row.state) ? `  ${row.state.toUpperCase()}` : '';
 			console.log(`    ${key.padEnd(16)} ${fmt(row.base).padStart(12)} ${fmt(row.head).padStart(12)} ${signed(row.deltaPct).padStart(8)}${gate}${spread}${flag}`);
@@ -738,9 +1054,10 @@ async function compareMode(options) {
 	}
 
 	const overall = ['invalid', 'regressed', 'inconclusive'].find((v) => verdicts.includes(v)) ?? 'pass';
+	const captures = Object.values(scenes).flatMap((s) => [...s.base, ...s.head]);
 	const result = {
-		...header(settings, Object.values(scenes).flatMap((s) => [...s.base, ...s.head])),
-		statistic: STATISTIC,
+		...top,
+		settings: settingsOf(settings, captures),
 		gates: settings.threshold === null ? GATES : `${settings.threshold}% everywhere`,
 		base,
 		head: { exe: headExe, source: options.exe ? null : describe(ROOT) },
@@ -749,7 +1066,7 @@ async function compareMode(options) {
 	};
 	write(options.out ?? path.join(ROOT, 'perf-results/local', `compare-${Date.now()}.json`), result);
 	console.log(`perf: ${overall}`);
-	process.exit(EXIT[overall === 'pass' ? 'pass' : overall]);
+	process.exit(EXIT[overall]);
 }
 
 const modes = { run: runMode, compare: compareMode, noise: noiseMode };
