@@ -21,7 +21,7 @@ namespace ui {
 		[[nodiscard]] bool handlesPointer() const override { return true; }
 		// Disabled, it fades whole, fill, border, label and icon, so a clear fill still reads as disabled.
 		[[nodiscard]] float stateOpacity() const override;
-		void			   describe(nlohmann::json& node) const override;
+		void				describe(nlohmann::json& node) const override;
 
 	  protected:
 		void						onMount() override;
