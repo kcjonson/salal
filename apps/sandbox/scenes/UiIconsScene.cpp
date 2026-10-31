@@ -45,20 +45,26 @@ namespace {
 	  private:
 		static void sizes(Ref<Component> stage) {
 			constexpr std::array<float, 6> kSizes{12.0F, 16.0F, 24.0F, 32.0F, 48.0F, 96.0F};
-			float						   y = 70.0F;
-			for (const char* name : kNames) {
-				stage.addChild<Text>({.position = {0.0F, y + 8.0F}, .style = styles::text::caption, .text = name});
-				float x = 100.0F;
-				for (const float size : kSizes) {
+			constexpr float				   kColumn = 112.0F; // the largest size and a gap
+			for (std::size_t i = 0; i < kNames.size(); ++i) {
+				stage.addChild<Text>(
+					{.position = {100.0F + static_cast<float>(i) * kColumn, 60.0F}, .style = styles::text::caption, .text = kNames[i]}
+				);
+			}
+			// A row a size, as tall as it.
+			float y = 84.0F;
+			for (const float size : kSizes) {
+				const std::string px = std::to_string(static_cast<int>(size));
+				stage.addChild<Text>({.position = {0.0F, y}, .style = styles::text::caption, .text = px + " px"});
+				for (std::size_t i = 0; i < kNames.size(); ++i) {
 					stage.addChild<Icon>(
-						{.id = std::string(name) + "_" + std::to_string(static_cast<int>(size)),
-						 .position = {x, y},
+						{.id = std::string(kNames[i]) + "_" + px,
+						 .position = {100.0F + static_cast<float>(i) * kColumn, y},
 						 .size = {size, size},
-						 .name = name}
+						 .name = kNames[i]}
 					);
-					x += size + 16.0F;
 				}
-				y += 52.0F;
+				y += size + 16.0F;
 			}
 		}
 

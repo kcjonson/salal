@@ -37,11 +37,10 @@ namespace ui {
 		if (getSizeSpec().width.isAuto()) {
 			setSize({percent(100.0F), getSizeSpec().height});
 		}
-		const Style	   labelStyle = styles::label.extend({.textTransform = Foundation::TextTransform::Uppercase});
-		const bool	   header = !inlineLabel && (!label.empty() || !valueText.empty());
-		Ref<Component> textRow;
+		const Style labelStyle = styles::label.extend({.textTransform = Foundation::TextTransform::Uppercase});
+		const bool	header = !inlineLabel && (!label.empty() || !valueText.empty());
 		if (header) {
-			textRow = addChild<Component>({.layout = {.display = Display::Flex, .justifyContent = JustifyContent::SpaceBetween}});
+			texts = addChild<Component>({.layout = {.display = Display::Flex, .justifyContent = JustifyContent::SpaceBetween}});
 		}
 
 		const float height = trackHeight(controlSize, inlineLabel);
@@ -65,13 +64,27 @@ namespace ui {
 			.style = {.borderRadius = radius},
 		});
 		if (inlineLabel) {
-			textRow = track;
+			texts = track;
 		}
-		if (textRow.get() != nullptr) {
-			shownLabel = textRow.addChild<Text>({.style = labelStyle, .text = label});
-			shownValue = textRow.addChild<Text>({.text = valueText});
+		if (texts.get() != nullptr) {
+			shownLabel = texts.addChild<Text>({.style = labelStyle, .text = label});
+			shownValue = texts.addChild<Text>({.text = valueText});
 		}
+		showTexts();
 		fill();
+	}
+
+	// An empty text isn't shown, and the value keeps to the end without a label.
+	void ProgressBar::showTexts() {
+		Component* row = texts.get();
+		if (row == nullptr) {
+			return;
+		}
+		shownLabel.get()->setVisible(!label.empty());
+		shownValue.get()->setVisible(!valueText.empty());
+		Layout layout = row->getLayout();
+		layout.justifyContent = label.empty() ? JustifyContent::End : JustifyContent::SpaceBetween;
+		row->setLayout(layout);
 	}
 
 	void ProgressBar::setStyle(const Style& declared) {
@@ -94,6 +107,7 @@ namespace ui {
 		if (Text* shown = shownValue.get()) {
 			shown->setText(valueText);
 		}
+		showTexts();
 	}
 
 	void ProgressBar::setLabel(std::string text) {
@@ -101,6 +115,7 @@ namespace ui {
 		if (Text* shown = shownLabel.get()) {
 			shown->setText(label);
 		}
+		showTexts();
 	}
 
 	void ProgressBar::fill() {

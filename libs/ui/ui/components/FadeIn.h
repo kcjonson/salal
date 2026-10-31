@@ -1,7 +1,7 @@
 #pragma once
 
-// An overlay's entrance: its opacity from 0 to its declared one over motion.duration.fast, on
-// motion.easing.enter, through the animator, so reduced motion shows it at once.
+// An overlay's entrance: its fade from 0 to 1 over motion.duration.fast, on motion.easing.enter,
+// through the animator, so reduced motion shows it at once. Its style, opacity and all, is left alone.
 
 #include "ui/Component.h"
 

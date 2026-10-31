@@ -36,7 +36,7 @@ namespace {
 			Ref<Component> stage = root().addChild<Component>({.id = "stage", .position = {20.0F, 20.0F}, .size = {1000.0F, 660.0F}});
 			stage.addChild<Text>({.id = "title", .style = styles::text::display, .text = "Theme"});
 			stage.addChild<Text>(
-				{.id = "hint", .position = {0.0F, 52.0F}, .style = styles::text::caption, .text = "T switches dark and light"}
+				{.id = "hint", .position = {0.0F, 56.0F}, .style = styles::text::caption, .text = "T switches dark and light"}
 			);
 			surfaces(stage);
 			type(stage);
@@ -78,11 +78,11 @@ namespace {
 				{"tooltip", styles::tooltip},
 			}};
 			for (std::size_t i = 0; i < panes.size(); ++i) {
-				const float x = static_cast<float>(i) * 190.0F;
-				stage.addChild<Rectangle>(
+				const float	   x = static_cast<float>(i) * 190.0F;
+				Ref<Rectangle> pane = stage.addChild<Rectangle>(
 					{.id = panes[i].first, .position = {x, 100.0F}, .size = {170.0F, 110.0F}, .style = panes[i].second}
 				);
-				stage.addChild<Text>({.position = {x + 12.0F, 112.0F}, .style = styles::text::secondary, .text = panes[i].first});
+				pane.addChild<Text>({.position = {12.0F, 12.0F}, .style = styles::text::secondary, .text = panes[i].first});
 			}
 			// A theme style extended with a field of its own.
 			stage.addChild<Rectangle>({
@@ -101,10 +101,15 @@ namespace {
 				{"Caption", styles::text::caption},
 				{"Mono 0123456789", styles::text::mono},
 			}};
-			float												   y = 290.0F;
+			// A column, so each role takes its own line height.
+			Ref<Component> column = stage.addChild<Component>({
+				.id = "type",
+				.position = {0.0F, 290.0F},
+				.size = {400.0F, ui::kAuto},
+				.layout = {.display = ui::Display::Flex, .flexDirection = ui::FlexDirection::Column, .gap = 4.0F},
+			});
 			for (const auto& [label, style] : roles) {
-				stage.addChild<Text>({.position = {0.0F, y}, .style = style, .text = label});
-				y += 24.0F;
+				column.addChild<Text>({.style = style, .text = label});
 			}
 		}
 
@@ -145,16 +150,20 @@ namespace {
 				);
 			}
 
-			// The focus ring, drawn outside a control's box as its own outline.
+			// The focus ring, drawn outside a control's box as its own outline, with the control inside it.
 			const ui::FocusRing ring = ui::focusRing(theme);
-			swatches.addChild<Rectangle>({
-				.position = {520.0F - ring.offset - ring.width, 70.0F - ring.offset - ring.width},
-				.size = {64.0F + 2.0F * (ring.offset + ring.width), 40.0F + 2.0F * (ring.offset + ring.width)},
-				.style = {
-					.backgroundColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), .borderColor = ring.color, .borderWidth = ring.width
-				},
-			});
-			swatch({520.0F, 70.0F}, control, "focus ring");
+			const float			outset = ring.offset + ring.width;
+			Ref<Rectangle>		outline = swatches.addChild<Rectangle>({
+					 .position = {520.0F - outset, 70.0F - outset},
+					 .size = {64.0F + 2.0F * outset, 40.0F + 2.0F * outset},
+					 .style = {
+						 .backgroundColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), .borderColor = ring.color, .borderWidth = ring.width
+				 },
+			 });
+			outline.addChild<Rectangle>(
+				{.position = {outset, outset}, .size = {64.0F, 40.0F}, .style = {.backgroundColor = control, .borderRadius = 4.0F}}
+			);
+			swatches.addChild<Text>({.position = {520.0F, 116.0F}, .style = styles::text::caption, .text = "focus ring"});
 		}
 
 		Ref<Component> swatches;

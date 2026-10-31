@@ -238,6 +238,9 @@ namespace ui {
 		virtual void			   setStyle(const Style& value);
 		// The style as given, before the theme: what a component that tints itself leaves alone.
 		[[nodiscard]] const Style& getDeclaredStyle() const { return declaredStyle; }
+		// A factor on its opacity apart from its style, which an entrance tweens (ui/components/FadeIn.h).
+		[[nodiscard]] float getFade() const { return fade; }
+		void				setFade(float value) { fade = value; }
 
 		[[nodiscard]] std::optional<int> getZIndex() const { return zIndex; }
 		void							 setZIndex(std::optional<int> value);
@@ -379,7 +382,7 @@ namespace ui {
 		// Its pointerEvents when unset: Passthrough, a container's; a leaf or a widget says Auto.
 		[[nodiscard]] virtual PointerEvents defaultPointerEvents() const { return PointerEvents::Passthrough; }
 
-		// Its effective opacity, its own style's times its ancestors'. Valid in render().
+		// Its effective opacity, its own style's times its fade times its ancestors'. Valid in render().
 		[[nodiscard]] float opacity() const { return effectiveOpacity; }
 
 		Foundation::Vec2 position{0.0F, 0.0F};
@@ -505,6 +508,7 @@ namespace ui {
 		std::int32_t					key = 0;
 		std::int32_t					lastKey = 0; // the highest key in its subtree, which a scrollbar draws at
 		float							effectiveOpacity = 1.0F;
+		float							fade = 1.0F;
 		bool							visible = true;
 		bool							enabled = true;
 		bool							isolation = false;
