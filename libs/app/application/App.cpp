@@ -109,6 +109,7 @@ namespace app {
 		constexpr std::string_view kFullscreenMonitor = "video.fullscreenMonitor";
 		constexpr std::string_view kWindowWidth = "video.windowWidth";
 		constexpr std::string_view kWindowHeight = "video.windowHeight";
+		constexpr std::string_view kUiScale = "ui.scale";
 
 		using UserDir = std::filesystem::path (*)(std::string_view organization, std::string_view application);
 
@@ -215,6 +216,7 @@ namespace app {
 		userSettings = Settings::load(
 			userPath(config.settingsFile, userConfigDir, config, "settings"), config.settingsVersion, config.migrateSettings
 		);
+		scaleOfUi = std::clamp(userSettings.get<float>(kUiScale, 1.0F), 0.25F, 4.0F);
 		saveStore = SaveStore(userPath(config.savesDirectory, userDataDir, config, "saves"), config.saveFormat);
 	}
 
@@ -315,6 +317,7 @@ namespace app {
 		updateScenes();
 		endSection(sections.update);
 		sceneStack.layoutUi();
+		showCursor();
 		endSection(sections.layout);
 		render();
 		devServerPostRender();
@@ -421,6 +424,9 @@ namespace app {
 				detail::guard("Overlay", "handleEvent", [&] { consumed = (*it)->handleEvent(event); });
 			}
 			if (consumed || isPaused) {
+				continue;
+			}
+			if (sceneStack.dispatchTopUi(event)) {
 				continue;
 			}
 			if (Scene* top = sceneStack.top(); top != nullptr) {
@@ -532,6 +538,14 @@ namespace app {
 		const double now = platform->clock().now();
 		section = static_cast<float>((now - sectionStart) * 1000.0);
 		sectionStart = now;
+	}
+
+	void App::showCursor() {
+		const ui::Cursor wanted = sceneStack.topUiCursor();
+		if (wanted != shownCursor) {
+			platform->setCursor(wanted);
+			shownCursor = wanted;
+		}
 	}
 
 	float App::liveAlpha() const {
@@ -673,6 +687,12 @@ namespace app {
 
 	void App::setDispatch(std::function<void(App&)> newDispatch) {
 		dispatch = std::move(newDispatch);
+	}
+
+	void App::setUiScale(float scale) {
+		scaleOfUi = std::clamp(scale, 0.25F, 4.0F);
+		userSettings.set(kUiScale, scaleOfUi);
+		sceneStack.scaleUi(scaleOfUi);
 	}
 
 	void App::setVsync(bool enabled) {

@@ -48,6 +48,16 @@ namespace ui {
 			return Foundation::Rect{left, top, right - left, bottom - top};
 		}
 
+		bool clips(const Component& component) {
+			return component.getOverflow() == Overflow::Clip || component.getOverflow() == Overflow::Scroll;
+		}
+
+		// Something the pointer is meant to reach: it answers the pointer and its box can be hit.
+		bool interactive(const Component& component) {
+			const PointerEvents pointer = component.getPointerEvents();
+			return component.handlesPointer() && (pointer == PointerEvents::Auto || pointer == PointerEvents::Unit);
+		}
+
 		struct Sibling {
 			const Component* component;
 			std::string		 path;
@@ -72,9 +82,10 @@ namespace ui {
 				Foundation::Vec2					   origin,
 				int									   inheritedZ,
 				const std::optional<Foundation::Rect>& clip,
+				bool								   inScroller,
 				LintResult&							   result
 			) {
-				const bool			 parentClips = parent != nullptr && parent->component->getOverflow() == Overflow::Clip;
+				const bool			 parentClips = parent != nullptr && clips(*parent->component);
 				std::vector<Sibling> visible;
 				visible.reserve(ids.size());
 				for (std::size_t i = 0; i < ids.size(); ++i) {
@@ -105,7 +116,29 @@ namespace ui {
 							);
 						}
 					}
+					// Clipped away where no scroll brings it back.
+					if (interactive(*component) && clip && !inScroller && !intersection(bounds, *clip)) {
+						result.violations.push_back({LintRule::UnreachableInteractive, path, bounds, "clip", *clip});
+					}
 					visible.push_back({component, path, bounds, component->getZIndex().value_or(inheritedZ)});
+				}
+
+				// Covered whole by a sibling painted over it that takes the pointer.
+				for (const Sibling& under : visible) {
+					if (!interactive(*under.component)) {
+						continue;
+					}
+					for (const Sibling& over : visible) {
+						const PointerEvents pointer = over.component->getPointerEvents();
+						if (over.component->drawKey() > under.component->drawKey() &&
+							(pointer == PointerEvents::Auto || pointer == PointerEvents::Unit) &&
+							containsWithEpsilon(over.bounds, under.bounds)) {
+							result.violations.push_back(
+								{LintRule::UnreachableInteractive, under.path, under.bounds, over.path, over.bounds}
+							);
+							break;
+						}
+					}
 				}
 
 				// Roots are each a stacking context the size of the viewport, layered on purpose. A flex
@@ -139,13 +172,14 @@ namespace ui {
 						 member.z
 					 };
 					std::optional<Foundation::Rect> childClip = clip;
-					if (member.component->getOverflow() == Overflow::Clip) {
+					if (clips(*member.component)) {
 						childClip = clip ? intersection(box.bounds, *clip) : std::optional(box.bounds);
 						if (!childClip) {
 							childClip = Foundation::Rect{box.bounds.x, box.bounds.y, 0.0F, 0.0F};
 						}
 					}
-					siblings(member.component->getChildren(), &box, {box.bounds.x, box.bounds.y}, childZ, childClip, result);
+					const bool scrolls = inScroller || member.component->getOverflow() == Overflow::Scroll;
+					siblings(member.component->getChildren(), &box, {box.bounds.x, box.bounds.y}, childZ, childClip, scrolls, result);
 				}
 			}
 
@@ -168,6 +202,8 @@ namespace ui {
 				return "zero-or-negative-size";
 			case LintRule::TextOverflow:
 				return "text-overflow";
+			case LintRule::UnreachableInteractive:
+				return "unreachable-interactive";
 		}
 		return "unknown";
 	}
@@ -175,7 +211,7 @@ namespace ui {
 	LintResult lint(const Context& context, Foundation::Vec2 viewport) {
 		LintResult result;
 		Linter	   linter(context, viewport);
-		linter.siblings(context.getRoots(), nullptr, {0.0F, 0.0F}, 0, std::nullopt, result);
+		linter.siblings(context.getRoots(), nullptr, {0.0F, 0.0F}, 0, std::nullopt, false, result);
 		return result;
 	}
 

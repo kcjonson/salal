@@ -78,13 +78,19 @@ namespace app {
 		// nothing, logged, while not paused.
 		void step(int ticks);
 
-		// Replaces step 5's default dispatch (each event to the overlays, last added first, then the top
-		// scene unless paused). Runs every frame, paused or not; an empty function restores the default.
+		// Replaces step 5's default dispatch (each event to the overlays, last added first, then unless
+		// paused the top scene's ui, then the top scene). Runs every frame, paused or not; an empty
+		// function restores the default.
 		void setDispatch(std::function<void(App&)> dispatch);
 		// The window's settings, applied through the platform and kept in settings() as video.vsync and
 		// video.fullscreenMonitor (null for windowed), which the App reads at create; the game saves them.
 		// The monitor is kept as asked, so one unplugged now is tried again at the next launch.
 		void setVsync(bool enabled);
+		// The ui's one scale (R7.5), 0.25 to 4, kept in settings() as ui.scale, which the App reads at
+		// create: every scene's ui lays out in the window's logical size over it and draws scaled, so a
+		// handheld gets larger ui with no second layout.
+		void				setUiScale(float scale);
+		[[nodiscard]] float uiScale() const { return scaleOfUi; }
 		// Fullscreen on the monitor at `monitor` (0 the primary), or windowed. Where the window resizes at
 		// once, the viewport, the coordinate system and Primitives take the new size at once too, as GL's
 		// viewport does, so the frame it's called in draws at that size; scenes and overlays hear of it
@@ -175,6 +181,7 @@ namespace app {
 		void  pace() const;
 		float liveAlpha() const;
 		void  endSection(float& section);
+		void  showCursor();
 
 		AppConfig									config;
 		std::unique_ptr<Platform>					platform;
@@ -196,22 +203,24 @@ namespace app {
 		const void*									contextType = nullptr;
 		foundation::InputSnapshot					tickInput{};
 
-		double	 frameStart = 0.0;		 // the clock at step 1
-		double	 frameDelta = 0.0;		 // this frame's real delta, clamped
-		double	 fixedAccumulator = 0.0; // seconds not yet ticked
-		int		 pendingSteps = 0;
-		bool	 clockStarted = false;
-		bool	 resized = false;
-		bool	 framebufferEmpty = false; // minimized
-		bool	 isPaused = false;
-		bool	 resumeAtFrameEnd = false;
-		bool	 exitRequested = false;
-		bool	 inFrame = false;
-		bool	 shuttingDown = false;
-		bool	 isShutDown = false;
-		bool	 metricsFrameOpen = false;
-		double	 sectionStart = 0.0;
-		Sections sections;
+		double	   frameStart = 0.0;	   // the clock at step 1
+		double	   frameDelta = 0.0;	   // this frame's real delta, clamped
+		double	   fixedAccumulator = 0.0; // seconds not yet ticked
+		int		   pendingSteps = 0;
+		bool	   clockStarted = false;
+		bool	   resized = false;
+		bool	   framebufferEmpty = false; // minimized
+		bool	   isPaused = false;
+		bool	   resumeAtFrameEnd = false;
+		bool	   exitRequested = false;
+		bool	   inFrame = false;
+		bool	   shuttingDown = false;
+		bool	   isShutDown = false;
+		bool	   metricsFrameOpen = false;
+		double	   sectionStart = 0.0;
+		Sections   sections;
+		float	   scaleOfUi = 1.0F;
+		ui::Cursor shownCursor = ui::Cursor::Default;
 	};
 
 } // namespace app

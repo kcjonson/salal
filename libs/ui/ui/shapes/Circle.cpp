@@ -22,6 +22,12 @@ namespace ui {
 		);
 	}
 
+	bool Circle::containsPoint(Foundation::Vec2 local) const {
+		const Foundation::Vec2 fromCentre = local - (size * 0.5F);
+		const float			   radius = std::min(size.x, size.y) * 0.5F;
+		return (fromCentre.x * fromCentre.x) + (fromCentre.y * fromCentre.y) < radius * radius;
+	}
+
 	void Circle::render() {
 		const float							   alpha = opacity();
 		const float							   borderWidth = style.borderWidth.value_or(0.0F);

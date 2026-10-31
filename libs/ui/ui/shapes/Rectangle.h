@@ -14,7 +14,8 @@ namespace ui {
 		void					  describe(nlohmann::json& node) const override;
 
 	  protected:
-		void render() override;
+		void						render() override;
+		[[nodiscard]] PointerEvents defaultPointerEvents() const override { return PointerEvents::Auto; }
 	};
 
 } // namespace ui

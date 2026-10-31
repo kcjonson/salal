@@ -247,8 +247,11 @@ public:
 4. The frame reader is consumed: `input().frame()` and `input().events()` now
    hold this frame.
 5. Dispatch. By default each event goes to the overlays top-down, then the top
-   scene, each `handleEvent` returning whether it consumed it; while paused,
-   only overlays receive them. A game can replace this step with
+   scene's ui (which takes what it hits, and a press's gesture once it has
+   the press), then the top scene, each returning whether it consumed it;
+   while paused, only overlays receive them. The window's cursor follows the
+   top scene's ui after the layout pass, through `Platform::setCursor`, and a
+   scene covered by a push gets a cancel for anything its ui had in hand. A game can replace this step with
    `setDispatch`, which worldsim does (under "What worldsim keeps").
 6. Scene-stack changes requested so far apply here, after dispatch and before
    any update, which is where worldsim's deferred switch applies today

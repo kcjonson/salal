@@ -1,9 +1,12 @@
 #include "ui/Context.h"
 
+#include "ui/detail/Dispatcher.h"
 #include "ui/detail/LayoutEngine.h"
 
 #include <primitives/Primitives.h>
 #include <utils/Log.h>
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <utility>
@@ -35,6 +38,25 @@ namespace ui {
 			bool& flag;
 		};
 
+		bool inside(const Foundation::Rect& rect, Foundation::Vec2 point) {
+			return point.x >= rect.x && point.y >= rect.y && point.x < rect.right() && point.y < rect.bottom();
+		}
+
+		Foundation::Rect intersect(const Foundation::Rect& a, const Foundation::Rect& b) {
+			const float left = std::max(a.x, b.x);
+			const float top = std::max(a.y, b.y);
+			const float right = std::min(a.right(), b.right());
+			const float bottom = std::min(a.bottom(), b.bottom());
+			return {left, top, std::max(right - left, 0.0F), std::max(bottom - top, 0.0F)};
+		}
+
+		bool clips(Overflow overflow) {
+			return overflow == Overflow::Clip || overflow == Overflow::Scroll;
+		}
+
+		const Foundation::Color kScrollThumb(1.0F, 1.0F, 1.0F, 0.35F);
+		const Foundation::Color kScrollTrack(1.0F, 1.0F, 1.0F, 0.06F);
+
 		// ui's tokens alone, loaded once; every context starts from them. They were checked when ui built.
 		const Theme& uiTheme() {
 			static const Theme kTheme = Theme::load({}).theme;
@@ -44,7 +66,9 @@ namespace ui {
 
 	Context::Context(Foundation::Vec2 viewportSize)
 		: theme(uiTheme()),
-		  viewport(viewportSize) {}
+		  windowSize(viewportSize),
+		  viewport(viewportSize),
+		  dispatcher(std::make_unique<detail::Dispatcher>(*this)) {}
 
 	void Context::setTheme(Theme value) {
 		if (drawing) {
@@ -117,18 +141,33 @@ namespace ui {
 		}
 		std::erase(roots, rootId);
 		orderDirty = true;
+		removing(rootId);
 		registry.release(rootId);
 	}
 
 	void Context::setViewport(Foundation::Vec2 size) {
-		if (size == viewport) {
+		if (size == windowSize) {
 			return;
 		}
-		viewport = size;
+		windowSize = size;
+		resizeRoots();
+	}
+
+	void Context::setScale(float value) {
+		const float clamped = std::clamp(value, 0.25F, 4.0F);
+		if (clamped == scale) {
+			return;
+		}
+		scale = clamped;
+		resizeRoots();
+	}
+
+	void Context::resizeRoots() {
+		viewport = windowSize / scale;
 		for (const ComponentId rootId : roots) {
 			if (Component* rootComponent = registry.find(rootId)) {
-				rootComponent->sizeSpec = Size(size);
-				rootComponent->size = size;
+				rootComponent->sizeSpec = Size(viewport);
+				rootComponent->size = viewport;
 				rootComponent->layoutDirty = true;
 				dirtyBoundaries.push_back(rootId);
 			}
@@ -143,10 +182,12 @@ namespace ui {
 	}
 
 	// From each relayout boundary something under changed, a root's box being the viewport; then the
-	// screen maps and clips, the paint order, and onLayout for whatever moved, which may ask for
-	// another pass on the next frame.
+	// screen maps and clips, the paint order, onLayout for whatever moved, and the hover again when
+	// anything moved under a still pointer (R9.9). Callbacks may ask for another pass, the next frame's.
 	void Context::layout() {
-		std::vector<ComponentId> moved;
+		const Registry::DispatchScope scope(registry);
+		std::vector<ComponentId>	  moved;
+		bool						  changed = hoverStale;
 		if (!dirtyBoundaries.empty()) {
 			++layoutPass;
 			detail::LayoutEngine		   engine(registry, layoutPass, moved);
@@ -167,45 +208,54 @@ namespace ui {
 		if (geometryDirty) {
 			for (const ComponentId rootId : roots) {
 				if (Component* rootComponent = registry.find(rootId)) {
-					updateScreen(*rootComponent, {}, std::nullopt);
+					updateScreen(*rootComponent, {}, std::nullopt, true, false);
 				}
 			}
 			geometryDirty = false;
+			changed = true;
 		}
 		if (orderDirty) {
 			buildOrder();
 			orderDirty = false;
+			changed = true;
 		}
-		if (!moved.empty()) {
-			const Registry::DispatchScope scope(registry);
-			for (const ComponentId movedId : moved) {
-				Component* component = registry.find(movedId);
-				if (component != nullptr && component->handlers && component->handlers->onLayout) {
-					component->handlers->onLayout(*component);
-				}
+		for (const ComponentId movedId : moved) {
+			Component* component = registry.find(movedId);
+			if (component != nullptr && component->handlers && component->handlers->onLayout) {
+				component->handlers->onLayout(*component);
 			}
+		}
+		hoverStale = false;
+		if (changed) {
+			dispatcher->hoverAgain();
 		}
 	}
 
-	void Context::updateScreen(Component& component, const Affine& parent, const std::optional<Foundation::Rect>& parentClip) {
+	// A scroller's children sit under its scroll offset; a disabled ancestor disables them; a
+	// pointerEvents of Unit or None keeps the pointer off everything under it (R8.29).
+	void Context::updateScreen(
+		Component&							   component,
+		const Affine&						   parent,
+		const std::optional<Foundation::Rect>& parentClip,
+		bool								   parentEnabled,
+		bool								   blocked
+	) {
 		component.screen = parent * Affine::local(component.offset + component.margin.topLeft(), component.size, component.transform);
 		component.clip = parentClip;
+		component.enabledInTree = parentEnabled && component.enabled;
+		component.hitBlocked = blocked;
 		std::optional<Foundation::Rect> childClip = parentClip;
-		if (component.overflow == Overflow::Clip) {
+		if (clips(component.overflow)) {
 			const Foundation::Rect box = component.screenBounds();
-			if (!childClip) {
-				childClip = box;
-			} else {
-				const float left = std::max(childClip->x, box.x);
-				const float top = std::max(childClip->y, box.y);
-				const float right = std::min(childClip->right(), box.right());
-				const float bottom = std::min(childClip->bottom(), box.bottom());
-				childClip = Foundation::Rect{left, top, std::max(right - left, 0.0F), std::max(bottom - top, 0.0F)};
-			}
+			childClip = childClip ? intersect(*childClip, box) : box;
 		}
+		const PointerEvents pointer = component.getPointerEvents();
+		const bool			childBlocked = blocked || pointer == PointerEvents::Unit || pointer == PointerEvents::None;
+		const Affine		childParent =
+			   component.scroll == Foundation::Vec2{0.0F, 0.0F} ? component.screen : component.screen * Affine::translation(-component.scroll);
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
-				updateScreen(*child, component.screen, childClip);
+				updateScreen(*child, childParent, childClip, component.enabledInTree, childBlocked);
 			}
 		}
 	}
@@ -236,7 +286,35 @@ namespace ui {
 			rankOverflowLogged = true;
 		}
 		for (std::size_t rank = 0; rank < order.size(); ++rank) {
-			registry.find(order[rank])->key = static_cast<std::int32_t>(std::min(rank, static_cast<std::size_t>(kMaxRank)));
+			Component* component = registry.find(order[rank]);
+			component->key = static_cast<std::int32_t>(std::min(rank, static_cast<std::size_t>(kMaxRank)));
+			component->lastKey = component->key;
+		}
+		// Each component's last key is its subtree's highest, children after parents in reverse.
+		for (auto it = order.rbegin(); it != order.rend(); ++it) {
+			const Component* component = registry.find(*it);
+			if (Component* parentNode = registry.find(component->parentId)) {
+				parentNode->lastKey = std::max(parentNode->lastKey, component->lastKey);
+			}
+		}
+
+		std::vector<std::pair<std::int32_t, ComponentId>> bars;
+		for (const ComponentId id : order) {
+			const Component* component = registry.find(id);
+			if (component->overflow == Overflow::Scroll) {
+				bars.emplace_back(component->lastKey, id);
+			}
+		}
+		std::ranges::stable_sort(bars, {}, &std::pair<std::int32_t, ComponentId>::first);
+		hitList.clear();
+		hitList.reserve(order.size() + bars.size());
+		std::size_t bar = 0;
+		for (const ComponentId id : order) {
+			hitList.push_back({.id = id, .scrollbar = false});
+			const std::int32_t key = registry.find(id)->key;
+			for (; bar < bars.size() && bars[bar].first == key; ++bar) {
+				hitList.push_back({.id = bars[bar].second, .scrollbar = true});
+			}
 		}
 	}
 
@@ -278,20 +356,89 @@ namespace ui {
 		}
 	}
 
+	// --- Input ---
+
+	bool Context::dispatch(const foundation::InputEvent& event) {
+		const Registry::DispatchScope scope(registry);
+		layout();
+		return dispatcher->dispatch(event, scale);
+	}
+
+	// Top down through the list painting reads, so the winner is the topmost painted component the
+	// point is in: inside every clip above it, its own box after its transform is undone, edges
+	// half-open (R8.12). Disabled components occlude (R9.5); a transparent one doesn't (R8.3).
+	ComponentId Context::hitTest(Foundation::Vec2 point, bool* onScrollbar) const {
+		for (auto it = hitList.rbegin(); it != hitList.rend(); ++it) {
+			const Component* component = registry.find(it->id);
+			if (component == nullptr || (component->clip && !inside(*component->clip, point))) {
+				continue;
+			}
+			const Foundation::Vec2 local = component->screenToLocal(point);
+			if (it->scrollbar) {
+				const detail::Scrollbar bar = detail::scrollbarOf(component->size, component->scroll, component->scrollMax);
+				if (bar.shown && inside(bar.track, local)) {
+					if (onScrollbar != nullptr) {
+						*onScrollbar = true;
+					}
+					return component->selfId;
+				}
+				continue;
+			}
+			const PointerEvents pointer = component->getPointerEvents();
+			if (component->hitBlocked || component->effectiveOpacity <= 0.0F ||
+				(pointer != PointerEvents::Auto && pointer != PointerEvents::Unit)) {
+				continue;
+			}
+			if (component->containsPoint(local)) {
+				return component->selfId;
+			}
+		}
+		return {};
+	}
+
+	Cursor Context::cursor() const {
+		return dispatcher->cursor();
+	}
+
+	void Context::cancelInteraction() {
+		const Registry::DispatchScope scope(registry);
+		dispatcher->cancel();
+	}
+
+	void Context::removing(ComponentId root) {
+		dispatcher->removing(root);
+	}
+
+	void Context::capture(ComponentId captorId) {
+		dispatcher->capture(captorId);
+	}
+
+	ComponentId Context::captor() const {
+		return dispatcher->captor();
+	}
+
+	// --- Drawing ---
+
 	void Context::render() {
 		layout();
 		const Registry::DispatchScope scope(registry);
 		const ScopedFlag			  flag(drawing);
+		if (scale != 1.0F) {
+			Renderer::Primitives::PushTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(scale, scale, 1.0F)));
+		}
 		for (const ComponentId rootId : roots) {
 			if (Component* rootComponent = registry.find(rootId)) {
 				renderComponent(*rootComponent, 1.0F);
 			}
 		}
+		if (scale != 1.0F) {
+			Renderer::Primitives::PopTransform();
+		}
 	}
 
 	// Depth first in tree order, so each component draws under its ancestors' transforms and clips; its
-	// key, not the walk, puts it in paint order. Overflow::Clip cuts the children, not the component's
-	// own draws.
+	// key, not the walk, puts it in paint order. Overflow::Clip and Scroll cut the children, not the
+	// component's own draws; a scroller's bar draws over its subtree, at the subtree's last key.
 	void Context::renderComponent(Component& component, float parentOpacity) {
 		if (!component.isShown()) {
 			return;
@@ -303,14 +450,24 @@ namespace ui {
 			Renderer::Primitives::PushTransform(local.toMat4());
 		}
 		component.render();
-		const bool clipped = component.overflow == Overflow::Clip && !component.children.empty();
+		const bool clipped = clips(component.overflow) && !component.children.empty();
 		if (clipped) {
 			Renderer::Primitives::pushClip({0.0F, 0.0F, component.size.x, component.size.y});
+		}
+		const bool scrolled = component.scroll != Foundation::Vec2{0.0F, 0.0F};
+		if (scrolled) {
+			Renderer::Primitives::PushTransform(Affine::translation(-component.scroll).toMat4());
 		}
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
 				renderComponent(*child, component.effectiveOpacity);
 			}
+		}
+		if (scrolled) {
+			Renderer::Primitives::PopTransform();
+		}
+		if (component.overflow == Overflow::Scroll) {
+			drawScrollbar(component);
 		}
 		if (clipped) {
 			Renderer::Primitives::popClip();
@@ -318,6 +475,26 @@ namespace ui {
 		if (moved) {
 			Renderer::Primitives::PopTransform();
 		}
+	}
+
+	void Context::drawScrollbar(const Component& scroller) const {
+		const detail::Scrollbar bar = detail::scrollbarOf(scroller.size, scroller.scroll, scroller.scrollMax);
+		if (!bar.shown) {
+			return;
+		}
+		const float radius = bar.track.width * 0.5F;
+		const auto	rounded = [&](const Foundation::Rect& rect, Foundation::Color color) {
+			 color.a *= scroller.effectiveOpacity;
+			 Renderer::Primitives::drawRect({
+				 .bounds = rect,
+				 .style =
+					 {.fill = color,
+					  .border = Foundation::BorderStyle{.color = {0.0F, 0.0F, 0.0F, 0.0F}, .width = 0.0F, .cornerRadius = radius}},
+				 .key = scroller.lastKey,
+			 });
+		};
+		rounded(bar.track, kScrollTrack);
+		rounded(bar.thumb, kScrollThumb);
 	}
 
 } // namespace ui

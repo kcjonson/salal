@@ -50,6 +50,7 @@ namespace ui {
 
 	  protected:
 		void										  render() override;
+		[[nodiscard]] PointerEvents					  defaultPointerEvents() const override { return PointerEvents::Auto; }
 		[[nodiscard]] std::optional<Foundation::Vec2> intrinsicSize(std::optional<float> width, float availableWidth) const override;
 		[[nodiscard]] float							  minContentWidth() const override;
 
