@@ -290,11 +290,16 @@ The renderer's base shader is assembled and compiled into each consumer at build
 time by `salal_base_shader()` ([docs/shader-hooks.md](docs/shader-hooks.md)),
 with the consumer's hooks, so no shader files sit beside an executable; it ships
 no fonts: a game hands `FontRenderer::Initialize` its atlases, each a PNG and
-JSON path under a `FontFamily` id the game defines, and names its default
-family; a bad set comes back as `false`, never a process exit, and a glyph
-whose atlas cell is too small for what its quad samples is a warning at load.
-Glyph quads carry their atlas and its range, so `drawGlyphs` takes no family,
-and wrapped text carries the family and scale it was wrapped in.
+the JSON msdf-atlas-gen wrote with it (glyphs by code point, either `yOrigin`,
+kerning applied), under a `FontFamily` id the game defines, and names its default
+family; a bad set comes back as `false` with the reason logged, never a process
+exit, and a glyph whose quad reads into another's in the atlas is a warning at
+load. `scripts/convert-font-atlas.mjs` converts an atlas JSON in salal's old
+layout (worldsim's `tools/generate_sdf_atlas`). Text is UTF-8, measured, laid out
+and wrapped by code point: one the atlas lacks draws as U+FFFD, or `?` without
+it, and so does each ill-formed sequence. Glyph quads carry their atlas and its
+range, so `drawGlyphs` takes no family, and wrapped text carries the family and
+scale it was wrapped in.
 
 A theme is Design Tokens (2025.10, with the Resolver module) loaded at run time
 into `ui::Theme` ([docs/ui-design.md](docs/ui-design.md), "Theme"). ui's own

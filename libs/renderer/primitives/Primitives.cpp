@@ -11,7 +11,6 @@
 #include "vector/Tessellator.h"
 #include "vector/Types.h"
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
@@ -21,6 +20,7 @@
 #include <unordered_map>
 #include <utility>
 #include <utils/Log.h>
+#include <utils/Utf8.h>
 #include <vector>
 
 // Text rendering is implemented via the base shader in BatchRenderer.
@@ -593,12 +593,8 @@ namespace Renderer::Primitives {
 		}
 
 		// CSS text-transform: fold the case once up front so measure and emit agree.
-		std::string effective = args.text;
-		if (args.transform == Foundation::TextTransform::Uppercase) {
-			for (char& c : effective) {
-				c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-			}
-		}
+		const std::string effective =
+			args.transform == Foundation::TextTransform::Uppercase ? foundation::UTF8::uppercase(args.text) : args.text;
 
 		// CSS text-align within the optional [position, position+box] rect. With no
 		// box, or Left/Top alignment, the origin stays at position (plain top-left)
