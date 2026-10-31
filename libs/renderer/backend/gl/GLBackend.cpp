@@ -115,6 +115,37 @@ namespace Renderer::backend::gl {
 			}
 		}
 
+		// An integer attribute of `components` of `type` at `offset` in a `stride`-byte record of the
+		// bound GL_ARRAY_BUFFER, one per instance.
+		void uintAttribute(GLuint location, GLint components, GLenum type, size_t stride, size_t offset) {
+			glEnableVertexAttribArray(location);
+			glVertexAttribIPointer(
+				location,
+				components,
+				type,
+				static_cast<GLsizei>(stride),
+				reinterpret_cast<const void*>(offset) // NOLINT(performance-no-int-to-ptr)
+			);
+			glVertexAttribDivisor(location, 1);
+		}
+
+		// The Batched layout's attributes, every one per instance, reading the bound
+		// GL_ARRAY_BUFFER from instance `first`: GL 3.3 has no base instance, so a draw
+		// of a later run points them there.
+		void batchedAttributes(uint32_t first) {
+			constexpr size_t kStride = sizeof(BatchInstance);
+			const size_t	 base = static_cast<size_t>(first) * kStride;
+			floatAttribute(1, 4, kStride, base + offsetof(BatchInstance, corners), 1);
+			floatAttribute(3, 4, kStride, base + offsetof(BatchInstance, corners) + (2 * sizeof(Foundation::Vec2)), 1);
+			floatAttribute(4, 4, kStride, base + offsetof(BatchInstance, geometry), 1);
+			floatAttribute(5, 4, kStride, base + offsetof(BatchInstance, clip), 1);
+			uintAttribute(8, 2, GL_UNSIGNED_INT, kStride, base + offsetof(BatchInstance, radii));
+			uintAttribute(9, 4, GL_UNSIGNED_INT, kStride, base + offsetof(BatchInstance, fills));
+			uintAttribute(10, 1, GL_UNSIGNED_INT, kStride, base + offsetof(BatchInstance, border));
+			uintAttribute(11, 2, GL_UNSIGNED_INT, kStride, base + offsetof(BatchInstance, shape));
+			uintAttribute(12, 4, GL_UNSIGNED_BYTE, kStride, base + offsetof(BatchInstance, mode));
+		}
+
 		// Buffers are bound for writing on GL_COPY_WRITE_BUFFER, which no vertex array
 		// records: an index buffer bound to GL_ELEMENT_ARRAY_BUFFER would land in
 		// whatever vertex array a game's code left bound.
@@ -347,7 +378,8 @@ namespace Renderer::backend::gl {
 		const BufferSlot* vertices = buffers.find(desc.vertices);
 		const BufferSlot* indices = buffers.find(desc.indices);
 		const BufferSlot* instances = buffers.find(desc.instances);
-		if (vertices == nullptr || indices == nullptr || (desc.layout == VertexLayout::InstancedMesh && instances == nullptr)) {
+		const bool		  mesh = desc.layout == VertexLayout::InstancedMesh;
+		if (vertices == nullptr || (mesh && (indices == nullptr || instances == nullptr))) {
 			LOG_ERROR(Renderer, "createGeometry: a buffer is missing");
 			return {};
 		}
@@ -357,13 +389,8 @@ namespace Renderer::backend::gl {
 		glBindBuffer(GL_ARRAY_BUFFER, vertices->buffer);
 		switch (desc.layout) {
 			case VertexLayout::Batched:
-				// Locations 6 and 7 are the instanced layout's
-				floatAttribute(0, 2, sizeof(BatchVertex), offsetof(BatchVertex, position));
-				floatAttribute(1, 2, sizeof(BatchVertex), offsetof(BatchVertex, texCoord));
-				floatAttribute(2, 4, sizeof(BatchVertex), offsetof(BatchVertex, color));
-				floatAttribute(3, 4, sizeof(BatchVertex), offsetof(BatchVertex, data1));
-				floatAttribute(4, 4, sizeof(BatchVertex), offsetof(BatchVertex, data2));
-				floatAttribute(5, 4, sizeof(BatchVertex), offsetof(BatchVertex, clipBounds));
+				// Locations 0, 2, 6 and 7 are the instanced mesh's, and stay disabled here
+				batchedAttributes(0);
 				break;
 			case VertexLayout::InstancedMesh:
 				// Locations 1, 3, 4 and 5 stay disabled and read GL's default (0, 0, 0, 1);
@@ -376,9 +403,14 @@ namespace Renderer::backend::gl {
 				floatAttribute(7, 4, sizeof(InstanceData), offsetof(InstanceData, colorTint), 1);
 				break;
 		}
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices->buffer);
+		if (mesh) {
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices->buffer);
+		}
 		GLVertexArray::unbind();
-		return geometries.insert({.vertexArray = std::move(vertexArray), .layout = desc.layout});
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		return geometries.insert(
+			{.vertexArray = std::move(vertexArray), .layout = desc.layout, .instances = mesh ? 0U : vertices->buffer.handle()}
+		);
 	}
 
 	void GLBackend::destroyGeometry(GeometryHandle geometry) {
@@ -584,9 +616,13 @@ namespace Renderer::backend::gl {
 		std::optional<BlendState> blend;
 		TextureHandle			  texture;
 		for (const DrawCall& call : calls) {
-			const Shader*		pipeline = pipelines.find(call.pipeline);
-			const GeometrySlot* geometry = geometries.find(call.geometry);
-			if (pipeline == nullptr || geometry == nullptr || call.indexCount == 0) {
+			const Shader* pipeline = pipelines.find(call.pipeline);
+			GeometrySlot* geometry = geometries.find(call.geometry);
+			if (pipeline == nullptr || geometry == nullptr) {
+				continue;
+			}
+			const bool batched = geometry->layout == VertexLayout::Batched;
+			if (batched ? call.instanceCount == 0 : call.indexCount == 0) {
 				continue;
 			}
 			if (pipeline->getProgram() != program) {
@@ -608,16 +644,28 @@ namespace Renderer::backend::gl {
 				glBindTexture(GL_TEXTURE_2D, textureName(call.texture));
 				texture = call.texture;
 			}
-			const bool		wide = geometry->layout == VertexLayout::Batched;
-			const GLenum	type = wide ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
-			const uintptr_t offset = static_cast<uintptr_t>(call.indexOffset) * (wide ? sizeof(uint32_t) : sizeof(uint16_t));
+			if (batched) {
+				if (geometry->firstInstance != call.firstInstance) {
+					glBindBuffer(GL_ARRAY_BUFFER, geometry->instances);
+					batchedAttributes(call.firstInstance);
+					glBindBuffer(GL_ARRAY_BUFFER, 0);
+					geometry->firstInstance = call.firstInstance;
+				}
+				glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(call.instanceCount));
+				continue;
+			}
+			const uintptr_t offset = static_cast<uintptr_t>(call.indexOffset) * sizeof(uint16_t);
 			const auto*		indices = reinterpret_cast<const void*>(offset); // NOLINT(performance-no-int-to-ptr)
 			if (call.instanceCount > 0) {
 				glDrawElementsInstanced(
-					GL_TRIANGLES, static_cast<GLsizei>(call.indexCount), type, indices, static_cast<GLsizei>(call.instanceCount)
+					GL_TRIANGLES,
+					static_cast<GLsizei>(call.indexCount),
+					GL_UNSIGNED_SHORT,
+					indices,
+					static_cast<GLsizei>(call.instanceCount)
 				);
 			} else {
-				glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(call.indexCount), type, indices);
+				glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(call.indexCount), GL_UNSIGNED_SHORT, indices);
 			}
 		}
 

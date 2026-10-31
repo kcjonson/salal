@@ -45,23 +45,20 @@ namespace app::testing {
 			Renderer::Primitives::drawRect({.bounds = {x, 0.0F, 10.0F, 10.0F}, .style = {.fill = Foundation::Color::white()}, .key = key});
 		}
 
-		// Each rect's x in the last frame's one draw, in the order the batch paints them: the index
-		// buffer's quads, each naming its first vertex.
+		// Each rect's x in the last frame's one draw, in the order the batch paints them: the
+		// uploaded quads, each by its top-left corner.
 		std::vector<float> drawnX() {
 			auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
 			EXPECT_NE(gpu, nullptr);
 			EXPECT_EQ(gpu->draws().size(), 1U);
 			const Renderer::backend::GeometryDesc* geometry = gpu->geometry(gpu->draws().at(0).call.geometry);
 			EXPECT_NE(geometry, nullptr);
-			const std::span<const uint8_t>	   vertexBytes = gpu->bufferContents(geometry->vertices);
-			const std::span<const uint8_t>	   indexBytes = gpu->bufferContents(geometry->indices);
-			std::vector<Renderer::BatchVertex> vertices(vertexBytes.size() / sizeof(Renderer::BatchVertex));
-			std::vector<uint32_t>			   indices(indexBytes.size() / sizeof(uint32_t));
-			std::memcpy(vertices.data(), vertexBytes.data(), vertices.size() * sizeof(Renderer::BatchVertex));
-			std::memcpy(indices.data(), indexBytes.data(), indices.size() * sizeof(uint32_t));
+			const std::span<const uint8_t>		 bytes = gpu->bufferContents(geometry->vertices);
+			std::vector<Renderer::BatchInstance> quads(bytes.size() / sizeof(Renderer::BatchInstance));
+			std::memcpy(quads.data(), bytes.data(), quads.size() * sizeof(Renderer::BatchInstance));
 			std::vector<float> drawn;
-			for (size_t i = 0; i < indices.size(); i += 6) {
-				drawn.push_back(vertices.at(indices[i]).position.x);
+			for (const Renderer::BatchInstance& quad : quads) {
+				drawn.push_back(quad.corners[0].x);
 			}
 			return drawn;
 		}

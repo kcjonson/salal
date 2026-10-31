@@ -161,6 +161,82 @@ namespace Renderer {
 		expectNear(pixel(16, 16), {50, 25, 0, 100});
 	}
 
+	TEST_F(PrimitivesDrawTest, AGradientInterpolatesItsCornersPremultiplied) {
+		// Red to transparent blue, left to right: midway it is half red, not half purple.
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [] {
+			Primitives::drawRect(
+				{.bounds = {0.0F, 0.0F, static_cast<float>(kSize), static_cast<float>(kSize)},
+				 .style = {
+					 .gradient =
+						 Foundation::LinearGradient{.from = {1.0F, 0.0F, 0.0F, 1.0F}, .to = {0.0F, 0.0F, 1.0F, 0.0F}, .horizontal = true}
+				 }}
+			);
+		});
+		const std::array<int, 4> middle = pixel(16, 16);
+		EXPECT_NEAR(middle[0], 123, 3);
+		EXPECT_LE(middle[2], 1);
+		EXPECT_NEAR(middle[3], 123, 3);
+	}
+
+	TEST_F(PrimitivesDrawTest, ACornerRadiusCutsItsCorner) {
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [] {
+			Primitives::drawRect(
+				{.bounds = {0.0F, 0.0F, static_cast<float>(kSize), static_cast<float>(kSize)},
+				 .style = {.fill = Foundation::Color::white(), .border = Foundation::BorderStyle{.width = 0.0F, .cornerRadius = 10.0F}}}
+			);
+		});
+		expectNear(pixel(0, 0), {0, 0, 0, 0});
+		expectNear(pixel(31, 31), {0, 0, 0, 0});
+		expectNear(pixel(16, 16), {255, 255, 255, 255});
+		expectNear(pixel(16, 1), {255, 255, 255, 255});
+	}
+
+	TEST_F(PrimitivesDrawTest, AShadowFadesAcrossItsBlurCentredOnTheEdge) {
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [] {
+			Primitives::drawRect(
+				{.bounds = {8.0F, 8.0F, 16.0F, 16.0F},
+				 .style = {
+					 .fill = {1.0F, 1.0F, 1.0F, 0.0F}, .boxShadow = Foundation::BoxShadow{.color = Foundation::Color::white(), .blur = 4.0F}
+				 }}
+			);
+		});
+		expectNear(pixel(16, 16), {255, 255, 255, 255});
+		expectNear(pixel(1, 1), {0, 0, 0, 0});
+		const int edge = pixel(8, 16)[3];
+		EXPECT_GT(edge, 100);
+		EXPECT_LT(edge, 200);
+		EXPECT_LT(pixel(5, 16)[3], edge);
+	}
+
+	TEST_F(PrimitivesDrawTest, TextCoversWhereItsAtlasIsInside) {
+		// A one-texel atlas, every channel at 1 (inside) or 0 (outside), stretched over a glyph's quad.
+		const std::array<uint8_t, 3> inside = {255, 255, 255};
+		const std::array<uint8_t, 3> outside = {0, 0, 0};
+		const Texture				 insideAtlas =
+			Primitives::createTexture({.width = 1, .height = 1, .format = TextureFormat::Rgb8, .pixels = inside.data()});
+		const Texture outsideAtlas =
+			Primitives::createTexture({.width = 1, .height = 1, .format = TextureFormat::Rgb8, .pixels = outside.data()});
+		const auto glyph = [](TextureHandle atlas, float x) {
+			const FontRenderer::GlyphQuad quad{
+				.position = {x, 0.0F},
+				.size = {16.0F, 32.0F},
+				.uvMin = {0.0F, 0.0F},
+				.uvMax = {1.0F, 1.0F},
+				.color = {0.0F, 1.0F, 0.0F, 0.5F},
+				.runOrigin = {x, 32.0F},
+				.atlas = atlas,
+				.pixelRange = 4.0F
+			};
+			Primitives::drawGlyphs(&quad, 1);
+		};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			glyph(insideAtlas.handle(), 0.0F);
+			glyph(outsideAtlas.handle(), 16.0F);
+		});
+		expectNear(pixel(8, 16), {0, 128, 0, 128});
+		expectNear(pixel(24, 16), {0, 0, 0, 0});
+	}
+
 	TEST_F(PrimitivesDrawTest, AFreedTextureDrawsNothingAfterTheDrawsBeforeItsFree) {
 		const std::array<uint8_t, 4> white = {255, 255, 255, 255};
 		Texture						 texture = Primitives::createTexture({.width = 1, .height = 1, .pixels = white.data()});

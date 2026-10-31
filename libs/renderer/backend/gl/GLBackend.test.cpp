@@ -10,6 +10,7 @@
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <glm/gtc/packing.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -490,24 +491,26 @@ namespace Renderer::backend::gl {
 		const PipelineHandle pipeline = gpu->createPipeline(base_shader::source());
 		ASSERT_TRUE(pipeline.isValid());
 		// A stream buffer made empty grows to its first write.
-		const BufferHandle	 vertices = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
-		const BufferHandle	 indices = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
-		const GeometryHandle geometry = gpu->createGeometry({.layout = VertexLayout::Batched, .vertices = vertices, .indices = indices});
+		const BufferHandle	 instances = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
+		const GeometryHandle geometry = gpu->createGeometry({.layout = VertexLayout::Batched, .vertices = instances});
 		ASSERT_TRUE(geometry.isValid());
 
-		// Two flat red triangles over a 4 x 4 target, drawn as two calls, the second from index 3.
-		const Foundation::Vec4			 red(1.0F, 0.0F, 0.0F, 1.0F);
-		const Foundation::Vec4			 flat(0.0F, 0.0F, 0.0F, 1.0F); // a zero-size shape: the triangle itself
-		const Foundation::Vec4			 none(0.0F);
-		const std::array<BatchVertex, 4> quad = {{
-			{{0.0F, 0.0F}, {0.0F, 0.0F}, red, none, flat, none},
-			{{4.0F, 0.0F}, {0.0F, 0.0F}, red, none, flat, none},
-			{{4.0F, 4.0F}, {0.0F, 0.0F}, red, none, flat, none},
-			{{0.0F, 4.0F}, {0.0F, 0.0F}, red, none, flat, none},
-		}};
-		const std::array<uint32_t, 6>	 triangles = {0, 1, 2, 0, 2, 3};
-		gpu->updateBuffer(vertices, 0, sizeof(quad), quad.data());
-		gpu->updateBuffer(indices, 0, sizeof(triangles), triangles.data());
+		// Two flat red triangles over a 4 x 4 target, each a quad repeating its last corner,
+		// drawn as two calls, the second from instance 1.
+		const uint32_t red = glm::packUnorm4x8(Foundation::Vec4(1.0F, 0.0F, 0.0F, 1.0F));
+		const auto	   triangle = [red](Foundation::Vec2 a, Foundation::Vec2 b, Foundation::Vec2 c) {
+			BatchInstance quad{}; // mode 0, flat
+			quad.corners[0] = a;
+			quad.corners[1] = b;
+			quad.corners[2] = c;
+			quad.corners[3] = c;
+			std::fill(std::begin(quad.fills), std::end(quad.fills), red);
+			return quad;
+		};
+		const std::array<BatchInstance, 2> triangles = {
+			triangle({0.0F, 0.0F}, {4.0F, 0.0F}, {4.0F, 4.0F}), triangle({0.0F, 0.0F}, {4.0F, 4.0F}, {0.0F, 4.0F})
+		};
+		gpu->updateBuffer(instances, 0, sizeof(triangles), triangles.data());
 
 		const TextureHandle		 atlas = createTexture({.width = 1, .height = 1});
 		const TextureHandle		 colour = createTexture({.width = 4, .height = 4});
@@ -531,8 +534,8 @@ namespace Renderer::backend::gl {
 		glUseProgram(0);
 
 		const std::array<DrawCall, 2> calls = {{
-			{.pipeline = pipeline, .geometry = geometry, .texture = atlas, .indexOffset = 0, .indexCount = 3},
-			{.pipeline = pipeline, .geometry = geometry, .texture = foreignTexture, .indexOffset = 3, .indexCount = 3},
+			{.pipeline = pipeline, .geometry = geometry, .texture = atlas, .firstInstance = 0, .instanceCount = 1},
+			{.pipeline = pipeline, .geometry = geometry, .texture = foreignTexture, .firstInstance = 1, .instanceCount = 1},
 		}};
 		gpu->draw(calls);
 
@@ -567,8 +570,7 @@ namespace Renderer::backend::gl {
 		destroyTexture(colour);
 		destroyTexture(atlas);
 		gpu->destroyGeometry(geometry);
-		gpu->destroyBuffer(indices);
-		gpu->destroyBuffer(vertices);
+		gpu->destroyBuffer(instances);
 		gpu->destroyPipeline(pipeline);
 	}
 

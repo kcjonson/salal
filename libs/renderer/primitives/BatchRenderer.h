@@ -8,8 +8,8 @@
 //
 // Also provides GPU instancing for efficient rendering of many identical meshes.
 //
-// It sits in front of the backend seam: it builds BatchVertex data, the draw runs
-// and the uniforms as plain data, and a backend::Backend uploads and draws them.
+// It sits in front of the backend seam: it builds a BatchInstance per quad, the draw
+// runs and the uniforms as plain data, and a backend::Backend uploads and draws them.
 
 #include "Handle.h"
 #include "backend/Backend.h"
@@ -23,6 +23,7 @@
 #include "vector/Tessellator.h"
 #include <algorithm>
 #include <cstdint>
+#include <glm/mat2x2.hpp>
 #include <optional>
 #include <span>
 #include <vector>
@@ -44,42 +45,30 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		const BoundaryLoops*			  feather = nullptr;
 	};
 
-	// BatchVertex, the batch's vertex, is in backend/Backend.h: the backend uploads it.
+	// BatchInstance (backend/Backend.h), the batch's quad: its mode is how base.frag
+	// shades it (base.vert and base.frag have the same table), and sets what its fields
+	// hold. Every quad's fills are its colour, premultiplied, the same at each corner
+	// unless the table says otherwise.
 	//
-	// data2.w holds the render mode and the additive flag together; base.frag
-	// decodes the same table with half-unit margins.
+	//   Flat    a triangle, its last corner repeated, or a quad; fills: each corner's colour
+	//   Rect    geometry: half size, then the quad's half extent; radii: the corners' (tl, tr,
+	//           br, bl); fills: each corner's, for a gradient; border: the border's colour;
+	//           shape.x: its width; flags: its position
+	//   Shadow  geometry: half size, then the quad's half extent; radii: the corners'; shape.z: the blur
+	//   Arc     geometry: inner and outer radius, half the sweep, the middle's angle; shape.y: how
+	//           far the quad reaches past the outer radius
+	//   Image   geometry: the uv rect, the top-left corner's then the bottom-right's
+	//   Text    geometry: the uv rect; shape.z: the atlas's distance range in texels
+	//   Stroke  a convex piece, a fan's quad; geometry: the rows of the map from a screen offset
+	//           to the piece's frame; radii: its centre on screen; shape: its half size; border:
+	//           its corner radius; all floats
 	//
-	//   mode              alpha        additive
-	//   shape             0, 1, 2      4, 5, 6     border position inside, center, outside
-	//   text              -1           -11
-	//   instanced, baked  -2           -           written by base.vert, never additive
-	//   shadow            -3           -13
-	//   arc               -4           -14
-	//   image             -5           -15
-	//
-	// A shape's mode also carries its border's transparency (1 - alpha) in its
-	// fraction, over kBorderTransparencySpan, so an opaque border, or none, keeps
-	// the whole number above.
-	constexpr float kRenderModeText = -1.0F;	  // MSDF text
-	constexpr float kRenderModeShadow = -3.0F;	  // Box-shadow / glow (SDF soft falloff)
-	constexpr float kRenderModeArc = -4.0F;		  // Ring, arc or pie (SDF)
-	constexpr float kRenderModeImage = -5.0F;	  // Plain texture sample
-	constexpr float kAdditiveShapeOffset = 4.0F;  // Added to a shape's border position
-	constexpr float kAdditiveModeOffset = -10.0F; // Added to a negative mode
-	constexpr float kBorderTransparencySpan = 0.25F;
+	// Halves (radii, shape) are glm::packHalf2x16's, rgba8 (fills, border) glm::packUnorm4x8's.
+	enum class QuadMode : uint8_t { Flat, Rect, Shadow, Arc, Image, Text, Stroke };
 
-	// data2.w for a border position (0..2) or a negative mode, drawn with `blend`.
-	constexpr float renderMode(float mode, Primitives::BlendMode blend) {
-		if (blend != Primitives::BlendMode::Additive) {
-			return mode;
-		}
-		return mode >= 0.0F ? mode + kAdditiveShapeOffset : mode + kAdditiveModeOffset;
-	}
-
-	// data2.w for a shape: its border position (0..2) and its border's alpha, drawn with `blend`.
-	constexpr float shapeMode(float borderPosition, float borderAlpha, Primitives::BlendMode blend) {
-		return renderMode(borderPosition, blend) + (kBorderTransparencySpan * (1.0F - std::clamp(borderAlpha, 0.0F, 1.0F)));
-	}
+	// BatchInstance::flags
+	constexpr uint8_t kQuadAdditive = 1U;	 // the colour adds to what is under it, its alpha 0
+	constexpr uint8_t kQuadBorderShift = 1U; // a rect's border position from this bit, two bits: inside, centred, outside
 
 	// The GPU blend state a mode draws in. Output is premultiplied and blended
 	// (ONE, ONE_MINUS_SRC_ALPHA); Additive is that state with the output alpha
@@ -88,21 +77,21 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		return backend::BlendState::Alpha;
 	}
 
-	// One draw call: `indexCount` indices from `indexStart` in the emit order,
+	// One draw call: `instanceCount` quads from `instanceStart` in the emit order,
 	// sampling `texture` (bound for the run; invalid binds nothing) in one GPU
 	// blend state.
 	struct DrawRun {
-		uint32_t			indexStart = 0;
-		uint32_t			indexCount = 0;
+		uint32_t			instanceStart = 0;
+		uint32_t			instanceCount = 0;
 		TextureHandle		texture;
 		backend::BlendState blendState = backend::BlendState::Alpha;
 	};
 
-	// What flush() submits: the indices in emit order and the runs they split into.
+	// What flush() submits: the quads in emit order and the runs they split into.
 	// Both point into the batch and stay valid until the next add or flush.
 	struct DrawPlan {
-		std::span<const uint32_t> indices;
-		std::span<const DrawRun>  runs;
+		std::span<const BatchInstance> instances;
+		std::span<const DrawRun>	   runs;
 	};
 
 	// Batch accumulator - collects geometry before GPU upload
@@ -147,7 +136,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		);
 
 		// Add an indexed triangle mesh as one draw group (drawTriangles, drawLine, a
-		// polygon's fill). With `mesh.feather`, a ring one device pixel wide runs outside
+		// polygon's fill), a flat quad a triangle. With `mesh.feather`, a ring one device pixel wide runs outside
 		// each loop in the same group, each boundary vertex's colour fading to alpha 0
 		// across it, a linear coverage ramp. Its outer edge sits on the miter of the
 		// vertex's two edges, at most 4 pixels out, outward through any transform,
@@ -155,7 +144,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void addTriangles(const TriangleMeshArgs& mesh);
 
 		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
-		// its polygon as a fan, shaded by its SDF box.
+		// its polygon as a fan of quads, shaded by its SDF box.
 		void addStroke(
 			std::span<const StrokePiece> pieces,
 			const Foundation::Color&	 color,
@@ -217,7 +206,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// The emit order and draw runs of what has been added; flush() submits
 		// exactly this. Groups are stable-sorted by sort domain, then key, when any
 		// carries a non-zero key (submission order otherwise), and the emit order is
-		// cut into a new run wherever a triangle needs a texture other than the bound
+		// cut into a new run wherever a quad needs a texture other than the bound
 		// one or a group's GPU blend state differs. Shapes, arcs and the like need no
 		// texture and never split.
 		DrawPlan plan();
@@ -226,8 +215,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// added before, whatever its key. No flush, and no run is cut for it.
 		void sortBarrier() { ++sortDomain; }
 
-		// Upload the vertices and the planned indices, set the uniforms and submit
-		// one draw call per run.
+		// Upload the quads in emit order, set the uniforms and submit one draw call
+		// per run.
 		void flush();
 
 		// Frame lifecycle
@@ -281,13 +270,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		};
 
 		// Statistics
-		size_t		getVertexCount() const { return vertices.size(); }
+		size_t		getInstanceCount() const { return instances.size(); }
 		size_t		getDrawGroupCount() const { return drawGroups.size(); } // the key sort's units, since the last flush
 		size_t		getDrawCallCount() const { return drawCallCount; }
 		RenderStats getStats() const;
 
-		// The vertices added since the last flush, in the order added.
-		std::span<const BatchVertex> getPendingVertices() const { return vertices; }
+		// The quads added since the last flush, in the order added.
+		std::span<const BatchInstance> getPendingInstances() const { return instances; }
 
 		// --- GPU Instancing (World-Space) ---
 
@@ -329,26 +318,25 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void endBakedPass();
 
 	  private:
-		// Vertex data (CPU-side accumulation)
-		std::vector<BatchVertex> vertices;
-		std::vector<uint32_t>	 indices;
+		// The quads added since the last flush, in the order added.
+		std::vector<BatchInstance> instances;
 
-		// Per-vertex texture tag, parallel to `vertices`. Invalid = no texture
-		// requirement (shapes, arcs); valid = the MSDF atlas a text vertex or the
-		// texture an image vertex samples. plan() splits runs on these.
-		std::vector<TextureHandle> vertexAtlas;
+		// Per-quad texture tag, parallel to `instances`. Invalid = no texture
+		// requirement (shapes, arcs); valid = the MSDF atlas a glyph or the texture an
+		// image samples. plan() splits runs on these.
+		std::vector<TextureHandle> instanceTextures;
 
-		// Per-draw-call groups. Each add* records one {indexStart, indexCount, order,
-		// blend}, or extends the last when it has the same order and blend (every
+		// Per-draw-call groups. Each add* records one {instanceStart, instanceCount,
+		// order, blend}, or extends the last when it has the same order and blend (every
 		// glyph of a text run after the first). `order` is the domain, the count of
 		// sortBarrier() calls since the last flush, in the high word and the key with
 		// its sign bit flipped in the low one, so one unsigned compare sorts by domain,
 		// then key, negative keys first. plan() keeps submission order unless some
 		// group carries a non-zero key, in which case groups are stable-sorted by
-		// order and the emit-order index list is rebuilt.
+		// order and their quads copied out in that order.
 		struct DrawGroup {
-			uint32_t			  indexStart;
-			uint32_t			  indexCount;
+			uint32_t			  instanceStart;
+			uint32_t			  instanceCount;
 			uint64_t			  order;
 			Primitives::BlendMode blend;
 		};
@@ -356,13 +344,28 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		bool				   anyKey = false;
 		uint32_t			   sortDomain = 0;
 
-		// plan()'s output, reused across flushes: the key-sorted index list (unused in
-		// submission order) and the runs.
-		std::vector<uint32_t> sortedIndices;
-		std::vector<DrawRun>  runs;
+		// plan()'s output, reused across flushes: the quads in key order and their
+		// textures (unused in submission order), and the runs.
+		std::vector<BatchInstance> sortedInstances;
+		std::vector<TextureHandle> sortedTextures;
+		std::vector<DrawRun>	   runs;
 
-		// Record the index range [groupStart, current end) as one draw group.
+		// Record the quads [groupStart, current end) as one draw group.
 		void recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend);
+
+		// Append a quad of `mode` over `corners` (TL, TR, BR, BL, before the transform),
+		// drawn with `blend` and sampling `texture`, with the current clip; the caller
+		// fills in the rest.
+		BatchInstance&
+		pushQuad(QuadMode mode, const Foundation::Vec2 (&corners)[4], Primitives::BlendMode blend, TextureHandle texture = {});
+
+		// The same with corners already on screen, as a mesh's and a stroke's are.
+		BatchInstance&
+		pushScreenQuad(QuadMode mode, const Foundation::Vec2 (&corners)[4], Primitives::BlendMode blend, TextureHandle texture = {});
+
+		// Scratch for addTriangles: the mesh's positions on screen and colours.
+		std::vector<Foundation::Vec2> meshPositions;
+		std::vector<uint32_t>		  meshColors;
 
 		// Whether a draw may sample `texture`, a valid handle: false, warned once, when
 		// it is stale or waiting to be freed.
@@ -380,26 +383,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		bool warnedStale = false;
 
-		// addTriangles' feather ring along `loops`, whose indices count from `meshBase`,
-		// the mesh's first vertex in the batch.
-		void addFeather(uint32_t meshBase, const BoundaryLoops& loops);
-
-		// Append the four corners of a quad, TL, TR, BR, BL, positions through the
-		// current transform, and its two triangles, all tagged with `texture`.
-		void pushQuad(
-			const Foundation::Vec2 (&corners)[4],
-			const Foundation::Vec2 (&texCoords)[4],
-			const Foundation::Vec4& color,
-			const Foundation::Vec4& data1,
-			const Foundation::Vec4& data2,
-			TextureHandle			texture = {}
-		);
+		// addTriangles' feather ring along `loops`, over meshPositions and meshColors.
+		void addFeather(const BoundaryLoops& loops, Primitives::BlendMode blend);
 
 		// The backend and what this batch made on it.
 		backend::Backend& gpu;
 		PipelineHandle	  pipeline;
-		BufferHandle	  vertexBuffer;
-		BufferHandle	  indexBuffer;
+		BufferHandle	  instanceBuffer;
 		GeometryHandle	  geometry;
 
 		// The uniforms as the last draw read them. Each draw path sets the fields it
@@ -442,6 +432,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		Foundation::Mat4 currentTransform{1.0F}; // Identity
 		TransformClass	 transformClass = TransformClass::kIdentity;
 		Foundation::Vec2 transformTranslation{0.0F, 0.0F}; // Valid for kTranslateOnly (zero for kIdentity)
+
+		// The inverse of currentTransform's linear part, which takes a stroke's screen
+		// offsets back to its own units; a transform that flattens everything has none,
+		// and draws no stroke.
+		glm::mat2 inverseLinear{1.0F};
+		bool	  invertible = true;
+
+		// addFeather's outer points, one a boundary vertex of the loop it is on.
+		std::vector<Foundation::Vec2> featherOuter;
 
 		// Local units per logical pixel under currentTransform (the inverse of its
 		// area scale), the padding SDF quads get so their edge ramp fits.
