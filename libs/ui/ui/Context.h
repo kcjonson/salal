@@ -119,6 +119,13 @@ namespace ui {
 
 		// --- The overlay stack (ui/Overlay.h) ---
 
+		// The stack dismisses a menu on a press outside it and when its player's focus leaves it for
+		// somewhere outside it, and the innermost menu, dialog or panel around a player's focus on that
+		// player's cancel, nothing having consumed it (R9.13, R9.14). Focus in an entry as it closes goes
+		// back to where it was when the entry opened. A component's tooltip (Component::setTooltip)
+		// opens once the pointer has rested on it kTooltipDelayMs, and closes when the pointer leaves it
+		// or presses; after a press it stays shut until the pointer leaves.
+
 		// Closes an entry as code does, with no onDismiss: the same as removing it.
 		void closeOverlay(Ref<Component> entry);
 		// Closes an entry as the stack does: onDismiss, then closed.
@@ -185,6 +192,16 @@ namespace ui {
 		void placeOverlays();
 		// A press at `hit` closes the pointer player's menus it is outside; true when that consumes it.
 		bool pressOutside(ComponentId hit, foundation::MouseButton button);
+		// The innermost menu, dialog or panel around the player's focus, else the player's topmost menu,
+		// dismissed; false when there's none.
+		bool cancelOverlay(int player);
+		// The player's focus moved from `from`: the player's menus it left are dismissed.
+		void focusMoved(int player, ComponentId from);
+		// Where focus at `focused` goes when `root` goes: the focus before the outermost entry within
+		// `root` that holds it opened; none when no entry holds it.
+		[[nodiscard]] ComponentId overlayRestore(ComponentId focused, ComponentId root) const;
+		void					  updateTooltip();
+		void					  closeTooltip();
 		// The slot of the pointer player's topmost dialog: what's in a lower slot is inert to the pointer.
 		[[nodiscard]] int  modalFloor() const;
 		[[nodiscard]] bool pointerInert() const { return modalFloor() > 0; }
@@ -227,18 +244,25 @@ namespace ui {
 			ComponentId	   id;
 			ComponentId	   opener;
 			OverlayOptions options;
+			ComponentId	   restore; // its player's focus when it opened
 		};
-		std::vector<OverlayEntry> overlayStack;		// in stack order
-		int						  paintingSlot = 0; // the slot buildOrder fills
-		std::vector<ComponentId>  dirtyBoundaries;	// where the next pass lays out from
-		std::vector<ComponentId>  updateRequests;	// for the next update
-		std::uint32_t			  layoutPass = 0;
-		std::vector<OrderItem>	  orderScratch;
-		bool					  geometryDirty = true;
-		bool					  orderDirty = true;
-		bool					  drawing = false;
-		bool					  hoverStale = false; // something moved under a still pointer
-		bool					  rankOverflowLogged = false;
+		std::vector<OverlayEntry> overlayStack; // in stack order
+		// The hover tooltip: whose, its entry, when the pointer reached its owner, and whether a press
+		// keeps it shut.
+		ComponentId				 tipOwner;
+		ComponentId				 tipEntry;
+		double					 tipSince = 0.0;
+		bool					 tipHeld = false;
+		int						 paintingSlot = 0; // the slot buildOrder fills
+		std::vector<ComponentId> dirtyBoundaries;  // where the next pass lays out from
+		std::vector<ComponentId> updateRequests;   // for the next update
+		std::uint32_t			 layoutPass = 0;
+		std::vector<OrderItem>	 orderScratch;
+		bool					 geometryDirty = true;
+		bool					 orderDirty = true;
+		bool					 drawing = false;
+		bool					 hoverStale = false; // something moved under a still pointer
+		bool					 rankOverflowLogged = false;
 	};
 
 	template <typename T>

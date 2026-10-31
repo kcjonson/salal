@@ -363,6 +363,20 @@
       "borderWidth": { "$value": "{lineWidth.thin}" }, "borderRadius": { "$value": "{radius.sm}" },
       "color": { "$value": "{color.text.primary}" }, "font": { "$value": "{typography.body}" }
     },
+    "menuItem": {
+      "backgroundColor": { "$value": "{base.color.clear}" }, "borderRadius": { "$value": "{radius.sm}" },
+      "color": { "$value": "{color.text.primary}" }, "font": { "$value": "{typography.body}" }
+    },
+    "select": {
+      "backgroundColor": { "$value": "{color.surface.control}" }, "borderColor": { "$value": "{color.line.edge}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" }, "borderRadius": { "$value": "{radius.md}" },
+      "color": { "$value": "{color.text.primary}" }, "font": { "$value": "{typography.body}" }
+    },
+    "toast": {
+      "backgroundColor": { "$value": "{color.surface.overlay}" }, "borderColor": { "$value": "{color.line.strong}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" }, "borderRadius": { "$value": "{radius.md}" },
+      "boxShadow": { "$value": "{shadow.overlay}" }
+    },
     "divider": {
       "backgroundColor": { "$value": "{color.line.subtle}" }
     },

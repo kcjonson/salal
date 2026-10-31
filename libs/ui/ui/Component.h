@@ -296,6 +296,11 @@ namespace ui {
 		[[nodiscard]] bool isOverlayTrigger() const { return overlayTrigger; }
 		// Its draw key's slot: 0 for the scene, its entry's in a stack entry, as of the last layout.
 		[[nodiscard]] int paintSlot() const { return slot; }
+		// The tooltip it shows while the pointer rests on it: opened under it at `at`, the pointer in its
+		// own space. ui::tooltip() (ui/components/Tooltip.h) makes one; empty is none.
+		using TooltipOpener = std::function<Ref<Component>(Component& owner, Foundation::Vec2 at)>;
+		void			   setTooltip(TooltipOpener open) { tooltip = std::move(open); }
+		[[nodiscard]] bool hasTooltip() const { return static_cast<bool>(tooltip); }
 		// --- Focus ---
 
 		[[nodiscard]] bool							   isFocusable() const { return focusable; }
@@ -513,6 +518,7 @@ namespace ui {
 		std::optional<OverlayKind>		overlayKind; // a stack entry's
 		int								slot = 0;
 		bool							detached = false; // an Absolute overlay: in screen space, apart from its opener
+		TooltipOpener					tooltip;
 		bool							focusable = false;
 		std::uint8_t					focusedBy = 0; // a bit for each player whose focus is on it
 		std::uint8_t					focusVisibleBy = 0;

@@ -7,6 +7,19 @@
 
 namespace ui {
 
+	namespace {
+		// An event from inside an overlay the control opened isn't its own: a click on a menu's padding,
+		// or an activate a dialog's content didn't take.
+		bool fromOverlay(const Component& control, const Component* target) {
+			for (const Component* node = target; node != nullptr && node != &control; node = node->parent().get()) {
+				if (node->isOverlay()) {
+					return true;
+				}
+			}
+			return false;
+		}
+	} // namespace
+
 	void Control::onMount() {
 		setFocusable(true);
 		if (!getCursor()) {
@@ -50,14 +63,23 @@ namespace ui {
 	}
 
 	void Control::handlePointer(PointerEvent& event) {
-		if (event.type == PointerEvent::Type::Click && event.button == foundation::MouseButton::Left && isEnabledInTree()) {
+		if (event.type == PointerEvent::Type::Click && event.button == foundation::MouseButton::Left && isEnabledInTree() &&
+			!fromOverlay(*this, event.target)) {
+			activator = 0;
+			for (int player = 0; player < kMaxPlayers; ++player) {
+				if (isFocusedBy(player)) {
+					activator = player;
+					break;
+				}
+			}
 			activate();
 			event.consume();
 		}
 	}
 
 	void Control::handleKey(KeyEvent& event) {
-		if (event.type == KeyEvent::Type::Activate && isEnabledInTree()) {
+		if (event.type == KeyEvent::Type::Activate && isEnabledInTree() && !fromOverlay(*this, event.target)) {
+			activator = event.player;
 			activate();
 			event.consume();
 		}

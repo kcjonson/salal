@@ -2,7 +2,7 @@
 
 #include "ui/Context.h"
 #include "ui/components/Control.h"
-#include "ui/shapes/Line.h"
+#include "ui/shapes/Chevron.h"
 #include "ui/shapes/Text.h"
 #include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
@@ -44,17 +44,10 @@ namespace ui {
 				if (Text* shown = count.get()) {
 					shown->setText(node.count ? std::to_string(*node.count) : std::string());
 				}
-				// The caret: a chevron pointing right when closed and down when open.
-				if (Line* first = caretA.get(); Line* second = caretB.get()) {
-					first->setVisible(branch);
-					second->setVisible(branch);
-					if (expanded) {
-						first->setEndpoints({1.0F, 3.0F}, {5.0F, 7.0F});
-						second->setEndpoints({5.0F, 7.0F}, {9.0F, 3.0F});
-					} else {
-						first->setEndpoints({3.0F, 1.0F}, {7.0F, 5.0F});
-						second->setEndpoints({7.0F, 5.0F}, {3.0F, 9.0F});
-					}
+				// The caret points right when closed and down when open; a leaf keeps its room.
+				if (Chevron* shown = caret.get()) {
+					shown->setVisible(branch);
+					shown->setPointing(expanded ? Chevron::Pointing::Down : Chevron::Pointing::Right);
 				}
 			}
 
@@ -62,10 +55,7 @@ namespace ui {
 			void onMount() override {
 				Control::onMount();
 				setSize({kAuto, sizeMetrics(getContext()->getTheme(), ControlSize::Sm).controlHeight});
-				Ref<Component> caret = addChild<Component>({.size = {kCaret, kCaret}});
-				const Style	   stroke{.color = getContext()->getTheme().get(tokens::color::text::secondary)};
-				caretA = caret.addChild<Line>({.style = stroke, .lineWidth = 1.5F, .roundCaps = true});
-				caretB = caret.addChild<Line>({.style = stroke, .lineWidth = 1.5F, .roundCaps = true});
+				caret = addChild<Component>({.size = {kCaret, kCaret}}).addChild<Chevron>({});
 				text = addChild<Text>({.layout = {.flexGrow = 1.0F}, .style = styles::text::body});
 				count = addChild<Text>({.style = styles::label});
 			}
@@ -91,13 +81,12 @@ namespace ui {
 				}
 			}
 
-			std::string nodeId;
-			bool		branch = false;
-			bool		expanded = false;
-			Ref<Text>	text;
-			Ref<Text>	count;
-			Ref<Line>	caretA;
-			Ref<Line>	caretB;
+			std::string	 nodeId;
+			bool		 branch = false;
+			bool		 expanded = false;
+			Ref<Text>	 text;
+			Ref<Text>	 count;
+			Ref<Chevron> caret;
 		};
 
 		TreeNode* findIn(std::vector<TreeNode>& nodes, const std::string& id) {

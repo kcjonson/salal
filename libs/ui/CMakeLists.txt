@@ -45,20 +45,28 @@ add_library(salal_ui STATIC
     ui/components/Badge.cpp
     ui/components/Button.cpp
     ui/components/Checkbox.cpp
+    ui/components/ContextMenu.cpp
     ui/components/Control.cpp
+    ui/components/Dialog.cpp
+    ui/components/DropdownButton.cpp
+    ui/components/FadeIn.cpp
     ui/components/ListRow.cpp
     ui/components/Divider.cpp
     ui/components/KeyCap.cpp
+    ui/components/Menu.cpp
     ui/components/Panel.cpp
     ui/components/RadioGroup.cpp
     ui/components/SegmentedControl.cpp
+    ui/components/Select.cpp
     ui/components/Slider.cpp
     ui/components/ProgressBar.cpp
     ui/components/Stat.cpp
     ui/components/TabBar.cpp
     ui/components/TextEditor.cpp
     ui/components/TextInput.cpp
+    ui/components/Toast.cpp
     ui/components/Toggle.cpp
+    ui/components/Tooltip.cpp
     ui/components/TreeView.cpp
     ui/Component.cpp
     ui/Context.cpp
@@ -73,6 +81,7 @@ add_library(salal_ui STATIC
     ui/detail/FocusManager.cpp
     ui/detail/LayoutEngine.cpp
     ui/shapes/Circle.cpp
+    ui/shapes/Chevron.cpp
     ui/shapes/Line.cpp
     ui/shapes/Rectangle.cpp
     ui/shapes/Icon.cpp

@@ -15,6 +15,8 @@ namespace ui {
 					return "menu";
 				case OverlayKind::Dialog:
 					return "dialog";
+				case OverlayKind::Panel:
+					return "panel";
 				case OverlayKind::Toast:
 					return "toast";
 				case OverlayKind::Tooltip:

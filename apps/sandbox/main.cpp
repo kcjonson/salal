@@ -33,7 +33,7 @@ namespace {
 	}};
 
 	// In the picker's order; the first is where the sandbox starts without --scene.
-	const std::array<const sandbox::SceneInfo*, 19> kScenes{
+	const std::array<const sandbox::SceneInfo*, 20> kScenes{
 		// The renderer's, from worldsim.
 		&sandbox::kSdfMinimalScene,
 		&sandbox::kPolygonScene,
@@ -55,6 +55,7 @@ namespace {
 		&sandbox::kUiFocusScene,
 		&sandbox::kUiDisplayScene,
 		&sandbox::kUiControlsScene,
+		&sandbox::kUiOverlayComponentsScene,
 	};
 
 	void printUsage(std::FILE* stream) {

@@ -41,6 +41,9 @@ namespace ui::detail {
 
 		[[nodiscard]] ComponentId captor() const { return captured; }
 		[[nodiscard]] Cursor	  cursor() const;
+		// What the pointer is over, innermost first, and where it is in the ui's px.
+		[[nodiscard]] const std::vector<ComponentId>& hovered() const { return hoverChain; }
+		[[nodiscard]] Foundation::Vec2				  pointerAt() const { return pointer; }
 
 	  private:
 		bool pointerDown(PointerEvent& event);

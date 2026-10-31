@@ -247,6 +247,9 @@ namespace ui::detail {
 		if (deliver(players[player].focused, event)) {
 			return true;
 		}
+		if (event.type == KeyEvent::Type::Cancel) {
+			return context.cancelOverlay(player);
+		}
 		return event.type == KeyEvent::Type::Navigate && direction(player, event.direction);
 	}
 
@@ -276,6 +279,9 @@ namespace ui::detail {
 			if (node->focusable && canFocus(*node, player)) {
 				move(player, node->selfId, false, false);
 				return;
+			}
+			if (node->isOverlay()) {
+				return; // nothing to focus in it: focus stays, rather than going past it to its opener
 			}
 		}
 		if (players[player].scopes.empty()) {
@@ -325,6 +331,9 @@ namespace ui::detail {
 		}
 		if (now->handlers && now->handlers->onFocus) {
 			now->handlers->onFocus(*now);
+		}
+		if (to.valid() && state.focused == to) {
+			context.focusMoved(player, from);
 		}
 	}
 
@@ -635,6 +644,8 @@ namespace ui::detail {
 					gone->focusedBy &= ~bitOf(player);
 					gone->focusVisibleBy &= ~bitOf(player);
 				}
+				// Focus in an overlay that closes goes back to where it was when the overlay opened.
+				state.restore = context.overlayRestore(state.focused, root);
 				state.focused = {};
 				state.lost = true;
 			}
