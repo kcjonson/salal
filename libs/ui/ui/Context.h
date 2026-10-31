@@ -24,10 +24,17 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <input/InputTypes.h>
+
+#include <memory>
 #include <optional>
 #include <vector>
 
 namespace ui {
+
+	namespace detail {
+		class Dispatcher;
+	} // namespace detail
 
 	// A draw key is (slot << kRankBits) | rank. The scene is slot 0; popup stack entries and the tiers
 	// above it take the slots after.
@@ -60,8 +67,12 @@ namespace ui {
 		// The scene's icon atlases; a game adds its own (my_game::iconAtlas()) before its icons draw.
 		[[nodiscard]] IconService& icons() { return iconService; }
 
-		// Resizes every root.
-		void						   setViewport(Foundation::Vec2 size);
+		// The window's logical size, which the ui's viewport is at its scale; resizes every root.
+		void setViewport(Foundation::Vec2 size);
+		// The ui's one scale (R7.5): its viewport is the window's logical size over it, so layout and
+		// input work in the scaled space and nothing is zoomed as a bitmap. 0.25 to 4; 1 by default.
+		void						   setScale(float value);
+		[[nodiscard]] float			   getScale() const { return scale; }
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }
 
 		void update(double dt);
@@ -71,6 +82,18 @@ namespace ui {
 		// Draws every visible component at its key, in its own space.
 		void render();
 
+		// One platform event; true when the ui took it, so the scene shouldn't. Pointer events go to
+		// the topmost hit, a press's gesture stays with whoever had the press, and the wheel scrolls.
+		bool dispatch(const foundation::InputEvent& event);
+		// The topmost component the pointer hits at a point, in the ui's px; none for empty space. A
+		// scroller is the hit over its scrollbar, which sets `onScrollbar`.
+		[[nodiscard]] ComponentId hitTest(Foundation::Vec2 point, bool* onScrollbar = nullptr) const;
+		// The cursor the hovered component, or the pointer's captor, asks for.
+		[[nodiscard]] Cursor cursor() const;
+		// Ends anything mid-interaction: a held press, a capture, a drag, the hover. The scene was
+		// covered, or the window lost focus.
+		void cancelInteraction();
+
 		// Every visible component, bottom to top, as of the last layout.
 		[[nodiscard]] const std::vector<ComponentId>& paintOrder() const { return order; }
 		[[nodiscard]] Component*					  find(ComponentId id) const { return registry.find(id); }
@@ -79,6 +102,7 @@ namespace ui {
 
 	  private:
 		friend class Component;
+		friend class detail::Dispatcher;
 		friend Registry* detail::registryOf(const Context& context);
 
 		struct OrderItem {
@@ -87,7 +111,18 @@ namespace ui {
 		};
 
 		ComponentId adoptRoot(std::unique_ptr<Component> component, const Component::Args& args);
-		void		updateScreen(Component& component, const Affine& parent, const std::optional<Foundation::Rect>& parentClip);
+		void		updateScreen(
+				   Component&							  component,
+				   const Affine&						  parent,
+				   const std::optional<Foundation::Rect>& parentClip,
+				   bool									  parentEnabled,
+				   bool									  blocked
+			   );
+		void		resizeRoots();
+		void		removing(ComponentId root);
+		void		capture(ComponentId captor);
+		ComponentId captor() const;
+		void		drawScrollbar(const Component& scroller) const;
 		void		buildOrder();
 		void		paintContext(Component& contextRoot);
 		void		collectContext(Component& parent, int inheritedZ);
@@ -99,15 +134,26 @@ namespace ui {
 		IconService				 iconService;
 		std::vector<ComponentId> roots;
 		ComponentId				 defaultRoot;
+		Foundation::Vec2		 windowSize;
 		Foundation::Vec2		 viewport;
+		float					 scale = 1.0F;
 		std::vector<ComponentId> order;
-		std::vector<ComponentId> dirtyBoundaries; // where the next pass lays out from
-		std::uint32_t			 layoutPass = 0;
-		std::vector<OrderItem>	 orderScratch;
-		bool					 geometryDirty = true;
-		bool					 orderDirty = true;
-		bool					 drawing = false;
-		bool					 rankOverflowLogged = false;
+		// The paint order as the pointer meets it: each component, and each scroller's bar after the
+		// last of its subtree, where it paints.
+		struct HitEntry {
+			ComponentId id;
+			bool		scrollbar;
+		};
+		std::vector<HitEntry>				hitList;
+		std::unique_ptr<detail::Dispatcher> dispatcher;
+		std::vector<ComponentId>			dirtyBoundaries; // where the next pass lays out from
+		std::uint32_t						layoutPass = 0;
+		std::vector<OrderItem>				orderScratch;
+		bool								geometryDirty = true;
+		bool								orderDirty = true;
+		bool								drawing = false;
+		bool								hoverStale = false; // something moved under a still pointer
+		bool								rankOverflowLogged = false;
 	};
 
 	template <typename T>

@@ -27,8 +27,9 @@ namespace ui {
 		void					  describe(nlohmann::json& node) const override;
 
 	  protected:
-		void onMount() override;
-		void render() override;
+		void						onMount() override;
+		void						render() override;
+		[[nodiscard]] PointerEvents defaultPointerEvents() const override { return PointerEvents::Auto; }
 
 	  private:
 		Foundation::Vec2 initialStart;

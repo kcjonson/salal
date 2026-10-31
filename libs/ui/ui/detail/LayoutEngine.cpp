@@ -203,7 +203,7 @@ namespace ui::detail {
 					float main = item.basis;
 					if (free > 0.0F && grow > 0.0F) {
 						main += free * std::max(item.component->layout.flexGrow, 0.0F) / grow;
-					} else if (free < 0.0F && shrink > 0.0F) {
+					} else if (free < 0.0F && shrink > 0.0F && node.overflow != Overflow::Scroll) {
 						main += free * std::max(item.component->layout.flexShrink, 0.0F) * item.basis / shrink;
 					}
 					const float held = std::max(std::min(main, item.maxMain), item.minMain);
@@ -244,6 +244,23 @@ namespace ui::detail {
 		} else {
 			arrangeFree(node);
 		}
+		if (node.overflow == Overflow::Scroll) {
+			scrollExtent(node);
+		}
+	}
+
+	// How far a scroller scrolls: its children's margin boxes and its padding past its box (R4.13).
+	void LayoutEngine::scrollExtent(Component& node) {
+		Foundation::Vec2 content{0.0F, 0.0F};
+		for (const ComponentId childId : node.children) {
+			const Component* child = registry.find(childId);
+			if (child != nullptr && child->isShown()) {
+				content = glm::max(content, child->offset + child->size + child->margin.total());
+			}
+		}
+		content += Foundation::Vec2{node.layout.padding.right, node.layout.padding.bottom};
+		node.scrollMax = glm::max(content - node.size, Foundation::Vec2{0.0F, 0.0F});
+		node.scroll = glm::clamp(node.scroll, Foundation::Vec2{0.0F, 0.0F}, node.scrollMax);
 	}
 
 	void LayoutEngine::arrangeFree(Component& node) {

@@ -13,7 +13,10 @@ namespace ui {
 		void					  describe(nlohmann::json& node) const override;
 
 	  protected:
-		void render() override;
+		void						render() override;
+		[[nodiscard]] PointerEvents defaultPointerEvents() const override { return PointerEvents::Auto; }
+		// The disc, not its box.
+		[[nodiscard]] bool containsPoint(Foundation::Vec2 local) const override;
 	};
 
 } // namespace ui
