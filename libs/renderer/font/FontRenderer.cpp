@@ -109,10 +109,7 @@ namespace Renderer {
 	}
 
 	void FontRenderer::release() {
-		for (Atlas& atlas : atlases) {
-			Primitives::destroyTexture(atlas.texture);
-		}
-		atlases.clear();
+		atlases.clear(); // their textures go with them
 		fallbackFamily = FontFamily::Default;
 		glyphQuadCache.clear();
 		wrappedTextCache.clear();
@@ -220,6 +217,17 @@ namespace Renderer {
 			atlasMetadata.glyphSize,
 			atlasMetadata.distanceRange
 		);
+		if (thinDistanceRange(atlasMetadata)) {
+			LOG_WARNING(
+				UI,
+				"SDF atlas %s: a distance range of %.1f texels is under a sixth of its %d-texel em, too thin for small text; generate it "
+				"with %d or more",
+				std::filesystem::path(jsonPath).filename().string().c_str(),
+				atlasMetadata.distanceRange,
+				atlasMetadata.glyphSize,
+				(atlasMetadata.glyphSize + 5) / 6
+			);
+		}
 
 		std::map<char, SDFGlyph>& sdfGlyphs = atlas.glyphs;
 
@@ -324,7 +332,6 @@ namespace Renderer {
 		LOG_INFO(UI, "Loaded atlas texture: %dx%d, %d channels", width, height, channels);
 
 		// RGB8, linear, clamped: the SDF is sampled bilinearly and decoded in the shader.
-		Primitives::destroyTexture(atlas.texture);
 		atlas.texture = Primitives::createTexture(
 			{.width = width, .height = height, .format = TextureFormat::Rgb8, .linear = true, .pixels = imageData.get()}
 		);
@@ -456,7 +463,7 @@ namespace Renderer {
 			quad.uvMin = glm::clamp(glm::vec2(glyph.atlasBoundsMin.x - padU, glyph.atlasBoundsMin.y - padV), 0.0F, 1.0F);
 			quad.uvMax = glm::clamp(glm::vec2(glyph.atlasBoundsMax.x + padU, glyph.atlasBoundsMax.y + padV), 0.0F, 1.0F);
 			quad.color = color;
-			quad.atlas = atlas.texture;
+			quad.atlas = atlas.texture.handle();
 			quad.pixelRange = atlas.metadata.distanceRange;
 
 			outQuads.push_back(quad);
@@ -684,7 +691,7 @@ namespace Renderer {
 	}
 
 	TextureHandle FontRenderer::getAtlasTexture(FontFamily family) const {
-		return atlasFor(family).texture;
+		return atlasFor(family).texture.handle();
 	}
 
 	std::string FontRenderer::crampedGlyphs(FontFamily family) const {
