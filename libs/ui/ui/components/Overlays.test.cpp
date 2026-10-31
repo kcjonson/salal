@@ -1,23 +1,30 @@
 // The overlay components through the dispatcher: a menu's choice, its keys and its disabled items; a
 // select's value and where focus goes after; a press outside a menu, focus leaving one, and a
 // context menu at the press; a dialog's modality, focus scope and the ways it closes; the hover
-// tooltip's delay and what closes it; toasts timing out, pressed, capped and brought to the front.
-// Headless; nothing draws.
+// tooltip's delay and what closes it; toasts timing out, pressed, capped and brought to the front;
+// each one fading in to full opacity, as the tree snapshot reports it, and a fade that leaves the style
+// alone. Headless; nothing draws.
 
 #include "ui/Context.h"
 #include "ui/components/Button.h"
 #include "ui/components/ContextMenu.h"
 #include "ui/components/Dialog.h"
 #include "ui/components/DropdownButton.h"
+#include "ui/components/FadeIn.h"
 #include "ui/components/Menu.h"
 #include "ui/components/Select.h"
 #include "ui/components/Toast.h"
 #include "ui/components/Tooltip.h"
+#include "ui/debug/TreeSnapshot.h"
 
 #include <gtest/gtest.h>
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ui {
@@ -27,6 +34,19 @@ namespace ui {
 		using foundation::InputEvent;
 		using foundation::Key;
 		using foundation::MouseButton;
+
+		// The opacity the tree snapshot gives the first node of a type under `node`.
+		std::optional<float> opacityOf(const nlohmann::json& node, std::string_view type) {
+			if (node.at("type").get<std::string>() == type) {
+				return node.at("opacity").get<float>();
+			}
+			for (const nlohmann::json& child : node.at("children")) {
+				if (const std::optional<float> found = opacityOf(child, type)) {
+					return found;
+				}
+			}
+			return std::nullopt;
+		}
 
 		constexpr foundation::DeviceId kKeyboard{.kind = foundation::DeviceKind::Keyboard};
 
@@ -63,6 +83,17 @@ namespace ui {
 				context.layout();
 				const Foundation::Rect box = component.screenBounds();
 				return {box.x + box.width * 0.5F, box.y + box.height * 0.5F};
+			}
+
+			// As /api/ui/tree reports it.
+			std::optional<float> reportedOpacity(std::string_view type) {
+				const nlohmann::json tree = nlohmann::json::parse(treeJson(&context, "overlays", {800.0F, 600.0F}));
+				for (const nlohmann::json& top : tree.at("roots")) {
+					if (const std::optional<float> found = opacityOf(top, type)) {
+						return found;
+					}
+				}
+				return std::nullopt;
 			}
 
 			Context		   context{{800.0F, 600.0F}};
@@ -322,6 +353,49 @@ namespace ui {
 		click(middleOf(*toast.get())); // over the modal dialog, so it takes the press
 		EXPECT_EQ(pressed, 1);
 		EXPECT_NE(dialog.get(), nullptr);
+	}
+
+	// --- Entrances ---
+
+	TEST_F(UiOverlayComponentsTest, EachOverlayFadesInToFullOpacityAndStaysThere) {
+		Ref<Button> opener = root.addChild<Button>({.position = {100.0F, 100.0F}, .label = "Build"});
+		opener.get()->setTooltip(tooltip([](Tooltip& tip) { tip.addChild<Rectangle>({.size = {100.0F, 20.0F}}); }));
+		move(middleOf(*opener.get()));
+		wait(1.0); // the rest, then the fade
+		EXPECT_EQ(reportedOpacity("Tooltip"), 1.0F);
+
+		Menu::open(*opener.get(), {.items = {{.label = "Wall"}}});
+		context.layout();
+		EXPECT_EQ(reportedOpacity("Menu"), 0.0F);
+		wait(0.5);
+		EXPECT_EQ(reportedOpacity("Menu"), 1.0F);
+
+		Dialog::open(*root.get(), {.title = "Colonist", .panelSize = {200.0F, 100.0F}, .modal = false});
+		Ref<ToastStack> stack = ToastStack::open(*root.get(), {});
+		stack.get()->add({.title = "Saved", .autoDismissMs = 0.0});
+		context.layout();
+		EXPECT_EQ(reportedOpacity("Dialog"), 0.0F);
+		EXPECT_EQ(reportedOpacity("Toast"), 0.0F);
+		wait(0.5);
+		EXPECT_EQ(reportedOpacity("Dialog"), 1.0F);
+		EXPECT_EQ(reportedOpacity("Toast"), 1.0F);
+		wait(1.0);
+		EXPECT_EQ(reportedOpacity("Dialog"), 1.0F);
+		EXPECT_EQ(reportedOpacity("Toast"), 1.0F);
+	}
+
+	TEST_F(UiOverlayComponentsTest, AFadeEndsAtTheStylesOpacityAndLeavesTheStyleAlone) {
+		Ref<Rectangle>	   box = root.addChild<Rectangle>({.size = {10.0F, 10.0F}, .style = {.opacity = 0.5F}});
+		const Tween<float> appear = fadeIn(*box.get());
+		EXPECT_EQ(reportedOpacity("Rectangle"), 0.0F);
+		wait(0.05);
+		const float halfway = reportedOpacity("Rectangle").value_or(0.0F);
+		EXPECT_GT(halfway, 0.0F);
+		EXPECT_LT(halfway, 0.5F);
+		EXPECT_EQ(box.get()->getDeclaredStyle().opacity, 0.5F);
+		wait(0.5);
+		EXPECT_EQ(reportedOpacity("Rectangle"), 0.5F);
+		EXPECT_EQ(box.get()->getStyle().opacity, 0.5F);
 	}
 
 } // namespace ui

@@ -874,7 +874,7 @@ namespace ui {
 		if (!component.isShown()) {
 			return;
 		}
-		component.effectiveOpacity = parentOpacity * component.style.opacity.value_or(1.0F);
+		component.effectiveOpacity = parentOpacity * component.style.opacity.value_or(1.0F) * component.fade;
 		const Affine local = Affine::local(component.offset + component.margin.topLeft(), component.size, component.transform);
 		const bool	 moved = !local.isTranslation() || local.tx != 0.0F || local.ty != 0.0F;
 		if (moved) {
