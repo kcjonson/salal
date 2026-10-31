@@ -31,7 +31,7 @@ namespace ui {
 		row.alignItems = AlignItems::Center;
 		row.justifyContent = JustifyContent::Center;
 		row.gap = kGap;
-		row.padding = {0.0F, kPadX};
+		row.padding = label.empty() ? Edges{} : Edges{0.0F, kPadX}; // an icon alone sits in the middle
 		setLayout(row);
 		if (getSizeSpec().height.isAuto()) {
 			setSize({getSizeSpec().width, metrics.controlHeight});

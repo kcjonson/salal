@@ -72,7 +72,7 @@ namespace ui {
 			UI_COMMON_ARGS
 			ToastAnchor anchor = ToastAnchor::BottomRight;
 			float		spacing = 8.0F;
-			float		inset = 16.0F; // from the viewport's edges
+			Edges		inset = 16.0F; // from the viewport's edges
 			std::size_t maxToasts = 5;
 			float		toastWidth = 300.0F;
 		};
@@ -108,7 +108,7 @@ namespace ui {
 
 		ToastAnchor		   anchor;
 		float			   spacing;
-		float			   inset;
+		Edges			   inset;
 		std::size_t		   maxToasts;
 		float			   toastWidth;
 		std::vector<Entry> entries; // oldest first

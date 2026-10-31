@@ -50,7 +50,7 @@ namespace ui {
 			.style = {.backgroundColor = theme.get(tokens::tone::accent::color)},
 		});
 		if (!iconName.empty()) {
-			addChild<Icon>({.size = {kIcon, kIcon}, .style = dim ? styles::text::secondary : Style{}, .name = iconName});
+			shownIcon = addChild<Icon>({.size = {kIcon, kIcon}, .style = dim ? styles::text::secondary : Style{}, .name = iconName});
 		}
 		text = addChild<Text>({.layout = {.flexGrow = 1.0F}, .style = dim ? styles::text::secondary : styles::text::body, .text = label});
 		trailingText = addChild<Text>({.style = styles::label, .text = trailing});
@@ -68,6 +68,19 @@ namespace ui {
 		label = std::move(value);
 		if (Text* shown = text.get()) {
 			shown->setText(label);
+		}
+	}
+
+	void ListRow::setDim(bool value) {
+		if (value == dim) {
+			return;
+		}
+		dim = value;
+		if (Icon* shown = shownIcon.get()) {
+			shown->setStyle(dim ? styles::text::secondary : Style{});
+		}
+		if (Text* shown = text.get()) {
+			shown->setStyle(dim ? styles::text::secondary : styles::text::body);
 		}
 	}
 

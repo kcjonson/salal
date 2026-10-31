@@ -68,7 +68,7 @@ namespace ui {
 			textRow = track;
 		}
 		if (textRow.get() != nullptr) {
-			textRow.addChild<Text>({.style = labelStyle, .text = label});
+			shownLabel = textRow.addChild<Text>({.style = labelStyle, .text = label});
 			shownValue = textRow.addChild<Text>({.text = valueText});
 		}
 		fill();
@@ -93,6 +93,13 @@ namespace ui {
 		valueText = std::move(text);
 		if (Text* shown = shownValue.get()) {
 			shown->setText(valueText);
+		}
+	}
+
+	void ProgressBar::setLabel(std::string text) {
+		label = std::move(text);
+		if (Text* shown = shownLabel.get()) {
+			shown->setText(label);
 		}
 	}
 

@@ -34,6 +34,8 @@ namespace ui {
 		void			   setSelected(bool value);
 		void			   setLabel(std::string value);
 		void			   setTrailing(std::string value);
+		[[nodiscard]] bool isDim() const { return dim; }
+		void			   setDim(bool value);
 		void			   setOnPress(std::function<void()> callback) { onPress = std::move(callback); }
 
 		[[nodiscard]] const char* typeName() const override { return "ListRow"; }
@@ -51,6 +53,7 @@ namespace ui {
 		float				  indent;
 		bool				  selectedAtStart;
 		std::function<void()> onPress;
+		Ref<Icon>			  shownIcon;
 		Ref<Text>			  text;
 		Ref<Text>			  trailingText;
 		Ref<Rectangle>		  bar;
