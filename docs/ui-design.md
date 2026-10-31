@@ -604,7 +604,11 @@ Decided 2026-10-30, closing the review of the spec.
   component (R12.5), no nine-slice (R2.12, R5.19) and no art residency,
   decoding or context-loss handling (R5.31 to R5.33). Textures are MSDF
   atlases (fonts, icons) and render targets; `drawImage` stays only to
-  composite a render target.
+  composite a render target. That one file was the whole of the game's paper
+  look, so a surface texture is a game's fill hook instead, computed in the
+  base shader per rect ([shader-hooks.md](shader-hooks.md), "Fill hooks",
+  2026-10-31), and the rest of a game's art is vector through
+  `renderer/vector`.
 - **Rounded clip (R4.14):** deferred until a game needs one. Until then,
   inset content by the radius. The instance format already has a byte for a
   rounded-clip entry.
