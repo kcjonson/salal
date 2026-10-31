@@ -99,6 +99,31 @@ namespace foundation {
 			gz = kGrads[idx][2]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
 		}
 
+		// Where each fractalNoise2 octave samples from, in its own lattice units, in
+		// 65536ths; octave i reads entry i % 16. Gradient noise is 0 at its lattice
+		// points, and unshifted octaves at lacunarity 2 all have a lattice point at every
+		// integer, so their sum is 0 there too. These keep every octave's lattice at
+		// least 1/32 of a cell, on each axis, from every other octave's at lacunarity 2
+		// and from the integers.
+		inline constexpr uint16_t kOctaveOffsetX[16] =
+			{3752, 32263, 47360, 59925, 19021, 17060, 7795, 54912, 9872, 26527, 18277, 55290, 50790, 4576, 51674, 16225};
+		inline constexpr uint16_t kOctaveOffsetY[16] =
+			{29970, 24750, 38559, 7890, 55392, 5978, 29888, 8584, 9040, 12153, 38523, 27056, 20525, 33387, 6834, 49365};
+
+		struct OctaveOffset {
+			float x = 0.0F;
+			float y = 0.0F;
+		};
+
+		inline OctaveOffset octaveOffset(int octave) {
+			const auto	slot = static_cast<uint32_t>(octave) & 15U;
+			const float unit = 1.0F / 65536.0F;
+			return {
+				.x = static_cast<float>(kOctaveOffsetX[slot]) * unit, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+				.y = static_cast<float>(kOctaveOffsetY[slot]) * unit, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+			};
+		}
+
 	} // namespace detail
 
 	// ============================================================================
@@ -271,6 +296,9 @@ namespace foundation {
 	// FractalNoise3: fBm over gradientNoise3.
 	// lacunarity: frequency multiplier per octave (typically 2.0)
 	// gain: amplitude multiplier per octave (typically 0.5 for H=1 fBm)
+	// Its octaves are unshifted, unlike fractalNoise2's, so at an integer lacunarity
+	// they share lattice points and the sum is 0 at every integer (x, y, z). Worldsim's
+	// world generation is built on this output and hashes it against goldens.
 	inline float fractalNoise3(float x, float y, float z, uint32_t seed, int octaves, float lacunarity, float gain) {
 		float value = 0.0F;
 		float amplitude = 1.0F;
@@ -285,16 +313,16 @@ namespace foundation {
 		return maxAmp > 0.0F ? value / maxAmp : 0.0F;
 	}
 
-	// FractalNoise2: fractalNoise3(x, y, 0, ...) bit-for-bit over gradientNoise2, for
-	// planar callers that sample at z = 0 (an exact-zero octave's sign cannot reach the
-	// sum, which starts at +0).
+	// FractalNoise2: fBm over gradientNoise2, each octave read at its own offset
+	// (detail::octaveOffset) so the octaves' lattice zeros don't line up.
 	inline float fractalNoise2(float x, float y, uint32_t seed, int octaves, float lacunarity, float gain) {
 		float value = 0.0F;
 		float amplitude = 1.0F;
 		float frequency = 1.0F;
 		float maxAmp = 0.0F;
 		for (int i = 0; i < octaves; ++i) {
-			value += gradientNoise2(x * frequency, y * frequency, seed + static_cast<uint32_t>(i)) * amplitude;
+			const detail::OctaveOffset offset = detail::octaveOffset(i);
+			value += gradientNoise2(x * frequency + offset.x, y * frequency + offset.y, seed + static_cast<uint32_t>(i)) * amplitude;
 			maxAmp += amplitude;
 			amplitude *= gain;
 			frequency *= lacunarity;
@@ -310,8 +338,11 @@ namespace foundation {
 	// octave's cell index is found in integers (the position splits into whole
 	// wavelengths plus a remainder under one wavelength) and only that remainder is a
 	// float. `wavelength` >= 1, in the units of the whole part; frac in [0, 1). `first`
-	// is fractalNoise2 bit for bit whenever the position divided by the wavelength is
-	// exact in float at every octave; `second` is an independent field.
+	// is the plain fBm of gradientNoise2 (no octave offsets, unlike fractalNoise2) bit
+	// for bit whenever the position divided by the wavelength is exact in float at every
+	// octave; `second` is an independent field. Its octaves share lattice zeros at whole
+	// wavelengths, which worldsim reads off; its land shader mirrors this function
+	// (hash_noise.glsl, held to the C++ by SurfaceFieldGolden.test.cpp).
 	inline NoisePair fractalNoise2SplitPair(
 		int64_t	 wholeX,
 		int64_t	 wholeY,
