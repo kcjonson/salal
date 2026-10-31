@@ -4,7 +4,6 @@
 #include "ui/theme/Tokens.h"
 
 #include <algorithm>
-#include <optional>
 
 namespace ui {
 
@@ -55,26 +54,21 @@ namespace ui {
 				.justifyContent = JustifyContent::SpaceBetween,
 			};
 		}
-		// Its own stacking context, so the inline texts' zIndex lifts them over the fill and no further.
-		Ref<Rectangle> track = addChild<Rectangle>({
-			.size = {kAuto, height},
-			.layout = trackLayout,
-			.style = styles::progressTrack.extend({.borderRadius = radius}),
-			.isolation = inlineLabel,
-		});
+		Ref<Rectangle> track = addChild<Rectangle>(
+			{.size = {kAuto, height}, .layout = trackLayout, .style = styles::progressTrack.extend({.borderRadius = radius})}
+		);
+		// First in the track, so the inline label and value draw over it.
 		bar = track.addChild<Rectangle>({
 			.size = {percent(value * 100.0F), percent(100.0F)},
 			.layout = {.position = Position::Absolute, .inset = {.top = 0.0F, .left = 0.0F}},
 			.style = {.borderRadius = radius},
 		});
-		std::optional<int> textZ;
 		if (inlineLabel) {
 			texts = track;
-			textZ = 1;
 		}
 		if (texts.get() != nullptr) {
-			shownLabel = texts.addChild<Text>({.style = labelStyle, .zIndex = textZ, .text = label});
-			shownValue = texts.addChild<Text>({.zIndex = textZ, .text = valueText});
+			shownLabel = texts.addChild<Text>({.style = labelStyle, .text = label});
+			shownValue = texts.addChild<Text>({.text = valueText});
 		}
 		showTexts();
 		fill();
