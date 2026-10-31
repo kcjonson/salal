@@ -187,6 +187,13 @@ namespace ui {
 				dirtyBoundaries.push_back(rootId);
 			}
 		}
+		for (const OverlayEntry& open : overlayStack) {
+			const auto* absolute = std::get_if<Absolute>(&open.options.placement);
+			if (Component* entry = registry.find(open.id); entry != nullptr && absolute != nullptr && absolute->cover) {
+				entry->sizeSpec = Size(viewport);
+				entry->layoutChanged(true);
+			}
+		}
 		geometryDirty = true;
 	}
 
@@ -237,6 +244,8 @@ namespace ui {
 			}
 			geometryDirty = true;
 		}
+		changed = refreshGeometry() || changed;
+		placeOverlays();
 		changed = refreshGeometry() || changed;
 		if (orderDirty) {
 			buildOrder();
@@ -294,7 +303,14 @@ namespace ui {
 			   component.scroll == Foundation::Vec2{0.0F, 0.0F} ? component.screen : component.screen * Affine::translation(-component.scroll);
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
-				updateScreen(*child, childParent, childClip, component.enabledInTree, childBlocked);
+				const bool entry = child->isOverlay();
+				updateScreen(
+					*child,
+					child->detached ? Affine{} : childParent,
+					entry ? std::nullopt : childClip,
+					component.enabledInTree,
+					!entry && childBlocked
+				);
 			}
 		}
 	}
@@ -310,24 +326,40 @@ namespace ui {
 		}
 		const std::size_t rootCount = orderScratch.size();
 		std::ranges::stable_sort(orderScratch, {}, &OrderItem::z);
+		paintingSlot = 0;
 		for (std::size_t i = 0; i < rootCount; ++i) {
 			paintContext(*orderScratch[i].component);
 		}
 		orderScratch.clear();
-
-		if (order.size() > static_cast<std::size_t>(kMaxRank) + 1 && !rankOverflowLogged) {
-			LOG_ERROR(
-				UI,
-				"%zu visible components in one slot, past the %d a draw key ranks; the rest share its last key",
-				order.size(),
-				kMaxRank + 1
-			);
-			rankOverflowLogged = true;
+		int stackSlot = 0;
+		for (const bool tooltips : {false, true}) {
+			for (const OverlayEntry& entry : overlayStack) {
+				Component* component = registry.find(entry.id);
+				if (component == nullptr || (entry.options.kind == OverlayKind::Tooltip) != tooltips || !shownInTree(*component)) {
+					continue;
+				}
+				paintingSlot = tooltips ? kTooltipSlot : std::min(++stackSlot, kMaxStackEntries);
+				paintContext(*component);
+			}
 		}
-		for (std::size_t rank = 0; rank < order.size(); ++rank) {
-			Component* component = registry.find(order[rank]);
-			component->key = static_cast<std::int32_t>(std::min(rank, static_cast<std::size_t>(kMaxRank)));
+		paintingSlot = 0;
+
+		// A component's key is its slot over its rank in that slot.
+		int			slotNow = -1;
+		std::size_t rank = 0;
+		for (const ComponentId id : order) {
+			Component* component = registry.find(id);
+			if (component->slot != slotNow) {
+				slotNow = component->slot;
+				rank = 0;
+			}
+			if (rank > static_cast<std::size_t>(kMaxRank) && !rankOverflowLogged) {
+				LOG_ERROR(UI, "more than %d visible components in slot %d; the rest share its last key", kMaxRank + 1, slotNow);
+				rankOverflowLogged = true;
+			}
+			component->key = (slotNow << kRankBits) | static_cast<std::int32_t>(std::min(rank, static_cast<std::size_t>(kMaxRank)));
 			component->lastKey = component->key;
+			++rank;
 		}
 		// Each component's last key is its subtree's highest, children after parents in reverse.
 		for (auto it = order.rbegin(); it != order.rend(); ++it) {
@@ -349,6 +381,9 @@ namespace ui {
 		hitList.reserve(order.size() + bars.size());
 		std::size_t bar = 0;
 		for (const ComponentId id : order) {
+			if (registry.find(id)->slot == kTooltipSlot) {
+				continue;
+			}
 			hitList.push_back({.id = id, .scrollbar = false});
 			const std::int32_t key = registry.find(id)->key;
 			for (; bar < bars.size() && bars[bar].first == key; ++bar) {
@@ -361,6 +396,7 @@ namespace ui {
 	// Members of every open context share orderScratch: a nested call appends after this one's and
 	// truncates back, so indices hold where references wouldn't.
 	void Context::paintContext(Component& contextRoot) {
+		contextRoot.slot = paintingSlot;
 		order.push_back(contextRoot.selfId);
 		const std::size_t begin = orderScratch.size();
 		collectContext(contextRoot, 0);
@@ -375,6 +411,7 @@ namespace ui {
 			if (member.isolation) {
 				paintContext(member);
 			} else {
+				member.slot = paintingSlot;
 				order.push_back(member.selfId);
 			}
 		}
@@ -384,8 +421,8 @@ namespace ui {
 	void Context::collectContext(Component& parent, int inheritedZ) {
 		for (const ComponentId childId : parent.children) {
 			Component* child = registry.find(childId);
-			if (child == nullptr || !child->isShown()) {
-				continue;
+			if (child == nullptr || !child->isShown() || child->isOverlay()) {
+				continue; // an entry paints in its own slot
 			}
 			const int z = child->zIndex.value_or(inheritedZ);
 			orderScratch.push_back({.component = child, .z = z});
@@ -419,8 +456,12 @@ namespace ui {
 	// point is in: inside every clip above it, its own box after its transform is undone, edges
 	// half-open (R8.12). Disabled components occlude (R9.5); a transparent one doesn't (R8.3).
 	ComponentId Context::hitTest(Foundation::Vec2 point, bool* onScrollbar) const {
+		const int floor = modalFloor();
 		for (auto it = hitList.rbegin(); it != hitList.rend(); ++it) {
 			const Component* component = registry.find(it->id);
+			if (component != nullptr && component->slot < floor) {
+				break; // inert under a modal
+			}
 			if (component == nullptr || (component->clip && !inside(*component->clip, point))) {
 				continue;
 			}
@@ -459,6 +500,7 @@ namespace ui {
 	// The subtree's tweens and timers go with it.
 	void Context::removing(ComponentId root) {
 		dispatcher->removing(root);
+		std::erase_if(overlayStack, [&](const OverlayEntry& entry) { return within(entry.id, root); });
 		std::vector<ComponentId> subtree{root};
 		for (std::size_t i = 0; i < subtree.size(); ++i) {
 			if (const Component* node = registry.find(subtree[i])) {
@@ -467,6 +509,185 @@ namespace ui {
 		}
 		animator->ownersRemoved(subtree);
 		focusManager->removing(root);
+	}
+
+	bool Context::shownInTree(const Component& component) const {
+		for (const Component* node = &component; node != nullptr; node = registry.find(node->parentId)) {
+			if (!node->isShown()) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool Context::within(ComponentId id, ComponentId root) const {
+		for (const Component* node = registry.find(id); node != nullptr; node = registry.find(node->parentId)) {
+			if (node->selfId == root) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// --- The overlay stack ---
+
+	// An entry leaves its opener's flow and becomes a stacking context. A menu closes its player's
+	// other menus, except the ones it was opened from inside.
+	void Context::openOverlay(ComponentId entryId, ComponentId opener, OverlayOptions options) {
+		Component* entry = registry.find(entryId);
+		if (entry == nullptr) {
+			return;
+		}
+		const auto stacked =
+			std::ranges::count_if(overlayStack, [](const OverlayEntry& each) { return each.options.kind != OverlayKind::Tooltip; });
+		if (options.kind != OverlayKind::Tooltip && stacked >= kMaxStackEntries) {
+			LOG_ERROR(UI, "%d overlay stack entries open; this one shares the top slot", kMaxStackEntries);
+		}
+		entry->overlayKind = options.kind;
+		entry->isolation = true;
+		entry->layout.position = Position::Absolute;
+		if (const auto* absolute = std::get_if<Absolute>(&options.placement)) {
+			entry->detached = true;
+			if (absolute->cover) {
+				entry->sizeSpec = Size(viewport);
+			}
+		}
+		entry->layoutChanged(true);
+		orderDirty = true;
+		geometryDirty = true;
+		std::vector<ComponentId> closing;
+		if (options.kind == OverlayKind::Menu) {
+			for (auto open = overlayStack.rbegin(); open != overlayStack.rend(); ++open) { // the topmost first, so each hears its dismissal
+				if (open->options.kind == OverlayKind::Menu && open->options.player == options.player && !within(opener, open->id)) {
+					closing.push_back(open->id);
+				}
+			}
+		}
+		overlayStack.push_back({.id = entryId, .opener = opener, .options = std::move(options)});
+		for (const ComponentId id : closing) {
+			dismiss(id);
+		}
+	}
+
+	void Context::closeOverlay(Ref<Component> entryRef) {
+		Component* entry = entryRef.registry == &registry ? entryRef.get() : nullptr;
+		if (entry == nullptr || !entry->isOverlay()) {
+			return;
+		}
+		if (Component* opener = registry.find(entry->parentId)) {
+			const Registry::DispatchScope scope(registry);
+			opener->removeChild(entryRef);
+		}
+	}
+
+	void Context::dismissOverlay(Ref<Component> entryRef) {
+		if (entryRef.registry == &registry) {
+			dismiss(entryRef.componentId());
+		}
+	}
+
+	void Context::dismiss(ComponentId entryId) {
+		const auto open = std::ranges::find(overlayStack, entryId, &OverlayEntry::id);
+		if (open == overlayStack.end()) {
+			return;
+		}
+		const Registry::DispatchScope scope(registry);
+		const std::function<void()>	  onDismiss = open->options.onDismiss;
+		if (onDismiss) {
+			onDismiss();
+		}
+		closeOverlay({entryId, &registry});
+	}
+
+	void Context::bringToFront(Ref<Component> entryRef) {
+		if (entryRef.registry != &registry || entryRef.get() == nullptr || !entryRef.get()->isOverlay()) {
+			return;
+		}
+		const ComponentId front = entryRef.componentId();
+		std::stable_partition(overlayStack.begin(), overlayStack.end(), [&](const OverlayEntry& entry) {
+			return !within(entry.id, front);
+		});
+		orderDirty = true;
+	}
+
+	std::vector<ComponentId> Context::overlays() const {
+		std::vector<ComponentId> ids;
+		ids.reserve(overlayStack.size());
+		for (const OverlayEntry& entry : overlayStack) {
+			ids.push_back(entry.id);
+		}
+		return ids;
+	}
+
+	// After the layout: an anchored overlay where placement puts it against its origin on screen,
+	// converted to its opener's child space (inside its scroll); an absolute one at its screen point,
+	// which is its own space, or over the viewport.
+	void Context::placeOverlays() {
+		const Foundation::Rect screen{0.0F, 0.0F, viewport.x, viewport.y};
+		for (const OverlayEntry& open : overlayStack) {
+			Component* entry = registry.find(open.id);
+			Component* opener = registry.find(open.opener);
+			if (entry == nullptr || opener == nullptr || !entry->isShown()) {
+				continue;
+			}
+			const Foundation::Vec2 size = entry->size + entry->margin.total();
+			Foundation::Vec2	   at{0.0F, 0.0F};
+			if (const auto* anchored = std::get_if<Anchored>(&open.options.placement)) {
+				Foundation::Rect origin = opener->screenBounds();
+				if (anchored->point) {
+					const Foundation::Vec2 point = opener->localToScreen(*anchored->point);
+					origin = {point.x, point.y, 0.0F, 0.0F};
+				}
+				const Foundation::Rect rect = place(origin, size, screen, *anchored);
+				at = opener->screenToLocal({rect.x, rect.y}) + opener->scroll;
+			} else if (const auto& absolute = std::get<Absolute>(open.options.placement); !absolute.cover) {
+				at = absolute.at;
+				if (absolute.margin) {
+					at.x = std::clamp(at.x, *absolute.margin, std::max(viewport.x - *absolute.margin - size.x, *absolute.margin));
+					at.y = std::clamp(at.y, *absolute.margin, std::max(viewport.y - *absolute.margin - size.y, *absolute.margin));
+				}
+			}
+			if (at != entry->offset) {
+				entry->offset = at;
+				entry->position = at;
+				geometryDirty = true;
+			}
+		}
+	}
+
+	// A press outside the pointer player's menus closes them; it is consumed unless it is a secondary
+	// press or lands on an overlay trigger (R9.13).
+	bool Context::pressOutside(ComponentId hit, foundation::MouseButton button) {
+		constexpr int			 kPointerPlayer = 0;
+		std::vector<ComponentId> closing;
+		for (auto it = overlayStack.rbegin(); it != overlayStack.rend(); ++it) {
+			if (it->options.kind == OverlayKind::Menu && it->options.player == kPointerPlayer && !within(hit, it->id)) {
+				closing.push_back(it->id);
+			}
+		}
+		if (closing.empty()) {
+			return false;
+		}
+		bool trigger = false;
+		for (const Component* node = registry.find(hit); node != nullptr && !trigger; node = registry.find(node->parentId)) {
+			trigger = node->overlayTrigger;
+		}
+		for (const ComponentId id : closing) {
+			dismiss(id);
+		}
+		return button == foundation::MouseButton::Left && !trigger;
+	}
+
+	int Context::modalFloor() const {
+		constexpr int kPointerPlayer = 0;
+		int			  floor = 0;
+		for (const OverlayEntry& open : overlayStack) {
+			const Component* entry = registry.find(open.id);
+			if (entry != nullptr && open.options.kind == OverlayKind::Dialog && open.options.player == kPointerPlayer && entry->isShown()) {
+				floor = std::max(floor, entry->slot);
+			}
+		}
+		return floor;
 	}
 
 	void Context::pointerPressed(ComponentId hit) {
@@ -554,6 +775,11 @@ namespace ui {
 				renderComponent(*rootComponent, 1.0F);
 			}
 		}
+		for (const OverlayEntry& open : overlayStack) {
+			if (Component* entry = registry.find(open.id); entry != nullptr && entry->detached && shownInTree(*entry)) {
+				renderComponent(*entry, 1.0F);
+			}
+		}
 		if (scale != 1.0F) {
 			Renderer::Primitives::PopTransform();
 		}
@@ -583,7 +809,17 @@ namespace ui {
 		}
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
+				if (child->detached) {
+					continue; // drawn from the top, in screen space
+				}
+				const bool entry = child->isOverlay();
+				if (entry) {
+					Renderer::Primitives::pushClipReset();
+				}
 				renderComponent(*child, component.effectiveOpacity);
+				if (entry) {
+					Renderer::Primitives::popClip();
+				}
 			}
 		}
 		if (scrolled) {

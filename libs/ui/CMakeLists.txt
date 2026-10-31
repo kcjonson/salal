@@ -62,6 +62,7 @@ add_library(salal_ui STATIC
     ui/components/TreeView.cpp
     ui/Component.cpp
     ui/Context.cpp
+    ui/Overlay.cpp
     ui/Focus.cpp
     ui/Registry.cpp
     ui/Style.cpp

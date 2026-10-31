@@ -234,6 +234,27 @@ namespace Renderer {
 		EXPECT_EQ(uploaded[1].clip, Foundation::Vec4(110.0F, 0.0F, 130.0F, 50.0F));
 	}
 
+	TEST_F(FlushTest, AResetPushDrawsUnclippedAndAClipPushedOverItClipsAgain) {
+		Primitives::beginFrame();
+		Primitives::pushClip(Foundation::Rect{0.0F, 0.0F, 50.0F, 50.0F});
+		Primitives::pushClipReset();
+		rect(100.0F); // outside the clip it escaped
+		Primitives::pushClip(Foundation::Rect{90.0F, 0.0F, 40.0F, 40.0F});
+		rect(95.0F);
+		Primitives::popClip();
+		Primitives::popClip();
+		rect(10.0F); // under the first clip again
+		Primitives::popClip();
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 3U);
+		EXPECT_EQ(uploaded[0].clip, Foundation::Vec4(0.0F)); // none
+		EXPECT_EQ(uploaded[1].clip, Foundation::Vec4(90.0F, 0.0F, 130.0F, 40.0F));
+		EXPECT_EQ(uploaded[2].clip, Foundation::Vec4(0.0F, 0.0F, 50.0F, 50.0F));
+	}
+
 	TEST_F(FlushTest, ANegativeExtentIsEmptyUnderAMirrorToo) {
 		Primitives::beginFrame();
 		Primitives::PushTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(-1.0F, -1.0F, 1.0F)));

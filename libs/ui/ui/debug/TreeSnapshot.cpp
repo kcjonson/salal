@@ -9,6 +9,20 @@ namespace ui {
 
 	namespace {
 
+		const char* overlayKindName(OverlayKind kind) {
+			switch (kind) {
+				case OverlayKind::Menu:
+					return "menu";
+				case OverlayKind::Dialog:
+					return "dialog";
+				case OverlayKind::Toast:
+					return "toast";
+				case OverlayKind::Tooltip:
+					break;
+			}
+			return "tooltip";
+		}
+
 		const char* pointerEventsName(PointerEvents value) {
 			switch (value) {
 				case PointerEvents::Auto:
@@ -56,6 +70,9 @@ namespace ui {
 			const std::optional<int> zIndex = component.getZIndex();
 			out["zIndex"] = zIndex ? nlohmann::json(*zIndex) : nlohmann::json(nullptr);
 			out["isolation"] = component.getIsolation();
+			const std::optional<OverlayKind> overlay = component.getOverlayKind();
+			out["overlay"] = overlay ? nlohmann::json(overlayKindName(*overlay)) : nlohmann::json(nullptr);
+			out["slot"] = component.paintSlot();
 			out["key"] = component.isShown() ? nlohmann::json(component.drawKey()) : nlohmann::json(nullptr);
 			out["visible"] = component.isVisible();
 			out["enabled"] = component.isEnabled();

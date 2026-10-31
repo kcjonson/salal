@@ -24,13 +24,20 @@ that slot's stacking contexts.
   layout never do), which is the part of CSS z-index that hurts. Every root
   is a context of its own: each of the scene's roots, each stack entry, and
   the tooltip and drag tiers. An ancestor's clip applies
-  whatever the `zIndex`; escaping a clip is what the popup stack is for.
-- **The popup stack.** Dialogs, menus, selects, context menus and toasts are
-  entries in one stack, ordered by when they opened, latest on top; a toast is
+  whatever the `zIndex`; escaping a clip is what the overlay stack is for.
+- **The overlay stack.** Dialogs, menus, selects, context menus, toasts and
+  tooltips are overlays, entries in one stack, ordered by when they opened, latest on top; a toast is
   brought to the front when it arrives. An entry stays logically owned by the
   component that opened it, for lifetime, dismissal and commands, and anything
-  opened from an entry lands above it. The popup service (R8.21) is this
+  opened from an entry lands above it. The overlay service (R8.21) is this
   stack.
+- **Anchored and absolute.** An overlay is placed one of two ways. Anchored,
+  it opens from an origin in its opener (its box, or a point in it, for a
+  context menu at the press), sits beside it, flipped and kept inside the
+  viewport (R12.30), and moves with it as it scrolls, moves or turns, under
+  its transform. Absolute, it sits at a point in screen coordinates, or over
+  the whole viewport for a dialog's scrim, and its opener's position and
+  transform play no part. Either way the opener owns it.
 - **Fixed tiers above the stack.** Tooltip, then drag, for the two things that
   must win however recently they opened. A screen transition is app's
   (`SceneStack`), not a ui tier.
@@ -41,7 +48,7 @@ that slot's stacking contexts.
   Painting, hit testing and pad focus navigation all read the same sorted list,
   so the hit winner at a point is always the topmost painted node, and a test
   holds that.
-- **Modality per focus context.** Modal input blocking and popup exclusivity
+- **Modality per focus context.** Modal input blocking and menu exclusivity
   belong to a focus context, not the screen, so one player's confirm dialog
   doesn't close or block the other's menu.
 
@@ -317,7 +324,7 @@ size is a design call per screen, not a lint.
 
 Decided 2026-10-30. Takes R1.6 and R8.14, scoped per scene.
 
-Every ui service (focus, the popup stack, the theme, input dispatch,
+Every ui service (focus, the overlay stack, the theme, input dispatch,
 viewport, clock and animator, placement, clipboard) reaches a component
 through the context of the scene it was mounted in. There are no singletons,
 and constructors touch no service. The draw API stays process-wide.
@@ -398,7 +405,7 @@ root().removeChild(row);   // health.get() is null from here on
 - **Storage is a slot map the scene owns.** Each component is allocated once
   and filed in a slot; a `Ref` is a 64-bit (index, generation) pair. A lookup
   is an index and a compare, no hashing. Parent and children are stored as
-  ids, and so are focus, capture, hover, popup-stack entries and timers.
+  ids, and so are focus, capture, hover, overlay-stack entries and timers.
   `removeChild` unlinks at once and frees after the current dispatch through
   one path, which bumps the slot's generation and clears every reference to
   the component (focus falls back, capture gets a cancel, timers drop). Game
@@ -595,9 +602,10 @@ Decided 2026-10-30, closing the review of the spec.
 - **Activate and cancel (R9.27):** ui reads activate, cancel and the
   navigation directions as actions from foundation's `ActionMap`, rebindable
   per device, never from hard-coded keys.
-- **Names:** ui's stack of dialogs, menus, selects, context menus and toasts
-  is the popup stack, run by the popup service. "Overlay" stays app's word
-  for its diagnostic layers (`app::Overlay`), so the two don't collide.
+- **Names:** each of ui's dialogs, menus, selects, context menus, toasts and
+  tooltips is an overlay, an entry in the overlay stack, which the overlay
+  service runs; the spec's "popup" is not used. app's layers above every scene
+  (dev menus, debug HUDs) are `app::DebugLayer`, so the two don't collide.
 - **Screen transitions (R8.22, R12.38):** app's `SceneStack` owns them; ui
   mounts a scene's roots in `onEnter` and unmounts them in `onExit`.
 - **The lint's required rules** are R13.25's first six; the spec's chapter 13

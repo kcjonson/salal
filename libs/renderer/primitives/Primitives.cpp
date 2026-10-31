@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
+#include <limits>
 #include <memory>
 #include <stack>
 #include <unordered_map>
@@ -53,6 +54,13 @@ namespace Renderer::Primitives {
 	// the empty clip, which culls every draw; an intersection only shrinks, so every
 	// push over an empty clip stays empty.
 	static std::vector<Foundation::Vec4> g_clipStack;
+	// pushClipReset's entry: unbounded, so a clip pushed over it intersects to itself.
+	static const Foundation::Vec4 kNoClip(
+		-std::numeric_limits<float>::infinity(),
+		-std::numeric_limits<float>::infinity(),
+		std::numeric_limits<float>::infinity(),
+		std::numeric_limits<float>::infinity()
+	);
 
 	// A clip was pushed under a rotation or shear, and the box around it used.
 	static bool g_warnedRotatedClip = false;
@@ -748,13 +756,21 @@ namespace Renderer::Primitives {
 		g_batchRenderer->setClipBounds(bounds);
 	}
 
+	void pushClipReset() {
+		if (g_batchRenderer == nullptr) {
+			return;
+		}
+		g_clipStack.push_back(kNoClip);
+		g_batchRenderer->clearClipBounds();
+	}
+
 	void popClip() {
 		if (g_clipStack.empty()) {
 			return;
 		}
 		g_clipStack.pop_back();
 		if (g_batchRenderer != nullptr) {
-			if (g_clipStack.empty()) {
+			if (g_clipStack.empty() || g_clipStack.back() == kNoClip) {
 				g_batchRenderer->clearClipBounds();
 			} else {
 				g_batchRenderer->setClipBounds(g_clipStack.back());

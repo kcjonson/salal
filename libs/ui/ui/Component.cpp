@@ -211,6 +211,10 @@ namespace ui {
 		}
 	}
 
+	void Component::registerOverlay(ComponentId entry, OverlayOptions options) {
+		context->openOverlay(entry, selfId, std::move(options));
+	}
+
 	void Component::requestUpdate() {
 		if (context != nullptr && !updateRequested) {
 			updateRequested = true;
