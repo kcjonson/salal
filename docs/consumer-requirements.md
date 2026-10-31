@@ -554,6 +554,9 @@ Its loop is variable-step with a 120 FPS cap, and its scenes implement
 fixed-step accumulator is opt-in for worldsim: it keeps variable-step
 behaviour until it chooses otherwise.
 
+Input is keyboard and mouse, and stays that way: worldsim takes no controller
+(decided 2026-10-30), so salal's pad support is for the other two games.
+
 Naming: worldsim's code spells namespaces `Foundation` 19 times and
 `foundation` 13, `Renderer` 31 and `renderer` 11 (plus 14 `renderer::tess`),
 `UI` 89 and `ui` 3; `m_` prefixes sit on 33 of 154 engine headers, 2 of 47 in
