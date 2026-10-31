@@ -1,6 +1,7 @@
 #include "ui/components/RadioGroup.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/shapes/Circle.h"
 #include "ui/shapes/Text.h"
 #include "ui/theme/Tokens.h"
@@ -72,6 +73,10 @@ namespace ui {
 		  selected(args.selected),
 		  direction(args.direction),
 		  onChange(args.onChange) {}
+
+	void RadioGroup::describe(nlohmann::json& node) const {
+		node["value"] = selected;
+	}
 
 	void RadioGroup::onMount() {
 		Layout layout = getLayout();

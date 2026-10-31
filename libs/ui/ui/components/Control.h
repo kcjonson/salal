@@ -19,6 +19,7 @@ namespace ui {
 		[[nodiscard]] bool isActive() const { return active; }
 
 		[[nodiscard]] bool handlesPointer() const override { return true; }
+		void			   describe(nlohmann::json& node) const override;
 
 	  protected:
 		void						onMount() override;

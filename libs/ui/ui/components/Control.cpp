@@ -1,6 +1,7 @@
 #include "ui/components/Control.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/theme/Variants.h"
 
 #include <primitives/Primitives.h>
@@ -19,6 +20,11 @@ namespace ui {
 			return false;
 		}
 	} // namespace
+
+	void Control::describe(nlohmann::json& node) const {
+		Rectangle::describe(node);
+		node["state"]["active"] = active;
+	}
 
 	void Control::onMount() {
 		setFocusable(true);

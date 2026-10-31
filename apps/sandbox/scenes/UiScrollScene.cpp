@@ -65,7 +65,9 @@ namespace {
 			}
 
 			Ref<Component> outer = captioned("A scroller in a scroller", {260.0F, 360.0F});
-			outer.addChild<Text>({.style = {.color = kLabel, .fontSize = 12.0F}, .text = "The inner list keeps the wheel to its end."});
+			outer.addChild<Text>(
+				{.style = {.color = kLabel, .fontSize = 12.0F}, .text = "The inner list keeps the wheel to its end.", .wrap = true}
+			);
 			Ref<Component> inner = outer.addChild<Rectangle>({
 				.id = "inner",
 				.size = {ui::kAuto, 160.0F},

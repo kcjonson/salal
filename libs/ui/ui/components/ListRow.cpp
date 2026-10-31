@@ -1,6 +1,7 @@
 #include "ui/components/ListRow.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
 
@@ -20,6 +21,11 @@ namespace ui {
 		  indent(args.indent),
 		  selectedAtStart(args.selected),
 		  onPress(args.onPress) {}
+
+	void ListRow::describe(nlohmann::json& node) const {
+		Control::describe(node);
+		node["state"]["selected"] = isSelected();
+	}
 
 	StyleId ListRow::themeStyle() const {
 		return styles::listRow.theme;
@@ -43,11 +49,13 @@ namespace ui {
 			.size = {kAuto, hairline},
 			.layout = {.position = Position::Absolute, .inset = {.right = 0.0F, .bottom = 0.0F, .left = 0.0F}},
 			.style = styles::divider,
+			.pointerEvents = PointerEvents::None,
 		});
 		bar = addChild<Rectangle>({
 			.size = {theme.get(tokens::lineWidth::thick), kAuto},
 			.layout = {.position = Position::Absolute, .inset = {.top = 0.0F, .bottom = 0.0F, .left = 0.0F}},
 			.style = {.backgroundColor = theme.get(tokens::tone::accent::color)},
+			.pointerEvents = PointerEvents::None,
 		});
 		if (!iconName.empty()) {
 			shownIcon = addChild<Icon>({.size = {kIcon, kIcon}, .style = dim ? styles::text::secondary : Style{}, .name = iconName});

@@ -1,7 +1,8 @@
 #pragma once
 
 // A caret: two strokes meeting at a point in a 10 px box, pointing down, up, right or left, in
-// style.color (the theme's secondary text unset). Lines, so ui needs no icon atlas of its own.
+// style.color (the theme's secondary text unset). Lines, so ui needs no icon atlas of its own; they
+// are decoration, and the box takes the pointer, as a leaf shape's does.
 
 #include "ui/Component.h"
 #include "ui/shapes/Line.h"
@@ -26,7 +27,8 @@ namespace ui {
 		void				   setSize(const Size& /*value*/) override {}
 		void				   setStyle(const Style& declared) override;
 
-		[[nodiscard]] const char* typeName() const override { return "Chevron"; }
+		[[nodiscard]] const char*	typeName() const override { return "Chevron"; }
+		[[nodiscard]] PointerEvents defaultPointerEvents() const override { return PointerEvents::Auto; }
 
 	  protected:
 		void onMount() override;

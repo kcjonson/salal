@@ -1,8 +1,8 @@
 // ui_input: pointer dispatch. Three buttons count their clicks, one with a label that is its own hit
 // so the click comes up from it; a knob dragged along a track through capture; a card whose parts
 // can't be hit (pointerEvents: Unit) beside a container the pointer passes through; a disabled button
-// that blocks what's under it without clicking; and a cursor for each. The last event is written
-// under them all.
+// that blocks what's under it without clicking, which shows below it; and a cursor for each. The
+// last event is written under them all.
 
 #include "Scenes.h"
 
@@ -87,14 +87,18 @@ namespace {
 			});
 		}
 
-		// The knob takes the pointer on its press and follows it anywhere until the release.
+		// The knob takes the pointer on its press and follows it anywhere until the release. The rail under
+		// it is decoration.
 		void slider() {
-			Ref<Rectangle> track = root().addChild<Rectangle>(
-				{.id = "track", .size = {kTrack, 8.0F}, .margin = {12.0F, 0.0F}, .style = {.backgroundColor = kMuted, .borderRadius = 4.0F}}
-			);
+			Ref<Component> track = root().addChild<Component>({.id = "track", .size = {kTrack, kKnob}, .margin = {4.0F, 0.0F}});
+			track.addChild<Rectangle>({
+				.position = {0.0F, (kKnob - 8.0F) * 0.5F},
+				.size = {kTrack, 8.0F},
+				.style = {.backgroundColor = kMuted, .borderRadius = 4.0F},
+				.pointerEvents = ui::PointerEvents::None,
+			});
 			track.addChild<Rectangle>({
 				.id = "knob",
-				.position = {0.0F, (8.0F - kKnob) * 0.5F},
 				.size = {kKnob, kKnob},
 				.style = {.backgroundColor = Foundation::Color::white(), .borderRadius = kKnob * 0.5F},
 				.cursor = ui::Cursor::ResizeHorizontal,
@@ -121,7 +125,13 @@ namespace {
 				.pointerEvents = ui::PointerEvents::Unit,
 				.onClick = [this](PointerEvent& event) { show("Card clicked; target " + event.target->getId()); },
 			});
-			card.addChild<Text>({.position = {10.0F, 10.0F}, .style = {.fontSize = 13.0F}, .text = "Unit: the card is the hit"});
+			card.addChild<Text>(
+				{.position = {10.0F, 10.0F},
+				 .size = {160.0F, ui::kAuto},
+				 .style = {.fontSize = 13.0F},
+				 .text = "Unit: the card is the hit",
+				 .wrap = true}
+			);
 
 			Ref<Component> pass = row.addChild<Component>({.id = "passthrough", .size = {180.0F, 80.0F}});
 			pass.addChild<Rectangle>({
@@ -138,19 +148,25 @@ namespace {
 				.id = "under_disabled",
 				.size = {180.0F, 80.0F},
 				.style = {.backgroundColor = kButton},
-				.onClick = [this](PointerEvent& /*event*/) { show("Under the disabled button: shouldn't happen"); },
+				.onClick = [this](PointerEvent& /*event*/) { show("Under the disabled button, where it shows"); },
 			});
 			stack
 				.addChild<Rectangle>({
 					.id = "disabled",
 					.enabled = false,
-					.size = {180.0F, 80.0F},
+					.size = {180.0F, 60.0F},
 					.style = {.backgroundColor = kMuted, .opacity = 0.9F},
 					.zIndex = 1,
 					.cursor = ui::Cursor::NotAllowed,
 					.onClick = [this](PointerEvent& /*event*/) { show("Disabled clicked: shouldn't happen"); },
 				})
-				.addChild<Text>({.position = {10.0F, 30.0F}, .style = {.fontSize = 13.0F}, .text = "Disabled, and in the way"});
+				.addChild<Text>(
+					{.position = {10.0F, 12.0F},
+					 .size = {160.0F, ui::kAuto},
+					 .style = {.fontSize = 13.0F},
+					 .text = "Disabled, and in the way",
+					 .wrap = true}
+				);
 		}
 
 		Ref<Text> status;

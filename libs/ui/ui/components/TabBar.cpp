@@ -1,6 +1,7 @@
 #include "ui/components/TabBar.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/shapes/Text.h"
 #include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
@@ -46,6 +47,7 @@ namespace ui {
 				underline = addChild<Rectangle>({
 					.size = {kAuto, theme.get(tokens::lineWidth::thick)},
 					.layout = {.position = Position::Absolute, .inset = {.right = 0.0F, .bottom = 0.0F, .left = 0.0F}},
+					.pointerEvents = PointerEvents::None,
 				});
 				text = addChild<Text>({.text = tab.label});
 			}
@@ -77,6 +79,10 @@ namespace ui {
 		  selectedId(args.selectedId.empty() && !args.tabs.empty() ? args.tabs.front().id : args.selectedId),
 		  onSelect(args.onSelect) {}
 
+	void TabBar::describe(nlohmann::json& node) const {
+		node["value"] = selectedId;
+	}
+
 	void TabBar::onMount() {
 		const Theme& theme = getContext()->getTheme();
 		Layout		 row = getLayout();
@@ -89,6 +95,7 @@ namespace ui {
 			.size = {kAuto, theme.get(tokens::lineWidth::thin)},
 			.layout = {.position = Position::Absolute, .inset = {.right = 0.0F, .bottom = 0.0F, .left = 0.0F}},
 			.style = styles::divider,
+			.pointerEvents = PointerEvents::None,
 		});
 		for (const Tab& tab : tabs) {
 			tabControls.push_back(addChild<TabControl>({.id = "tab_" + tab.id, .tab = tab}));

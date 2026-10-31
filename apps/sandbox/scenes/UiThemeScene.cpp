@@ -36,7 +36,7 @@ namespace {
 			Ref<Component> stage = root().addChild<Component>({.id = "stage", .position = {20.0F, 20.0F}, .size = {1000.0F, 660.0F}});
 			stage.addChild<Text>({.id = "title", .style = styles::text::display, .text = "Theme"});
 			stage.addChild<Text>(
-				{.id = "hint", .position = {0.0F, 52.0F}, .style = styles::text::caption, .text = "T switches dark and light"}
+				{.id = "hint", .position = {0.0F, 56.0F}, .style = styles::text::caption, .text = "T switches dark and light"}
 			);
 			surfaces(stage);
 			type(stage);
@@ -79,10 +79,11 @@ namespace {
 			}};
 			for (std::size_t i = 0; i < panes.size(); ++i) {
 				const float x = static_cast<float>(i) * 190.0F;
-				stage.addChild<Rectangle>(
-					{.id = panes[i].first, .position = {x, 100.0F}, .size = {170.0F, 110.0F}, .style = panes[i].second}
-				);
-				stage.addChild<Text>({.position = {x + 12.0F, 112.0F}, .style = styles::text::secondary, .text = panes[i].first});
+				stage
+					.addChild<Rectangle>(
+						{.id = panes[i].first, .position = {x, 100.0F}, .size = {170.0F, 110.0F}, .style = panes[i].second}
+					)
+					.addChild<Text>({.position = {12.0F, 12.0F}, .style = styles::text::secondary, .text = panes[i].first});
 			}
 			// A theme style extended with a field of its own.
 			stage.addChild<Rectangle>({
@@ -101,10 +102,11 @@ namespace {
 				{"Caption", styles::text::caption},
 				{"Mono 0123456789", styles::text::mono},
 			}};
-			float												   y = 290.0F;
+
+			const ui::Layout stack{.display = ui::Display::Flex, .flexDirection = ui::FlexDirection::Column, .gap = 4.0F};
+			Ref<Component>	 column = stage.addChild<Component>({.position = {0.0F, 290.0F}, .layout = stack});
 			for (const auto& [label, style] : roles) {
-				stage.addChild<Text>({.position = {0.0F, y}, .style = style, .text = label});
-				y += 24.0F;
+				column.addChild<Text>({.style = style, .text = label});
 			}
 		}
 
@@ -150,9 +152,9 @@ namespace {
 			swatches.addChild<Rectangle>({
 				.position = {520.0F - ring.offset - ring.width, 70.0F - ring.offset - ring.width},
 				.size = {64.0F + 2.0F * (ring.offset + ring.width), 40.0F + 2.0F * (ring.offset + ring.width)},
-				.style = {
-					.backgroundColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), .borderColor = ring.color, .borderWidth = ring.width
-				},
+				.style =
+					{.backgroundColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), .borderColor = ring.color, .borderWidth = ring.width},
+				.pointerEvents = ui::PointerEvents::None,
 			});
 			swatch({520.0F, 70.0F}, control, "focus ring");
 		}

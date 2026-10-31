@@ -1,6 +1,7 @@
 #include "ui/components/TextInput.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
 
@@ -28,6 +29,11 @@ namespace ui {
 		  onChange(args.onChange),
 		  onSubmit(args.onSubmit) {}
 
+	void TextInput::describe(nlohmann::json& node) const {
+		Control::describe(node);
+		node["value"] = editor.text();
+	}
+
 	StyleId TextInput::themeStyle() const {
 		return styles::textInput.theme;
 	}
@@ -49,10 +55,10 @@ namespace ui {
 			 getSizeSpec().height.isAuto() ? Length(height) : getSizeSpec().height}
 		);
 		field = addChild<Component>({.size = {kAuto, percent(100.0F)}, .layout = {.flexGrow = 1.0F}, .overflow = Overflow::Clip});
-		selectionBox = field.addChild<Rectangle>({});
+		selectionBox = field.addChild<Rectangle>({.pointerEvents = PointerEvents::None});
 		shownText = field.addChild<Text>({.size = {kAuto, percent(100.0F)}, .text = editor.text()});
 		placeholderText = field.addChild<Text>({.size = {kAuto, percent(100.0F)}, .text = placeholder});
-		caretBar = field.addChild<Rectangle>({.style = {.backgroundColor = kClear}});
+		caretBar = field.addChild<Rectangle>({.style = {.backgroundColor = kClear}, .pointerEvents = PointerEvents::None});
 		show();
 	}
 

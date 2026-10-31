@@ -328,6 +328,19 @@ The rules are R13.25's first six: `sibling-overlap`, `child-outside-parent`,
 in steps and a dense mouse HUD is small on purpose, so a minimum hit-target
 size is a design call per screen, not a lint.
 
+Decoration is exempt from the first two and from `zero-or-negative-size`
+(decided 2026-10-30). A component whose own `pointerEvents` is None, R8.29's
+decorative overlay, may overlap its siblings, leave its parent's box and be
+empty (a fill at 0). Examples: a caret's strokes, a checkbox tick, the
+hairline under a tab bar, a list row's selection bar, a slider's thumb, a
+progress fill under its label, a focus ring. R13.25.1 exempts only a
+differing zIndex or layer, and R3.18 rules out zIndex inside a composite
+widget, so without this every stock widget that layers decoration over its
+content would fail, and a stock component has to lint at 0 in any game. The
+pointer can't reach a decoration, so a None that hides a real overlap can't
+also hide a blocked control. Its children are judged by their own value, so a
+tooltip's content (the tooltip is None) is still checked.
+
 ## Services and input routing
 
 Decided 2026-10-30. Takes R1.6 and R8.14, scoped per scene.

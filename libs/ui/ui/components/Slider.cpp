@@ -1,6 +1,7 @@
 #include "ui/components/Slider.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Snapshot.h"
 #include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
 
@@ -29,6 +30,11 @@ namespace ui {
 		value = snapped(value);
 	}
 
+	void Slider::describe(nlohmann::json& node) const {
+		Control::describe(node);
+		node["value"] = value;
+	}
+
 	StyleId Slider::themeStyle() const {
 		return styles::listRow.theme; // the row itself has no fill; the track carries the look
 	}
@@ -53,10 +59,13 @@ namespace ui {
 			.size = {percent(100.0F), kTrack},
 			.style = styles::progressTrack.extend({.borderRadius = kTrack * 0.5F}),
 		});
-		fill = track.addChild<Rectangle>({.size = {kAuto, percent(100.0F)}, .style = {.borderRadius = kTrack * 0.5F}});
+		fill = track.addChild<Rectangle>(
+			{.size = {kAuto, percent(100.0F)}, .style = {.borderRadius = kTrack * 0.5F}, .pointerEvents = PointerEvents::None}
+		);
 		thumb = fill.addChild<Circle>({
 			.size = {kThumb, kThumb},
 			.layout = {.position = Position::Absolute, .inset = {.top = (kTrack - kThumb) * 0.5F, .right = -kThumb * 0.5F}},
+			.pointerEvents = PointerEvents::None,
 		});
 		if (showValue) {
 			valueText = addChild<Text>({.style = styles::label});
