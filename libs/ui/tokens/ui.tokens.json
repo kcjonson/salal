@@ -291,6 +291,7 @@
       "borderWidth": { "$value": "{lineWidth.thin}" },
       "borderRadius": { "$value": "{radius.md}" }
     },
+    "icon": { "color": { "$value": "{color.text.primary}" } },
     "inset": {
       "backgroundColor": { "$value": "{color.surface.sunken}" },
       "borderColor": { "$value": "{color.line.subtle}" },

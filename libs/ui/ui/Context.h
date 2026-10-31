@@ -16,6 +16,7 @@
 // focus read the same list.
 
 #include "ui/Component.h"
+#include "ui/icons/IconService.h"
 #include "ui/theme/Theme.h"
 
 #include <math/Types.h>
@@ -54,6 +55,9 @@ namespace ui {
 		[[nodiscard]] const Theme& getTheme() const { return theme; }
 		void					   setTheme(Theme value);
 
+		// The scene's icon atlases; a game adds its own (my_game::iconAtlas()) before its icons draw.
+		[[nodiscard]] IconService& icons() { return iconService; }
+
 		// Resizes every root.
 		void						   setViewport(Foundation::Vec2 size);
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }
@@ -89,6 +93,7 @@ namespace ui {
 
 		mutable Registry		 registry;
 		Theme					 theme;
+		IconService				 iconService;
 		std::vector<ComponentId> roots;
 		ComponentId				 defaultRoot;
 		Foundation::Vec2		 viewport;

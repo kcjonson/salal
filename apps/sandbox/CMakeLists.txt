@@ -11,6 +11,7 @@ add_executable(salal_sandbox
     scenes/SdfMinimalScene.cpp
     scenes/UiOrderScene.cpp
     scenes/UiTextScene.cpp
+    scenes/UiIconsScene.cpp
     scenes/UiThemeScene.cpp
 )
 
@@ -28,6 +29,9 @@ salal_base_shader(salal_sandbox)
 
 # The sandbox's theme, ui's tokens with a light mode over them, which ui_theme switches between.
 salal_tokens(salal_sandbox tokens NAMESPACE sandbox_theme HEADER sandbox_theme/Tokens.h)
+
+# The sandbox's icons, which ui_icons draws.
+salal_icons(salal_sandbox icons NAMESPACE sandbox_icons HEADER sandbox_icons/Icons.h)
 
 set_target_properties(salal_sandbox PROPERTIES OUTPUT_NAME sandbox FOLDER salal)
 

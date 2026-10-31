@@ -51,10 +51,12 @@ add_library(salal_ui STATIC
     ui/shapes/Circle.cpp
     ui/shapes/Line.cpp
     ui/shapes/Rectangle.cpp
+    ui/shapes/Icon.cpp
     ui/shapes/Text.cpp
     ui/theme/Theme.cpp
     ui/theme/Variants.cpp
     ui/icons/IconAtlas.cpp
+    ui/icons/IconService.cpp
 )
 add_library(salal::ui ALIAS salal_ui)
 
