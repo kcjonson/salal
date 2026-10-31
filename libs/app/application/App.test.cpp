@@ -1042,6 +1042,40 @@ namespace app::testing {
 		EXPECT_EQ(app->scenes().top()->ui().getViewport(), Foundation::Vec2(800.0F, 600.0F));
 	}
 
+	// The keyboard claimed for slot 0 drives player 0's focus, and a pad claimed for slot 1 once it
+	// connects drives player 1's.
+	TEST_F(AppTest, EachSlotsDeviceDrivesThatPlayersFocusInTheTopScenesUi) {
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			ui::Ref<ui::Component> root = running.scenes().top()->root();
+			root.addChild<ui::Rectangle>({.id = "a", .size = {40.0F, 20.0F}, .focusable = true});
+			root.addChild<ui::Rectangle>({.id = "b", .position = {100.0F, 0.0F}, .size = {40.0F, 20.0F}, .focusable = true});
+		};
+		app->scenes().push<SceneA>();
+		app->input().claim(0, {.kind = foundation::DeviceKind::Keyboard});
+		platform->connectGamepad({.id = padId(0), .name = "Pad", .modelGuid = "pad"});
+		frame(0.0);
+		app->input().claim(1, padId(0));
+		GamepadSample right;
+		right.buttons.at(static_cast<std::size_t>(foundation::GamepadButton::DpadRight)) = true;
+		const auto focusedId = [&](int player) {
+			const ui::Component* focused = app->scenes().top()->ui().focused(player).get();
+			return focused != nullptr ? focused->getId() : std::string("none");
+		};
+		for (int press = 0; press < 2; ++press) {
+			platform->setGamepad(0, right);
+			frame(0.0);
+			platform->setGamepad(0, {});
+			frame(0.0);
+		}
+		EXPECT_EQ(focusedId(1), "b");
+		EXPECT_EQ(focusedId(0), "none");
+		platform->push({.type = InputEvent::Type::KeyDown, .key = Key::Right});
+		frame(0.0);
+		EXPECT_EQ(focusedId(0), "a");
+		EXPECT_EQ(focusedId(1), "b");
+	}
+
 	// --- Exceptions ---
 
 	TEST_F(AppTest, WhatASceneThrowsIsLoggedAndTheFrameGoesOn) {

@@ -1,6 +1,7 @@
 #include "ui/Context.h"
 
 #include "ui/detail/Dispatcher.h"
+#include "ui/detail/FocusManager.h"
 #include "ui/detail/LayoutEngine.h"
 
 #include <primitives/Primitives.h>
@@ -61,7 +62,8 @@ namespace ui {
 	Context::Context(Foundation::Vec2 viewportSize)
 		: windowSize(viewportSize),
 		  viewport(viewportSize),
-		  dispatcher(std::make_unique<detail::Dispatcher>(*this)) {}
+		  dispatcher(std::make_unique<detail::Dispatcher>(*this)),
+		  focusManager(std::make_unique<detail::FocusManager>(*this)) {}
 
 	Context::~Context() = default;
 
@@ -151,8 +153,9 @@ namespace ui {
 	}
 
 	// From each relayout boundary something under changed, a root's box being the viewport; then the
-	// screen maps and clips, the paint order, onLayout for whatever moved, and the hover again when
-	// anything moved under a still pointer (R9.9). Callbacks may ask for another pass, the next frame's.
+	// screen maps and clips, the paint order, onLayout for whatever moved, focus's upkeep, and the hover
+	// again when anything moved under a still pointer (R9.9). Callbacks may ask for another pass, the
+	// next frame's.
 	void Context::layout() {
 		const Registry::DispatchScope scope(registry);
 		std::vector<ComponentId>	  moved;
@@ -174,15 +177,7 @@ namespace ui {
 			}
 			geometryDirty = true;
 		}
-		if (geometryDirty) {
-			for (const ComponentId rootId : roots) {
-				if (Component* rootComponent = registry.find(rootId)) {
-					updateScreen(*rootComponent, {}, std::nullopt, true, false);
-				}
-			}
-			geometryDirty = false;
-			changed = true;
-		}
+		changed = refreshGeometry() || changed;
 		if (orderDirty) {
 			buildOrder();
 			orderDirty = false;
@@ -194,10 +189,25 @@ namespace ui {
 				component->handlers->onLayout(*component);
 			}
 		}
+		focusManager->afterLayout();
+		changed = refreshGeometry() || hoverStale || changed;
 		hoverStale = false;
 		if (changed) {
 			dispatcher->hoverAgain();
 		}
+	}
+
+	bool Context::refreshGeometry() {
+		if (!geometryDirty) {
+			return false;
+		}
+		for (const ComponentId rootId : roots) {
+			if (Component* rootComponent = registry.find(rootId)) {
+				updateScreen(*rootComponent, {}, std::nullopt, true, false);
+			}
+		}
+		geometryDirty = false;
+		return true;
 	}
 
 	// A scroller's children sit under its scroll offset; a disabled ancestor disables them; a
@@ -330,7 +340,19 @@ namespace ui {
 	bool Context::dispatch(const foundation::InputEvent& event) {
 		const Registry::DispatchScope scope(registry);
 		layout();
-		return dispatcher->dispatch(event, scale);
+		using Type = foundation::InputEvent::Type;
+		switch (event.type) {
+			case Type::KeyDown:
+			case Type::KeyUp:
+			case Type::Char:
+			case Type::ButtonDown:
+			case Type::ButtonUp:
+			case Type::Axis:
+			case Type::DeviceDisconnected:
+				return focusManager->dispatch(event);
+			default:
+				return dispatcher->dispatch(event, scale);
+		}
 	}
 
 	// Top down through the list painting reads, so the winner is the topmost painted component the
@@ -376,6 +398,70 @@ namespace ui {
 
 	void Context::removing(ComponentId root) {
 		dispatcher->removing(root);
+		focusManager->removing(root);
+	}
+
+	void Context::pointerPressed(ComponentId hit) {
+		focusManager->pointerPressed(hit);
+	}
+
+	// --- Focus ---
+
+	bool Context::focus(Ref<Component> target, int player) {
+		if (target.registry != &registry) {
+			return false;
+		}
+		const Registry::DispatchScope scope(registry);
+		return focusManager->focus(target.componentId(), player);
+	}
+
+	void Context::clearFocus(int player) {
+		const Registry::DispatchScope scope(registry);
+		focusManager->clear(player);
+	}
+
+	Ref<Component> Context::focused(int player) {
+		return {focusManager->focused(player), &registry};
+	}
+
+	bool Context::focusNext(int player) {
+		const Registry::DispatchScope scope(registry);
+		return focusManager->next(player, false);
+	}
+
+	bool Context::focusPrevious(int player) {
+		const Registry::DispatchScope scope(registry);
+		return focusManager->next(player, true);
+	}
+
+	bool Context::focusDirection(Direction direction, int player) {
+		const Registry::DispatchScope scope(registry);
+		return focusManager->direction(player, direction);
+	}
+
+	void Context::pushScope(Ref<Component> scopeRoot, int player) {
+		if (scopeRoot.registry != &registry) {
+			return;
+		}
+		const Registry::DispatchScope scope(registry);
+		focusManager->pushScope(scopeRoot.componentId(), player);
+	}
+
+	void Context::popScope(int player) {
+		const Registry::DispatchScope scope(registry);
+		focusManager->popScope(player);
+	}
+
+	void Context::setNavigation(int player, foundation::ActionMap map) {
+		focusManager->setNavigation(player, std::move(map));
+	}
+
+	void Context::setPlayerDevices(int player, std::span<const foundation::DeviceId> devices) {
+		focusManager->setDevices(player, devices);
+	}
+
+	InputMode Context::inputMode() const {
+		return focusManager->inputMode();
 	}
 
 	void Context::capture(ComponentId captorId) {
