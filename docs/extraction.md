@@ -319,7 +319,9 @@ the font-atlas target and its three copy steps; salal
 ships no fonts and `msdfgen` leaves its manifest. `FontRenderer` moves as it is,
 `Initialize()` included. An API that takes atlas sources and stops calling
 `std::exit` was the follow-up; it is in (2026-10-27), and the font half of
-decision H with it.
+decision H with it. Since 2026-10-31 `FontRenderer` reads msdf-atlas-gen's JSON
+and no other, so worldsim's atlases go through `scripts/convert-font-atlas.mjs`
+(or a regeneration with msdf-atlas-gen) at the bump that takes it.
 
 `libs/app/` is new and is the hard part: the generic slice carved out of
 worldsim's `libs/engine` (16 files, 2,902 lines: `application/`, `scene/`,

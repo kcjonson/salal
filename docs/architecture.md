@@ -93,12 +93,19 @@ atlas its UVs index and that atlas's distance range, so `Primitives::drawGlyphs`
 takes no family and text draws with the atlas it was laid out in, at its range.
 Wrapped text keeps the family and scale it was wrapped in: `generateWrappedGlyphQuads`
 takes `wrapText`'s result, not a family or a scale of its own. A quad laid out before a
-second `Initialize` carries a destroyed atlas and draws nothing. The quad reads
-its atlas half the distance range plus half a texel past the glyph's bounds,
-and the atlas generator has to leave that much room around each glyph inside
-its cell; loading warns about a glyph that lacks it (`FontRenderer::crampedGlyphs`)
-and loads it anyway, as it does a glyph whose cell isn't four numbers, which
-it doesn't check.
+second `Initialize` carries a destroyed atlas and draws nothing. The atlas JSON
+is msdf-atlas-gen's, read as it writes it: glyphs keyed by code point, either
+`yOrigin`, any `emSize`, atlas bounds in texels and kerning pairs, which
+measuring, layout and wrapping apply. Its bounds already hold the half of the
+distance range the edge fades over, so a quad is the glyph's plane bounds and
+samples its atlas bounds, reading half a texel past them where bilinear
+filtering reaches; msdf-atlas-gen insets the bounds by that half texel from
+each glyph's box, so packed boxes touch and no read crosses into another's.
+Loading warns about glyphs whose reads overlap (`FontRenderer::crampedGlyphs`),
+which draw slivers of each other, and loads them anyway. Text is UTF-8, walked
+by code point everywhere it is measured, laid out or wrapped; a code point the
+atlas lacks draws as U+FFFD, or `?` where it lacks that too, and each
+ill-formed sequence (Unicode's maximal subpart, or a lone byte) as one U+FFFD.
 
 ### The dependency rule
 

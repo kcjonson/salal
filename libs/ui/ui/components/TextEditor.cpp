@@ -33,7 +33,7 @@ namespace ui {
 	}
 
 	void TextEditor::setText(std::string value) {
-		content = std::move(value);
+		content = UTF8::sanitize(value);
 		if (maxLength > 0 && UTF8::characterCount(content) > maxLength) {
 			std::size_t at = 0;
 			for (std::size_t kept = 0; kept < maxLength && at < content.size(); ++kept) {
@@ -59,7 +59,7 @@ namespace ui {
 
 	bool TextEditor::insert(std::string_view typed) {
 		bool		changed = removeSelection();
-		std::string adding(typed);
+		std::string adding = UTF8::sanitize(typed);
 		if (maxLength > 0) {
 			const std::size_t room = maxLength > UTF8::characterCount(content) ? maxLength - UTF8::characterCount(content) : 0;
 			std::size_t		  at = 0;
@@ -168,11 +168,7 @@ namespace ui {
 	}
 
 	void TextEditor::moveTo(std::size_t offset, bool select) {
-		std::size_t at = std::min(offset, content.size());
-		while (at > 0 && at < content.size() && UTF8::isContinuationByte(static_cast<unsigned char>(content[at]))) {
-			--at;
-		}
-		place(at, select);
+		place(UTF8::characterStart(content, offset), select);
 	}
 
 } // namespace ui

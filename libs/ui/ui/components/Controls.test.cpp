@@ -27,11 +27,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <random>
+#include <vector>
 
 namespace ui {
 
@@ -271,6 +273,47 @@ namespace ui {
 		EXPECT_EQ(limited.text(), "aZ");
 	}
 
+	TEST(UiTextEditor, ACaretNeverSitsInsideACharacter) {
+		// a, é, € and 😀, one to four bytes. A pointer landing on any byte puts the caret at the start
+		// of the character holding it, and the arrows, backspace and delete take a character at a time.
+		TextEditor					   editor("a\xC3\xA9\xE2\x82\xAC\xF0\x9F\x98\x80");
+		const std::vector<std::size_t> boundaries{0, 1, 3, 6, 10};
+		for (std::size_t offset = 0; offset <= editor.text().size(); ++offset) {
+			editor.moveTo(offset, false);
+			EXPECT_EQ(editor.caret(), *(std::ranges::upper_bound(boundaries, offset) - 1)) << "offset " << offset;
+		}
+		editor.home(false);
+		for (std::size_t i = 1; i < boundaries.size(); ++i) {
+			editor.right(false, false);
+			EXPECT_EQ(editor.caret(), boundaries[i]);
+		}
+		editor.moveTo(4, true); // a drag into the € selects from its start
+		EXPECT_EQ(editor.selectedText(), "\xE2\x82\xAC\xF0\x9F\x98\x80");
+		editor.end(false);
+		EXPECT_TRUE(editor.backspace());
+		EXPECT_EQ(editor.text(), "a\xC3\xA9\xE2\x82\xAC");
+		editor.home(false);
+		editor.right(false, false);
+		EXPECT_TRUE(editor.deleteForward());
+		EXPECT_EQ(editor.text(), "a\xE2\x82\xAC");
+
+		// Ill-formed bytes, set or pasted, are kept as U+FFFD, so no edit joins them into a character
+		// around the caret: deleting the A from E2 82 A AC would otherwise leave it inside a €.
+		const std::string replacement = "\xEF\xBF\xBD";
+		TextEditor		  joined(
+			   "\xE2\x82"
+				   "A\xAC"
+		   );
+		EXPECT_EQ(joined.text(), replacement + "A" + replacement);
+		joined.moveTo(4, false);
+		EXPECT_TRUE(joined.backspace());
+		EXPECT_EQ(joined.text(), replacement + replacement);
+		EXPECT_EQ(joined.caret(), 3U);
+		EXPECT_TRUE(joined.insert("\xF0\x9F")); // a paste of four bytes cut short, between the two
+		EXPECT_EQ(joined.text(), replacement + replacement + replacement);
+		EXPECT_EQ(joined.caret(), 6U);
+	}
+
 	// --- Themed labels ---
 
 	namespace {
@@ -279,13 +322,14 @@ namespace ui {
 
 		// Advances only, capitals wider than small letters, so a measured width says which were measured.
 		constexpr const char* kAtlasJson = R"({
-			"atlas": { "type": "msdf", "distanceRange": 8, "size": 32, "width": 1, "height": 1 },
+			"atlas": { "type": "msdf", "distanceRange": 8, "size": 32, "width": 1, "height": 1, "yOrigin": "bottom" },
 			"metrics": { "emSize": 1, "ascender": 0.9, "descender": -0.25, "lineHeight": 1.2 },
-			"glyphs": {
-				" ": { "atlas": null, "advance": 0.3 }, "?": { "atlas": null, "advance": 0.5 },
-				"G": { "atlas": null, "advance": 0.8 }, "O": { "atlas": null, "advance": 0.8 },
-				"g": { "atlas": null, "advance": 0.5 }, "o": { "atlas": null, "advance": 0.5 }
-			}
+			"glyphs": [
+				{ "unicode": 32, "advance": 0.3 }, { "unicode": 63, "advance": 0.5 },
+				{ "unicode": 71, "advance": 0.8 }, { "unicode": 79, "advance": 0.8 },
+				{ "unicode": 103, "advance": 0.5 }, { "unicode": 111, "advance": 0.5 }
+			],
+			"kerning": []
 		})";
 
 		// stbi_load needs a real image; the null backend keeps none of its pixels.
