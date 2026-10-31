@@ -5,8 +5,9 @@
 // roots; there are no singletons. app makes one the first time a scene asks for it, and destroys it
 // once the scene's onExit has run.
 //
-// Each frame: update(), layout() (screen transforms and the paint order), and render(), which draws
-// after the scene's own draws behind a sort barrier, so the scene's keys and ui's never interleave.
+// Each frame: update(), layout() (the layout pass from each relayout boundary that changed, then
+// screen transforms, clips and the paint order), and render(), which draws after the scene's own
+// draws behind a sort barrier, so the scene's keys and ui's never interleave.
 //
 // Paint order (docs/ui-design.md, "Ordering"): every root is a stacking context, and so is a component
 // with `isolation`; nothing else makes one. Inside a context its root paints first, then everything
@@ -23,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace ui {
@@ -63,7 +65,8 @@ namespace ui {
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }
 
 		void update(double dt);
-		// Screen transforms and the paint order, where something changed since the last.
+		// Layout, screen transforms and the paint order, where something changed since the last; then
+		// onLayout for what moved.
 		void layout();
 		// Draws every visible component at its key, in its own space.
 		void render();
@@ -84,7 +87,7 @@ namespace ui {
 		};
 
 		ComponentId adoptRoot(std::unique_ptr<Component> component, const Component::Args& args);
-		void		updateScreen(Component& component, const Affine& parent);
+		void		updateScreen(Component& component, const Affine& parent, const std::optional<Foundation::Rect>& parentClip);
 		void		buildOrder();
 		void		paintContext(Component& contextRoot);
 		void		collectContext(Component& parent, int inheritedZ);
@@ -98,6 +101,8 @@ namespace ui {
 		ComponentId				 defaultRoot;
 		Foundation::Vec2		 viewport;
 		std::vector<ComponentId> order;
+		std::vector<ComponentId> dirtyBoundaries; // where the next pass lays out from
+		std::uint32_t			 layoutPass = 0;
 		std::vector<OrderItem>	 orderScratch;
 		bool					 geometryDirty = true;
 		bool					 orderDirty = true;

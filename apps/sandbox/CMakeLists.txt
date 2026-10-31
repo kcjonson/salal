@@ -9,6 +9,8 @@ add_executable(salal_sandbox
     scenes/PolygonScene.cpp
     scenes/PolylineScene.cpp
     scenes/SdfMinimalScene.cpp
+    scenes/UiClipScene.cpp
+    scenes/UiLayoutScene.cpp
     scenes/UiOrderScene.cpp
     scenes/UiTextScene.cpp
     scenes/UiIconsScene.cpp

@@ -16,13 +16,13 @@ flat in vec4	v_radii;
 flat in vec4	v_border;
 flat in vec4	v_shape; // (border width, reach, blur or range, opacity)
 flat in vec4	v_clip;	 // (minX, minY, maxX, maxY), or zero for none
-flat in uvec2	v_mode;	 // (mode, flags)
+flat in uvec3	v_mode;	 // (mode, flags, texture slot)
 
 out vec4 FragColor;
 
-// The run's texture: the MSDF font atlas for text, the image for image quads
-// (ignored by every other mode)
-uniform sampler2D u_atlas;
+// The draw's textures, one a unit, an instance's slot picking one: MSDF font atlases
+// for text, images for image quads (ignored by every other mode)
+uniform sampler2D u_textures[8];
 
 // u_bakedAlpha (instanced and baked draws), and u_viewportHeight and u_pixelRatio
 // (the clip test's y flip: OpenGL's origin is bottom-left, the UI's top-left)
@@ -55,10 +55,39 @@ float median(float r, float g, float b) {
 	return max(min(r, g), min(max(r, g), b));
 }
 
+// A sampler array takes only constant indices in GLSL 3.30, hence the switches. The
+// sample is in non-uniform control flow, where implicit derivatives are undefined, so
+// it reads level 0 (no texture has mips); the derivatives text needs are taken first.
+vec4 sampleSlot(uint slot, vec2 uv) {
+	switch (slot) {
+		case 1u: return textureLod(u_textures[1], uv, 0.0);
+		case 2u: return textureLod(u_textures[2], uv, 0.0);
+		case 3u: return textureLod(u_textures[3], uv, 0.0);
+		case 4u: return textureLod(u_textures[4], uv, 0.0);
+		case 5u: return textureLod(u_textures[5], uv, 0.0);
+		case 6u: return textureLod(u_textures[6], uv, 0.0);
+		case 7u: return textureLod(u_textures[7], uv, 0.0);
+		default: return textureLod(u_textures[0], uv, 0.0);
+	}
+}
+
+vec2 slotSize(uint slot) {
+	switch (slot) {
+		case 1u: return vec2(textureSize(u_textures[1], 0));
+		case 2u: return vec2(textureSize(u_textures[2], 0));
+		case 3u: return vec2(textureSize(u_textures[3], 0));
+		case 4u: return vec2(textureSize(u_textures[4], 0));
+		case 5u: return vec2(textureSize(u_textures[5], 0));
+		case 6u: return vec2(textureSize(u_textures[6], 0));
+		case 7u: return vec2(textureSize(u_textures[7], 0));
+		default: return vec2(textureSize(u_textures[0], 0));
+	}
+}
+
 // The distance field's range in screen pixels, from the UV's change per pixel
-// (fwidth of v_texCoord)
-float screenPxRange(float pixelRange, vec2 texCoordWidth) {
-	vec2 unitRange = vec2(pixelRange) / vec2(textureSize(u_atlas, 0));
+// (fwidth of v_texCoord), over an atlas `atlasSize` texels across
+float screenPxRange(float pixelRange, vec2 atlasSize, vec2 texCoordWidth) {
+	vec2 unitRange = vec2(pixelRange) / atlasSize;
 	vec2 screenTexSize = vec2(1.0) / texCoordWidth;
 	return max(0.5 * dot(unitRange, screenTexSize), 1.0);
 }
@@ -75,8 +104,7 @@ vec4 blended(vec4 color, bool additive) {
 
 void main() {
 	// Every derivative is taken here, in uniform control flow, before any branch or
-	// discard: inside the mode branches they would be undefined. The texture reads
-	// below take these as their gradients for the same reason. The rounded box is
+	// discard: inside the mode branches they would be undefined. The rounded box is
 	// the rect's and the shadow's distance; the other modes ignore it.
 	vec2  texCoordDx = dFdx(v_texCoord);
 	vec2  texCoordDy = dFdy(v_texCoord);
@@ -190,14 +218,14 @@ void main() {
 
 	} else if (mode == kModeImage) {
 		// Texels are premultiplied, so the premultiplied tint multiplies straight in.
-		FragColor = blended(textureGrad(u_atlas, v_texCoord, texCoordDx, texCoordDy) * v_fill, additive);
+		FragColor = blended(sampleSlot(v_mode.z, v_texCoord) * v_fill, additive);
 
 	} else {
 		// MSDF text: the median of the three channels is the signed distance, v_shape.z
 		// the atlas's distance range in texels
-		vec3  msd = textureGrad(u_atlas, v_texCoord, texCoordDx, texCoordDy).rgb;
+		vec3  msd = sampleSlot(v_mode.z, v_texCoord).rgb;
 		float sd = median(msd.r, msd.g, msd.b);
-		float screenPxDistance = screenPxRange(v_shape.z, abs(texCoordDx) + abs(texCoordDy)) * (sd - 0.5);
+		float screenPxDistance = screenPxRange(v_shape.z, slotSize(v_mode.z), abs(texCoordDx) + abs(texCoordDy)) * (sd - 0.5);
 		float opacity = smoothstep(-0.5, 0.5, screenPxDistance);
 		FragColor = blended(v_fill * opacity, additive);
 	}

@@ -237,6 +237,27 @@ namespace Renderer {
 		expectNear(pixel(24, 16), {0, 0, 0, 0});
 	}
 
+	TEST_F(PrimitivesDrawTest, NineTexturesDrawInTwoCallsEachQuadSamplingItsOwn) {
+		// Nine one-texel images, each its own grey, in columns three pixels wide: the first
+		// eight share a draw, the ninth starts another, and each column shows its own texel.
+		std::vector<Texture> images;
+		for (int i = 0; i < 9; ++i) {
+			const uint8_t				 level = static_cast<uint8_t>(20 * (i + 1));
+			const std::array<uint8_t, 4> texel = {level, level, level, 255};
+			images.push_back(Primitives::createTexture({.width = 1, .height = 1, .pixels = texel.data()}));
+		}
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			for (int i = 0; i < 9; ++i) {
+				Primitives::drawImage({.texture = images[i].handle(), .bounds = {static_cast<float>(3 * i), 0.0F, 3.0F, 32.0F}});
+			}
+		});
+		EXPECT_EQ(Primitives::getStats().drawCalls, 2U);
+		for (int i = 0; i < 9; ++i) {
+			const int level = 20 * (i + 1);
+			expectNear(pixel((3 * i) + 1, 16), {level, level, level, 255});
+		}
+	}
+
 	TEST_F(PrimitivesDrawTest, AFreedTextureDrawsNothingAfterTheDrawsBeforeItsFree) {
 		const std::array<uint8_t, 4> white = {255, 255, 255, 255};
 		Texture						 texture = Primitives::createTexture({.width = 1, .height = 1, .pixels = white.data()});

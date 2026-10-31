@@ -16,17 +16,30 @@ namespace ui {
 		}
 	} // namespace detail
 
+	// Until the first layout, `size` holds the px a declared size gives, 0 for auto or a percentage.
 	void Component::setCommon(const Args& args) {
 		id = args.id;
 		visible = args.visible;
 		enabled = args.enabled;
 		position = args.position;
-		size = args.size;
+		sizeSpec = args.size;
+		minSpec = args.minSize;
+		maxSpec = args.maxSize;
+		margin = args.margin;
+		size = {
+			sizeSpec.width.unit == Length::Unit::Px ? sizeSpec.width.value : 0.0F,
+			sizeSpec.height.unit == Length::Unit::Px ? sizeSpec.height.value : 0.0F,
+		};
 		transform = args.transform;
+		layout = args.layout;
 		declaredStyle = args.style;
 		style = args.style;
+		overflow = args.overflow;
 		zIndex = args.zIndex;
 		isolation = args.isolation;
+		if (args.onLayout) {
+			setOnLayout(args.onLayout);
+		}
 	}
 
 	void Component::setStyle(const Style& value) {
@@ -49,7 +62,7 @@ namespace ui {
 		added.parentId = selfId;
 		added.context = context;
 		children.push_back(childId);
-		context->geometryDirty = true;
+		layoutChanged(false);
 		context->orderDirty = true;
 		added.setStyle(added.declaredStyle);
 		{
@@ -70,6 +83,7 @@ namespace ui {
 			return;
 		}
 		std::erase(children, removed->selfId);
+		layoutChanged(false);
 		context->orderDirty = true;
 		context->registry.release(removed->selfId);
 	}
@@ -82,10 +96,14 @@ namespace ui {
 		return context != nullptr ? Ref<Component>(selfId, &context->registry) : Ref<Component>();
 	}
 
+	Component* Component::parentComponent() const {
+		return context != nullptr ? context->registry.find(parentId) : nullptr;
+	}
+
 	void Component::setVisible(bool value) {
 		if (visible != value) {
 			visible = value;
-			geometryChanged();
+			layoutChanged(true);
 			orderChanged();
 		}
 	}
@@ -93,20 +111,51 @@ namespace ui {
 	void Component::setPosition(Foundation::Vec2 value) {
 		if (position != value) {
 			position = value;
-			geometryChanged();
+			layoutChanged(true);
 		}
 	}
 
-	void Component::setSize(Foundation::Vec2 value) {
-		if (size != value) {
-			size = value;
-			geometryChanged();
+	void Component::setSize(const Size& value) {
+		sizeSpec = value;
+		layoutChanged(true);
+	}
+
+	void Component::setMinSize(const Size& value) {
+		minSpec = value;
+		layoutChanged(true);
+	}
+
+	void Component::setMaxSize(const Size& value) {
+		maxSpec = value;
+		layoutChanged(true);
+	}
+
+	void Component::setMargin(const Edges& value) {
+		if (margin != value) {
+			margin = value;
+			layoutChanged(true);
+		}
+	}
+
+	void Component::setLayout(const Layout& value) {
+		if (layout != value) {
+			layout = value;
+			layoutChanged(true);
+		}
+	}
+
+	void Component::setOverflow(Overflow value) {
+		overflow = value;
+		if (context != nullptr) {
+			context->geometryDirty = true;
 		}
 	}
 
 	void Component::setTransform(const Transform& value) {
 		transform = value;
-		geometryChanged();
+		if (context != nullptr) {
+			context->geometryDirty = true;
+		}
 	}
 
 	void Component::setZIndex(std::optional<int> value) {
@@ -121,6 +170,17 @@ namespace ui {
 			isolation = value;
 			orderChanged();
 		}
+	}
+
+	void Component::setOnLayout(std::function<void(Component&)> callback) {
+		if (!handlers) {
+			handlers = std::make_unique<Handlers>();
+		}
+		handlers->onLayout = std::move(callback);
+	}
+
+	Foundation::Rect Component::getBounds() const {
+		return {offset.x, offset.y, size.x + margin.horizontal(), size.y + margin.vertical()};
 	}
 
 	Foundation::Rect Component::screenBounds() const {
@@ -150,9 +210,35 @@ namespace ui {
 		return screen.inverse().apply(point);
 	}
 
-	void Component::geometryChanged() const {
-		if (context != nullptr) {
-			context->geometryDirty = true;
+	void Component::contentChanged() {
+		layoutChanged(false);
+	}
+
+	bool Component::isLayoutBoundary() const {
+		return !parentId.valid() || (!sizeSpec.width.isAuto() && !sizeSpec.height.isAuto());
+	}
+
+	// A change to its own box is its parent's to lay out again; a change to what it holds is its own,
+	// and its ancestors' while their size hangs on it. The walk stops at the first boundary, which the
+	// context lays out from on the next pass.
+	void Component::layoutChanged(bool ownBox) {
+		layoutDirty = true;
+		if (context == nullptr) {
+			return;
+		}
+		context->geometryDirty = true;
+		Component* node = ownBox ? parentComponent() : this;
+		if (node == nullptr) {
+			context->dirtyBoundaries.push_back(selfId);
+			return;
+		}
+		while (node != nullptr) {
+			node->layoutDirty = true;
+			if (node->isLayoutBoundary()) {
+				context->dirtyBoundaries.push_back(node->selfId);
+				return;
+			}
+			node = node->parentComponent();
 		}
 	}
 

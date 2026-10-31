@@ -50,7 +50,13 @@ namespace ui {
 		Renderer::Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const Renderer::TextureDesc* atlas = gpu->texture(gpu->draws()[0].call.texture);
+		const Renderer::TextureDesc* atlas = nullptr;
+		for (const Renderer::TextureHandle bound : gpu->draws()[0].call.textures) {
+			if (const Renderer::TextureDesc* desc = gpu->texture(bound); desc != nullptr) {
+				ASSERT_EQ(atlas, nullptr) << "one atlas bound";
+				atlas = desc;
+			}
+		}
 		ASSERT_NE(atlas, nullptr);
 		EXPECT_EQ(atlas->width, 96);
 		EXPECT_EQ(atlas->format, Renderer::TextureFormat::Rgb8);

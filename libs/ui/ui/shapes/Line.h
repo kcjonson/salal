@@ -2,7 +2,7 @@
 
 // A straight stroke (R12.3) from `start` to `end`, given in the parent's space, in style.color (white
 // unset). Its box is the endpoints' bounds grown by half the width on each side, so `position` and
-// `size` in its Args are ignored; moving it moves both endpoints, and layout can't resize it.
+// `size` in its Args are ignored; a new position moves both endpoints, and layout can't resize it.
 
 #include "ui/Component.h"
 
@@ -20,7 +20,7 @@ namespace ui {
 
 		explicit Line(const Args& args);
 
-		void setSize(Foundation::Vec2 /*value*/) override {}
+		void setSize(const Size& /*value*/) override {}
 		// Both endpoints, in the parent's space.
 		void					  setEndpoints(Foundation::Vec2 start, Foundation::Vec2 end);
 		[[nodiscard]] const char* typeName() const override { return "Line"; }

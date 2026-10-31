@@ -302,10 +302,13 @@ namespace Renderer::backend::gl {
 			glGetActiveUniformsiv(program, 1, &index, GL_UNIFORM_OFFSET, &actual);
 			EXPECT_EQ(actual, static_cast<GLint>(offset)) << member;
 		}
-		// The atlas stays a plain sampler, on unit 0.
-		GLint atlasUnit = -1;
-		glGetUniformiv(program, glGetUniformLocation(program, "u_atlas"), &atlasUnit);
-		EXPECT_EQ(atlasUnit, 0);
+		// The textures stay plain samplers, slot i on unit i.
+		for (size_t slot = 0; slot < kTextureSlots; ++slot) {
+			const std::string name = "u_textures[" + std::to_string(slot) + "]";
+			GLint			  unit = -1;
+			glGetUniformiv(program, glGetUniformLocation(program, name.c_str()), &unit);
+			EXPECT_EQ(unit, static_cast<GLint>(slot)) << name;
+		}
 		gpu->destroyPipeline(pipeline);
 	}
 
@@ -534,8 +537,8 @@ namespace Renderer::backend::gl {
 		glUseProgram(0);
 
 		const std::array<DrawCall, 2> calls = {{
-			{.pipeline = pipeline, .geometry = geometry, .texture = atlas, .firstInstance = 0, .instanceCount = 1},
-			{.pipeline = pipeline, .geometry = geometry, .texture = foreignTexture, .firstInstance = 1, .instanceCount = 1},
+			{.pipeline = pipeline, .geometry = geometry, .textures = {atlas}, .firstInstance = 0, .instanceCount = 1},
+			{.pipeline = pipeline, .geometry = geometry, .textures = {foreignTexture, atlas}, .firstInstance = 1, .instanceCount = 1},
 		}};
 		gpu->draw(calls);
 

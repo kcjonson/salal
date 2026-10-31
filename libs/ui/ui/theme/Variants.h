@@ -8,7 +8,7 @@
 namespace ui {
 
 	enum class Tone : std::uint8_t { Default, Accent, Info, Positive, Warning, Danger, Auto };
-	enum class Size : std::uint8_t { Sm, Md, Lg };
+	enum class ControlSize : std::uint8_t { Sm, Md, Lg };
 
 	struct ToneColors {
 		Foundation::Color color;   // the tone itself, for text and indicators
@@ -26,7 +26,7 @@ namespace ui {
 		float controlHeight = 0.0F;
 	};
 
-	SizeMetrics sizeMetrics(const Theme& theme, Size size);
+	SizeMetrics sizeMetrics(const Theme& theme, ControlSize size);
 
 	struct InteractionState {
 		bool hovered = false;

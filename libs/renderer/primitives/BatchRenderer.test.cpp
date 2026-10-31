@@ -224,12 +224,13 @@ TEST(BatchPlanTest, InterleavedAlphaAndAdditiveOnOneAtlasIsOneRun) {
 	ASSERT_EQ(plan.runs.size(), 1U);
 	EXPECT_EQ(plan.runs[0].instanceStart, 0U);
 	EXPECT_EQ(plan.runs[0].instanceCount, 6U);
-	EXPECT_EQ(plan.runs[0].texture, kAtlasA);
+	EXPECT_EQ(plan.runs[0].textures[0], kAtlasA);
+	EXPECT_FALSE(plan.runs[0].textures[1].isValid());
 	EXPECT_EQ(plan.runs[0].blendState, backend::BlendState::Alpha);
 	EXPECT_EQ(plan.instances.size(), 6U);
 }
 
-TEST(BatchPlanTest, AtlasChangeStillSplits) {
+TEST(BatchPlanTest, AtlasesShareARunEachQuadSamplingItsOwnSlot) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
 	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
@@ -242,19 +243,44 @@ TEST(BatchPlanTest, AtlasChangeStillSplits) {
 	addGlyph(batch, kAtlasA, BlendMode::Additive);
 
 	const DrawPlan plan = batch.plan();
-	ASSERT_EQ(plan.runs.size(), 3U);
-	EXPECT_EQ(plan.runs[0].texture, kAtlasA);
-	EXPECT_EQ(plan.runs[0].instanceStart, 0U);
-	EXPECT_EQ(plan.runs[0].instanceCount, 2U);
-	EXPECT_EQ(plan.runs[1].texture, kAtlasB);
-	EXPECT_EQ(plan.runs[1].instanceStart, 2U);
-	EXPECT_EQ(plan.runs[1].instanceCount, 3U);
-	EXPECT_EQ(plan.runs[2].texture, kAtlasA);
-	EXPECT_EQ(plan.runs[2].instanceStart, 5U);
-	EXPECT_EQ(plan.runs[2].instanceCount, 1U);
+	ASSERT_EQ(plan.runs.size(), 1U);
+	EXPECT_EQ(plan.runs[0].instanceCount, 6U);
+	EXPECT_EQ(plan.runs[0].textures[0], kAtlasA);
+	EXPECT_EQ(plan.runs[0].textures[1], kAtlasB);
+	EXPECT_FALSE(plan.runs[0].textures[2].isValid());
+	std::vector<uint8_t> slots;
+	for (const BatchInstance& quad : plan.instances) {
+		slots.push_back(quad.slot);
+	}
+	EXPECT_EQ(slots, (std::vector<uint8_t>{0, 0, 1, 1, 0, 0})); // shapes keep 0
 }
 
-TEST(BatchPlanTest, ShapesOnlyAreOneRunOnTheDefaultAtlas) {
+TEST(BatchPlanTest, ANinthTextureStartsARun) {
+	backend::NullBackend	   gpu;
+	BatchRenderer			   batch(gpu, base_shader::source());
+	std::vector<TextureHandle> nine;
+	for (int i = 0; i < 9; ++i) {
+		nine.push_back(gpu.createTexture({.width = 1, .height = 1}));
+		batch.addImageQuad({.texture = nine.back(), .bounds = {static_cast<float>(i), 0.0F, 1.0F, 1.0F}});
+	}
+	batch.addImageQuad({.texture = nine[0], .bounds = {9.0F, 0.0F, 1.0F, 1.0F}}); // the first again, in the second run
+
+	const DrawPlan plan = batch.plan();
+	ASSERT_EQ(plan.runs.size(), 2U);
+	EXPECT_EQ(plan.runs[0].instanceCount, 8U);
+	for (size_t slot = 0; slot < backend::kTextureSlots; ++slot) {
+		EXPECT_EQ(plan.runs[0].textures[slot], nine[slot]);
+		EXPECT_EQ(plan.instances[slot].slot, slot);
+	}
+	EXPECT_EQ(plan.runs[1].instanceStart, 8U);
+	EXPECT_EQ(plan.runs[1].instanceCount, 2U);
+	EXPECT_EQ(plan.runs[1].textures[0], nine[8]);
+	EXPECT_EQ(plan.runs[1].textures[1], nine[0]);
+	EXPECT_EQ(plan.instances[8].slot, 0);
+	EXPECT_EQ(plan.instances[9].slot, 1);
+}
+
+TEST(BatchPlanTest, ShapesOnlyBindNoTexture) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
 	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
@@ -264,11 +290,11 @@ TEST(BatchPlanTest, ShapesOnlyAreOneRunOnTheDefaultAtlas) {
 
 	const DrawPlan plan = batch.plan();
 	ASSERT_EQ(plan.runs.size(), 1U);
-	EXPECT_EQ(plan.runs[0].texture, kAtlasA);
+	EXPECT_FALSE(plan.runs[0].textures[0].isValid());
 	EXPECT_EQ(plan.runs[0].instanceCount, 2U);
 }
 
-TEST(BatchPlanTest, AnImageSplitsOnItsTexture) {
+TEST(BatchPlanTest, AnImageTakesASlotBesideTheText) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
 	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
@@ -279,12 +305,11 @@ TEST(BatchPlanTest, AnImageSplitsOnItsTexture) {
 	addGlyph(batch, kAtlasA);
 
 	const DrawPlan plan = batch.plan();
-	ASSERT_EQ(plan.runs.size(), 3U);
-	EXPECT_EQ(plan.runs[0].texture, kAtlasA);
-	EXPECT_EQ(plan.runs[1].texture, kImage);
-	EXPECT_EQ(plan.runs[1].instanceStart, 1U);
-	EXPECT_EQ(plan.runs[1].instanceCount, 1U);
-	EXPECT_EQ(plan.runs[2].texture, kAtlasA);
+	ASSERT_EQ(plan.runs.size(), 1U);
+	EXPECT_EQ(plan.runs[0].textures[0], kAtlasA);
+	EXPECT_EQ(plan.runs[0].textures[1], kImage);
+	EXPECT_EQ(plan.instances[1].slot, 1);
+	EXPECT_EQ(plan.instances[2].slot, 0);
 	EXPECT_EQ(batch.getPendingInstances().size(), 3U);
 }
 
@@ -298,15 +323,15 @@ TEST(BatchPlanTest, KeysSortGroupsStablyBeforeSplitting) {
 	addRect(batch, BlendMode::Additive, 1, 2.0F);
 	addGlyph(batch, kAtlasB, BlendMode::Alpha, 0, 3.0F);
 
-	// Key 0 first in submission order (glyph B, glyph B), then key 1 (glyph A, rect).
+	// Key 0 first in submission order (glyph B, glyph B), then key 1 (glyph A, rect);
+	// the slots follow the sorted order.
 	const DrawPlan plan = batch.plan();
 	EXPECT_EQ(lefts(plan.instances), (std::vector{1.0F, 3.0F, 0.0F, 2.0F}));
-	ASSERT_EQ(plan.runs.size(), 2U);
-	EXPECT_EQ(plan.runs[0].texture, kAtlasB);
-	EXPECT_EQ(plan.runs[0].instanceCount, 2U);
-	EXPECT_EQ(plan.runs[1].texture, kAtlasA);
-	EXPECT_EQ(plan.runs[1].instanceStart, 2U);
-	EXPECT_EQ(plan.runs[1].instanceCount, 2U);
+	ASSERT_EQ(plan.runs.size(), 1U);
+	EXPECT_EQ(plan.runs[0].textures[0], kAtlasB);
+	EXPECT_EQ(plan.runs[0].textures[1], kAtlasA);
+	EXPECT_EQ(plan.instances[0].slot, 0);
+	EXPECT_EQ(plan.instances[2].slot, 1);
 }
 
 TEST(BatchPlanTest, ATextRunIsOneGroupHoweverManyGlyphs) {

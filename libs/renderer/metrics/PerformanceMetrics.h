@@ -62,6 +62,7 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		float pollEventsMs{};  // Time for glfwPollEvents
 		float inputHandleMs{}; // Time for input handling
 		float sceneUpdateMs{}; // Time for scene update
+		float uiLayoutMs{};	   // Time for the ui layout pass
 		float sceneRenderMs{}; // Time for scene render
 		float swapBuffersMs{}; // Time for buffer swap (includes VSync wait)
 

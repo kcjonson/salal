@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -16,6 +17,9 @@ namespace ui {
 		constexpr Foundation::Color kColor = Foundation::Color::white();
 		constexpr float				kFontSize = 16.0F;
 		constexpr float				kBaseFontSize = 16.0F; // FontRenderer's scale 1
+		// FontRenderer takes a wrap width of 0 as one line, newlines and all, so text that breaks only
+		// at newlines wraps at a width it never reaches.
+		constexpr float kNoWrap = std::numeric_limits<float>::max();
 
 		float alignOffset(float room, Foundation::HorizontalAlign align) {
 			switch (align) {
@@ -46,25 +50,12 @@ namespace ui {
 		: text(args.text),
 		  wrap(args.wrap) {}
 
-	void Text::onMount() {
-		hugWidth = size.x <= 0.0F;
-		hugHeight = size.y <= 0.0F;
-		measure();
-	}
-
 	void Text::setText(std::string value) {
 		if (value != text) {
 			text = std::move(value);
-			measure();
+			glyphOpacity = -1.0F;
+			contentChanged();
 		}
-	}
-
-	// An axis set to 0 hugs again; any other value fixes it.
-	void Text::setSize(Foundation::Vec2 value) {
-		hugWidth = value.x <= 0.0F;
-		hugHeight = value.y <= 0.0F;
-		Component::setSize(value);
-		measure();
 	}
 
 	StyleId Text::themeStyle() const {
@@ -73,17 +64,8 @@ namespace ui {
 
 	void Text::setStyle(const Style& value) {
 		Component::setStyle(value);
-		measure();
-	}
-
-	bool Text::multiline(const std::string& content) const {
-		return (wrap && !hugWidth) || content.find('\n') != std::string::npos;
-	}
-
-	// FontRenderer takes a width of 0 as one line, newlines and all, so text hugging its width wraps at
-	// a width it never reaches and breaks at newlines only.
-	float Text::wrapWidth() const {
-		return wrap && !hugWidth ? size.x : std::numeric_limits<float>::max();
+		glyphOpacity = -1.0F;
+		contentChanged();
 	}
 
 	std::string Text::shown() const {
@@ -95,33 +77,68 @@ namespace ui {
 		return upper;
 	}
 
-	// Explicit newlines and wrapping take FontRenderer's wrapped path, which has no letter spacing.
-	void Text::measure() {
-		glyphOpacity = -1.0F;
+	// Wrapping and explicit newlines take FontRenderer's wrapped path, which has no letter spacing.
+	Text::Extent Text::measureAt(std::optional<float> wrapWidth) const {
 		const Renderer::FontRenderer* fonts = Renderer::Primitives::getFontRenderer();
-		measured = {0.0F, 0.0F};
-		lineCount = 0;
-		if (fonts != nullptr && !text.empty()) {
-			const float				   scale = style.fontSize.value_or(kFontSize) / kBaseFontSize;
-			const Renderer::FontFamily family = style.fontFamily.value_or(Renderer::FontFamily::Default);
-			const std::string		   content = shown();
-			if (multiline(content)) {
-				const auto& wrapped = fonts->wrapText(content, scale, wrapWidth(), family);
-				measured = {wrapped.totalWidth, wrapped.totalHeight};
-				lineCount = static_cast<int>(wrapped.lines.size());
-			} else {
-				const glm::vec2 extent = fonts->MeasureText(content, scale, family, style.letterSpacing.value_or(0.0F));
-				measured = {extent.x, extent.y};
-				lineCount = 1;
-			}
+		if (fonts == nullptr || text.empty()) {
+			return {};
 		}
-		const Foundation::Vec2 hugged{hugWidth ? measured.x : size.x, hugHeight ? measured.y : size.y};
-		Component::setSize(hugged);
+		const float				   scale = style.fontSize.value_or(kFontSize) / kBaseFontSize;
+		const Renderer::FontFamily family = style.fontFamily.value_or(Renderer::FontFamily::Default);
+		const std::string		   content = shown();
+		if (wrapWidth || content.find('\n') != std::string::npos) {
+			const auto& wrapped = fonts->wrapText(content, scale, wrapWidth.value_or(kNoWrap), family);
+			return {.size = {wrapped.totalWidth, wrapped.totalHeight}, .lines = static_cast<int>(wrapped.lines.size())};
+		}
+		const glm::vec2 extent = fonts->MeasureText(content, scale, family, style.letterSpacing.value_or(0.0F));
+		return {.size = {extent.x, extent.y}, .lines = 1};
+	}
+
+	std::optional<Foundation::Vec2> Text::intrinsicSize(std::optional<float> width, float availableWidth) const {
+		if (!wrap) {
+			return measureAt(std::nullopt).size;
+		}
+		std::optional<float> wrapWidth = width;
+		if (!wrapWidth && std::isfinite(availableWidth)) {
+			wrapWidth = availableWidth;
+		}
+		const Extent extent = measureAt(wrapWidth);
+		return Foundation::Vec2{width.value_or(extent.size.x), extent.size.y};
+	}
+
+	// Its longest word when it wraps (R10.4), all of it when it doesn't.
+	float Text::minContentWidth() const {
+		if (!wrap) {
+			return measureAt(std::nullopt).size.x;
+		}
+		const Renderer::FontRenderer* fonts = Renderer::Primitives::getFontRenderer();
+		if (fonts == nullptr) {
+			return 0.0F;
+		}
+		const float				   scale = style.fontSize.value_or(kFontSize) / kBaseFontSize;
+		const Renderer::FontFamily family = style.fontFamily.value_or(Renderer::FontFamily::Default);
+		const std::string		   content = shown();
+		float					   longest = 0.0F;
+		std::size_t				   start = 0;
+		while (start < content.size()) {
+			const std::size_t end = content.find_first_of(" \n", start);
+			const std::size_t stop = end == std::string::npos ? content.size() : end;
+			if (stop > start) {
+				longest = std::max(longest, fonts->MeasureText(content.substr(start, stop - start), scale, family).x);
+			}
+			start = stop + 1;
+		}
+		return longest;
+	}
+
+	Text::Extent Text::measureExtent() const {
+		return measureAt(wrap ? std::optional(size.x) : std::nullopt);
 	}
 
 	void Text::layOut() {
 		glyphs.clear();
 		glyphOpacity = opacity();
+		glyphSize = size;
 		const Renderer::FontRenderer* fonts = Renderer::Primitives::getFontRenderer();
 		if (fonts == nullptr || text.empty()) {
 			return;
@@ -131,19 +148,20 @@ namespace ui {
 		const Foundation::HorizontalAlign textAlign = style.textAlign.value_or(Foundation::HorizontalAlign::Left);
 		const Foundation::Color			  color = detail::withOpacity(style.color.value_or(kColor), glyphOpacity);
 		const glm::vec4					  rgba(color.r, color.g, color.b, color.a);
-		const float		  top = alignOffset(size.y - measured.y, style.verticalAlign.value_or(Foundation::VerticalAlign::Top));
+		const Extent					  extent = measureExtent();
+		const float		  top = alignOffset(size.y - extent.size.y, style.verticalAlign.value_or(Foundation::VerticalAlign::Top));
 		const std::string content = shown();
-		if (multiline(content)) {
-			const auto& wrapped = fonts->wrapText(content, scale, wrapWidth(), family);
+		if (wrap || content.find('\n') != std::string::npos) {
+			const auto& wrapped = fonts->wrapText(content, scale, wrap ? size.x : kNoWrap, family);
 			fonts->generateWrappedGlyphQuads(wrapped, {0.0F, top}, rgba, textAlign, size.x, glyphs);
 		} else {
-			const float left = alignOffset(size.x - measured.x, textAlign);
+			const float left = alignOffset(size.x - extent.size.x, textAlign);
 			fonts->generateGlyphQuads(content, {left, top}, scale, rgba, glyphs, family, style.letterSpacing.value_or(0.0F));
 		}
 	}
 
 	void Text::render() {
-		if (glyphOpacity != opacity()) {
+		if (glyphOpacity != opacity() || glyphSize != size) {
 			layOut();
 		}
 		if (!glyphs.empty()) {
@@ -152,10 +170,12 @@ namespace ui {
 	}
 
 	void Text::describe(nlohmann::json& node) const {
+		const Extent extent = measureExtent();
+		const bool	 overflows = extent.size.x > size.x + 0.5F || extent.size.y > size.y + 0.5F;
 		node["text"] = {
 			{"content", text},
-			{"measured", {{"w", measured.x}, {"h", measured.y}, {"lines", lineCount}}},
-			{"overflow", "none"},
+			{"measured", {{"w", extent.size.x}, {"h", extent.size.y}, {"lines", extent.lines}}},
+			{"overflow", overflows ? "overflowing" : "none"},
 		};
 		node["style"] = detail::styleJson(std::nullopt, style.color.value_or(kColor), std::nullopt);
 	}
