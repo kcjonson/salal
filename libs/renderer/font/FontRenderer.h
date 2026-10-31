@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Handle.h"
+#include "Texture.h"
 #include "graphics/PrimitiveStyles.h"
 #include "primitives/FontFamily.h"
 #include <cmath>
@@ -61,11 +62,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * The sources load in order. One that fails to load is logged and skipped, and
 		 * its family draws with the default, as does any family not given.
 		 *
-		 * A second call destroys the atlases the first made, so a handle from
+		 * A second call frees the atlases the first made, so a handle from
 		 * getAtlasTexture goes stale: a game that handed one to Primitives::setFontAtlas
 		 * hands over the new one. So does every GlyphQuad laid out before it, which
-		 * carries its atlas and now draws nothing: lay the text out again. Not
-		 * mid-frame: glyphs already batched would sample destroyed textures.
+		 * carries its atlas and now draws nothing: lay the text out again. Glyphs
+		 * already batched still draw; their atlases are freed after the flush.
+		 *
+		 * An atlas whose distance range is under a sixth of its em warns at load:
+		 * too thin a range for text at the small sizes ui draws.
 		 * @param sources One atlas per family; no family twice, and not FontFamily::Default
 		 * @param defaultFamily The family FontFamily::Default stands for; one of the sources
 		 * @return false, with nothing loaded, when the sources are empty or break the rules
@@ -268,7 +272,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		struct Atlas {
 			std::map<char, SDFGlyph> glyphs;						// Map of SDF glyphs
 			SDFAtlasMetadata		 metadata{};					// SDF atlas metadata
-			TextureHandle			 texture;						// SDF atlas texture in the renderer's table, owned here
+			Texture					 texture;						// SDF atlas texture in the renderer's table, owned here
 			float					 scaledAscender = 0.0F;			// Ascender for the base font size
 			float					 maxGlyphHeightUnscaled = 0.0F; // Unscaled max glyph height
 			bool					 loaded = false;				// True once successfully loaded
@@ -285,6 +289,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// The glyphs of `atlas` whose sampled area leaves their cell (see crampedGlyphs).
 		static std::string findCrampedGlyphs(const Atlas& atlas);
+
+		// Whether an atlas's distance range is under a sixth of its em, both in atlas pixels.
+		static bool thinDistanceRange(const SDFAtlasMetadata& metadata) {
+			return metadata.distanceRange * 6.0F < static_cast<float>(metadata.glyphSize);
+		}
 
 		/**
 		 * The family a request draws with: itself when it is loaded, otherwise the

@@ -4,6 +4,7 @@
 #include "primitives/BatchRenderer.h"
 #include "CoordinateSystem/CoordinateSystem.h"
 #include "primitives/BoundaryLoops.h"
+#include "utils/Log.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -82,6 +83,7 @@ namespace Renderer {
 	}
 
 	BatchRenderer::~BatchRenderer() {
+		freePending();
 		gpu.destroyGeometry(geometry);
 		gpu.destroyBuffer(indexBuffer);
 		gpu.destroyBuffer(vertexBuffer);
@@ -553,7 +555,7 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::addImageQuad(const Primitives::ImageArgs& args) {
-		if (clipEmpty || !args.texture.isValid()) {
+		if (clipEmpty || !args.texture.isValid() || !sampleable(args.texture)) {
 			return;
 		}
 		const Foundation::Rect& b = args.bounds;
@@ -595,6 +597,9 @@ namespace Renderer {
 		// at the default's range.
 		const TextureHandle resolvedAtlas = atlas.isValid() ? atlas : defaultFontAtlas;
 		const float			resolvedPixelRange = atlas.isValid() ? pixelRange : fontPixelRange;
+		if (resolvedAtlas.isValid() && !sampleable(resolvedAtlas)) {
+			return;
+		}
 
 		uint32_t baseIndex = static_cast<uint32_t>(vertices.size());
 
@@ -702,6 +707,46 @@ namespace Renderer {
 	void BatchRenderer::setFontAtlas(TextureHandle atlas, float pixelRange) {
 		defaultFontAtlas = atlas;
 		fontPixelRange = pixelRange;
+	}
+
+	void BatchRenderer::releaseTexture(TextureHandle texture) {
+		if (!texture.isValid()) {
+			return;
+		}
+		if (texture == liveTexture) {
+			liveTexture = {};
+		}
+		if (vertices.empty()) {
+			gpu.destroyTexture(texture);
+		} else {
+			pendingFrees.push_back(texture);
+		}
+	}
+
+	bool BatchRenderer::sampleable(TextureHandle texture) {
+		if (texture == liveTexture) {
+			return true;
+		}
+		if (!gpu.hasTexture(texture) || std::ranges::find(pendingFrees, texture) != pendingFrees.end()) {
+			if (!warnedStale) {
+				warnedStale = true;
+				LOG_WARNING(
+					Renderer,
+					"A draw sampled texture %u after it was freed; it draws nothing (warned once)",
+					static_cast<unsigned>(texture.value)
+				);
+			}
+			return false;
+		}
+		liveTexture = texture;
+		return true;
+	}
+
+	void BatchRenderer::freePending() {
+		for (const TextureHandle texture : pendingFrees) {
+			gpu.destroyTexture(texture);
+		}
+		pendingFrees.clear();
 	}
 
 	DrawPlan BatchRenderer::plan() {
@@ -829,6 +874,7 @@ namespace Renderer {
 		}
 		gpu.draw(drawCalls);
 		drawCallCount += drawCalls.size();
+		freePending();
 
 		// Accumulate stats before clearing
 		frameVertexCount += vertices.size();
@@ -844,6 +890,7 @@ namespace Renderer {
 	}
 
 	void BatchRenderer::beginFrame() {
+		freePending(); // nothing left in the batch samples them
 		drawCallCount = 0;
 		frameVertexCount = 0;
 		frameTriangleCount = 0;

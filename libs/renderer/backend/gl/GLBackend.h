@@ -45,6 +45,7 @@ namespace Renderer::backend::gl {
 		TextureHandle createTexture(const TextureDesc& desc) override;
 		void		  updateTexture(TextureHandle texture, int x, int y, int width, int height, const void* pixels) override;
 		void		  destroyTexture(TextureHandle texture) override;
+		bool		  hasTexture(TextureHandle texture) const override { return textures.find(texture) != nullptr; }
 
 		RenderTargetHandle createRenderTarget(TextureHandle colour) override;
 		void			   setRenderTarget(RenderTargetHandle target) override;
