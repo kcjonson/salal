@@ -3,6 +3,7 @@
 #include "ui/detail/Dispatcher.h"
 #include "ui/detail/FocusManager.h"
 #include "ui/detail/LayoutEngine.h"
+#include "ui/theme/Tokens.h"
 
 #include <primitives/Primitives.h>
 #include <utils/Log.h>
@@ -10,6 +11,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace ui {
@@ -51,6 +53,8 @@ namespace ui {
 			return {left, top, std::max(right - left, 0.0F), std::max(bottom - top, 0.0F)};
 		}
 
+		constexpr double kMaxUpdateDt = 0.25; // seconds; a stalled frame doesn't jump animations (R13.9)
+
 		bool clips(Overflow overflow) {
 			return overflow == Overflow::Clip || overflow == Overflow::Scroll;
 		}
@@ -66,11 +70,19 @@ namespace ui {
 	} // namespace
 
 	Context::Context(Foundation::Vec2 viewportSize)
-		: theme(uiTheme()),
+		: animator(std::make_unique<Animator>(clock)),
+		  theme(uiTheme()),
 		  windowSize(viewportSize),
 		  viewport(viewportSize),
 		  dispatcher(std::make_unique<detail::Dispatcher>(*this)),
-		  focusManager(std::make_unique<detail::FocusManager>(*this)) {}
+		  focusManager(std::make_unique<detail::FocusManager>(*this)) {
+		applyMotion();
+	}
+
+	// Tweens without their own duration and easing take the theme's.
+	void Context::applyMotion() {
+		animator->setDefaults(theme.get(tokens::motion::duration::normal), Easing(theme.get(tokens::motion::easing::standard)));
+	}
 
 	void Context::setTheme(Theme value) {
 		if (drawing) {
@@ -78,6 +90,7 @@ namespace ui {
 			return;
 		}
 		theme = std::move(value);
+		applyMotion();
 		for (const ComponentId rootId : roots) {
 			if (Component* rootComponent = registry.find(rootId)) {
 				restyle(*rootComponent);
@@ -177,10 +190,26 @@ namespace ui {
 		geometryDirty = true;
 	}
 
-	// The animator and the components that ask for updates arrive with phase 3's animation; until then
-	// a frame's update only lets removals made outside a dispatch settle.
-	void Context::update(double /*dt*/) {
+	void Context::update(double dt) {
 		const Registry::DispatchScope scope(registry);
+		const double				  seconds = std::isfinite(dt) ? std::clamp(dt, 0.0, kMaxUpdateDt) : 0.0;
+		clock.advance(seconds * 1000.0);
+		animator->tick();
+		const std::vector<ComponentId> requested = std::exchange(updateRequests, {});
+		for (const ComponentId id : requested) {
+			Component* component = registry.find(id);
+			if (component == nullptr) {
+				continue;
+			}
+			component->updateRequested = false;
+			bool shown = true;
+			for (const Component* node = component; node != nullptr && shown; node = registry.find(node->parentId)) {
+				shown = node->isShown();
+			}
+			if (shown) {
+				component->update(static_cast<float>(seconds));
+			}
+		}
 	}
 
 	// From each relayout boundary something under changed, a root's box being the viewport; then the
@@ -427,8 +456,16 @@ namespace ui {
 		dispatcher->cancel();
 	}
 
+	// The subtree's tweens and timers go with it.
 	void Context::removing(ComponentId root) {
 		dispatcher->removing(root);
+		std::vector<ComponentId> subtree{root};
+		for (std::size_t i = 0; i < subtree.size(); ++i) {
+			if (const Component* node = registry.find(subtree[i])) {
+				subtree.insert(subtree.end(), node->children.begin(), node->children.end());
+			}
+		}
+		animator->ownersRemoved(subtree);
 		focusManager->removing(root);
 	}
 

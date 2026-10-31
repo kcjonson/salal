@@ -110,6 +110,7 @@ namespace app {
 		constexpr std::string_view kWindowWidth = "video.windowWidth";
 		constexpr std::string_view kWindowHeight = "video.windowHeight";
 		constexpr std::string_view kUiScale = "ui.scale";
+		constexpr std::string_view kReducedMotion = "ui.reducedMotion";
 
 		using UserDir = std::filesystem::path (*)(std::string_view organization, std::string_view application);
 
@@ -217,6 +218,7 @@ namespace app {
 			userPath(config.settingsFile, userConfigDir, config, "settings"), config.settingsVersion, config.migrateSettings
 		);
 		scaleOfUi = std::clamp(userSettings.get<float>(kUiScale, 1.0F), 0.25F, 4.0F);
+		motionReduced = userSettings.get<bool>(kReducedMotion, false);
 		saveStore = SaveStore(userPath(config.savesDirectory, userDataDir, config, "saves"), config.saveFormat);
 	}
 
@@ -694,6 +696,12 @@ namespace app {
 		scaleOfUi = std::clamp(scale, 0.25F, 4.0F);
 		userSettings.set(kUiScale, scaleOfUi);
 		sceneStack.scaleUi(scaleOfUi);
+	}
+
+	void App::setReducedMotion(bool reduced) {
+		motionReduced = reduced;
+		userSettings.set(kReducedMotion, motionReduced);
+		sceneStack.reduceMotionUi(motionReduced);
 	}
 
 	void App::setVsync(bool enabled) {
