@@ -15,6 +15,7 @@
 #include "ui/components/Toggle.h"
 #include "ui/components/TreeView.h"
 #include "ui/debug/TreeSnapshot.h"
+#include "ui/theme/Tokens.h"
 
 #include "BaseShader.h"
 #include "backend/NullBackend.h"
@@ -96,6 +97,32 @@ namespace ui {
 		button.get()->setEnabled(false);
 		click(middleOf(*button.get()));
 		EXPECT_EQ(presses, 3);
+	}
+
+	// Fill, border, label and icon together, so a clear-fill button still reads as disabled; once, not
+	// again in its fill.
+	TEST_F(UiControlsTest, ADisabledControlFadesWholeAtTheDisabledOpacity) {
+		Ref<Button> on = root.addChild<Button>({.label = "On"});
+		Ref<Button> off = root.addChild<Button>({.enabled = false, .position = {0.0F, 40.0F}, .label = "Off"});
+		const float disabled = context.getTheme().get(tokens::state::disabled::opacity);
+		const auto	labelOpacity = [](const nlohmann::json& button) {
+			 for (const nlohmann::json& child : button["children"]) {
+				 if (child["type"] == "Text") {
+					 return child["opacity"].get<float>();
+				 }
+			 }
+			 return -1.0F;
+		};
+		const nlohmann::json nodes = snapshot();
+		EXPECT_FLOAT_EQ(nodes[0]["opacity"].get<float>(), 1.0F);
+		EXPECT_FLOAT_EQ(labelOpacity(nodes[0]), 1.0F);
+		EXPECT_FLOAT_EQ(nodes[1]["opacity"].get<float>(), disabled);
+		EXPECT_FLOAT_EQ(labelOpacity(nodes[1]), disabled);
+		on.get()->setEnabled(false);
+		off.get()->setEnabled(true);
+		const nlohmann::json flipped = snapshot();
+		EXPECT_FLOAT_EQ(labelOpacity(flipped[0]), disabled);
+		EXPECT_FLOAT_EQ(labelOpacity(flipped[1]), 1.0F);
 	}
 
 	TEST_F(UiControlsTest, ACheckboxAndAToggleFlipOnAPress) {

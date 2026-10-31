@@ -155,7 +155,6 @@ TEST(Theme, StateLayersTonesAndSizesReadTheTokens) {
 	const Foundation::Color base{0.2F, 0.2F, 0.2F, 1.0F};
 	// hover's wash is white at 0.06: 0.2 * 0.94 + 0.06
 	expectColor(ui::applyStateLayers(theme, base, {.hovered = true}), 0.248F, 0.248F, 0.248F);
-	expectColor(ui::applyStateLayers(theme, base, {.disabled = true}), 0.2F, 0.2F, 0.2F, 0.45F);
 	expectColor(
 		ui::applyStateLayers(theme, {0.0F, 0.0F, 0.0F, 0.0F}, {.hovered = true}), 1.0F, 1.0F, 1.0F, 0.06F
 	); // a wash shows on a clear base

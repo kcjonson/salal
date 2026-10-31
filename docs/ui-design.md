@@ -246,8 +246,9 @@ focus ring), spacing, radii and motion: font roles (display, body, mono), each
 naming a game family; a semantic tone set (default, accent, info, positive,
 warning, danger, plus `Auto`, picked by value); and `size` (sm, md, lg)
 setting font size and control height. State layers apply in R11.12's order
-(base, hover, pressed, open and active, disabled, focus ring), their washes
-coming from tokens. Worldsim's design language (elevation by tint, its line
+(base, hover, pressed, open and active, focus ring), their washes coming from
+tokens. A disabled control draws whole at the disabled opacity, fill, border,
+label and icon, so one with a clear fill still reads as disabled. Worldsim's design language (elevation by tint, its line
 alphas, two accents, its radius scale and control heights, Panel's kicker and
 bracket ticks) is worldsim's tokens and components, not engine rules.
 

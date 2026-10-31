@@ -2,6 +2,7 @@
 
 #include "ui/Context.h"
 #include "ui/detail/Snapshot.h"
+#include "ui/theme/Tokens.h"
 #include "ui/theme/Variants.h"
 
 #include <primitives/Primitives.h>
@@ -35,7 +36,11 @@ namespace ui {
 	}
 
 	InteractionState Control::interaction() const {
-		return {.hovered = isHovered(), .pressed = isPressed(), .active = active, .disabled = !isEnabledInTree()};
+		return {.hovered = isHovered(), .pressed = isPressed(), .active = active};
+	}
+
+	float Control::stateOpacity() const {
+		return isEnabledInTree() ? 1.0F : getContext()->getTheme().get(tokens::state::disabled::opacity);
 	}
 
 	void Control::render() {
