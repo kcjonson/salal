@@ -1,6 +1,6 @@
 // perf_ui: ui's walk over 10,000 components with the overlay stack in use. 1,250 cards of eight nodes
-// each: a rounded card with a header, an icon, a title, a value, a meter's track and fill and a divider,
-// one card in ten raised by zIndex. Over them, open from the start: a menu anchored to a card, a modal
+// each, three deep: a rounded card holding a header (an icon and a title), a value, a meter's track
+// (its fill) and a divider, one card in ten raised by zIndex. Over them, open from the start: a menu anchored to a card, a modal
 // dialog over a scrim, two toasts and a tooltip. The stage moves with the tick, as perf_quads does, so
 // every frame places every card again and the anchored menu and tooltip follow theirs. Fixed content
 // from a fixed seed.
@@ -105,19 +105,21 @@ namespace {
 				.style = {.backgroundColor = kCard, .borderColor = tint, .borderWidth = 1.0F, .borderRadius = 4.0F},
 				.zIndex = raised ? std::optional(1) : std::nullopt,
 			});
-			made.addChild<Rectangle>({.position = {2.0F, 2.0F}, .size = {60.0F, 12.0F}, .style = {.backgroundColor = shade(tint, 0.6F)}});
-			made.addChild<ui::Circle>({.position = {4.0F, 3.0F}, .size = {10.0F, 10.0F}, .style = {.backgroundColor = tint}});
-			made.addChild<Text>(
-				{.position = {17.0F, 2.0F}, .style = {.color = Color::white(), .fontSize = 11.0F}, .text = "#" + std::to_string(index)}
+			const Ref<Rectangle> header = made.addChild<Rectangle>(
+				{.position = {2.0F, 2.0F}, .size = {60.0F, 16.0F}, .style = {.backgroundColor = shade(tint, 0.6F)}}
 			);
-			made.addChild<Text>({.position = {4.0F, 16.0F}, .style = {.color = tint, .fontSize = 11.0F}, .text = value});
-			made.addChild<Rectangle>(
-				{.position = {4.0F, 32.0F}, .size = {56.0F, 6.0F}, .style = {.backgroundColor = kTrack, .borderRadius = 3.0F}}
+			header.addChild<ui::Circle>({.position = {2.0F, 3.0F}, .size = {10.0F, 10.0F}, .style = {.backgroundColor = tint}});
+			header.addChild<Text>(
+				{.position = {15.0F, 1.0F}, .style = {.color = Color::white(), .fontSize = 11.0F}, .text = "#" + std::to_string(index)}
 			);
-			made.addChild<Rectangle>(
-				{.position = {4.0F, 32.0F}, .size = {56.0F * filled, 6.0F}, .style = {.backgroundColor = tint, .borderRadius = 3.0F}}
+			made.addChild<Text>({.position = {4.0F, 20.0F}, .style = {.color = tint, .fontSize = 11.0F}, .text = value});
+			const Ref<Rectangle> track = made.addChild<Rectangle>(
+				{.position = {4.0F, 36.0F}, .size = {56.0F, 6.0F}, .style = {.backgroundColor = kTrack, .borderRadius = 3.0F}}
 			);
-			made.addChild<ui::Line>({.style = {.color = shade(tint, 0.8F)}, .start = {34.0F, 18.0F}, .end = {60.0F, 18.0F}});
+			track.addChild<Rectangle>(
+				{.size = {56.0F * (0.05F + (0.95F * filled)), 6.0F}, .style = {.backgroundColor = tint, .borderRadius = 3.0F}}
+			);
+			made.addChild<ui::Line>({.style = {.color = shade(tint, 0.8F)}, .start = {34.0F, 27.0F}, .end = {60.0F, 27.0F}});
 			nodes += kNodesPerCard;
 			return made;
 		}
