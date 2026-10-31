@@ -9,9 +9,8 @@ frame, input and the scene graph, so the games on top of it only have to be
 games. See [README.md](README.md).
 
 It is being **extracted from worldsim**, which has already implemented this
-architecture and is where the code comes from. `foundation`, `renderer` and
-`app` are in and worldsim runs on all three; `ui` is being built in phase 3,
-its core in and hosted by `app`.
+architecture and is where the code comes from. `foundation`, `renderer`,
+`app` and `ui` are in, and worldsim runs on all four.
 
 ## Project management: Specboard
 
@@ -84,8 +83,8 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 The build skeleton is in, with CI on Windows, macOS and Linux. **`foundation`
 and `renderer` are imported** (plain copies of worldsim at `870dd755` and
 `2cc7e40a`, 2026-10-26); `app` is built from worldsim's `libs/engine` slice
-(phase 2, below); `ui` is being built to [docs/ui-design.md](docs/ui-design.md),
-its core (components in a scene's slot map, one paint order) in.
+(phase 2, below); `ui` is built in salal to [docs/ui-design.md](docs/ui-design.md)
+(phase 3, below).
 **Phase 0, the audit, is done** (2026-10-25); findings in
 [docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
@@ -119,9 +118,17 @@ the sandbox harness, a scene picker drawn with `Primitives` over worldsim's
 renderer-level scenes. Worldsim pinned `v0.15.0` ([worldsim#313](https://github.com/kcjonson/worldsim/pull/313))
 and then converted its three GUI apps onto `app` ([worldsim#314](https://github.com/kcjonson/worldsim/pull/314)),
 which deleted its own application, scene, input, clipboard and debug code. The
-accepted behaviour differences are owned in app-api.md. Next is phase 2b, audio,
-once decision B is settled, then phase 3, `ui`. The extraction doc has the detail
-and the reasoning for the order.
+accepted behaviour differences are owned in app-api.md.
+
+**Phase 3, `ui`, is done** (2026-10-30), in the PRs [docs/ui-plan.md](docs/ui-plan.md)
+sequences: four renderer PRs, then `ui` built in salal (core, layout, input,
+focus, theme and tokens, icons, animation, overlays, and the display, control
+and overlay components), then worldsim's conversion in three PRs, [worldsim#322](https://github.com/kcjonson/worldsim/pull/322)
+to [worldsim#324](https://github.com/kcjonson/worldsim/pull/324). Worldsim runs entirely on salal's ui at `v0.29.0`, keyboard and
+mouse only, with its `libs/ui` and the bridge deleted. Grid, the perf suite,
+the scene diff and the happy-path scripts were deferred and are still to do.
+Next is phase 2b, audio, once decision B is settled. The extraction doc has the
+detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
 consume this repo. Not one giant branch: worldsim is active, and a long-lived
@@ -271,8 +278,7 @@ or delete `build/`.
 `app` is worldsim's `libs/engine` slice rebuilt to [docs/app-api.md](docs/app-api.md),
 in namespace `app`. `ui` is built in salal to [docs/ui-design.md](docs/ui-design.md),
 ported from worldsim's `libs/ui` where its code still applies, in namespace
-`ui` with its headers under `ui/` (`#include <ui/Component.h>`), so they
-can't collide with worldsim's ui while both are linked. `app` links it and
+`ui` with its headers under `ui/` (`#include <ui/Component.h>`). `app` links it and
 gives every scene a context (`Scene::ui()`). The casing of the imported
 renderer's namespaces (it has both `Renderer` and `renderer`) is an open
 worldsim follow-up. Blame and history for imported code live in worldsim;
