@@ -18,6 +18,7 @@
 #include <memory>
 #include <stack>
 #include <unordered_map>
+#include <utility>
 #include <utils/Log.h>
 #include <vector>
 
@@ -149,23 +150,17 @@ namespace Renderer::Primitives {
 
 	// --- Textures ---
 
-	TextureHandle createTexture(const TextureDesc& desc) {
+	Texture createTexture(const TextureDesc& desc) {
 		if (g_backend == nullptr) {
 			LOG_ERROR(Renderer, "createTexture: the renderer is not initialized");
 			return {};
 		}
-		return g_backend->createTexture(desc);
+		return Texture(g_backend->createTexture(desc));
 	}
 
 	void updateTexture(TextureHandle handle, int x, int y, int width, int height, const void* pixels) {
 		if (g_backend != nullptr) {
 			g_backend->updateTexture(handle, x, y, width, height, pixels);
-		}
-	}
-
-	void destroyTexture(TextureHandle handle) {
-		if (g_backend != nullptr) {
-			g_backend->destroyTexture(handle);
 		}
 	}
 
@@ -811,6 +806,31 @@ namespace Renderer::Primitives {
 	}
 
 } // namespace Renderer::Primitives
+
+namespace Renderer {
+
+	// Texture's free goes through the batch, which holds it back while a pending draw samples it.
+
+	Texture::~Texture() {
+		if (Primitives::g_batchRenderer != nullptr) {
+			Primitives::g_batchRenderer->releaseTexture(texture);
+		}
+	}
+
+	Texture::Texture(Texture&& other) noexcept
+		: texture(std::exchange(other.texture, {})) {}
+
+	Texture& Texture::operator=(Texture&& other) noexcept {
+		if (this != &other) {
+			if (Primitives::g_batchRenderer != nullptr) {
+				Primitives::g_batchRenderer->releaseTexture(texture);
+			}
+			texture = std::exchange(other.texture, {});
+		}
+		return *this;
+	}
+
+} // namespace Renderer
 
 namespace Renderer::backend {
 

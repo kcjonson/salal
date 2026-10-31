@@ -195,6 +195,8 @@ namespace Renderer::backend {
 		// outside the texture is refused.
 		virtual void updateTexture(TextureHandle texture, int x, int y, int width, int height, const void* pixels) = 0;
 		virtual void destroyTexture(TextureHandle texture) = 0;
+		// Whether `texture` is in the table: false for an invalid or stale handle.
+		[[nodiscard]] virtual bool hasTexture(TextureHandle texture) const = 0;
 
 		// --- Render targets ---
 

@@ -83,7 +83,6 @@ namespace {
 
 		void onExit() override {
 			target = Renderer::RenderTarget();
-			Renderer::Primitives::destroyTexture(sprite);
 			sprite = {};
 		}
 
@@ -176,7 +175,7 @@ namespace {
 					const float		sx = x0 + 120.0F + (static_cast<float>(mode) * 380.0F);
 					for (int i = 0; i < 3; ++i) {
 						P::drawImage(
-							{.texture = sprite,
+							{.texture = sprite.handle(),
 							 .bounds = {sx + (static_cast<float>(i) * 70.0F), 950.0F + (static_cast<float>(i % 2) * 40.0F), 200.0F, 200.0F},
 							 .blend = blend}
 						);
@@ -236,8 +235,8 @@ namespace {
 			return target.isValid();
 		}
 
-		Renderer::TextureHandle sprite;
-		Renderer::RenderTarget	target;
+		Renderer::Texture	   sprite;
+		Renderer::RenderTarget target;
 	};
 
 } // namespace

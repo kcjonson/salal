@@ -23,6 +23,7 @@
 #include <memory>
 #include <numbers>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace Renderer {
@@ -440,8 +441,10 @@ namespace Renderer {
 	}
 
 	TEST_F(FlushTest, AtlasChangesSplitIntoDrawCallsOverOneUpload) {
-		const TextureHandle atlas = Primitives::createTexture({.width = 4, .height = 4, .format = TextureFormat::Rgb8});
-		const TextureHandle image = Primitives::createTexture({.width = 4, .height = 4});
+		const Texture		atlasTexture = Primitives::createTexture({.width = 4, .height = 4, .format = TextureFormat::Rgb8});
+		const Texture		imageTexture = Primitives::createTexture({.width = 4, .height = 4});
+		const TextureHandle atlas = atlasTexture.handle();
+		const TextureHandle image = imageTexture.handle();
 		Primitives::setFontAtlas(atlas);
 
 		Primitives::beginFrame();
@@ -565,7 +568,7 @@ namespace Renderer {
 	}
 
 	TEST_F(FlushTest, AClipWithNoAreaCullsEveryKindOfDraw) {
-		const TextureHandle					  image = Primitives::createTexture({.width = 1, .height = 1});
+		const Texture						  image = Primitives::createTexture({.width = 1, .height = 1});
 		const std::array<Foundation::Vec2, 3> triangle = {{{0.0F, 0.0F}, {10.0F, 0.0F}, {0.0F, 10.0F}}};
 		const std::array<uint16_t, 3>		  triangleIndices = {0, 1, 2};
 		Primitives::beginFrame();
@@ -586,12 +589,64 @@ namespace Renderer {
 		Primitives::drawPolygon({.vertices = triangle, .style = {.border = Foundation::LineStyle{}}});
 		Primitives::drawPolyline({.points = triangle, .width = 2.0F});
 		Primitives::drawArc({.center = {10.0F, 10.0F}, .outerRadius = 5.0F});
-		Primitives::drawImage({.texture = image, .bounds = {0.0F, 0.0F, 4.0F, 4.0F}});
+		Primitives::drawImage({.texture = image.handle(), .bounds = {0.0F, 0.0F, 4.0F, 4.0F}});
 		Primitives::popClip();
 		Primitives::endFrame();
 
 		EXPECT_TRUE(gpu->draws().empty());
-		Primitives::destroyTexture(image);
+	}
+
+	TEST_F(FlushTest, ATextureIsFreedOnceByWhicheverOwnerHoldsItLast) {
+		{
+			Texture				first = Primitives::createTexture({.width = 2, .height = 2});
+			const TextureHandle firstHandle = first.handle();
+			Texture				moved(std::move(first));
+			EXPECT_FALSE(first.isValid()); // NOLINT(bugprone-use-after-move): moved from, as the test means
+			EXPECT_EQ(moved.handle(), firstHandle);
+			EXPECT_EQ(gpu->live().textures, 1U);
+
+			Texture				second = Primitives::createTexture({.width = 4, .height = 4});
+			const TextureHandle secondHandle = second.handle();
+			second = std::move(moved); // frees what second held
+			EXPECT_EQ(gpu->texture(secondHandle), nullptr);
+			EXPECT_NE(gpu->texture(firstHandle), nullptr);
+			EXPECT_EQ(gpu->live().textures, 1U);
+		}
+		EXPECT_EQ(gpu->live().textures, 0U);
+		EXPECT_EQ(gpu->texturesMade(), 2);
+	}
+
+	TEST_F(FlushTest, AStaleTextureDrawsNothing) {
+		Texture				image = Primitives::createTexture({.width = 2, .height = 2});
+		const TextureHandle stale = image.handle();
+		image = {};
+		Primitives::setFontAtlas(stale);
+
+		Primitives::beginFrame();
+		Primitives::drawImage({.texture = stale, .bounds = {0.0F, 0.0F, 4.0F, 4.0F}});
+		const FontRenderer::GlyphQuad quad{.position = {0.0F, 0.0F}, .size = {8.0F, 8.0F}, .atlas = stale, .pixelRange = 4.0F};
+		Primitives::drawGlyphs(&quad, 1);
+		glyph(10.0F); // the default atlas, freed too
+		Primitives::endFrame();
+		EXPECT_TRUE(gpu->draws().empty());
+	}
+
+	TEST_F(FlushTest, ATextureFreedUnderAPendingDrawLivesUntilTheFlush) {
+		Texture				image = Primitives::createTexture({.width = 2, .height = 2});
+		const TextureHandle handle = image.handle();
+
+		Primitives::beginFrame();
+		Primitives::drawImage({.texture = handle, .bounds = {0.0F, 0.0F, 4.0F, 4.0F}});
+		image = {};
+		EXPECT_NE(gpu->texture(handle), nullptr);										 // the draw above still samples it
+		Primitives::drawImage({.texture = handle, .bounds = {10.0F, 0.0F, 4.0F, 4.0F}}); // but nothing new does
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(gpu->draws()[0].call.texture, handle);
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U);
+		EXPECT_EQ(gpu->texture(handle), nullptr);
+		EXPECT_EQ(gpu->live().textures, 0U);
 	}
 
 	TEST_F(FlushTest, EachFlushIsASubmissionThatStartsTheBuffersOver) {
