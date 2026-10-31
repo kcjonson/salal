@@ -187,8 +187,9 @@ namespace ui {
 				dirtyBoundaries.push_back(rootId);
 			}
 		}
-		for (const PopupEntry& open : popupStack) {
-			if (Component* entry = registry.find(open.id); entry != nullptr && open.options.cover) {
+		for (const OverlayEntry& open : overlayStack) {
+			const auto* absolute = std::get_if<Absolute>(&open.options.placement);
+			if (Component* entry = registry.find(open.id); entry != nullptr && absolute != nullptr && absolute->cover) {
 				entry->sizeSpec = Size(viewport);
 				entry->layoutChanged(true);
 			}
@@ -244,7 +245,7 @@ namespace ui {
 			geometryDirty = true;
 		}
 		changed = refreshGeometry() || changed;
-		placePopups();
+		placeOverlays();
 		changed = refreshGeometry() || changed;
 		if (orderDirty) {
 			buildOrder();
@@ -302,8 +303,14 @@ namespace ui {
 			   component.scroll == Foundation::Vec2{0.0F, 0.0F} ? component.screen : component.screen * Affine::translation(-component.scroll);
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
-				const bool entry = child->isPopupEntry();
-				updateScreen(*child, childParent, entry ? std::nullopt : childClip, component.enabledInTree, !entry && childBlocked);
+				const bool entry = child->isOverlay();
+				updateScreen(
+					*child,
+					child->detached ? Affine{} : childParent,
+					entry ? std::nullopt : childClip,
+					component.enabledInTree,
+					!entry && childBlocked
+				);
 			}
 		}
 	}
@@ -324,19 +331,11 @@ namespace ui {
 			paintContext(*orderScratch[i].component);
 		}
 		orderScratch.clear();
-		const auto shownInTree = [&](const Component& entry) {
-			for (const Component* node = &entry; node != nullptr; node = registry.find(node->parentId)) {
-				if (!node->isShown()) {
-					return false;
-				}
-			}
-			return true;
-		};
 		int stackSlot = 0;
 		for (const bool tooltips : {false, true}) {
-			for (const PopupEntry& entry : popupStack) {
+			for (const OverlayEntry& entry : overlayStack) {
 				Component* component = registry.find(entry.id);
-				if (component == nullptr || (entry.options.kind == PopupKind::Tooltip) != tooltips || !shownInTree(*component)) {
+				if (component == nullptr || (entry.options.kind == OverlayKind::Tooltip) != tooltips || !shownInTree(*component)) {
 					continue;
 				}
 				paintingSlot = tooltips ? kTooltipSlot : std::min(++stackSlot, kMaxStackEntries);
@@ -422,7 +421,7 @@ namespace ui {
 	void Context::collectContext(Component& parent, int inheritedZ) {
 		for (const ComponentId childId : parent.children) {
 			Component* child = registry.find(childId);
-			if (child == nullptr || !child->isShown() || child->isPopupEntry()) {
+			if (child == nullptr || !child->isShown() || child->isOverlay()) {
 				continue; // an entry paints in its own slot
 			}
 			const int z = child->zIndex.value_or(inheritedZ);
@@ -501,7 +500,7 @@ namespace ui {
 	// The subtree's tweens and timers go with it.
 	void Context::removing(ComponentId root) {
 		dispatcher->removing(root);
-		std::erase_if(popupStack, [&](const PopupEntry& entry) { return within(entry.id, root); });
+		std::erase_if(overlayStack, [&](const OverlayEntry& entry) { return within(entry.id, root); });
 		std::vector<ComponentId> subtree{root};
 		for (std::size_t i = 0; i < subtree.size(); ++i) {
 			if (const Component* node = registry.find(subtree[i])) {
@@ -510,6 +509,15 @@ namespace ui {
 		}
 		animator->ownersRemoved(subtree);
 		focusManager->removing(root);
+	}
+
+	bool Context::shownInTree(const Component& component) const {
+		for (const Component* node = &component; node != nullptr; node = registry.find(node->parentId)) {
+			if (!node->isShown()) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	bool Context::within(ComponentId id, ComponentId root) const {
@@ -521,46 +529,49 @@ namespace ui {
 		return false;
 	}
 
-	// --- The popup stack ---
+	// --- The overlay stack ---
 
 	// An entry leaves its opener's flow and becomes a stacking context. A menu closes its player's
 	// other menus, except the ones it was opened from inside.
-	void Context::openPopup(ComponentId entryId, ComponentId opener, PopupOptions options) {
+	void Context::openOverlay(ComponentId entryId, ComponentId opener, OverlayOptions options) {
 		Component* entry = registry.find(entryId);
 		if (entry == nullptr) {
 			return;
 		}
 		const auto stacked =
-			std::ranges::count_if(popupStack, [](const PopupEntry& each) { return each.options.kind != PopupKind::Tooltip; });
-		if (options.kind != PopupKind::Tooltip && stacked >= kMaxStackEntries) {
-			LOG_ERROR(UI, "%d popup stack entries open; this one shares the top slot", kMaxStackEntries);
+			std::ranges::count_if(overlayStack, [](const OverlayEntry& each) { return each.options.kind != OverlayKind::Tooltip; });
+		if (options.kind != OverlayKind::Tooltip && stacked >= kMaxStackEntries) {
+			LOG_ERROR(UI, "%d overlay stack entries open; this one shares the top slot", kMaxStackEntries);
 		}
-		entry->popupKind = options.kind;
+		entry->overlayKind = options.kind;
 		entry->isolation = true;
 		entry->layout.position = Position::Absolute;
-		if (options.cover) {
-			entry->sizeSpec = Size(viewport);
+		if (const auto* absolute = std::get_if<Absolute>(&options.placement)) {
+			entry->detached = true;
+			if (absolute->cover) {
+				entry->sizeSpec = Size(viewport);
+			}
 		}
 		entry->layoutChanged(true);
 		orderDirty = true;
 		geometryDirty = true;
 		std::vector<ComponentId> closing;
-		if (options.kind == PopupKind::Menu) {
-			for (auto open = popupStack.rbegin(); open != popupStack.rend(); ++open) { // the topmost first, so each hears its dismissal
-				if (open->options.kind == PopupKind::Menu && open->options.player == options.player && !within(opener, open->id)) {
+		if (options.kind == OverlayKind::Menu) {
+			for (auto open = overlayStack.rbegin(); open != overlayStack.rend(); ++open) { // the topmost first, so each hears its dismissal
+				if (open->options.kind == OverlayKind::Menu && open->options.player == options.player && !within(opener, open->id)) {
 					closing.push_back(open->id);
 				}
 			}
 		}
-		popupStack.push_back({.id = entryId, .opener = opener, .options = std::move(options)});
+		overlayStack.push_back({.id = entryId, .opener = opener, .options = std::move(options)});
 		for (const ComponentId id : closing) {
 			dismiss(id);
 		}
 	}
 
-	void Context::closePopup(Ref<Component> entryRef) {
+	void Context::closeOverlay(Ref<Component> entryRef) {
 		Component* entry = entryRef.registry == &registry ? entryRef.get() : nullptr;
-		if (entry == nullptr || !entry->isPopupEntry()) {
+		if (entry == nullptr || !entry->isOverlay()) {
 			return;
 		}
 		if (Component* opener = registry.find(entry->parentId)) {
@@ -569,15 +580,15 @@ namespace ui {
 		}
 	}
 
-	void Context::dismissPopup(Ref<Component> entryRef) {
+	void Context::dismissOverlay(Ref<Component> entryRef) {
 		if (entryRef.registry == &registry) {
 			dismiss(entryRef.componentId());
 		}
 	}
 
 	void Context::dismiss(ComponentId entryId) {
-		const auto open = std::ranges::find(popupStack, entryId, &PopupEntry::id);
-		if (open == popupStack.end()) {
+		const auto open = std::ranges::find(overlayStack, entryId, &OverlayEntry::id);
+		if (open == overlayStack.end()) {
 			return;
 		}
 		const Registry::DispatchScope scope(registry);
@@ -585,41 +596,57 @@ namespace ui {
 		if (onDismiss) {
 			onDismiss();
 		}
-		closePopup({entryId, &registry});
+		closeOverlay({entryId, &registry});
 	}
 
 	void Context::bringToFront(Ref<Component> entryRef) {
-		if (entryRef.registry != &registry || entryRef.get() == nullptr || !entryRef.get()->isPopupEntry()) {
+		if (entryRef.registry != &registry || entryRef.get() == nullptr || !entryRef.get()->isOverlay()) {
 			return;
 		}
 		const ComponentId front = entryRef.componentId();
-		std::stable_partition(popupStack.begin(), popupStack.end(), [&](const PopupEntry& entry) { return !within(entry.id, front); });
+		std::stable_partition(overlayStack.begin(), overlayStack.end(), [&](const OverlayEntry& entry) {
+			return !within(entry.id, front);
+		});
 		orderDirty = true;
 	}
 
-	std::vector<ComponentId> Context::popups() const {
+	std::vector<ComponentId> Context::overlays() const {
 		std::vector<ComponentId> ids;
-		ids.reserve(popupStack.size());
-		for (const PopupEntry& entry : popupStack) {
+		ids.reserve(overlayStack.size());
+		for (const OverlayEntry& entry : overlayStack) {
 			ids.push_back(entry.id);
 		}
 		return ids;
 	}
 
-	// After the layout, each placed entry goes where placement says against its opener's box on screen,
-	// converted to its opener's child space (inside its scroll), and a cover entry over the viewport.
-	void Context::placePopups() {
+	// After the layout: an anchored overlay where placement puts it against its origin on screen,
+	// converted to its opener's child space (inside its scroll); an absolute one at its screen point,
+	// which is its own space, or over the viewport.
+	void Context::placeOverlays() {
 		const Foundation::Rect screen{0.0F, 0.0F, viewport.x, viewport.y};
-		for (const PopupEntry& open : popupStack) {
+		for (const OverlayEntry& open : overlayStack) {
 			Component* entry = registry.find(open.id);
 			Component* opener = registry.find(open.opener);
-			if (entry == nullptr || opener == nullptr || !entry->isShown() || (!open.options.cover && !open.options.placement)) {
+			if (entry == nullptr || opener == nullptr || !entry->isShown()) {
 				continue;
 			}
-			const Foundation::Rect rect =
-				open.options.cover ? screen
-								   : place(opener->screenBounds(), entry->size + entry->margin.total(), screen, *open.options.placement);
-			const Foundation::Vec2 at = opener->screenToLocal({rect.x, rect.y}) + opener->scroll;
+			const Foundation::Vec2 size = entry->size + entry->margin.total();
+			Foundation::Vec2	   at{0.0F, 0.0F};
+			if (const auto* anchored = std::get_if<Anchored>(&open.options.placement)) {
+				Foundation::Rect origin = opener->screenBounds();
+				if (anchored->point) {
+					const Foundation::Vec2 point = opener->localToScreen(*anchored->point);
+					origin = {point.x, point.y, 0.0F, 0.0F};
+				}
+				const Foundation::Rect rect = place(origin, size, screen, *anchored);
+				at = opener->screenToLocal({rect.x, rect.y}) + opener->scroll;
+			} else if (const auto& absolute = std::get<Absolute>(open.options.placement); !absolute.cover) {
+				at = absolute.at;
+				if (absolute.margin) {
+					at.x = std::clamp(at.x, *absolute.margin, std::max(viewport.x - *absolute.margin - size.x, *absolute.margin));
+					at.y = std::clamp(at.y, *absolute.margin, std::max(viewport.y - *absolute.margin - size.y, *absolute.margin));
+				}
+			}
 			if (at != entry->offset) {
 				entry->offset = at;
 				entry->position = at;
@@ -629,12 +656,12 @@ namespace ui {
 	}
 
 	// A press outside the pointer player's menus closes them; it is consumed unless it is a secondary
-	// press or lands on a popup trigger (R9.13).
+	// press or lands on an overlay trigger (R9.13).
 	bool Context::pressOutside(ComponentId hit, foundation::MouseButton button) {
 		constexpr int			 kPointerPlayer = 0;
 		std::vector<ComponentId> closing;
-		for (auto it = popupStack.rbegin(); it != popupStack.rend(); ++it) {
-			if (it->options.kind == PopupKind::Menu && it->options.player == kPointerPlayer && !within(hit, it->id)) {
+		for (auto it = overlayStack.rbegin(); it != overlayStack.rend(); ++it) {
+			if (it->options.kind == OverlayKind::Menu && it->options.player == kPointerPlayer && !within(hit, it->id)) {
 				closing.push_back(it->id);
 			}
 		}
@@ -643,7 +670,7 @@ namespace ui {
 		}
 		bool trigger = false;
 		for (const Component* node = registry.find(hit); node != nullptr && !trigger; node = registry.find(node->parentId)) {
-			trigger = node->popupTrigger;
+			trigger = node->overlayTrigger;
 		}
 		for (const ComponentId id : closing) {
 			dismiss(id);
@@ -654,9 +681,9 @@ namespace ui {
 	int Context::modalFloor() const {
 		constexpr int kPointerPlayer = 0;
 		int			  floor = 0;
-		for (const PopupEntry& open : popupStack) {
+		for (const OverlayEntry& open : overlayStack) {
 			const Component* entry = registry.find(open.id);
-			if (entry != nullptr && open.options.kind == PopupKind::Dialog && open.options.player == kPointerPlayer && entry->isShown()) {
+			if (entry != nullptr && open.options.kind == OverlayKind::Dialog && open.options.player == kPointerPlayer && entry->isShown()) {
 				floor = std::max(floor, entry->slot);
 			}
 		}
@@ -748,6 +775,11 @@ namespace ui {
 				renderComponent(*rootComponent, 1.0F);
 			}
 		}
+		for (const OverlayEntry& open : overlayStack) {
+			if (Component* entry = registry.find(open.id); entry != nullptr && entry->detached && shownInTree(*entry)) {
+				renderComponent(*entry, 1.0F);
+			}
+		}
 		if (scale != 1.0F) {
 			Renderer::Primitives::PopTransform();
 		}
@@ -777,7 +809,10 @@ namespace ui {
 		}
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
-				const bool entry = child->isPopupEntry();
+				if (child->detached) {
+					continue; // drawn from the top, in screen space
+				}
+				const bool entry = child->isOverlay();
 				if (entry) {
 					Renderer::Primitives::pushClipReset();
 				}

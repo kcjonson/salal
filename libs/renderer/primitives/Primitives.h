@@ -479,7 +479,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// draws ignore clips.
 		void pushClip(const Foundation::Rect& bounds);
 
-		// A clip of none, whatever is pushed under it, until it is popped: what a ui popup draws
+		// A clip of none, whatever is pushed under it, until it is popped: what a ui overlay draws
 		// in, escaping its opener's clips. A clip pushed over it clips again.
 		void pushClipReset();
 

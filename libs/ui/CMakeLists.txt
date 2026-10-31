@@ -50,7 +50,7 @@ add_library(salal_ui STATIC
     ui/components/Stat.cpp
     ui/Component.cpp
     ui/Context.cpp
-    ui/Popup.cpp
+    ui/Overlay.cpp
     ui/Focus.cpp
     ui/Registry.cpp
     ui/Style.cpp

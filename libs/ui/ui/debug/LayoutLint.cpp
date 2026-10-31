@@ -95,7 +95,7 @@ namespace ui {
 				visible.reserve(ids.size());
 				for (std::size_t i = 0; i < ids.size(); ++i) {
 					const Component* component = context.find(ids[i]);
-					if (!entryGroup && component != nullptr && component->isShown() && component->isPopupEntry()) {
+					if (!entryGroup && component != nullptr && component->isShown() && component->isOverlay()) {
 						entries.push_back(i);
 						continue;
 					}
@@ -191,7 +191,7 @@ namespace ui {
 					siblings(member.component->getChildren(), &box, {box.bounds.x, box.bounds.y}, childZ, childClip, scrolls, result);
 				}
 
-				// A popup entry is out of its opener's box and clips on purpose: a root of its own, where
+				// An overlay entry is out of its opener's box and clips on purpose: a root of its own, where
 				// it is on screen, held to the viewport alone.
 				for (const std::size_t index : entries) {
 					const Component*	   entry = context.find(ids[index]);

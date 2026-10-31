@@ -1,4 +1,4 @@
-// ui_popups: the popup stack. A menu opens below its button and closes on a press outside it; one of
+// ui_overlays: the overlay stack. A menu opens below its button and closes on a press outside it; one of
 // its rows opens a dialog over a scrim, and the dialog's own menu lands above the dialog. A button
 // shows a tooltip above it while hovered, over everything. A toast arrives at the top right. A menu
 // opened from inside a clipped list escapes the clip. The last action is written at the bottom.
@@ -18,7 +18,7 @@
 
 namespace {
 
-	constexpr const char* kSceneName = "ui_popups";
+	constexpr const char* kSceneName = "ui_overlays";
 
 	const Foundation::Color kBackground(0.1F, 0.1F, 0.12F, 1.0F);
 	const Foundation::Color kButton(0.25F, 0.45F, 0.7F, 1.0F);
@@ -34,7 +34,7 @@ namespace {
 	using ui::Ref;
 	using ui::Text;
 
-	class UiPopupsScene final : public app::Scene {
+	class UiOverlaysScene final : public app::Scene {
 	  public:
 		const char* name() const override { return kSceneName; }
 
@@ -47,7 +47,7 @@ namespace {
 			menuButton.get()->setOnClick([this, menuButton](PointerEvent& /*event*/) { openMenu(menuButton); });
 			Ref<Rectangle> hint = button(row, "tooltip_button", "Hover for a tooltip", kButton, {});
 			hint.get()->setOnPointer(PointerEvent::Type::Enter, [this, hint](PointerEvent& /*event*/) { showTip(hint); });
-			hint.get()->setOnPointer(PointerEvent::Type::Leave, [this](PointerEvent& /*event*/) { ui().closePopup(tip); });
+			hint.get()->setOnPointer(PointerEvent::Type::Leave, [this](PointerEvent& /*event*/) { ui().closeOverlay(tip); });
 			button(row, "toast_button", "Toast", kButton, [this] { toast(); });
 			clippedList();
 			status = root().addChild<Text>({.id = "status", .style = {.color = kLabel, .fontSize = 14.0F}, .text = "Nothing yet"});
@@ -93,17 +93,15 @@ namespace {
 		// A column of rows under `opener`, each running its action and closing the menu.
 		Ref<Rectangle>
 		menu(Ref<Component> opener, const std::string& id, const std::vector<std::pair<std::string, std::function<void()>>>& rows) {
-			Ref<Rectangle> made = opener.get()->openPopup<Rectangle>(
+			Ref<Rectangle> made = opener.get()->openOverlay<Rectangle>(
 				{.id = id,
 				 .layout = {.display = ui::Display::Flex, .flexDirection = ui::FlexDirection::Column, .gap = 4.0F, .padding = 6.0F},
 				 .style = {.backgroundColor = kPanel, .borderRadius = 6.0F}},
-				{.kind = ui::PopupKind::Menu, .placement = ui::Placement{}, .onDismiss = [this, id] {
-					 show(id + " dismissed by a press outside");
-				 }}
+				{.kind = ui::OverlayKind::Menu, .onDismiss = [this, id] { show(id + " dismissed by a press outside"); }}
 			);
 			for (const auto& [label, action] : rows) {
 				button(made, id + "_" + label, label, kRow, [this, made, action] {
-					ui().closePopup(made);
+					ui().closeOverlay(made);
 					action();
 				});
 			}
@@ -125,12 +123,12 @@ namespace {
 
 		// A scrim over the viewport, the panel centred on it, modal for player 0.
 		void openDialog() {
-			Ref<Rectangle> scrim = root().get()->openPopup<Rectangle>(
+			Ref<Rectangle> scrim = root().get()->openOverlay<Rectangle>(
 				{.id = "dialog",
 				 .layout =
 					 {.display = ui::Display::Flex, .alignItems = ui::AlignItems::Center, .justifyContent = ui::JustifyContent::Center},
 				 .style = {.backgroundColor = kScrim}},
-				{.kind = ui::PopupKind::Dialog, .cover = true}
+				{.kind = ui::OverlayKind::Dialog, .placement = ui::Absolute{.cover = true}}
 			);
 			Ref<Rectangle> panel = scrim.addChild<Rectangle>({
 				.id = "dialog_panel",
@@ -144,16 +142,16 @@ namespace {
 				menu(more, "dialog_menu_open", {{"Above", [this] { show("The dialog's menu landed above it"); }}});
 			});
 			button(actions, "dialog_close", "Close", kButton, [this, scrim] {
-				ui().closePopup(scrim);
+				ui().closeOverlay(scrim);
 				show("Dialog closed");
 			});
 		}
 
 		void showTip(Ref<Component> anchor) {
-			ui().closePopup(tip);
-			tip = anchor.get()->openPopup<Rectangle>(
+			ui().closeOverlay(tip);
+			tip = anchor.get()->openOverlay<Rectangle>(
 				{.id = "tooltip", .layout = {.padding = 6.0F}, .style = {.backgroundColor = kTip, .borderRadius = 4.0F}},
-				{.kind = ui::PopupKind::Tooltip, .placement = ui::Placement{.side = ui::Side::Above}}
+				{.kind = ui::OverlayKind::Tooltip, .placement = ui::Anchored{.side = ui::Side::Above}}
 			);
 			tip.addChild<Text>({.style = {.color = kBackground, .fontSize = 13.0F}, .text = "Above everything, and never hit"});
 		}
@@ -161,14 +159,14 @@ namespace {
 		// Brought to the front as it arrives; a click closes it.
 		void toast() {
 			const std::string id = "toast_" + std::to_string(++toasts);
-			Ref<Rectangle>	  made = root().get()->openPopup<Rectangle>(
+			Ref<Rectangle>	  made = root().get()->openOverlay<Rectangle>(
 				   {.id = id,
 					.size = {220.0F, 48.0F},
 					.style = {.backgroundColor = kRow, .borderRadius = 6.0F},
 					.cursor = ui::Cursor::Pointer},
-				   {.kind = ui::PopupKind::Toast, .placement = ui::Placement{.at = Foundation::Vec2{10000.0F, 16.0F}}}
+				   {.kind = ui::OverlayKind::Toast, .placement = ui::Absolute{.at = {10000.0F, 16.0F}, .margin = 16.0F}}
 			   );
-			made.get()->setOnClick([this, made](PointerEvent& /*event*/) { ui().closePopup(made); });
+			made.get()->setOnClick([this, made](PointerEvent& /*event*/) { ui().closeOverlay(made); });
 			made.addChild<Text>(
 				{.position = {12.0F, 14.0F},
 				 .style = {.fontSize = 14.0F},
@@ -205,5 +203,5 @@ namespace {
 } // namespace
 
 namespace sandbox {
-	const SceneInfo kUiPopupsScene{.name = kSceneName, .make = makeScene<UiPopupsScene>};
+	const SceneInfo kUiOverlaysScene{.name = kSceneName, .make = makeScene<UiOverlaysScene>};
 } // namespace sandbox

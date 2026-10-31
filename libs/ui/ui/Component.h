@@ -33,7 +33,7 @@
 #include "ui/Focus.h"
 #include "ui/Input.h"
 #include "ui/Layout.h"
-#include "ui/Popup.h"
+#include "ui/Overlay.h"
 #include "ui/Registry.h"
 #include "ui/Style.h"
 #include "ui/Transform.h"
@@ -281,19 +281,19 @@ namespace ui {
 		// handlesPointer, which the lint's unreachable-interactive rule reads).
 		[[nodiscard]] virtual bool handlesPointer() const;
 
-		// --- Popups (ui/Popup.h) ---
+		// --- Overlays (ui/Overlay.h) ---
 
-		// Builds T under this component as a popup stack entry: out of this component's flow, a stacking
+		// Builds T under this component as an overlay stack entry: out of this component's flow, a stacking
 		// context in a slot of its own, placed beside this component after each layout. Close it with
-		// Context::closePopup, or by removing it or this component.
+		// Context::closeOverlay, or by removing it or this component.
 		template <typename T>
-		Ref<T>								   openPopup(const typename T::Args& args, PopupOptions options = {});
-		[[nodiscard]] bool					   isPopupEntry() const { return popupKind.has_value(); }
-		[[nodiscard]] std::optional<PopupKind> getPopupKind() const { return popupKind; }
+		Ref<T>									 openOverlay(const typename T::Args& args, OverlayOptions options = {});
+		[[nodiscard]] bool						 isOverlay() const { return overlayKind.has_value(); }
+		[[nodiscard]] std::optional<OverlayKind> getOverlayKind() const { return overlayKind; }
 		// A press on it, or under it, closes an open menu without being consumed, so one press moves
 		// from one menu's trigger to another's (R9.13).
-		void			   setPopupTrigger(bool value) { popupTrigger = value; }
-		[[nodiscard]] bool isPopupTrigger() const { return popupTrigger; }
+		void			   setOverlayTrigger(bool value) { overlayTrigger = value; }
+		[[nodiscard]] bool isOverlayTrigger() const { return overlayTrigger; }
 		// Its draw key's slot: 0 for the scene, its entry's in a stack entry, as of the last layout.
 		[[nodiscard]] int paintSlot() const { return slot; }
 		// --- Focus ---
@@ -420,7 +420,7 @@ namespace ui {
 		[[nodiscard]] const std::function<void(PointerEvent&)>* callbackFor(PointerEvent::Type type) const;
 
 		void		setCommon(const Args& args);
-		void		registerPopup(ComponentId entry, PopupOptions options);
+		void		registerOverlay(ComponentId entry, OverlayOptions options);
 		ComponentId adopt(std::unique_ptr<Component> child);
 		Component*	parentComponent() const;
 		// Layout must run again from here: its own box changed (`ownBox`, which its parent places) or
@@ -509,9 +509,10 @@ namespace ui {
 		bool							hitBlocked = false; // an ancestor's pointerEvents keeps the pointer off it
 		bool							hovered = false;
 		bool							pressed = false;
-		bool							popupTrigger = false;
-		std::optional<PopupKind>		popupKind; // a stack entry's
+		bool							overlayTrigger = false;
+		std::optional<OverlayKind>		overlayKind; // a stack entry's
 		int								slot = 0;
+		bool							detached = false; // an Absolute overlay: in screen space, apart from its opener
 		bool							focusable = false;
 		std::uint8_t					focusedBy = 0; // a bit for each player whose focus is on it
 		std::uint8_t					focusVisibleBy = 0;
@@ -563,10 +564,10 @@ namespace ui {
 	}
 
 	template <typename T>
-	Ref<T> Component::openPopup(const typename T::Args& args, PopupOptions options) {
+	Ref<T> Component::openOverlay(const typename T::Args& args, OverlayOptions options) {
 		Ref<T> entry = addChild<T>(args);
 		if (entry.get() != nullptr) {
-			registerPopup(entry.componentId(), std::move(options));
+			registerOverlay(entry.componentId(), std::move(options));
 		}
 		return entry.get() != nullptr ? entry : Ref<T>();
 	}

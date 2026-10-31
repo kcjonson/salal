@@ -254,7 +254,7 @@ namespace ui::detail {
 		Foundation::Vec2 content{0.0F, 0.0F};
 		for (const ComponentId childId : node.children) {
 			const Component* child = registry.find(childId);
-			if (child != nullptr && child->isShown() && !child->isPopupEntry()) {
+			if (child != nullptr && child->isShown() && !child->isOverlay()) {
 				content = glm::max(content, child->offset + child->size + child->margin.total());
 			}
 		}

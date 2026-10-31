@@ -47,7 +47,7 @@ namespace {
 		&sandbox::kUiScrollScene,
 		&sandbox::kUiInputScene,
 		&sandbox::kUiMotionScene,
-		&sandbox::kUiPopupsScene,
+		&sandbox::kUiOverlaysScene,
 		&sandbox::kUiThemeScene,
 		&sandbox::kUiIconsScene,
 		&sandbox::kUiFocusScene,

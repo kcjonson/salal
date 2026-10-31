@@ -211,8 +211,8 @@ namespace ui {
 		}
 	}
 
-	void Component::registerPopup(ComponentId entry, PopupOptions options) {
-		context->openPopup(entry, selfId, std::move(options));
+	void Component::registerOverlay(ComponentId entry, OverlayOptions options) {
+		context->openOverlay(entry, selfId, std::move(options));
 	}
 
 	void Component::requestUpdate() {

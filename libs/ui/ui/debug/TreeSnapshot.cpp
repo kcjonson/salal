@@ -9,15 +9,15 @@ namespace ui {
 
 	namespace {
 
-		const char* popupKindName(PopupKind kind) {
+		const char* overlayKindName(OverlayKind kind) {
 			switch (kind) {
-				case PopupKind::Menu:
+				case OverlayKind::Menu:
 					return "menu";
-				case PopupKind::Dialog:
+				case OverlayKind::Dialog:
 					return "dialog";
-				case PopupKind::Toast:
+				case OverlayKind::Toast:
 					return "toast";
-				case PopupKind::Tooltip:
+				case OverlayKind::Tooltip:
 					break;
 			}
 			return "tooltip";
@@ -70,8 +70,8 @@ namespace ui {
 			const std::optional<int> zIndex = component.getZIndex();
 			out["zIndex"] = zIndex ? nlohmann::json(*zIndex) : nlohmann::json(nullptr);
 			out["isolation"] = component.getIsolation();
-			const std::optional<PopupKind> popup = component.getPopupKind();
-			out["popup"] = popup ? nlohmann::json(popupKindName(*popup)) : nlohmann::json(nullptr);
+			const std::optional<OverlayKind> overlay = component.getOverlayKind();
+			out["overlay"] = overlay ? nlohmann::json(overlayKindName(*overlay)) : nlohmann::json(nullptr);
 			out["slot"] = component.paintSlot();
 			out["key"] = component.isShown() ? nlohmann::json(component.drawKey()) : nlohmann::json(nullptr);
 			out["visible"] = component.isVisible();

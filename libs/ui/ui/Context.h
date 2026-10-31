@@ -39,7 +39,7 @@ namespace ui {
 		class FocusManager;
 	} // namespace detail
 
-	// A draw key is (slot << kRankBits) | rank. The scene is slot 0; popup stack entries and the tiers
+	// A draw key is (slot << kRankBits) | rank. The scene is slot 0; overlay stack entries and the tiers
 	// above it take the slots after.
 	inline constexpr int		  kRankBits = 20;
 	inline constexpr std::int32_t kMaxRank = (1 << kRankBits) - 1;
@@ -107,16 +107,16 @@ namespace ui {
 		// covered, or the window lost focus.
 		void cancelInteraction();
 
-		// --- The popup stack (ui/Popup.h) ---
+		// --- The overlay stack (ui/Overlay.h) ---
 
 		// Closes an entry as code does, with no onDismiss: the same as removing it.
-		void closePopup(Ref<Component> entry);
+		void closeOverlay(Ref<Component> entry);
 		// Closes an entry as the stack does: onDismiss, then closed.
-		void dismissPopup(Ref<Component> entry);
+		void dismissOverlay(Ref<Component> entry);
 		// The entry, and every entry opened from inside it, above the others, keeping their order.
 		void bringToFront(Ref<Component> entry);
 		// The open entries in stack order, bottom to top.
-		[[nodiscard]] std::vector<ComponentId> popups() const;
+		[[nodiscard]] std::vector<ComponentId> overlays() const;
 		// --- Focus (ui/Focus.h) ---
 
 		// One focus per player slot, 0 to kMaxPlayers - 1. focus is refused, false, for a component
@@ -170,15 +170,16 @@ namespace ui {
 		// Screen maps, clips and enabled flags again if anything moved; true when it ran.
 		bool refreshGeometry();
 		void pointerPressed(ComponentId hit);
-		void openPopup(ComponentId entry, ComponentId opener, PopupOptions options);
+		void openOverlay(ComponentId entry, ComponentId opener, OverlayOptions options);
 		void dismiss(ComponentId entry);
-		void placePopups();
+		void placeOverlays();
 		// A press at `hit` closes the pointer player's menus it is outside; true when that consumes it.
 		bool pressOutside(ComponentId hit, foundation::MouseButton button);
 		// The slot of the pointer player's topmost dialog: what's in a lower slot is inert to the pointer.
 		[[nodiscard]] int  modalFloor() const;
 		[[nodiscard]] bool pointerInert() const { return modalFloor() > 0; }
 		[[nodiscard]] bool within(ComponentId id, ComponentId root) const;
+		[[nodiscard]] bool shownInTree(const Component& component) const;
 		void			   removing(ComponentId root);
 		void			   applyMotion();
 		void			   capture(ComponentId captor);
@@ -211,22 +212,22 @@ namespace ui {
 		std::vector<HitEntry>				  hitList;
 		std::unique_ptr<detail::Dispatcher>	  dispatcher;
 		std::unique_ptr<detail::FocusManager> focusManager;
-		struct PopupEntry {
-			ComponentId	 id;
-			ComponentId	 opener;
-			PopupOptions options;
+		struct OverlayEntry {
+			ComponentId	   id;
+			ComponentId	   opener;
+			OverlayOptions options;
 		};
-		std::vector<PopupEntry>	 popupStack;	   // in stack order
-		int						 paintingSlot = 0; // the slot buildOrder fills
-		std::vector<ComponentId> dirtyBoundaries;  // where the next pass lays out from
-		std::vector<ComponentId> updateRequests;   // for the next update
-		std::uint32_t			 layoutPass = 0;
-		std::vector<OrderItem>	 orderScratch;
-		bool					 geometryDirty = true;
-		bool					 orderDirty = true;
-		bool					 drawing = false;
-		bool					 hoverStale = false; // something moved under a still pointer
-		bool					 rankOverflowLogged = false;
+		std::vector<OverlayEntry> overlayStack;		// in stack order
+		int						  paintingSlot = 0; // the slot buildOrder fills
+		std::vector<ComponentId>  dirtyBoundaries;	// where the next pass lays out from
+		std::vector<ComponentId>  updateRequests;	// for the next update
+		std::uint32_t			  layoutPass = 0;
+		std::vector<OrderItem>	  orderScratch;
+		bool					  geometryDirty = true;
+		bool					  orderDirty = true;
+		bool					  drawing = false;
+		bool					  hoverStale = false; // something moved under a still pointer
+		bool					  rankOverflowLogged = false;
 	};
 
 	template <typename T>

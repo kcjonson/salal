@@ -1,4 +1,4 @@
-#include "ui/Popup.h"
+#include "ui/Overlay.h"
 
 #include <algorithm>
 
@@ -18,7 +18,7 @@ namespace ui {
 			return start;
 		}
 
-		Foundation::Rect onSide(Side side, const Foundation::Rect& anchor, Foundation::Vec2 size, const Placement& placement) {
+		Foundation::Rect onSide(Side side, const Foundation::Rect& anchor, Foundation::Vec2 size, const Anchored& placement) {
 			switch (side) {
 				case Side::Below:
 					return {aligned(placement.align, anchor.x, anchor.width, size.x), anchor.bottom() + placement.gap, size.x, size.y};
@@ -71,12 +71,11 @@ namespace ui {
 	// The preferred side, the opposite one when the preferred overflows and the opposite doesn't, then
 	// clamped inside the viewport, its top-left edge winning when it can't fit.
 	Foundation::Rect
-	place(const Foundation::Rect& anchor, Foundation::Vec2 size, const Foundation::Rect& viewport, const Placement& placement) {
-		const Foundation::Rect from = placement.at ? Foundation::Rect{placement.at->x, placement.at->y, 0.0F, 0.0F} : anchor;
-		Foundation::Rect	   rect = onSide(placement.side, from, size, placement);
+	place(const Foundation::Rect& anchor, Foundation::Vec2 size, const Foundation::Rect& viewport, const Anchored& placement) {
+		Foundation::Rect rect = onSide(placement.side, anchor, size, placement);
 		if (overflows(placement.side, rect, viewport, placement.margin)) {
 			const Side			   flipped = opposite(placement.side);
-			const Foundation::Rect other = onSide(flipped, from, size, placement);
+			const Foundation::Rect other = onSide(flipped, anchor, size, placement);
 			if (!overflows(flipped, other, viewport, placement.margin)) {
 				rect = other;
 			}
