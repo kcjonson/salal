@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -69,6 +70,15 @@ namespace ui {
 
 		// The scene's icon atlases; a game adds its own (my_game::iconAtlas()) before its icons draw.
 		[[nodiscard]] IconService& icons() { return iconService; }
+
+		// The system clipboard as app hands it to the scene's ui, which TextInput copies and pastes
+		// through; both unset outside app, where nothing is copied or pasted.
+		struct Clipboard {
+			std::function<std::string()>			read;
+			std::function<void(const std::string&)> write;
+		};
+		void						   setClipboard(Clipboard value) { clipboardAccess = std::move(value); }
+		[[nodiscard]] const Clipboard& clipboard() const { return clipboardAccess; }
 
 		// The window's logical size, which the ui's viewport is at its scale; resizes every root.
 		void setViewport(Foundation::Vec2 size);
@@ -177,6 +187,7 @@ namespace ui {
 		mutable Registry		  registry;
 		Theme					  theme;
 		IconService				  iconService;
+		Clipboard				  clipboardAccess;
 		std::vector<ComponentId>  roots;
 		ComponentId				  defaultRoot;
 		Foundation::Vec2		  windowSize;

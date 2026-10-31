@@ -4,6 +4,7 @@
     "$description": "Tier 1, plain values. ui reads none of these directly.",
     "color": {
       "$type": "color",
+      "clear": { "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0, "hex": "#000000"} },
       "black": { "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "hex": "#000000"} },
       "white": { "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"} },
       "gray950": { "$value": {"colorSpace": "srgb", "components": [0.0431, 0.051, 0.0706], "hex": "#0b0d12"} },
@@ -339,6 +340,29 @@
       "borderWidth": { "$value": "{lineWidth.thin}" }
     },
     "statValue": { "color": { "$value": "{color.text.primary}" }, "fontFamily": { "$value": "{font.family.display}" } },
+    "listRow": { "backgroundColor": { "$value": "{base.color.clear}" } },
+    "check": {
+      "backgroundColor": { "$value": "{color.surface.sunken}" }, "borderColor": { "$value": "{color.line.strong}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" }, "borderRadius": { "$value": "{radius.sm}" }
+    },
+    "toggleTrack": {
+      "backgroundColor": { "$value": "{color.surface.control}" }, "borderColor": { "$value": "{color.line.edge}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" }, "borderRadius": { "$value": "{radius.pill}" }
+    },
+    "segmented": {
+      "backgroundColor": { "$value": "{color.surface.sunken}" }, "borderColor": { "$value": "{color.line.subtle}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" }, "borderRadius": { "$value": "{radius.md}" }
+    },
+    "segment": {
+      "backgroundColor": { "$value": "{base.color.clear}" }, "borderRadius": { "$value": "{radius.sm}" },
+      "color": { "$value": "{color.text.secondary}" }, "font": { "$value": "{typography.body}" }
+    },
+    "tab": { "backgroundColor": { "$value": "{base.color.clear}" }, "color": { "$value": "{color.text.secondary}" }, "font": { "$value": "{typography.body}" } },
+    "textInput": {
+      "backgroundColor": { "$value": "{color.surface.sunken}" }, "borderColor": { "$value": "{color.line.edge}" },
+      "borderWidth": { "$value": "{lineWidth.thin}" }, "borderRadius": { "$value": "{radius.sm}" },
+      "color": { "$value": "{color.text.primary}" }, "font": { "$value": "{typography.body}" }
+    },
     "divider": {
       "backgroundColor": { "$value": "{color.line.subtle}" }
     },

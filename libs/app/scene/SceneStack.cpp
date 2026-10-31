@@ -39,6 +39,11 @@ namespace app {
 			if (stack != nullptr) {
 				uiContext->setScale(stack->app.uiScale());
 				uiContext->setReducedMotion(stack->app.reducedMotion());
+				App& app = stack->app;
+				uiContext->setClipboard({
+					.read = [&app] { return app.clipboard().getText(); },
+					.write = [&app](const std::string& text) { app.clipboard().setText(text); },
+				});
 			}
 		}
 		return *uiContext;
