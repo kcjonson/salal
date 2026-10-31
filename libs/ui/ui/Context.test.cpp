@@ -146,21 +146,18 @@ namespace ui {
 
 		void TearDown() override { Renderer::Primitives::shutdown(); }
 
-		// Each rect's screen x, in the order the batch paints them: the index buffer's quads, each
-		// naming its first vertex, whose position the transform baked in.
+		// Each rect's screen x, in the order the batch paints them: the draw's quads, each by its
+		// top-left corner, where the transform baked it.
 		std::vector<float> paintedX() const {
 			EXPECT_EQ(gpu->draws().size(), 1U);
 			const Renderer::backend::NullBackend::RecordedDraw& draw = gpu->draws().at(0);
 			const Renderer::backend::GeometryDesc*				geometry = gpu->geometry(draw.call.geometry);
-			const std::span<const uint8_t>						vertexBytes = gpu->bufferContents(geometry->vertices);
-			const std::span<const uint8_t>						indexBytes = gpu->bufferContents(geometry->indices);
-			std::vector<Renderer::BatchVertex>					vertices(vertexBytes.size() / sizeof(Renderer::BatchVertex));
-			std::vector<uint32_t>								indices(indexBytes.size() / sizeof(uint32_t));
-			std::memcpy(vertices.data(), vertexBytes.data(), vertices.size() * sizeof(Renderer::BatchVertex));
-			std::memcpy(indices.data(), indexBytes.data(), indices.size() * sizeof(uint32_t));
+			const std::span<const uint8_t>						bytes = gpu->bufferContents(geometry->vertices);
+			std::vector<Renderer::BatchInstance>				quads(bytes.size() / sizeof(Renderer::BatchInstance));
+			std::memcpy(quads.data(), bytes.data(), quads.size() * sizeof(Renderer::BatchInstance));
 			std::vector<float> xs;
-			for (std::size_t quad = 0; quad * 6 < draw.call.indexCount; ++quad) {
-				xs.push_back(vertices.at(indices.at(draw.call.indexOffset + quad * 6)).position.x);
+			for (std::size_t quad = 0; quad < draw.call.instanceCount; ++quad) {
+				xs.push_back(quads.at(draw.call.firstInstance + quad).corners[0].x);
 			}
 			return xs;
 		}

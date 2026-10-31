@@ -11,6 +11,7 @@
 
 #include <glm/geometric.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/packing.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -55,12 +56,17 @@ namespace Renderer {
 			return out;
 		}
 
-		// What the draw's geometry holds now: the last flush's upload.
-		std::vector<BatchVertex> vertices(const backend::NullBackend::RecordedDraw& draw) const {
-			return contents<BatchVertex>(gpu->geometry(draw.call.geometry)->vertices);
+		// What the draw's geometry holds now: the last flush's upload, its quads in emit order.
+		std::vector<BatchInstance> quads(const backend::NullBackend::RecordedDraw& draw) const {
+			return contents<BatchInstance>(gpu->geometry(draw.call.geometry)->vertices);
 		}
-		std::vector<uint32_t> indices(const backend::NullBackend::RecordedDraw& draw) const {
-			return contents<uint32_t>(gpu->geometry(draw.call.geometry)->indices);
+
+		static std::vector<float> lefts(const std::vector<BatchInstance>& uploaded) {
+			std::vector<float> out;
+			for (const BatchInstance& quad : uploaded) {
+				out.push_back(quad.corners[0].x);
+			}
+			return out;
 		}
 
 		static void rect(float x, BlendMode blend = BlendMode::Alpha, int32_t key = 0) {
@@ -87,7 +93,7 @@ namespace Renderer {
 	TEST_F(FlushTest, InitMakesThePipelineAndTheStreamGeometry) {
 		const backend::NullBackend::Counts live = gpu->live();
 		EXPECT_EQ(live.pipelines, 1U);
-		EXPECT_EQ(live.buffers, 2U);
+		EXPECT_EQ(live.buffers, 1U);
 		EXPECT_EQ(live.geometries, 1U);
 
 		rect(0.0F);
@@ -109,28 +115,20 @@ namespace Renderer {
 		EXPECT_EQ(gpu->frames(), 1);
 	}
 
-	TEST_F(FlushTest, TheKeySortReachesTheIndexBuffer) {
+	TEST_F(FlushTest, TheKeySortReachesTheUpload) {
 		Primitives::beginFrame();
-		rect(0.0F, BlendMode::Alpha, 1);  // vertices 0-3
-		rect(20.0F, BlendMode::Alpha, 0); // vertices 4-7
-		rect(40.0F, BlendMode::Alpha, 0); // vertices 8-11
+		rect(0.0F, BlendMode::Alpha, 1);
+		rect(20.0F, BlendMode::Alpha, 0);
+		rect(40.0F, BlendMode::Alpha, 0);
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
 		const backend::DrawCall& call = gpu->draws()[0].call;
-		EXPECT_EQ(call.indexOffset, 0U);
-		EXPECT_EQ(call.indexCount, 18U);
-		EXPECT_EQ(call.instanceCount, 0U);
+		EXPECT_EQ(call.firstInstance, 0U);
+		EXPECT_EQ(call.instanceCount, 3U);
 
-		// Key 0 in submission order, then key 1; the vertices stay as added.
-		const std::vector<uint32_t> emitted = indices(gpu->draws()[0]);
-		ASSERT_EQ(emitted.size(), 18U);
-		EXPECT_EQ(emitted[0], 4U);
-		EXPECT_EQ(emitted[6], 8U);
-		EXPECT_EQ(emitted[12], 0U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 12U);
-		EXPECT_EQ(uploaded[4].position.x, 20.0F);
+		// Key 0 in submission order, then key 1.
+		EXPECT_EQ(lefts(quads(gpu->draws()[0])), (std::vector{20.0F, 40.0F, 0.0F}));
 	}
 
 	TEST_F(FlushTest, ACirclesBorderDrawsAtItsKeyStraightAfterItsFill) {
@@ -146,50 +144,35 @@ namespace Renderer {
 		rect(20.0F, BlendMode::Alpha, 2); // submitted after the circle, at its key
 		Primitives::endFrame();
 
-		// Vertices as added: the fill's quad 0-3, the border's 4-7, the key 1 rect 8-11, the key 2
-		// rect 12-15.
+		// The key 1 rect, the fill, the border over it at the same key, then the key 2 rect.
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		ASSERT_EQ(vertices(gpu->draws()[0]).size(), 16U);
-		const std::vector<uint32_t> emitted = indices(gpu->draws()[0]);
-		ASSERT_EQ(emitted.size(), 24U);
-
-		// The draw groups in emit order, each by the vertices its indices reach.
-		const auto allWithin = [&](size_t from, uint32_t low) {
-			return std::ranges::all_of(std::span(emitted).subspan(from, 6), [&](uint32_t index) {
-				return index >= low && index < low + 4;
-			});
-		};
-		EXPECT_TRUE(allWithin(0, 8));	// the key 1 rect
-		EXPECT_TRUE(allWithin(6, 0));	// the fill, key 2
-		EXPECT_TRUE(allWithin(12, 4));	// the border, key 2, over the fill
-		EXPECT_TRUE(allWithin(18, 12)); // the key 2 rect, after the border at the same key
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 4U);
+		EXPECT_EQ(static_cast<QuadMode>(uploaded[0].mode), QuadMode::Rect);
+		EXPECT_EQ(uploaded[0].corners[0].x, 0.0F);
+		EXPECT_EQ(static_cast<QuadMode>(uploaded[1].mode), QuadMode::Arc);
+		EXPECT_EQ(uploaded[1].geometry.x, 0.0F); // the fill, no hole
+		EXPECT_EQ(static_cast<QuadMode>(uploaded[2].mode), QuadMode::Arc);
+		EXPECT_EQ(uploaded[2].geometry.x, 19.0F); // the border's ring
+		EXPECT_EQ(uploaded[3].corners[0].x, 20.0F);
 	}
 
 	TEST_F(FlushTest, KeysSortAsSignedIntegersAndTiesKeepSubmissionOrder) {
 		constexpr int32_t kLowest = std::numeric_limits<int32_t>::min();
 		constexpr int32_t kHighest = std::numeric_limits<int32_t>::max();
 		Primitives::beginFrame();
-		rect(0.0F, BlendMode::Alpha, 0);		 // vertices 0-3
-		rect(10.0F, BlendMode::Alpha, kHighest); // 4-7
-		rect(20.0F, BlendMode::Alpha, -5);		 // 8-11
-		glyph(30.0F);							 // 12-15, key 0 after the rect at 0
-		rect(40.0F, BlendMode::Alpha, 3);		 // 16-19
-		rect(50.0F, BlendMode::Alpha, -5);		 // 20-23
-		rect(60.0F, BlendMode::Alpha, kLowest);	 // 24-27
+		rect(0.0F, BlendMode::Alpha, 0);
+		rect(10.0F, BlendMode::Alpha, kHighest);
+		rect(20.0F, BlendMode::Alpha, -5);
+		glyph(30.0F); // key 0 after the rect at 0
+		rect(40.0F, BlendMode::Alpha, 3);
+		rect(50.0F, BlendMode::Alpha, -5);
+		rect(60.0F, BlendMode::Alpha, kLowest);
 		Primitives::endFrame();
 
-		std::vector<uint32_t> emitted;
-		for (const backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
-			const std::vector<uint32_t> all = indices(draw);
-			emitted.insert(emitted.end(), all.begin() + draw.call.indexOffset, all.begin() + draw.call.indexOffset + draw.call.indexCount);
-		}
-		ASSERT_EQ(emitted.size(), 42U);
-		std::vector<uint32_t> firstVertices;
-		for (size_t quad = 0; quad < 7; ++quad) {
-			firstVertices.push_back(emitted[quad * 6]);
-		}
 		// The lowest key, both -5s as submitted, the rect then the glyph at 0, 3, the highest.
-		EXPECT_EQ(firstVertices, (std::vector<uint32_t>{24, 8, 20, 0, 12, 16, 4}));
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(lefts(quads(gpu->draws()[0])), (std::vector{60.0F, 20.0F, 50.0F, 0.0F, 30.0F, 40.0F, 10.0F}));
 	}
 
 	TEST_F(FlushTest, AClipIsMappedThroughTheTransformItIsPushedUnder) {
@@ -203,7 +186,7 @@ namespace Renderer {
 			Primitives::PopTransform();
 			Primitives::endFrame();
 			EXPECT_EQ(gpu->draws().size(), 1U);
-			return gpu->draws().empty() ? Foundation::Vec4(-1.0F) : vertices(gpu->draws()[0])[0].clipBounds;
+			return gpu->draws().empty() ? Foundation::Vec4(-1.0F) : quads(gpu->draws()[0])[0].clip;
 		};
 		const Foundation::Rect clip{10.0F, 20.0F, 100.0F, 50.0F};
 		const Foundation::Mat4 identity(1.0F);
@@ -244,11 +227,11 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 8U);
-		EXPECT_EQ(uploaded[0].position.x, 60.0F);
-		EXPECT_EQ(uploaded[0].clipBounds, Foundation::Vec4(30.0F, 0.0F, 130.0F, 100.0F));
-		EXPECT_EQ(uploaded[4].clipBounds, Foundation::Vec4(110.0F, 0.0F, 130.0F, 50.0F));
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 2U);
+		EXPECT_EQ(uploaded[0].corners[0].x, 60.0F);
+		EXPECT_EQ(uploaded[0].clip, Foundation::Vec4(30.0F, 0.0F, 130.0F, 100.0F));
+		EXPECT_EQ(uploaded[1].clip, Foundation::Vec4(110.0F, 0.0F, 130.0F, 50.0F));
 	}
 
 	TEST_F(FlushTest, ANegativeExtentIsEmptyUnderAMirrorToo) {
@@ -295,29 +278,28 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 8U);
-		EXPECT_EQ(indices(gpu->draws()[0]), (std::vector<uint32_t>{0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7}));
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 2U);
 
 		const float							  pi = std::numbers::pi_v<float>;
 		const std::array<Foundation::Vec2, 4> corners = {{{-1.0F, -1.0F}, {1.0F, -1.0F}, {1.0F, 1.0F}, {-1.0F, 1.0F}}};
 		// Each quad reaches a pixel past its outer radius: the fill's 20, the centred
-		// border's 22. Its SDF coordinates are the corner's offset from the centre, turned.
-		const auto expectArc = [&](size_t first, float innerRadius, float outerRadius, const Foundation::Color& color) {
+		// border's 22. A full ring's middle is at pi.
+		const auto expectArc = [&](const BatchInstance& quad, float innerRadius, float outerRadius, const Foundation::Color& color) {
 			const float reach = outerRadius + 1.0F;
+			EXPECT_EQ(static_cast<QuadMode>(quad.mode), QuadMode::Arc);
 			for (size_t k = 0; k < 4; ++k) {
-				const BatchVertex& vertex = uploaded[first + k];
-				EXPECT_NEAR(vertex.position.x, 100.0F + (corners[k].x * reach), kTolerance) << first + k;
-				EXPECT_NEAR(vertex.position.y, 60.0F + (corners[k].y * reach), kTolerance) << first + k;
-				EXPECT_NEAR(glm::length(vertex.texCoord), reach * std::numbers::sqrt2_v<float>, kTolerance) << first + k;
-				EXPECT_EQ(vertex.color, color.toVec4());
-				EXPECT_EQ(vertex.data1, Foundation::Vec4(0.0F));
-				EXPECT_EQ(vertex.data2, Foundation::Vec4(innerRadius, outerRadius, pi, kRenderModeArc));
-				EXPECT_EQ(vertex.clipBounds, Foundation::Vec4(10.0F, 20.0F, 210.0F, 120.0F));
+				EXPECT_NEAR(quad.corners[k].x, 100.0F + (corners[k].x * reach), kTolerance) << k;
+				EXPECT_NEAR(quad.corners[k].y, 60.0F + (corners[k].y * reach), kTolerance) << k;
+				const Foundation::Vec4 c = color.toVec4();
+				EXPECT_EQ(quad.fills[k], glm::packUnorm4x8(Foundation::Vec4(Foundation::Vec3(c) * c.a, c.a)));
 			}
+			EXPECT_EQ(quad.geometry, Foundation::Vec4(innerRadius, outerRadius, pi, pi));
+			EXPECT_EQ(glm::unpackHalf2x16(quad.shape[0]).y, 1.0F);
+			EXPECT_EQ(quad.clip, Foundation::Vec4(10.0F, 20.0F, 210.0F, 120.0F));
 		};
-		expectArc(0, 0.0F, 20.0F, fill);
-		expectArc(4, 18.0F, 22.0F, edge);
+		expectArc(uploaded[0], 0.0F, 20.0F, fill);
+		expectArc(uploaded[1], 18.0F, 22.0F, edge);
 	}
 
 	TEST_F(FlushTest, ACirclesBorderRadiiFollowItsPosition) {
@@ -330,9 +312,9 @@ namespace Renderer {
 			);
 			Primitives::endFrame();
 			EXPECT_EQ(gpu->draws().size(), 1U);
-			const std::vector<BatchVertex> uploaded = gpu->draws().empty() ? std::vector<BatchVertex>{} : vertices(gpu->draws()[0]);
-			EXPECT_EQ(uploaded.size(), 4U);
-			return uploaded.empty() ? Foundation::Vec2(-1.0F) : Foundation::Vec2(uploaded[0].data2.x, uploaded[0].data2.y);
+			const std::vector<BatchInstance> uploaded = gpu->draws().empty() ? std::vector<BatchInstance>{} : quads(gpu->draws()[0]);
+			EXPECT_EQ(uploaded.size(), 1U);
+			return uploaded.empty() ? Foundation::Vec2(-1.0F) : Foundation::Vec2(uploaded[0].geometry.x, uploaded[0].geometry.y);
 		};
 		using Foundation::BorderPosition;
 		EXPECT_EQ(ring({.width = 4.0F}), Foundation::Vec2(18.0F, 22.0F)); // centred by default, as the line segments were
@@ -376,10 +358,11 @@ namespace Renderer {
 				Primitives::endFrame();
 
 				ASSERT_EQ(gpu->draws().size(), 1U);
-				const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-				ASSERT_EQ(uploaded.size(), 8U);
-				EXPECT_EQ(std::memcmp(&uploaded[0], &uploaded[4], 4 * sizeof(BatchVertex)), 0);
-				EXPECT_EQ(uploaded[0].data2.w, blend == BlendMode::Additive ? kRenderModeArc + kAdditiveModeOffset : kRenderModeArc);
+				const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+				ASSERT_EQ(uploaded.size(), 2U);
+				EXPECT_EQ(std::memcmp(&uploaded[0], &uploaded[1], sizeof(BatchInstance)), 0);
+				EXPECT_EQ(static_cast<QuadMode>(uploaded[0].mode), QuadMode::Arc);
+				EXPECT_EQ(uploaded[0].flags, blend == BlendMode::Additive ? kQuadAdditive : 0);
 			}
 		}
 	}
@@ -405,20 +388,22 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 8U);
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 2U);
 		const std::array<Foundation::Vec2, 4> corners = {{{-1.0F, -1.0F}, {1.0F, -1.0F}, {1.0F, 1.0F}, {-1.0F, 1.0F}}};
-		for (size_t k = 0; k < 8; ++k) {
-			const float			   reach = (k < 4 ? 8.0F : 10.0F) + 2.0F;
-			const Foundation::Vec4 local(10.0F + (corners[k % 4].x * reach), -5.0F + (corners[k % 4].y * reach), 0.0F, 1.0F);
-			const Foundation::Vec4 expected = stretched * local;
-			EXPECT_NEAR(uploaded[k].position.x, expected.x, 1e-3F) << k;
-			EXPECT_NEAR(uploaded[k].position.y, expected.y, 1e-3F) << k;
-			EXPECT_NEAR(glm::length(uploaded[k].texCoord), reach * std::numbers::sqrt2_v<float>, kTolerance) << k;
+		for (size_t q = 0; q < 2; ++q) {
+			const float reach = (q == 0 ? 8.0F : 10.0F) + 2.0F;
+			for (size_t k = 0; k < 4; ++k) {
+				const Foundation::Vec4 local(10.0F + (corners[k].x * reach), -5.0F + (corners[k].y * reach), 0.0F, 1.0F);
+				const Foundation::Vec4 expected = stretched * local;
+				EXPECT_NEAR(uploaded[q].corners[k].x, expected.x, 1e-3F) << q << ", " << k;
+				EXPECT_NEAR(uploaded[q].corners[k].y, expected.y, 1e-3F) << q << ", " << k;
+			}
+			EXPECT_EQ(glm::unpackHalf2x16(uploaded[q].shape[0]).y, 2.0F); // a local pixel
 		}
-		EXPECT_EQ(uploaded[0].data2.y, 8.0F);
-		EXPECT_EQ(uploaded[4].data2.x, 8.0F);
-		EXPECT_EQ(uploaded[4].data2.y, 10.0F);
+		EXPECT_EQ(uploaded[0].geometry.y, 8.0F);
+		EXPECT_EQ(uploaded[1].geometry.x, 8.0F);
+		EXPECT_EQ(uploaded[1].geometry.y, 10.0F);
 	}
 
 	TEST_F(FlushTest, AlphaAndAdditiveShareOneDrawCall) {
@@ -431,13 +416,14 @@ namespace Renderer {
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
 		EXPECT_EQ(gpu->draws()[0].call.blend, backend::BlendState::Alpha);
-		EXPECT_EQ(gpu->draws()[0].call.indexCount, 24U);
-		// The mode rides on the vertices instead.
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 16U);
-		EXPECT_EQ(uploaded[0].data2.w, 1.0F);
-		EXPECT_EQ(uploaded[4].data2.w, 5.0F);
-		EXPECT_EQ(uploaded[8].data2.w, kRenderModeArc + kAdditiveModeOffset);
+		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 4U);
+		// The blend rides on the quads instead.
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 4U);
+		EXPECT_EQ(uploaded[0].flags & kQuadAdditive, 0);
+		EXPECT_EQ(uploaded[1].flags & kQuadAdditive, kQuadAdditive);
+		EXPECT_EQ(uploaded[2].flags & kQuadAdditive, kQuadAdditive);
+		EXPECT_EQ(static_cast<QuadMode>(uploaded[2].mode), QuadMode::Arc);
 	}
 
 	TEST_F(FlushTest, AtlasChangesSplitIntoDrawCallsOverOneUpload) {
@@ -457,14 +443,14 @@ namespace Renderer {
 		const std::vector<backend::NullBackend::RecordedDraw>& draws = gpu->draws();
 		ASSERT_EQ(draws.size(), 3U);
 		EXPECT_EQ(draws[0].call.texture, atlas);
-		EXPECT_EQ(draws[0].call.indexOffset, 0U);
-		EXPECT_EQ(draws[0].call.indexCount, 12U);
+		EXPECT_EQ(draws[0].call.firstInstance, 0U);
+		EXPECT_EQ(draws[0].call.instanceCount, 2U);
 		EXPECT_EQ(draws[1].call.texture, image);
-		EXPECT_EQ(draws[1].call.indexOffset, 12U);
-		EXPECT_EQ(draws[1].call.indexCount, 6U);
+		EXPECT_EQ(draws[1].call.firstInstance, 2U);
+		EXPECT_EQ(draws[1].call.instanceCount, 1U);
 		EXPECT_EQ(draws[2].call.texture, atlas);
-		EXPECT_EQ(draws[2].call.indexOffset, 18U);
-		EXPECT_EQ(draws[2].call.indexCount, 6U);
+		EXPECT_EQ(draws[2].call.firstInstance, 3U);
+		EXPECT_EQ(draws[2].call.instanceCount, 1U);
 		// One submission, one upload, one set of uniforms
 		for (const backend::NullBackend::RecordedDraw& draw : draws) {
 			EXPECT_EQ(draw.submission, 0);
@@ -475,7 +461,7 @@ namespace Renderer {
 		EXPECT_EQ(Primitives::getStats().drawCalls, 3U);
 	}
 
-	TEST_F(FlushTest, ClipBoundsRideOnTheVerticesAndTheUniformsCarryTheFlip) {
+	TEST_F(FlushTest, ClipBoundsRideOnTheQuadsAndTheUniformsCarryTheFlip) {
 		Primitives::beginFrame();
 		Primitives::pushClip(Foundation::Rect{10.0F, 20.0F, 100.0F, 50.0F});
 		rect(0.0F);
@@ -487,13 +473,11 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 12U);
-		for (int i = 0; i < 4; ++i) {
-			EXPECT_EQ(uploaded[i].clipBounds, Foundation::Vec4(10.0F, 20.0F, 110.0F, 70.0F));
-			EXPECT_EQ(uploaded[4 + i].clipBounds, Foundation::Vec4(50.0F, 20.0F, 110.0F, 70.0F)); // nested: the intersection
-			EXPECT_EQ(uploaded[8 + i].clipBounds, Foundation::Vec4(0.0F));
-		}
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 3U);
+		EXPECT_EQ(uploaded[0].clip, Foundation::Vec4(10.0F, 20.0F, 110.0F, 70.0F));
+		EXPECT_EQ(uploaded[1].clip, Foundation::Vec4(50.0F, 20.0F, 110.0F, 70.0F)); // nested: the intersection
+		EXPECT_EQ(uploaded[2].clip, Foundation::Vec4(0.0F));
 
 		const backend::DrawUniforms& uniforms = gpu->draws()[0].uniforms;
 		EXPECT_EQ(uniforms.instanced, 0);
@@ -522,12 +506,12 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 8U);
-		EXPECT_EQ(uploaded[0].position.x, 10.0F);
-		EXPECT_EQ(uploaded[0].clipBounds, Foundation::Vec4(0.0F, 0.0F, 50.0F, 50.0F));
-		EXPECT_EQ(uploaded[4].position.x, 200.0F);
-		EXPECT_EQ(uploaded[4].clipBounds, Foundation::Vec4(0.0F));
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 2U);
+		EXPECT_EQ(uploaded[0].corners[0].x, 10.0F);
+		EXPECT_EQ(uploaded[0].clip, Foundation::Vec4(0.0F, 0.0F, 50.0F, 50.0F));
+		EXPECT_EQ(uploaded[1].corners[0].x, 200.0F);
+		EXPECT_EQ(uploaded[1].clip, Foundation::Vec4(0.0F));
 	}
 
 	TEST_F(FlushTest, ANanClipIsEmptyInsideAClipAsAtTheTop) {
@@ -560,10 +544,10 @@ namespace Renderer {
 		rect(10.0F);
 		Primitives::endFrame();
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 4U);
-		EXPECT_EQ(uploaded[0].position.x, 10.0F);
-		EXPECT_EQ(uploaded[0].clipBounds, Foundation::Vec4(0.0F));
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 1U);
+		EXPECT_EQ(uploaded[0].corners[0].x, 10.0F);
+		EXPECT_EQ(uploaded[0].clip, Foundation::Vec4(0.0F));
 		EXPECT_EQ(Primitives::getCurrentTransform(), Foundation::Mat4(1.0F));
 	}
 
@@ -644,7 +628,7 @@ namespace Renderer {
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
 		EXPECT_EQ(gpu->draws()[0].call.texture, handle);
-		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U);
+		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 1U);
 		EXPECT_EQ(gpu->texture(handle), nullptr);
 		EXPECT_EQ(gpu->live().textures, 0U);
 	}
@@ -660,10 +644,10 @@ namespace Renderer {
 		ASSERT_EQ(gpu->draws().size(), 2U);
 		EXPECT_EQ(gpu->draws()[0].submission, 0);
 		EXPECT_EQ(gpu->draws()[1].submission, 1);
-		EXPECT_EQ(gpu->draws()[1].call.indexCount, 6U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[1]);
-		ASSERT_EQ(uploaded.size(), 4U); // the stream buffer holds the second flush only
-		EXPECT_EQ(uploaded[0].position.x, 40.0F);
+		EXPECT_EQ(gpu->draws()[1].call.instanceCount, 1U);
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[1]);
+		ASSERT_EQ(uploaded.size(), 1U); // the stream buffer holds the second flush only
+		EXPECT_EQ(uploaded[0].corners[0].x, 40.0F);
 		EXPECT_EQ(gpu->uniformWrites().size(), 2U);
 	}
 
@@ -766,8 +750,17 @@ namespace Renderer {
 		const std::array<Foundation::Vec2, 4> kSquare = {{{10.0F, 10.0F}, {30.0F, 10.0F}, {30.0F, 30.0F}, {10.0F, 30.0F}}};
 		const std::array<uint16_t, 6>		  kSquareIndices = {0, 1, 2, 0, 2, 3};
 
-		size_t countAlpha(const std::vector<BatchVertex>& vertices, float alpha) {
-			return static_cast<size_t>(std::ranges::count_if(vertices, [alpha](const BatchVertex& v) { return v.color.a == alpha; }));
+		// The corners where a feather ring's quads fade out: those whose fill is transparent.
+		std::vector<Foundation::Vec2> fadedCorners(const std::vector<BatchInstance>& uploaded) {
+			std::vector<Foundation::Vec2> out;
+			for (const BatchInstance& quad : uploaded) {
+				for (int k = 0; k < 4; ++k) {
+					if (quad.fills[k] == 0U) {
+						out.push_back(quad.corners[k]);
+					}
+				}
+			}
+			return out;
 		}
 
 	} // namespace
@@ -778,19 +771,18 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 8U);
-		EXPECT_EQ(countAlpha(uploaded, 0.8F), 4U);
-		EXPECT_EQ(countAlpha(uploaded, 0.0F), 4U);
-		// Every outer vertex a pixel out from both edges at its corner.
-		for (const BatchVertex& vertex : uploaded) {
-			if (vertex.color.a == 0.0F) {
-				const bool onX = std::abs(vertex.position.x - 9.0F) < 1e-5F || std::abs(vertex.position.x - 31.0F) < 1e-5F;
-				const bool onY = std::abs(vertex.position.y - 9.0F) < 1e-5F || std::abs(vertex.position.y - 31.0F) < 1e-5F;
-				EXPECT_TRUE(onX && onY) << vertex.position.x << ", " << vertex.position.y;
-			}
+		// Two triangles, then a quad an edge, its outer two corners transparent.
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 6U);
+		const std::vector<Foundation::Vec2> faded = fadedCorners(uploaded);
+		EXPECT_EQ(faded.size(), 8U);
+		// Every outer corner a pixel out from both edges at its corner.
+		for (const Foundation::Vec2& corner : faded) {
+			const bool onX = std::abs(corner.x - 9.0F) < 1e-5F || std::abs(corner.x - 31.0F) < 1e-5F;
+			const bool onY = std::abs(corner.y - 9.0F) < 1e-5F || std::abs(corner.y - 31.0F) < 1e-5F;
+			EXPECT_TRUE(onX && onY) << corner.x << ", " << corner.y;
 		}
-		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U + (4U * 6U));
+		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 6U);
 
 		// Drawn again, from the cache: the same ring.
 		gpu->clearRecord();
@@ -799,8 +791,8 @@ namespace Renderer {
 		Primitives::drawPolygon({.vertices = kSquare, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
 		Primitives::endFrame();
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		EXPECT_EQ(countAlpha(vertices(gpu->draws()[0]), 0.0F), 8U);
-		EXPECT_EQ(gpu->draws()[0].call.indexCount, 2U * (6U + (4U * 6U)));
+		EXPECT_EQ(fadedCorners(quads(gpu->draws()[0])).size(), 16U);
+		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 12U);
 	}
 
 	TEST_F(FlushTest, APolylineDropsTheSamePointsAtEveryZoomAndNoneFurtherOffThanAQuarterPixel) {
@@ -815,7 +807,7 @@ namespace Renderer {
 				Primitives::drawPolyline({.points = points, .width = width, .closed = closed});
 				Primitives::PopTransform();
 				Primitives::endFrame();
-				return gpu->draws().empty() ? size_t{0} : vertices(gpu->draws()[0]).size();
+				return gpu->draws().empty() ? size_t{0} : quads(gpu->draws()[0]).size();
 			};
 		const Foundation::Mat4				one(1.0F);
 		const Foundation::Mat4				two = glm::scale(one, Foundation::Vec3(2.0F, 2.0F, 1.0F));
@@ -840,9 +832,8 @@ namespace Renderer {
 			Primitives::drawPolygon({.vertices = *outline, .style = {.fill = {0.2F, 0.4F, 0.6F, 0.8F}}});
 			Primitives::endFrame();
 			ASSERT_EQ(gpu->draws().size(), 1U);
-			const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-			EXPECT_EQ(countAlpha(uploaded, 0.0F), 4U);
-			EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U + (4U * 6U));
+			EXPECT_EQ(fadedCorners(quads(gpu->draws()[0])).size(), 8U);
+			EXPECT_EQ(gpu->draws()[0].call.instanceCount, 6U);
 		}
 	}
 
@@ -857,15 +848,16 @@ namespace Renderer {
 		);
 		Primitives::endFrame();
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		// Exactly the mesh: its vertices, its indices, a flat zero-size box.
-		const std::vector<BatchVertex> aliased = vertices(gpu->draws()[0]);
-		ASSERT_EQ(aliased.size(), 4U);
-		for (size_t i = 0; i < 4; ++i) {
-			EXPECT_EQ(aliased[i].position, kSquare[i]);
-			EXPECT_EQ(aliased[i].color, Foundation::Vec4(1.0F));
-			EXPECT_EQ(aliased[i].data2, Foundation::Vec4(0.0F, 0.0F, 0.0F, 1.0F));
+		// Exactly the mesh: a flat quad a triangle, its last corner repeated.
+		const std::vector<BatchInstance> aliased = quads(gpu->draws()[0]);
+		ASSERT_EQ(aliased.size(), 2U);
+		for (size_t t = 0; t < 2; ++t) {
+			EXPECT_EQ(static_cast<QuadMode>(aliased[t].mode), QuadMode::Flat);
+			for (size_t k = 0; k < 4; ++k) {
+				EXPECT_EQ(aliased[t].corners[k], kSquare[kSquareIndices[(t * 3) + std::min<size_t>(k, 2)]]) << t << ", " << k;
+				EXPECT_EQ(aliased[t].fills[k], 0xFFFFFFFFU);
+			}
 		}
-		EXPECT_EQ(indices(gpu->draws()[0]), (std::vector<uint32_t>{0, 1, 2, 0, 2, 3}));
 
 		gpu->clearRecord();
 		Primitives::beginFrame();
@@ -879,11 +871,11 @@ namespace Renderer {
 		);
 		Primitives::endFrame();
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> feathered = vertices(gpu->draws()[0]);
-		ASSERT_EQ(feathered.size(), 8U);
-		EXPECT_EQ(feathered[4].position, Foundation::Vec2(9.0F, 9.0F));
-		EXPECT_EQ(feathered[4].color, Foundation::Vec4(1.0F, 1.0F, 1.0F, 0.0F));
-		EXPECT_EQ(gpu->draws()[0].call.indexCount, 30U);
+		const std::vector<BatchInstance> feathered = quads(gpu->draws()[0]);
+		ASSERT_EQ(feathered.size(), 6U);
+		EXPECT_EQ(feathered[2].corners[3], Foundation::Vec2(9.0F, 9.0F));
+		EXPECT_EQ(feathered[2].fills[3], 0U);
+		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 6U);
 	}
 
 	TEST_F(FlushTest, AMeshWhoseBoundaryPinchesStaysAliasedWhenAskedToAntiAlias) {
@@ -900,8 +892,8 @@ namespace Renderer {
 		);
 		Primitives::endFrame();
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		EXPECT_EQ(vertices(gpu->draws()[0]).size(), 5U);
-		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U);
+		EXPECT_EQ(quads(gpu->draws()[0]).size(), 2U);
+		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 2U);
 	}
 
 	TEST_F(FlushTest, APolylinesPiecesShareTheirCutsBitForBitThroughTheTransform) {
@@ -919,14 +911,14 @@ namespace Renderer {
 		Primitives::endFrame();
 
 		ASSERT_EQ(gpu->draws().size(), 1U);
-		const std::vector<BatchVertex> uploaded = vertices(gpu->draws()[0]);
-		ASSERT_EQ(uploaded.size(), 8U); // two pieces of four corners
-		const auto shared = [&](size_t a, size_t b) {
-			return std::memcmp(&uploaded[a].position, &uploaded[b].position, sizeof(Foundation::Vec2)) == 0;
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 2U); // two pieces of four corners, a quad each
+		const auto shared = [&](int a, int b) {
+			return std::memcmp(&uploaded[0].corners[a], &uploaded[1].corners[b], sizeof(Foundation::Vec2)) == 0;
 		};
 		// The first piece ends outer, inner; the second starts inner, outer.
-		EXPECT_TRUE(shared(0, 7));
-		EXPECT_TRUE(shared(1, 6));
+		EXPECT_TRUE(shared(0, 3));
+		EXPECT_TRUE(shared(1, 2));
 	}
 
 	// The same through the base shader with the test hook, tests/hooks/offset.vert.glsl.
@@ -1031,7 +1023,7 @@ namespace Renderer {
 		{
 			BatchRenderer batch(gpu, base_shader::source());
 			EXPECT_EQ(gpu.live().pipelines, 1U);
-			EXPECT_EQ(gpu.live().buffers, 2U);
+			EXPECT_EQ(gpu.live().buffers, 1U);
 			EXPECT_EQ(gpu.live().geometries, 1U);
 		}
 		EXPECT_EQ(gpu.live().pipelines, 0U);

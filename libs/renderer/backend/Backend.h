@@ -18,22 +18,25 @@
 
 namespace Renderer { // NOLINT(readability-identifier-naming)
 
-	// The batched vertex (VertexLayout::Batched), attributes 0 to 5 of base.vert:
-	//   0 position (vec2), 1 texCoord (vec2): UV for text and images, rect-local for
-	//   shapes, arc-local for arcs; 2 color (vec4); 3 data1 (vec4): borderData for
-	//   shapes, blur for shadows; 4 data2 (vec4): per-mode parameters, the render mode
-	//   in w; 5 clipBounds (vec4): (minX, minY, maxX, maxY), or zero for no clip.
-	struct BatchVertex {
-		Foundation::Vec2 position;	 // Screen-space position
-		Foundation::Vec2 texCoord;	 // UV for text and images, rectLocalPos for shapes
-		Foundation::Vec4 color;		 // Fill color RGBA, straight alpha
-		Foundation::Vec4 data1;		 // Border: (color.rgb, width) for shapes, (blur, 0, 0, 0) for shadows
-		Foundation::Vec4 data2;		 // xyz per mode, w the mode (BatchRenderer.h has the table). Shape: (halfW, halfH, cornerRadius,
-									 // borderPos with the border's alpha); text: (pixelRange, 0, 0, w); shadow: (halfW, halfH,
-									 // cornerRadius, w); arc: (innerR, outerR, sweep / 2, w); image: (0, 0, 0, w)
-		Foundation::Vec4 clipBounds; // Clip rect (minX, minY, maxX, maxY), or (0,0,0,0) for no clipping
+	// One batched draw, a quad (VertexLayout::Batched): base.vert builds its six vertices
+	// from gl_VertexID, two triangles over the corners (0, 1, 2) and (0, 2, 3). What each
+	// field holds depends on `mode` (BatchRenderer.h has the table); `radii`, `border` and
+	// `shape` are raw words base.vert reads as halves, rgba8 or floats by mode. Colours
+	// are premultiplied. Attributes 1, 3, 4, 5 and 8 to 12 of base.vert, per instance.
+	struct BatchInstance {
+		Foundation::Vec2 corners[4]; // NOLINT(modernize-avoid-c-arrays): TL, TR, BR, BL, screen space, the transform applied
+		Foundation::Vec4 geometry;	 // per mode: half size and the quad's extent, a uv rect, an arc's radii, a stroke's frame
+		Foundation::Vec4 clip;		 // (minX, minY, maxX, maxY) in logical pixels, or zero for none
+		uint32_t		 radii[2];	 // NOLINT(modernize-avoid-c-arrays): four halves, or a stroke's centre as two floats
+		uint32_t		 fills[4];	 // NOLINT(modernize-avoid-c-arrays): rgba8 at each corner, in corner order
+		uint32_t		 border = 0; // rgba8, or a stroke's corner radius as a float
+		uint32_t		 shape[2];	 // NOLINT(modernize-avoid-c-arrays): four halves, or a stroke's half size as two floats
+		uint8_t			 mode = 0;
+		uint8_t			 slot = 0; // the texture slot, 0 until a run binds more than one
+		uint8_t			 flags = 0;
+		uint8_t			 roundedClip = 0; // reserved for a rounded clip's entry, 0 for none
 	};
-	static_assert(sizeof(BatchVertex) == 80, "BatchVertex is the 80-byte stride of the Batched layout");
+	static_assert(sizeof(BatchInstance) == 104, "BatchInstance is the 104-byte stride of the Batched layout");
 
 	// An instanced mesh vertex (VertexLayout::InstancedMesh), attributes 0 and 2; the
 	// per-instance InstanceData (primitives/InstanceData.h) supplies 6 and 7.
@@ -46,9 +49,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 namespace Renderer::backend {
 
-	// A geometry's vertex format, which fixes its index type: Batched is BatchVertex with
-	// uint32 indices; InstancedMesh is InstancedMeshVertex with uint16 indices, plus
-	// an InstanceData per instance.
+	// A geometry's vertex format: Batched is a BatchInstance per quad and no index
+	// buffer; InstancedMesh is InstancedMeshVertex with uint16 indices, plus an
+	// InstanceData per instance.
 	enum class VertexLayout : uint8_t { Batched, InstancedMesh };
 
 	// How a buffer is written after it is made. Static: never. Dynamic: in place, the
@@ -96,7 +99,8 @@ namespace Renderer::backend {
 		std::span<const HookUniformBlock> hookBlocks;
 	};
 
-	// Buffers to draw from in `layout`; `instances` only for InstancedMesh.
+	// Buffers to draw from in `layout`: for Batched, `vertices` holds the BatchInstances;
+	// for InstancedMesh, `vertices`, `indices` and `instances` all.
 	struct GeometryDesc {
 		VertexLayout layout = VertexLayout::Batched;
 		BufferHandle vertices;
@@ -104,9 +108,10 @@ namespace Renderer::backend {
 		BufferHandle instances;
 	};
 
-	// One draw: `indexCount` indices from `indexOffset` (counted in indices) of the
-	// geometry, triangles, `instanceCount` times when it is not zero. `texture` is
-	// bound to unit 0, which u_atlas samples; an invalid one binds nothing.
+	// One draw. Batched: `instanceCount` quads from `firstInstance`. InstancedMesh:
+	// `indexCount` indices from `indexOffset` (counted in indices), triangles,
+	// `instanceCount` times. `texture` is bound to unit 0, which u_atlas samples; an
+	// invalid one binds nothing.
 	struct DrawCall {
 		PipelineHandle pipeline;
 		GeometryHandle geometry;
@@ -114,6 +119,7 @@ namespace Renderer::backend {
 		TextureHandle  texture;
 		uint32_t	   indexOffset = 0;
 		uint32_t	   indexCount = 0;
+		uint32_t	   firstInstance = 0;
 		uint32_t	   instanceCount = 0;
 	};
 

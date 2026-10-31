@@ -1,0 +1,29 @@
+{
+  "color": {
+    "$type": "color",
+    "surface": {
+      "base": { "$value": "{base.color.gray50}" },
+      "raised": { "$value": "{base.color.white}" },
+      "sunken": { "$value": "{base.color.gray100}" },
+      "overlay": { "$value": "{base.color.white}" },
+      "control": { "$value": "{base.color.gray200}" }
+    },
+    "text": {
+      "primary": { "$value": "{base.color.gray950}" },
+      "secondary": { "$value": "{base.color.gray600}" },
+      "disabled": { "$value": "{base.color.gray400}" },
+      "inverse": { "$value": "{base.color.gray50}" }
+    },
+    "line": {
+      "subtle": { "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.08 } },
+      "edge": { "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.16 } },
+      "strong": { "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.32 } }
+    },
+    "scrim": { "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.4 } },
+    "focus": { "$value": "{base.color.blue500}" }
+  },
+  "state": {
+    "hover": { "wash": { "$type": "color", "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.05 } } },
+    "pressed": { "wash": { "$type": "color", "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.1 } } }
+  }
+}

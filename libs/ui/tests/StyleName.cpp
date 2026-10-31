@@ -4,11 +4,11 @@
 #include <ui/theme/Tokens.h>
 
 #ifdef SALAL_STYLE_TYPO
-constexpr ui::StyleId kStyle = ui::styles::pnae;
+constexpr ui::Style kStyle = ui::styles::pnae;
 #else
-constexpr ui::StyleId kStyle = ui::styles::pane;
+constexpr ui::Style kStyle = ui::styles::pane;
 #endif
 
 int main() {
-	return kStyle.table == &ui::tokenTable() ? 0 : 1;
+	return kStyle.theme.table == &ui::tokenTable() ? 0 : 1;
 }

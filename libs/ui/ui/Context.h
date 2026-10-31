@@ -17,6 +17,7 @@
 // focus read the same list.
 
 #include "ui/Component.h"
+#include "ui/theme/Theme.h"
 
 #include <math/Types.h>
 
@@ -50,6 +51,11 @@ namespace ui {
 		void										  removeRoot(Ref<Component> rootRef);
 		[[nodiscard]] const std::vector<ComponentId>& getRoots() const { return roots; }
 
+		// The theme every component's style resolves against (docs/ui-design.md, "Theme"): ui's tokens
+		// until a game sets its own. Setting one restyles every component, as a mode switch does.
+		[[nodiscard]] const Theme& getTheme() const { return theme; }
+		void					   setTheme(Theme value);
+
 		// Resizes every root.
 		void						   setViewport(Foundation::Vec2 size);
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }
@@ -82,8 +88,10 @@ namespace ui {
 		void		paintContext(Component& contextRoot);
 		void		collectContext(Component& parent, int inheritedZ);
 		void		renderComponent(Component& component, float parentOpacity);
+		void		restyle(Component& component);
 
 		mutable Registry		 registry;
+		Theme					 theme;
 		std::vector<ComponentId> roots;
 		ComponentId				 defaultRoot;
 		Foundation::Vec2		 viewport;

@@ -70,8 +70,9 @@ namespace Renderer::backend {
 	}
 
 	GeometryHandle NullBackend::createGeometry(const GeometryDesc& desc) {
-		const bool instancesOk = desc.layout != VertexLayout::InstancedMesh || bufferTable.find(desc.instances) != nullptr;
-		if (bufferTable.find(desc.vertices) == nullptr || bufferTable.find(desc.indices) == nullptr || !instancesOk) {
+		const bool mesh = desc.layout == VertexLayout::InstancedMesh;
+		if (bufferTable.find(desc.vertices) == nullptr ||
+			(mesh && (bufferTable.find(desc.indices) == nullptr || bufferTable.find(desc.instances) == nullptr))) {
 			return {};
 		}
 		return geometryTable.insert(desc);

@@ -34,10 +34,40 @@ namespace ui {
 		  private:
 			bool& flag;
 		};
+
+		// ui's tokens alone, loaded once; every context starts from them. They were checked when ui built.
+		const Theme& uiTheme() {
+			static const Theme kTheme = Theme::load({}).theme;
+			return kTheme;
+		}
 	} // namespace
 
 	Context::Context(Foundation::Vec2 viewportSize)
-		: viewport(viewportSize) {}
+		: theme(uiTheme()),
+		  viewport(viewportSize) {}
+
+	void Context::setTheme(Theme value) {
+		if (drawing) {
+			LOG_ERROR(UI, "setTheme while the ui draws; the theme is unchanged");
+			return;
+		}
+		theme = std::move(value);
+		for (const ComponentId rootId : roots) {
+			if (Component* rootComponent = registry.find(rootId)) {
+				restyle(*rootComponent);
+			}
+		}
+		geometryDirty = true;
+	}
+
+	void Context::restyle(Component& component) {
+		component.setStyle(component.declaredStyle);
+		for (const ComponentId childId : component.children) {
+			if (Component* child = registry.find(childId)) {
+				restyle(*child);
+			}
+		}
+	}
 
 	Context::~Context() = default;
 
@@ -67,6 +97,7 @@ namespace ui {
 		dirtyBoundaries.push_back(rootId);
 		geometryDirty = true;
 		orderDirty = true;
+		added.setStyle(added.declaredStyle);
 		{
 			const Registry::DispatchScope scope(registry);
 			added.onMount();

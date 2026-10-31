@@ -157,7 +157,7 @@ namespace ui {
 			}
 
 			for (std::string_view style : table->styles) {
-				ThemeStyle themed;
+				Style	   themed;
 				bool	   any = false;
 				const auto field = [&](std::string_view name, dtcg::TokenType type) -> const dtcg::ResolvedToken* {
 					const auto found = resolved.find(stylePath(style, name));
@@ -302,14 +302,20 @@ namespace ui {
 		return valueOr(token.table, token.index, dtcg::StrokeStyleValue{});
 	}
 
-	const ThemeStyle& Theme::style(StyleId id) const {
-		static const ThemeStyle kUnset;
+	const Style& Theme::style(StyleId id) const {
+		static const Style kUnset;
 		for (const Table& loaded : tables) {
 			if (loaded.table == id.table) {
 				return id.index < loaded.styles.size() ? loaded.styles[id.index] : kUnset;
 			}
 		}
 		return kUnset;
+	}
+
+	Style Theme::resolve(const Style& declared, StyleId typeStyle) const {
+		Style resolved = style(typeStyle).extend(style(declared.theme)).extend(declared);
+		resolved.theme = declared.theme;
+		return resolved;
 	}
 
 } // namespace ui

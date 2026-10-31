@@ -30,6 +30,7 @@
 #include "primitives/Primitives.h"
 #include "utils/Log.h"
 
+#include <glm/gtc/packing.hpp>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -477,9 +478,9 @@ namespace Renderer {
 		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
 		ASSERT_EQ(draws.size(), 2U);
 		EXPECT_EQ(draws[0].call.texture, mono);
-		EXPECT_EQ(draws[0].call.indexCount, 24U); // four glyphs of six indices
+		EXPECT_EQ(draws[0].call.instanceCount, 4U); // four glyphs, a quad each
 		EXPECT_EQ(draws[1].call.texture, body);
-		EXPECT_EQ(draws[1].call.indexCount, 24U);
+		EXPECT_EQ(draws[1].call.instanceCount, 4U);
 	}
 
 	TEST_F(FontRendererInitializeTest, EachQuadDrawsAtItsOwnAtlassDistanceRange) {
@@ -504,16 +505,16 @@ namespace Renderer {
 		Primitives::drawGlyphs(quads.data(), quads.size());
 		Primitives::endFrame();
 
-		// One upload; its vertices run in submission order, four per quad.
+		// One upload; its quads run in submission order, each with its range in shape.z.
 		const std::vector<backend::NullBackend::RecordedDraw>& draws = nullBackend->draws();
 		ASSERT_FALSE(draws.empty());
 		const std::span<const uint8_t> bytes = nullBackend->bufferContents(nullBackend->geometry(draws[0].call.geometry)->vertices);
-		std::vector<BatchVertex>	   vertices(bytes.size() / sizeof(BatchVertex));
-		std::memcpy(vertices.data(), bytes.data(), vertices.size() * sizeof(BatchVertex));
-		ASSERT_EQ(vertices.size(), 20U);
+		std::vector<BatchInstance>	   glyphs(bytes.size() / sizeof(BatchInstance));
+		std::memcpy(glyphs.data(), bytes.data(), glyphs.size() * sizeof(BatchInstance));
+		ASSERT_EQ(glyphs.size(), 5U);
 		const float expected[] = {2.0F, 2.0F, 4.0F, 4.0F, 6.0F};
-		for (size_t i = 0; i < vertices.size(); ++i) {
-			EXPECT_EQ(vertices[i].data2.x, expected[i / 4]) << "vertex " << i;
+		for (size_t i = 0; i < glyphs.size(); ++i) {
+			EXPECT_EQ(glm::unpackHalf2x16(glyphs[i].shape[1]).x, expected[i]) << "glyph " << i;
 		}
 	}
 
