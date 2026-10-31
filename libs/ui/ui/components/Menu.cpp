@@ -39,11 +39,10 @@ namespace ui {
 				setSize({kAuto, sizeMetrics(getContext()->getTheme(), ControlSize::Sm).controlHeight});
 				setEnabled(item.enabled);
 				setActive(item.selected);
-				const Style text = item.enabled ? styles::text::body : styles::text::secondary;
 				if (!item.icon.empty()) {
-					addChild<Icon>({.size = {kIcon, kIcon}, .style = item.enabled ? Style{} : styles::text::secondary, .name = item.icon});
+					addChild<Icon>({.size = {kIcon, kIcon}, .name = item.icon});
 				}
-				addChild<Text>({.layout = {.flexGrow = 1.0F}, .style = text, .text = item.label});
+				addChild<Text>({.layout = {.flexGrow = 1.0F}, .style = styles::text::body, .text = item.label});
 				if (!item.hint.empty()) {
 					addChild<Text>({.style = styles::label, .text = item.hint});
 				}
