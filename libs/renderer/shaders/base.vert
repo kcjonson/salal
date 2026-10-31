@@ -38,7 +38,7 @@ flat out vec4	 v_radii;	 // rect, shadow and stroke: corner radii (tl, tr, br, b
 flat out vec4	 v_border;	 // premultiplied
 flat out vec4	 v_shape;	 // (border width, reach, blur or range, opacity)
 flat out vec4	 v_clip;
-flat out uvec2	 v_mode;	 // (mode, flags)
+flat out uvec3	 v_mode;	 // (mode, flags, texture slot)
 
 // Modes, as BatchRenderer.h has them; instanced is the instanced and baked paths'
 const uint kModeFlat = 0u;
@@ -83,14 +83,14 @@ void main() {
 		// Local mesh space through the instance's world position, rotation and scale
 		gl_Position = u_projection * u_transform * vec4(instanceToScreen(a_position), 0.0, 1.0);
 		v_fill = a_color * getInstanceColorTint();
-		v_mode = uvec2(kModeInstanced, 0u);
+		v_mode = uvec3(kModeInstanced, 0u, 0u);
 		return;
 	}
 	if (u_instanced == 2) {
 		// Already in world space and tinted on the CPU
 		gl_Position = u_projection * u_transform * vec4(worldToScreen(a_position), 0.0, 1.0);
 		v_fill = a_color;
-		v_mode = uvec2(kModeInstanced, 0u);
+		v_mode = uvec3(kModeInstanced, 0u, 0u);
 		return;
 	}
 
@@ -100,7 +100,7 @@ void main() {
 	gl_Position = u_projection * u_transform * vec4(position, 0.0, 1.0);
 
 	uint mode = a_mode.x;
-	v_mode = uvec2(mode, a_mode.z);
+	v_mode = uvec3(mode, a_mode.z, a_mode.y);
 	v_fill = rgba8(a_fills[corner]);
 	v_clip = a_clip;
 

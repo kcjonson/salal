@@ -4,6 +4,7 @@
 #include "utils/Log.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <optional>
@@ -448,7 +449,8 @@ namespace Renderer::backend::gl {
 		}
 		glUniformBlockBinding(program, block, kUniformBinding);
 		shader.use();
-		glUniform1i(glGetUniformLocation(program, "u_atlas"), 0);
+		constexpr std::array<GLint, kTextureSlots> kUnits = {0, 1, 2, 3, 4, 5, 6, 7};
+		glUniform1iv(glGetUniformLocation(program, "u_textures"), static_cast<GLsizei>(kUnits.size()), kUnits.data());
 		shader.unbind();
 		return pipelines.insert(std::move(shader));
 	}
@@ -611,10 +613,10 @@ namespace Renderer::backend::gl {
 	void GLBackend::draw(std::span<const DrawCall> calls) {
 		// Nothing is assumed bound on entry: a game's GL may have run since the last
 		// submission. Within this one, a binding changes only where the calls differ.
-		GLuint					  program = 0;
-		GLuint					  vertexArray = 0;
-		std::optional<BlendState> blend;
-		TextureHandle			  texture;
+		GLuint									 program = 0;
+		GLuint									 vertexArray = 0;
+		std::optional<BlendState>				 blend;
+		std::array<TextureHandle, kTextureSlots> bound{}; // what this submission left on each unit
 		for (const DrawCall& call : calls) {
 			const Shader* pipeline = pipelines.find(call.pipeline);
 			GeometrySlot* geometry = geometries.find(call.geometry);
@@ -637,12 +639,12 @@ namespace Renderer::backend::gl {
 				applyBlend(call.blend);
 				blend = call.blend;
 			}
-			if (call.texture.isValid() && call.texture != texture) {
-				if (!texture.isValid()) {
-					glActiveTexture(GL_TEXTURE0);
+			for (size_t unit = 0; unit < kTextureSlots; ++unit) {
+				if (call.textures[unit].isValid() && call.textures[unit] != bound[unit]) {
+					glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+					glBindTexture(GL_TEXTURE_2D, textureName(call.textures[unit]));
+					bound[unit] = call.textures[unit];
 				}
-				glBindTexture(GL_TEXTURE_2D, textureName(call.texture));
-				texture = call.texture;
 			}
 			if (batched) {
 				if (geometry->firstInstance != call.firstInstance) {
@@ -670,12 +672,21 @@ namespace Renderer::backend::gl {
 		}
 
 		// What the batch has always left behind: no vertex array (a game's index-buffer
-		// bind would otherwise land in ours), no texture on unit 0, blending off.
+		// bind would otherwise land in ours), no texture on a unit it bound, unit 0
+		// active, blending off.
 		if (vertexArray != 0) {
 			GLVertexArray::unbind();
 		}
-		if (texture.isValid()) {
-			GLTexture::unbind();
+		bool anyBound = false;
+		for (size_t unit = 0; unit < kTextureSlots; ++unit) {
+			if (bound[unit].isValid()) {
+				glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
+				GLTexture::unbind();
+				anyBound = true;
+			}
+		}
+		if (anyBound) {
+			glActiveTexture(GL_TEXTURE0);
 		}
 		if (blend.has_value()) {
 			glDisable(GL_BLEND);

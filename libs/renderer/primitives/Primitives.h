@@ -374,7 +374,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Draw a texture into a rectangle, sampled linearly or nearest as the texture
 		// was made. Texels are taken as premultiplied alpha, which a RenderTarget's
 		// output already is; upload straight-alpha pixels premultiplied. Images batch
-		// with everything else, splitting the draw only where the texture changes.
+		// with everything else; a draw call binds eight textures, and splits only for a ninth.
 		void drawImage(const ImageArgs& args);
 
 		// Arguments for DrawText
