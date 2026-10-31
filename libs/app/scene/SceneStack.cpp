@@ -38,6 +38,11 @@ namespace app {
 			uiContext = std::make_unique<ui::Context>(stack != nullptr ? logicalSize(stack->app.viewport()) : Foundation::Vec2{0.0F, 0.0F});
 			if (stack != nullptr) {
 				uiContext->setScale(stack->app.uiScale());
+				App& app = stack->app;
+				uiContext->setClipboard({
+					.read = [&app] { return app.clipboard().getText(); },
+					.write = [&app](const std::string& text) { app.clipboard().setText(text); },
+				});
 			}
 		}
 		return *uiContext;

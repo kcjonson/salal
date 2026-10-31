@@ -42,11 +42,23 @@ endif()
 
 add_library(salal_ui STATIC
     ui/components/Badge.cpp
+    ui/components/Button.cpp
+    ui/components/Checkbox.cpp
+    ui/components/Control.cpp
+    ui/components/ListRow.cpp
     ui/components/Divider.cpp
     ui/components/KeyCap.cpp
     ui/components/Panel.cpp
+    ui/components/RadioGroup.cpp
+    ui/components/SegmentedControl.cpp
+    ui/components/Slider.cpp
     ui/components/ProgressBar.cpp
     ui/components/Stat.cpp
+    ui/components/TabBar.cpp
+    ui/components/TextEditor.cpp
+    ui/components/TextInput.cpp
+    ui/components/Toggle.cpp
+    ui/components/TreeView.cpp
     ui/Component.cpp
     ui/Context.cpp
     ui/Focus.cpp
