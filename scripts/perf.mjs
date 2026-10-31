@@ -53,14 +53,16 @@ const EXIT = { pass: 0, regressed: 1, invalid: 2, inconclusive: 3 };
 // The gate: a build's figure for a timing is the STATISTIC of its RUNS runs' values, and a head figure
 // more than the scene's threshold (percent) above the base's fails compare. A side whose spread (below)
 // is wider than the threshold hasn't reproduced its figure, and the compare is inconclusive. Set from
-// measured noise; docs/testing/README.md has the error rates behind each number.
+// 20 runs a scene on an idle machine, every split of them judged; docs/testing/README.md has the error
+// rates behind each number. The fastest of five: interference only slows a run, and the median left
+// half of perf_quads' no-op compares inconclusive. perf_ui's walk varies more launch to launch.
 const RUNS = 5;
-const STATISTIC = 'median';
+const STATISTIC = 'min';
 const GATES = {
 	perf_quads: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
 	perf_text: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
 	perf_world: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
-	perf_ui: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
+	perf_ui: { 'cpuMs.p50': 4, 'renderMs.p50': 4, 'gpuMs.p50': 4 },
 };
 // Fixed for fixed content: a head that draws more, uploads more or makes more draw calls fails, unless
 // --allow-counts. A moving camera culls a little differently in each capture window, so a count fails
@@ -149,9 +151,10 @@ function number(options, key, fallback, { integer = false, min = 0, exclusive = 
 
 // Pinned to a fixed set of cores, a launch can't land on a different core or CCD from the last. One
 // logical CPU on each of four cores, 4, 6, 8 and 10, where there are 16 or more: clear of CPU 0's
-// interrupts, inside a 5950X's first CCD, and no two of the sandbox's threads sharing a core, which
-// left the old 0x0FF0 mask's runs at two levels (README, Performance). None on a smaller machine or on
-// macOS, which has no affinity, and the runner says so.
+// interrupts, inside a 5950X's first CCD, and no two of the sandbox's threads sharing a core; the
+// thresholds were set on it, and 0x0FF0, both threads of the same cores, is still to be measured against
+// it (README, Performance). None on a smaller machine or on macOS, which has no affinity, and the runner
+// says so.
 function defaultAffinity() {
 	return os.cpus().length >= 16 && process.platform !== 'darwin' ? '0x0550' : null;
 }
@@ -1012,6 +1015,9 @@ async function compareMode(options) {
 	const missingHead = settings.scenes.filter((scene) => !headScenes.includes(scene));
 	if (missingHead.length > 0) {
 		throw new Invalid(`the head build has no ${missingHead.join(', ')}`);
+	}
+	if (!settings.scenes.some((scene) => baseScenes.includes(scene))) {
+		throw new Invalid(`the base build has none of ${settings.scenes.join(', ')}, so there is nothing to compare`);
 	}
 
 	const verdicts = [];
