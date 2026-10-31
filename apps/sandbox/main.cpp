@@ -104,7 +104,9 @@ int main(int argc, char** argv) {
 		names.emplace_back(scene->name);
 	}
 	app->scenes().switchTo(commandLine.scene.value_or(kScenes.front()->name));
-	app->addOverlay(std::make_unique<sandbox::Picker>(*app, sandbox::Picker::Args{.scenes = std::move(names), .open = !commandLine.scene}));
+	app->addDebugLayer(
+		std::make_unique<sandbox::Picker>(*app, sandbox::Picker::Args{.scenes = std::move(names), .open = !commandLine.scene})
+	);
 
 	app->run();
 	app->shutdown();

@@ -150,10 +150,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Draw-order barrier without a flush: every draw from here sorts after every
 		// draw before it, whatever their keys, so two passes (a covered scene and
-		// the one over it, the scenes and an overlay) keep their key spaces apart
+		// the one over it, the scenes and a debug layer) keep their key spaces apart
 		// and the later pass paints on top. It costs no draw call: the batch sorts on
 		// the barrier count ahead of the key. The app sets one before each stacked
-		// scene and each overlay renders.
+		// scene and each debug layer renders.
 		void sortBarrier();
 
 		// Flush pending batched primitives now: upload them and submit their draw

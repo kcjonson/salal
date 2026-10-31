@@ -1,6 +1,6 @@
 #pragma once
 
-// The sandbox's scene picker, an overlay drawn with Primitives (the harness's ui comes with salal's ui
+// The sandbox's scene picker, a debug layer drawn with Primitives (the harness's ui comes with salal's ui
 // in phase 3). Closed, it is a tab in the window's bottom-right corner; open, a list of every scene
 // stands above the tab with the running one marked. F1 or a click on the tab opens and closes it.
 // While it is open, Up and Down or the pointer over a row move the selection, Enter or a click on a row
@@ -18,7 +18,7 @@
 #include <graphics/Rect.h>
 #include <input/InputTypes.h>
 #include <math/Types.h>
-#include <scene/Overlay.h>
+#include <scene/DebugLayer.h>
 
 #include <bitset>
 #include <cstddef>
@@ -27,7 +27,7 @@
 
 namespace sandbox {
 
-	class Picker final : public app::Overlay {
+	class Picker final : public app::DebugLayer {
 	  public:
 		struct Args {
 			std::vector<std::string> scenes; // in the order listed, each a name the App's stack has
