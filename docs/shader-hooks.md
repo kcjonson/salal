@@ -5,10 +5,9 @@ The renderer draws everything with one program, the base shader
 game that needs its own vertex math in that program, worldsim's grass parting
 around the cursor for one, writes it as a hook: a GLSL file in the game's repo
 that the game's build splices into the base shader's vertex stage. A game that
-needs its own surface, dual-deck-builder's worn paper for one, writes a fill
-hook, spliced into the fragment stage and picked per rect ("Fill hooks", below).
-The GPU still sees one program (dual-deck-builder's R5.1), the game's code stays
-in the game's repo, and nothing about the shader is read or compiled from files
+needs its own surface, worn paper for one, writes a fill hook, spliced into the
+fragment stage and picked per rect ("Fill hooks", below). The GPU still sees one
+program, the game's code stays in the game's repo, and nothing about the shader is read or compiled from files
 at run time.
 
 Added 2026-10-26, for `v0.6.0`. Fill hooks designed 2026-10-31, not yet built.
@@ -260,10 +259,10 @@ of them calls it first. The null backend records each write
 ## Fill hooks
 
 Designed 2026-10-31. A fill hook is a game's surface: a function of the pixel's
-place in a rect that gives the rect's colour there. Dual-deck-builder needs one
-for its paper, grime at the edges and corners over a flat reading window, seeded
-per surface, which it would otherwise bake into nine-sliced raster art that
-salal doesn't draw (ui-design.md, "Remaining rules"). Noise computed where it is
+place in a rect that gives the rect's colour there. Worn paper is the case it
+was designed for: grime at the edges and corners over a flat reading window,
+seeded per surface, which would otherwise be baked into nine-sliced raster art
+that salal doesn't draw (ui-design.md, "Remaining rules"). Noise computed where it is
 drawn is what an SVG filter such as `feTurbulence` does, without the offscreen
 pass a filter needs, so a hooked rect is one more quad in the batch, with no
 texture and no split, and is sharp at any pixel ratio.

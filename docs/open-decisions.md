@@ -34,7 +34,7 @@ Written into the docs as decided, with the reason.
 | The renderer sits behind a backend boundary; OpenGL 3.3 core is the first backend, Vulkan possible later (direction settled 2026-10-26; the design is merged as [renderer-boundary.md](renderer-boundary.md)) | worldsim's renderer is OpenGL throughout: 19 GL or GLFW leaks in 16 public headers and 182 direct GL calls in twelve renderer files (measured at worldsim `2cc7e40a`), and `BatchRenderer.h` and `FontRenderer.h` hand `<GL/glew.h>` and `GLuint` to every includer. Four PRs tagged `v0.2.0` through `v0.5.0`, with a worldsim pin after each, are sequenced in [renderer-boundary.md](renderer-boundary.md); PRs 1 to 4 are in (`v0.2.0` to `v0.5.0`), and worldsim's grass deform has since moved out of the base shader into a worldsim hook ([shader-hooks.md](shader-hooks.md)) |
 | The renderer owns offscreen render targets, and additive blend is a per-group key in the batch sort key that splits a run rather than sorting; particles stay game-side; float colour attachments are allowed (decision G, 2026-10-26; the questions the design left open are decided in [renderer-boundary.md](renderer-boundary.md)) | blend state and the render-target API have to settle before a second consumer depends on the renderer API, so none is retrofitted onto an API three games call; GL 3.3 core has float colour attachments without an extension; particles start as a pool over `Primitives` and are promoted to an engine pool when a second game wants one |
 | The engine's game PRNG is dual-deck-builder's `Rng`, sfc32 with a MurmurHash3-based `fork(name, attempt)`, in `foundation/random/Rng.h`; Pcg32 and SplitMix64 stay as they are for worldsim's worldgen (decision A, 2026-10-26) | bit-identical differential testing of dual-deck-builder's C++ port is only possible with its generator and its fork, and worldgen is built on Pcg32 and `deriveSeed`. The port is bit-identical to `Rng.ts` at `RNG_VERSION` 1, and every golden vector in `Rng.test.ts` runs as a gtest on all three CI platforms (design and evidence under A below) |
-| Dual-deck-builder's UI art is not raster: its paper is a fill hook in the base shader, the rest of its art is vector through `renderer/vector`, and its icons go through `salal_icons` (the art half of decision H, 2026-10-31) | salal draws no raster images or nine-slice (ui-design.md, "Remaining rules"), and the game's art atlas was baked from SVG whose texture came from filters. A fill hook computes that noise where it is drawn, in the one batch with no texture; supporting SVG filters instead would mean an offscreen pass and a filter-graph interpreter per filtered element. Designed in [shader-hooks.md](shader-hooks.md), "Fill hooks" |
+| A game's UI art is not raster: surface texture is a fill hook in the base shader, the rest is vector through `renderer/vector`, and icons go through `salal_icons` (the art half of decision H, 2026-10-31) | salal draws no raster images or nine-slice (ui-design.md, "Remaining rules"), and the one raster UI atlas a consumer had was baked from SVG whose texture came from filters. A fill hook computes that noise where it is drawn, in the one batch with no texture; supporting SVG filters instead would mean an offscreen pass and a filter-graph interpreter per filtered element. Designed in [shader-hooks.md](shader-hooks.md), "Fill hooks" |
 | The ECS core stays in worldsim (decision E, 2026-10-26) | no other consumer wants it: asteroids' sim is data-oriented and "not an ECS framework", dual-deck-builder has none, and worldsim's own coding standards say "no ECS for UI components" |
 
 ## A. Engine PRNG
@@ -400,13 +400,12 @@ assets. It is the API `FontRenderer` takes for atlas sources, and getting
 `std::exit` out of its initialisation, a phase 2 follow-up. Settled 2026-10-27
 (Settled, above), which leaves H the vector and SVG question alone.
 
-Narrowed 2026-10-31: dual-deck-builder's presentation port answered what its
-art atlas needs (Settled, above). It drops the atlas: its paper is a fill hook
-([shader-hooks.md](shader-hooks.md), "Fill hooks") and its stamps, tape, logo
-and card backs are flat-fill SVG through `renderer/vector`, authored without
-the filters and masks its mocks used, which nanosvg doesn't read. What is left of H is worldsim's
-path conventions and whether `SVGLoader` takes a game's asset root, decided
-when dual-deck-builder first loads an SVG.
+Narrowed 2026-10-31: the art atlas question is answered (Settled, above). There
+is no atlas: surface texture is a fill hook ([shader-hooks.md](shader-hooks.md),
+"Fill hooks"), and the rest of a game's UI art is flat-fill SVG through
+`renderer/vector`, authored without filters or masks, which nanosvg doesn't
+read. What is left of H is worldsim's path conventions and whether `SVGLoader`
+takes a game's asset root, decided when a game first loads its own SVG.
 
 Needed by. Phase 1 at the latest for what moves; the convention question can
 wait until Job B's presentation phase.
