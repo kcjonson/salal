@@ -311,6 +311,9 @@ layer. `salal_tokens(<target> <dir>)` (`cmake/SalalTokens.cmake`) runs
 `salal_tokens_tool`, a host tool built in-tree on nlohmann-json, which checks
 the folder over ui's tokens in every mode, embeds it, and generates typed
 `<ns>::styles` and `<ns>::tokens` handles, so a misspelt style doesn't compile.
+A game registers its families with the theme by the names its tokens use, a
+role's faces under one name with their weights, and a style's `fontWeight`
+picks the face.
 
 Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
 The deterministic math and hash noise are header-inline polynomials; Clang fuses

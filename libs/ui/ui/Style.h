@@ -35,9 +35,12 @@ namespace ui {
 		std::optional<Foundation::VerticalAlign>   verticalAlign;
 		std::optional<float>					   letterSpacing; // px between glyphs
 		std::optional<Foundation::TextTransform>   textTransform;
-		// Carried from the tokens; Text reads neither yet (a font family is one weight, and wrapped
-		// text takes its line height from the atlas).
+		// Picks the face: resolved against the theme, fontFamily becomes the family registered under
+		// its name nearest this weight (ThemeArgs::fontFamilies), so a role's bold is a weight, not a
+		// family of its own. Unset, the family is as given.
 		std::optional<float> fontWeight;
+		// Carried from the tokens; nothing reads it yet (wrapped text takes its line height from the
+		// atlas).
 		std::optional<float> lineHeight; // a multiple of fontSize
 		StyleId				 theme;		 // the theme style this one extends, if any
 

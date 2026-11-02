@@ -12,6 +12,7 @@
 #include "ui/Style.h"
 #include "ui/theme/TokenTable.h"
 
+#include <cstddef>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -19,11 +20,20 @@
 
 namespace ui {
 
-	// The name a tokens file's fontFamily uses for one of the game's families (FontRenderer::Initialize).
+	// The name a tokens file's fontFamily uses for one of the game's families (FontRenderer::Initialize),
+	// and that family's weight. Several families under one name are its faces: a display role with a
+	// semibold and a bold atlas registers both, and a style draws in the face nearest its fontWeight.
 	struct FontFamilyName {
 		std::string_view	 name;
 		Renderer::FontFamily family;
+		float				 weight = 400.0F;
 	};
+
+	// Which of `weights` CSS's font matching picks for `desired` (CSS Fonts 4, 5.2): from 400 to 500,
+	// the desired weight up to 500, then lighter ones heaviest first, then heavier past 500; under 400,
+	// lighter or equal heaviest first, then heavier; over 500, heavier or equal lightest first, then
+	// lighter. An index into `weights`; 0 when it's empty.
+	std::size_t matchWeight(std::span<const float> weights, float desired);
 
 	struct Typography {
 		Renderer::FontFamily family = Renderer::FontFamily::Default;
@@ -76,8 +86,13 @@ namespace ui {
 		const Style& style(StyleId id) const;
 
 		// `declared` as a component of a type whose theme style is `typeStyle` draws it: that style,
-		// then the one `declared` extends, then `declared`'s own set fields.
+		// then the one `declared` extends, then `declared`'s own set fields, its fontFamily the face of
+		// that family's name nearest its fontWeight.
 		Style resolve(const Style& declared, StyleId typeStyle) const;
+
+		// The face of `family`'s name nearest `weight` (matchWeight); `family` itself when the game
+		// registered it under no name, or no other face under its name.
+		Renderer::FontFamily face(Renderer::FontFamily family, float weight) const;
 
 	  private:
 		struct Slot {
@@ -91,12 +106,20 @@ namespace ui {
 			std::vector<Style> styles;
 		};
 
+		// A family the game registered: which of the registered names it's under, and its weight.
+		struct Face {
+			std::size_t			 name = 0;
+			Renderer::FontFamily family = Renderer::FontFamily::Default;
+			float				 weight = 400.0F;
+		};
+
 		const Slot* slot(const TokenTable* table, std::uint32_t index) const;
 
 		template <typename T>
 		T valueOr(const TokenTable* table, std::uint32_t index, T fallback) const;
 
 		std::vector<Table> tables;
+		std::vector<Face>  faces;
 	};
 
 	struct ThemeLoad {

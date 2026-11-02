@@ -213,6 +213,15 @@ the load; `dimension` in px (rem times a root size); `duration` in ms;
 game's `FontFamily` ids by name; `shadow` and `border` to the renderer's
 styles.
 
+A font is one weight, so a role with several (a display face in semibold and
+bold) is several families under one name: the game registers each with its
+weight (`ThemeArgs::fontFamilies`), and a style's `fontWeight` picks the face,
+the nearest by CSS's matching rule ([CSS Fonts 4, 5.2](https://www.w3.org/TR/css-fonts-4/#font-style-matching)),
+when the theme resolves the style. So `title` at 600 draws the semibold, a
+style extended to 700 the bold, and a control passes its weight to its label
+with its family. A family registered under two names picks among the first
+one's faces.
+
 A text transform (CSS's `text-transform`) has no type in the format, so it is
 salal's extension, in the place the format leaves for one: a style's group
 carries it under `salal` in `$extensions`, and a file that sets it stays valid
@@ -245,7 +254,7 @@ theme doesn't change their case.
 
 What ui's tokens define, beyond palette roles (surfaces, text, lines, scrim,
 focus ring), spacing, radii and motion: font roles (display, body, mono), each
-naming a game family; a semantic tone set (default, accent, info, positive,
+naming a game family, its faces picked by weight; a semantic tone set (default, accent, info, positive,
 warning, danger, plus `Auto`, picked by value); and `size` (sm, md, lg)
 setting font size and control height. State layers apply in R11.12's order
 (base, hover, pressed, open and active, focus ring), their washes coming from

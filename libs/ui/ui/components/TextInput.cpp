@@ -124,6 +124,7 @@ namespace ui {
 			 .fontSize = fontSize,
 			 .verticalAlign = Foundation::VerticalAlign::Middle,
 			 .letterSpacing = style.letterSpacing,
+			 .fontWeight = style.fontWeight,
 		 };
 
 		// Scroll so the caret stays inside the field, once layout has given the field a width.
