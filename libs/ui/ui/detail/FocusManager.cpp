@@ -300,7 +300,11 @@ namespace ui::detail {
 		state.reveal = reveal ? to : ComponentId{};
 		if (to == state.focused) {
 			if (Component* same = find(to)) {
+				const std::uint8_t was = same->focusVisibleBy;
 				same->focusVisibleBy = visible ? (same->focusVisibleBy | bit) : (same->focusVisibleBy & ~bit);
+				if (same->focusVisibleBy != was) {
+					same->interactionChanged();
+				}
 			}
 			return;
 		}
@@ -308,6 +312,7 @@ namespace ui::detail {
 		if (Component* old = find(from)) {
 			old->focusedBy &= ~bit;
 			old->focusVisibleBy &= ~bit;
+			old->interactionChanged();
 			if (old->handlers && old->handlers->onBlur) {
 				old->handlers->onBlur(*old);
 			}
@@ -324,6 +329,7 @@ namespace ui::detail {
 		if (visible) {
 			now->focusVisibleBy |= bit;
 		}
+		now->interactionChanged();
 		for (Component* node = find(now->parentId); node != nullptr; node = find(node->parentId)) {
 			if (node->focusGroup) {
 				node->activeChild = to;

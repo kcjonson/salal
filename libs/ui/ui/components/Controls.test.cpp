@@ -101,6 +101,49 @@ namespace ui {
 		EXPECT_EQ(presses, 3);
 	}
 
+	// A subclass hears each change of hover, press and focus, as a button that lifts on hover would, and
+	// a key's activation shows a press for state.pressed.hold, which the snapshot reports.
+	TEST_F(UiControlsTest, AControlHearsItsInteractionChangeAndAKeyPressShowsForAMoment) {
+		class Watched : public Button {
+		  public:
+			using Button::Button;
+			std::vector<InteractionState> seen;
+
+		  protected:
+			void onInteractionChanged(const InteractionState& previous) override {
+				EXPECT_NE(previous, interaction());
+				seen.push_back(interaction());
+			}
+		};
+		Ref<Watched>		   button = root.addChild<Watched>({.label = "Go"});
+		const Foundation::Vec2 middle = middleOf(*button.get());
+		const auto			   last = [&] {
+			return button.get()->seen.back();
+		};
+		context.dispatch({.type = InputEvent::Type::PointerMove, .position = middle});
+		EXPECT_TRUE(last().hovered);
+		context.dispatch({.type = InputEvent::Type::PointerDown, .mouseButton = foundation::MouseButton::Left, .position = middle});
+		EXPECT_TRUE(last().pressed);
+		EXPECT_TRUE(last().focused); // the press gave it focus
+		EXPECT_FALSE(last().focusVisible);
+		context.dispatch({.type = InputEvent::Type::PointerUp, .mouseButton = foundation::MouseButton::Left, .position = middle});
+		EXPECT_FALSE(last().pressed);
+		context.dispatch({.type = InputEvent::Type::PointerMove, .position = {700.0F, 500.0F}});
+		EXPECT_FALSE(last().hovered);
+
+		const auto	 changes = button.get()->seen.size();
+		const double hold = context.getTheme().get(tokens::state::pressed::hold) / 1000.0;
+		key(Key::Enter);
+		ASSERT_GT(button.get()->seen.size(), changes);
+		EXPECT_TRUE(last().pressed);
+		EXPECT_TRUE(snapshot()[0]["state"]["pressed"].get<bool>());
+		context.update(hold * 0.5);
+		EXPECT_TRUE(last().pressed);
+		context.update(hold);
+		EXPECT_FALSE(last().pressed);
+		EXPECT_FALSE(snapshot()[0]["state"]["pressed"].get<bool>());
+	}
+
 	// Fill, border, label and icon together, so a clear-fill button still reads as disabled; once, not
 	// again in its fill.
 	TEST_F(UiControlsTest, ADisabledControlFadesWholeAtTheDisabledOpacity) {

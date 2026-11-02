@@ -265,7 +265,12 @@ warning, danger, plus `Auto`, picked by value); and `size` (sm, md, lg)
 setting font size and control height. State layers apply in R11.12's order
 (base, hover, pressed, open and active, focus ring), their washes coming from
 tokens. A disabled control draws whole at the disabled opacity, fill, border,
-label and icon, so one with a clear fill still reads as disabled. Worldsim's design language (elevation by tint, its line
+label and icon, so one with a clear fill still reads as disabled. A key or pad
+activation has no release to end a press, so it shows the pressed layer for
+`state.pressed.hold`, and a press looks the same however it comes. A control's
+state (hovered, pressed, active, focused, focus-visible) is readable to its
+subclasses, which hear it change as it happens (`Control::onInteractionChanged`),
+for a look the layers don't draw, a lift on hover. Worldsim's design language (elevation by tint, its line
 alphas, two accents, its radius scale and control heights, Panel's kicker and
 bracket ticks) is worldsim's tokens and components, not engine rules.
 
