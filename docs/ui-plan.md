@@ -231,7 +231,8 @@ Level 1": tracks and placements take taffy's types (`TrackSizingFunction`,
 `line()`, `span()`, `fr()` and `minmax()`; one `gap` for both axes, as the
 row above names it, with no `rowGap` or `columnGap`; implicit tracks auto,
 with no `gridAutoRows` or `gridAutoColumns`; negative lines, which can add
-tracks before the explicit grid; and a child's percentage size, an
-`Absolute` child and a grid with an auto width each as Flex has them, not as
-CSS does. The plain functions are `ui/detail/Grid.h`, tested from the spec's
-own examples, and the sandbox scene is `ui_grid`.
+tracks before the explicit grid; a child's percentage size and an `Absolute`
+child as under Flex, not as CSS has them; and an auto width that hugs the
+columns, where CSS's block-level grid would fill its parent. The plain
+functions are `ui/detail/Grid.h`, tested from the spec's own examples, and
+the sandbox scene is `ui_grid`.
