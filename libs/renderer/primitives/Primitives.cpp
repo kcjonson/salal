@@ -614,21 +614,46 @@ namespace Renderer::Primitives {
 			}
 		}
 
-		// Emit one pass of the string at a position/color (shared by the shadow
-		// and the main text so text-shadow is a single inline property, not a
-		// caller-side double draw).
-		const auto emit = [&](Foundation::Vec2 pos, const Foundation::Color& col) {
-			std::vector<FontRenderer::GlyphQuad> quads;
-			g_fontRenderer->generateGlyphQuads(
-				effective, glm::vec2(pos.x, pos.y), args.scale, glm::vec4(col.r, col.g, col.b, col.a), quads, args.font, args.letterSpacing
-			);
-			drawGlyphs(quads.data(), quads.size(), args.key, args.blend);
-		};
-
-		if (args.shadowColor.a > 0.0F) {
-			emit({origin.x + args.shadowOffset.x, origin.y + args.shadowOffset.y}, args.shadowColor);
+		static thread_local std::vector<FontRenderer::GlyphQuad> quads;
+		quads.clear();
+		const Foundation::Color& color = args.color;
+		g_fontRenderer->generateGlyphQuads(
+			effective,
+			glm::vec2(origin.x, origin.y),
+			args.scale,
+			glm::vec4(color.r, color.g, color.b, color.a),
+			quads,
+			args.font,
+			args.letterSpacing
+		);
+		if (args.shadow.has_value()) {
+			drawGlyphShadow(quads.data(), quads.size(), *args.shadow, args.key, args.blend);
 		}
-		emit(origin, args.color);
+		drawGlyphs(quads.data(), quads.size(), args.key, args.blend);
+	}
+
+	void
+	drawGlyphShadow(const FontRenderer::GlyphQuad* quads, size_t count, const Foundation::BoxShadow& shadow, int32_t key, BlendMode blend) {
+		if (g_batchRenderer == nullptr || !(shadow.color.a > 0.0F)) {
+			return;
+		}
+		const Foundation::Vec2 offset = shadow.offset;
+		for (size_t i = 0; i < count; ++i) {
+			const FontRenderer::GlyphQuad& quad = quads[i];
+			g_batchRenderer->addTextQuad(
+				Foundation::Vec2(quad.position.x, quad.position.y) + offset,
+				Foundation::Vec2(quad.size.x, quad.size.y),
+				Foundation::Vec2(quad.uvMin.x, quad.uvMin.y),
+				Foundation::Vec2(quad.uvMax.x, quad.uvMax.y),
+				shadow.color,
+				Foundation::Vec2(quad.runOrigin.x, quad.runOrigin.y) + offset,
+				quad.atlas,
+				quad.pixelRange,
+				key,
+				blend,
+				{.spread = std::max(shadow.spread, 0.0F), .blur = std::max(shadow.blur, 0.0F)}
+			);
+		}
 	}
 
 	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, int32_t key, BlendMode blend) {

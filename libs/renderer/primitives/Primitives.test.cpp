@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <vector>
 
 namespace Renderer {
@@ -235,6 +236,58 @@ namespace Renderer {
 		});
 		expectNear(pixel(8, 16), {0, 128, 0, 128});
 		expectNear(pixel(24, 16), {0, 0, 0, 0});
+	}
+
+	TEST_F(PrimitivesDrawTest, AGlyphsShadowGrowsByItsSpreadAndSoftensOverItsBlurInsideTheField) {
+		// An atlas whose distance runs across x, a texel a pixel at a range of 8: 16 - x px from the
+		// edge at x = 16, inside to the left, the field ending 4 px either side of it.
+		std::vector<uint8_t> ramp(static_cast<size_t>(kSize) * kSize * 3);
+		for (int y = 0; y < kSize; ++y) {
+			for (int x = 0; x < kSize; ++x) {
+				const float distance = 16.0F - (static_cast<float>(x) + 0.5F);
+				const auto	value = static_cast<uint8_t>(std::lround(std::clamp(0.5F + (distance / 8.0F), 0.0F, 1.0F) * 255.0F));
+				std::fill_n(ramp.begin() + ((static_cast<ptrdiff_t>(y) * kSize + x) * 3), 3, value);
+			}
+		}
+		const Texture atlas =
+			Primitives::createTexture({.width = kSize, .height = kSize, .format = TextureFormat::Rgb8, .pixels = ramp.data()});
+		const FontRenderer::GlyphQuad glyph{
+			.position = {0.0F, 0.0F},
+			.size = {static_cast<float>(kSize), static_cast<float>(kSize)},
+			.uvMin = {0.0F, 0.0F},
+			.uvMax = {1.0F, 1.0F},
+			.color = {1.0F, 1.0F, 1.0F, 1.0F},
+			.runOrigin = {0.0F, static_cast<float>(kSize)},
+			.atlas = atlas.handle(),
+			.pixelRange = 8.0F
+		};
+		const auto alphaAt = [&](int x, const std::optional<Foundation::BoxShadow>& shadow) {
+			render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+				if (shadow) {
+					Primitives::drawGlyphShadow(&glyph, 1, *shadow);
+				} else {
+					Primitives::drawGlyphs(&glyph, 1);
+				}
+			});
+			return pixel(x, 16)[3];
+		};
+
+		// The glyph's own edge ramps over a pixel; the spread moves it out 2 px.
+		EXPECT_EQ(alphaAt(15, std::nullopt), 255);
+		EXPECT_EQ(alphaAt(16, std::nullopt), 0);
+		const Foundation::BoxShadow spread{.color = Foundation::Color::white(), .blur = 0.0F, .spread = 2.0F};
+		EXPECT_EQ(alphaAt(17, spread), 255);
+		EXPECT_EQ(alphaAt(18, spread), 0);
+		// A blur of 2 ramps from 2 px inside to 2 px outside: smoothstep at 3/8 and 1/8 of the way.
+		const Foundation::BoxShadow blur{.color = Foundation::Color::white(), .blur = 2.0F};
+		EXPECT_NEAR(alphaAt(16, blur), 81, 2);
+		EXPECT_NEAR(alphaAt(17, blur), 11, 2);
+		EXPECT_EQ(alphaAt(18, blur), 0);
+		// A blur of 8 would run past the field's end, 4 px out, and stop hard there; it is fitted
+		// to end with the field instead.
+		const Foundation::BoxShadow wide{.color = Foundation::Color::white(), .blur = 8.0F};
+		EXPECT_LE(alphaAt(19, wide), 4);
+		EXPECT_EQ(alphaAt(24, wide), 0);
 	}
 
 	TEST_F(PrimitivesDrawTest, NineTexturesDrawInTwoCallsEachQuadSamplingItsOwn) {

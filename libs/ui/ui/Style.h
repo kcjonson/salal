@@ -27,8 +27,9 @@ namespace ui {
 		std::optional<float>					   borderWidth; // px, inside the box
 		std::optional<float>					   borderRadius;
 		std::optional<Foundation::BoxShadow>	   boxShadow;
-		std::optional<float>					   opacity; // 0 to 1, multiplied down the tree
-		std::optional<Foundation::Color>		   color;	// text, and a line's stroke
+		std::optional<float>					   opacity;	   // 0 to 1, multiplied down the tree
+		std::optional<Foundation::Color>		   color;	   // text, and a line's stroke
+		std::optional<Foundation::BoxShadow>	   textShadow; // with a spread, a halo's width (Primitives::drawGlyphShadow)
 		std::optional<Renderer::FontFamily>		   fontFamily;
 		std::optional<float>					   fontSize; // px
 		std::optional<Foundation::HorizontalAlign> textAlign;

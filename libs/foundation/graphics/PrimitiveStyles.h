@@ -34,9 +34,10 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		bool  horizontal = false; // false = vertical (top->bottom)
 	};
 
-	// Outer box-shadow / glow (CSS box-shadow, outset only). Rendered by the SDF
-	// shader as a soft falloff over `blur` px outside the (optionally `spread`-
-	// grown) shape, so it is one draw, perfectly rounded, no stacked geometry.
+	// An outer shadow or glow: a rect's (CSS box-shadow, outset only), and text's
+	// (CSS text-shadow with a spread, which is a halo's width; Primitives::drawGlyphShadow).
+	// Rendered by the SDF shader as a soft falloff over `blur` px either side of the
+	// `spread`-grown shape's edge, so it is one draw, perfectly rounded, no stacked geometry.
 	struct BoxShadow {
 		Color color = Color(0.0F, 0.0F, 0.0F, 0.5F);
 		float blur = 8.0F;			 // softness radius (px)

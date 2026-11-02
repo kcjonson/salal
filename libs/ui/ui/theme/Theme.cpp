@@ -213,21 +213,25 @@ namespace ui {
 				number("borderWidth", dtcg::TokenType::Dimension, themed.borderWidth);
 				number("borderRadius", dtcg::TokenType::Dimension, themed.borderRadius);
 				// The renderer draws one outer shadow; the first outer layer is it.
-				if (const dtcg::ResolvedToken* token = field("boxShadow", dtcg::TokenType::Shadow)) {
-					for (const dtcg::ShadowLayer& layer : std::get<dtcg::ShadowValue>(token->value).layers) {
-						if (!layer.inset) {
-							themed.boxShadow = Foundation::BoxShadow{
-								.color = toColor(layer.color),
-								.blur = layer.blur,
-								.spread = layer.spread,
-								.offset = {layer.offsetX, layer.offsetY}
-							};
-							break;
+				const auto shadow = [&](std::string_view name, std::optional<Foundation::BoxShadow>& out) {
+					if (const dtcg::ResolvedToken* token = field(name, dtcg::TokenType::Shadow)) {
+						for (const dtcg::ShadowLayer& layer : std::get<dtcg::ShadowValue>(token->value).layers) {
+							if (!layer.inset) {
+								out = Foundation::BoxShadow{
+									.color = toColor(layer.color),
+									.blur = layer.blur,
+									.spread = layer.spread,
+									.offset = {layer.offsetX, layer.offsetY}
+								};
+								break;
+							}
 						}
 					}
-				}
+				};
+				shadow("boxShadow", themed.boxShadow);
 				number("opacity", dtcg::TokenType::Number, themed.opacity);
 				color("color", themed.color);
+				shadow("textShadow", themed.textShadow);
 				if (const dtcg::ResolvedToken* token = field("fontFamily", dtcg::TokenType::FontFamily)) {
 					themed.fontFamily = families.map(std::get<dtcg::FontFamilyValue>(token->value), *token, stylePath(style, "fontFamily"));
 				}

@@ -82,6 +82,13 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	expectColor(*fill.backgroundColor, 230.0F / 255.0F, 102.0F / 255.0F, 26.0F / 255.0F);
 	EXPECT_FLOAT_EQ(fill.borderRadius.value_or(-1.0F), 2.0F);
 	EXPECT_TRUE(dark.theme.style(theme_test::styles::healthBar::track.theme).backgroundColor.has_value());
+	// A halo: a text shadow with no offset, its spread and blur from the token, its colour through the mode.
+	const std::optional<Foundation::BoxShadow> halo = light.theme.style(theme_test::styles::mapLabel.theme).textShadow;
+	ASSERT_TRUE(halo.has_value());
+	expectColor(halo->color, 0.08F, 0.09F, 0.11F);
+	EXPECT_FLOAT_EQ(halo->spread, 2.0F);
+	EXPECT_FLOAT_EQ(halo->blur, 1.0F);
+	EXPECT_EQ(halo->offset, Foundation::Vec2(0.0F, 0.0F));
 	expectColor(light.theme.get(theme_test::tokens::palette::slate::_900), 0.96F, 0.97F, 0.98F);
 	// The game's capitals on ui's button, from salal's extension on the style's group; ui sets none.
 	EXPECT_EQ(dark.theme.style(ui::styles::button.theme).textTransform, Foundation::TextTransform::Uppercase);

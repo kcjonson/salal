@@ -228,11 +228,16 @@ void main() {
 
 	} else {
 		// MSDF text: the median of the three channels is the signed distance, v_shape.z
-		// the atlas's distance range in texels
+		// the atlas's distance range in texels. A shadow grows the outline by its spread,
+		// v_shape.x px, and ramps over its blur, v_shape.y, either side, both scaled down
+		// to end where the field does, half its range on screen; a glyph's own ramp is
+		// half a pixel either side, which always fits.
 		vec3  msd = sampleSlot(v_mode.z, v_texCoord).rgb;
 		float sd = median(msd.r, msd.g, msd.b);
-		float screenPxDistance = screenPxRange(v_shape.z, slotSize(v_mode.z), abs(texCoordDx) + abs(texCoordDy)) * (sd - 0.5);
-		float opacity = smoothstep(-0.5, 0.5, screenPxDistance);
+		float pxRange = screenPxRange(v_shape.z, slotSize(v_mode.z), abs(texCoordDx) + abs(texCoordDy));
+		float soft = max(v_shape.y, 0.5);
+		float fit = min(1.0, 0.5 * pxRange / (v_shape.x + soft));
+		float opacity = smoothstep(-soft * fit, soft * fit, pxRange * (sd - 0.5) + v_shape.x * fit);
 		FragColor = blended(v_fill * opacity, additive);
 	}
 }

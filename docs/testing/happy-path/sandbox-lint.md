@@ -11,3 +11,5 @@ Each scene started with `--scene=<name>`, `/api/ui/lint` read once it has drawn,
 7. `ui_display` and `ui_controls`: count 0. In ui_controls' tree, Sound and Music carry `value` true or false and `state.selected` to match, View its segment's index, Volume its number.
 8. In ui_controls, check Sound off, then drag Volume to each end: still 0, Sound's `value` false, Volume's 0 and then 1.
 9. `ui_overlays`: count 0. `ui_overlay_components`: count 0, and still 0 with the difficulty menu open, the "Abandon run?" dialog open, a critical toast up and Save's tooltip showing.
+10. `sdf_minimal`'s screenshot: under the alphabet, "Halo over stripes" in dark ink with a cream halo about 3 px wide that keeps it readable over the green stripes and the dark blue between them, its outer edge soft and not cut off square at any glyph's box; "Drop shadow" in cream with a soft dark copy down and right of it.
+11. `ui_text`'s screenshot: bottom right, over striped green art, "Halo label" in dark ink inside a cream halo, and "Drop shadow" in cream over a dark copy 2 px down and right.

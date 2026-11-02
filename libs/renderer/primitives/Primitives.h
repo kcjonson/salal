@@ -26,6 +26,7 @@
 #include <glm/vec4.hpp>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -403,10 +404,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float			  scale = 1.0F;										 // Text scale (1.0F = 16px base size)
 			Foundation::Color color = Foundation::Color(1.0F, 1.0F, 1.0F, 1.0F); // RGBA
 			FontFamily		  font = FontFamily::Default;						 // Atlas to render with (the game's default)
-			// CSS text-shadow: when shadowColor.a > 0, the string is drawn once at
-			// position+shadowOffset in shadowColor (behind), then normally.
-			Foundation::Color shadowColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F);
-			Foundation::Vec2  shadowOffset{0.0F, 0.0F};
+			// CSS text-shadow, with a spread: the string drawn behind itself by drawGlyphShadow, at the
+			// same key. With no offset, a spread and a blur, it is a halo.
+			std::optional<Foundation::BoxShadow> shadow;
 			// CSS text-align / vertical alignment. When boxWidth/boxHeight > 0, the
 			// text is aligned within [position, position+box]; otherwise drawn at
 			// position (the box-less default matches plain top-left placement).
@@ -438,6 +438,21 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// and friends), each in its own colour, sampling the atlas it carries at that
 		// atlas's distance range, so one call can hold several families, at `key`.
 		void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, int32_t key = 0, BlendMode blend = BlendMode::Alpha);
+
+		// Batch the shadow of glyph quads: each moved by shadow.offset, in shadow.color, its outline
+		// grown by shadow.spread px and softened over shadow.blur px either side, in the text mode
+		// with the glyphs, so a shadow or halo is its glyphs' quads again and no extra pass. Draw it
+		// before the glyphs at their key. The distance field ends half its atlas's distanceRange (in
+		// texels) past the outline, scaled to the screen, and a spread and blur that reach further
+		// are scaled down to end there: an atlas of 32 texels to the em at a range of 4 holds a halo
+		// of one pixel round 16 px text, so a game that wants wider ones generates a wider range.
+		void drawGlyphShadow(
+			const FontRenderer::GlyphQuad* quads,
+			size_t						   count,
+			const Foundation::BoxShadow&   shadow,
+			int32_t						   key = 0,
+			BlendMode					   blend = BlendMode::Alpha
+		);
 
 		// --- World-Space Instancing ---
 

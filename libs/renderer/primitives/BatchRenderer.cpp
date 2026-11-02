@@ -504,7 +504,8 @@ namespace Renderer {
 		TextureHandle			 atlas,
 		float					 pixelRange,
 		int32_t					 key,
-		Primitives::BlendMode	 blend
+		Primitives::BlendMode	 blend,
+		const TextEdge&			 edge
 	) {
 		if (clipEmpty) {
 			return;
@@ -561,6 +562,7 @@ namespace Renderer {
 		BatchInstance& quad = pushScreenQuad(QuadMode::Text, corners, blend, resolvedAtlas);
 		quad.geometry = {uvMin.x, uvMax.y, uvMax.x, uvMin.y};
 		std::fill(std::begin(quad.fills), std::end(quad.fills), premultiplied(color.toVec4()));
+		quad.shape[0] = halves(edge.spread, edge.blur);
 		quad.shape[1] = halves(resolvedPixelRange, 0.0F);
 
 		recordGroup(groupStart, key, blend);

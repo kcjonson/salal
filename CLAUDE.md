@@ -303,7 +303,10 @@ layout (worldsim's `tools/generate_sdf_atlas`). Text is UTF-8, measured, laid ou
 and wrapped by code point: one the atlas lacks draws as U+FFFD, or `?` without
 it, and so does each ill-formed sequence. Glyph quads carry their atlas and its
 range, so `drawGlyphs` takes no family, and wrapped text carries the family and
-scale it was wrapped in.
+scale it was wrapped in. `drawGlyphShadow` draws the same quads as a shadow or
+halo, grown by a spread and softened by a blur in the text mode, as far as the
+atlas's distance field reaches: half its `distanceRange` past the outline, so a
+game that wants a wide halo generates its atlas with a wide range.
 
 A theme is Design Tokens (2025.10, with the Resolver module) loaded at run time
 into `ui::Theme` ([docs/ui-design.md](docs/ui-design.md), "Theme"). ui's own

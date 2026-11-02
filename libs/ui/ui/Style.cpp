@@ -20,6 +20,7 @@ namespace ui {
 		over(out.boxShadow, overrides.boxShadow);
 		over(out.opacity, overrides.opacity);
 		over(out.color, overrides.color);
+		over(out.textShadow, overrides.textShadow);
 		over(out.fontFamily, overrides.fontFamily);
 		over(out.fontSize, overrides.fontSize);
 		over(out.textAlign, overrides.textAlign);

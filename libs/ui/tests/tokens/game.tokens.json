@@ -28,6 +28,18 @@
       "track": {
         "backgroundColor": { "$value": { "$ref": "#/color/surface/sunken/$value" } }
       }
+    },
+    "mapLabel": {
+      "textShadow": {
+        "$type": "shadow",
+        "$value": {
+          "color": "{palette.slate.100}",
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 0, "unit": "px" },
+          "blur": { "value": 1, "unit": "px" },
+          "spread": { "value": 2, "unit": "px" }
+        }
+      }
     }
   }
 }

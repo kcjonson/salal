@@ -150,6 +150,7 @@ namespace ui::dtcg {
 		StyleField{.name = "boxShadow", .type = TokenType::Shadow},
 		StyleField{.name = "opacity", .type = TokenType::Number},
 		StyleField{.name = "color", .type = TokenType::Color},
+		StyleField{.name = "textShadow", .type = TokenType::Shadow},
 		StyleField{.name = "font", .type = TokenType::Typography},
 		StyleField{.name = "fontFamily", .type = TokenType::FontFamily},
 		StyleField{.name = "fontSize", .type = TokenType::Dimension},

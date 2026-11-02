@@ -167,6 +167,13 @@ hook can also see (1 and 3 to 5), which the instance's replace. A rect's fill
 hook (shader-hooks.md, "Fill hooks", built 2026-10-31) adds no field: its index
 is the texture-slot byte and its params corners 1 to 3 of the fill.
 
+The drawing added since fits the same 104 bytes, each in fields its mode didn't
+read (BatchRenderer.h has the table). A text shadow or halo
+(`Primitives::drawGlyphShadow`, built 2026-11-02) is its glyphs' quads again in
+the text mode, its spread and blur in the halves a rect keeps its border width
+and outset in, which text never read; the shader widens the coverage ramp by
+them, so a plain glyph pays a max, a min and a divide a pixel.
+
 Why: the per-vertex layout writes everything about a rect (colour, border,
 radius, clip, mode) into each of its four 80-byte vertices plus six indices,
 344 bytes a rect against 104. On desktop the bus doesn't notice either, but
@@ -211,7 +218,9 @@ is (R5.24), with another colour space taking its `hex` fallback or failing
 the load; `dimension` in px (rem times a root size); `duration` in ms;
 `cubicBezier` for the animator; `fontFamily` and `typography` resolving to the
 game's `FontFamily` ids by name; `shadow` and `border` to the renderer's
-styles.
+styles. A style's `boxShadow` and `textShadow` each take the first outer layer
+of their shadow token; `textShadow` is CSS's with the token's spread kept, which
+is a halo's width.
 
 A text transform (CSS's `text-transform`) has no type in the format, so it is
 salal's extension, in the place the format leaves for one: a style's group

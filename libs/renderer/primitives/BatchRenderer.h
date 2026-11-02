@@ -51,6 +51,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		const BoundaryLoops*			  feather = nullptr;
 	};
 
+	// A text quad's edge: its outline grown by `spread` px and softened over `blur` px either side,
+	// a shadow's or a halo's (Primitives::drawGlyphShadow); zero for a glyph's own.
+	struct TextEdge {
+		float spread = 0.0F;
+		float blur = 0.0F;
+	};
+
 	// BatchInstance (backend/Backend.h), the batch's quad: its mode is how base.frag
 	// shades it (base.vert and base.frag have the same table), and sets what its fields
 	// hold. Every quad's fills are its colour, premultiplied, the same at each corner
@@ -65,7 +72,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	//   Arc     geometry: inner and outer radius, half the sweep, the middle's angle; shape.y: how
 	//           far the quad reaches past the outer radius
 	//   Image   geometry: the uv rect, the top-left corner's then the bottom-right's
-	//   Text    geometry: the uv rect; shape.z: the atlas's distance range in texels
+	//   Text    geometry: the uv rect; shape.x: a shadow's spread, shape.y: its blur, shape.z: the
+	//           atlas's distance range in texels
 	//   Stroke  a convex piece, a fan's quad; geometry: the rows of the map from a screen offset
 	//           to the piece's frame; radii: its centre on screen; shape: its half size; border:
 	//           its corner radius; all floats
@@ -193,6 +201,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   its draw. A stale atlas adds nothing, warned once.
 		// pixelRange: that atlas's distance range in texels, which the shader turns
 		//   into the edge width. With an invalid atlas, setFontAtlas()'s range instead.
+		// edge: a shadow's spread and blur, which the shader fits inside the field.
 		void addTextQuad(
 			const Foundation::Vec2&	 position,
 			const Foundation::Vec2&	 size,
@@ -203,7 +212,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			TextureHandle			 atlas,
 			float					 pixelRange,
 			int32_t					 key = 0,
-			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha
+			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha,
+			const TextEdge&			 edge = {}
 		);
 
 		// Set the default MSDF font atlas and its distance range, which text quads
