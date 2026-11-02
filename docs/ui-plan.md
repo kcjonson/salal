@@ -224,3 +224,15 @@ worldsim's conversion doesn't need Grid: its grid-like screens (scenario
 select's five cards, world creator's `360 | stage | 360`, asset-manager's 2 by
 3 variants, the Salvage sandbox scene's icon wall) are Flex rows, nested in a
 column where there is more than one, and may move to Grid once it lands.
+
+Settled with it (2026-11-02), and in ui-design.md's "Grid is CSS Grid Layout
+Level 1": tracks and placements take taffy's types (`TrackSizingFunction`,
+`Line<GridPlacement>` as `GridLines`, since `ui::Line` is a shape), with
+`line()`, `span()`, `fr()` and `minmax()`; one `gap` for both axes, as the
+row above names it, with no `rowGap` or `columnGap`; implicit tracks auto,
+with no `gridAutoRows` or `gridAutoColumns`; negative lines, which can add
+tracks before the explicit grid; a child's percentage size and an `Absolute`
+child as under Flex, not as CSS has them; and an auto width that hugs the
+columns, where CSS's block-level grid would fill its parent. The plain
+functions are `ui/detail/Grid.h`, tested from the spec's own examples, and
+the sandbox scene is `ui_grid`.

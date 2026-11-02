@@ -484,8 +484,10 @@ root().removeChild(row);   // health.get() is null from here on
     `margin`, `transform` (render and hit test only)
   - layout: `layout`, with CSS names as taffy uses them: `display` (Free,
     Flex, Grid, None), `flexDirection`, `gap`, `padding`, `alignItems`,
-    `justifyContent`, and as a child `flexGrow`, `flexShrink`, `alignSelf`,
-    `position` (Relative or Absolute) and `inset`. `display: Free`, the
+    `justifyItems`, `justifyContent`, `gridTemplateColumns`,
+    `gridTemplateRows`, and as a child `flexGrow`, `flexShrink`, `alignSelf`,
+    `justifySelf`, `gridColumn`, `gridRow`, `position` (Relative or Absolute)
+    and `inset`. `display: Free`, the
     default, places each child at its own top-level `position`, its auto size
     hugging their boxes; Flex (and Grid) flow theirs, and `position:
     Absolute` takes a child out of a flowing parent to its `position` or
@@ -514,6 +516,30 @@ root().removeChild(row);   // health.get() is null from here on
 - **The layout engine is worldsim's `LayoutContainer`** (1,712 lines, 59
   tests), reworked to the CSS names: its hug is `auto`, fill with a weight is
   `flexGrow`, distribution is `justifyContent`, cross align is `alignItems`.
+- **Grid is CSS Grid Layout Level 1** in the same pass, its placement (8.5)
+  and track sizing (11) as plain functions over the children's measured sizes.
+  Tracks are taffy's `TrackSizingFunction`: a px float, `percent()` and
+  `kAuto` as a size spells them, `fr()`, and `minmax()` of those; a percentage
+  is auto while the grid's size hangs on its tracks. `gridColumn` and
+  `gridRow` are taffy's `Line<GridPlacement>`, a start and an end each of
+  `line(n)` (negative from the explicit grid's end), `span(n)` or auto, one
+  edge alone being the start, as in CSS. Auto placement is row first and
+  sparse, and implicit tracks are auto, CSS's initial `gridAutoRows`. `gap` is
+  one value for both axes, and a negative one is 0 in a grid, where CSS allows
+  none. The alignments are Flex's enum, Stretch (CSS's normal) filling an auto
+  axis and starting a definite one, and one that doesn't fit starts, as in a
+  flex row. Where Grid follows salal over CSS: a child's percentage size is of
+  the grid's content box, as a flex child's is, not of its area; an `Absolute`
+  child goes to its `position` or `inset` in the grid's box, as under Flex,
+  not into an area its lines name; a grid with an auto width hugs its columns'
+  max-content widths, sized again into the room there is when they don't fit
+  it, as a text wraps; and a container child's min-content width is 0, the
+  narrowest a flex row takes it to. Not built until a game asks: named lines
+  and areas, `repeat()`, the min-content, max-content and fit-content() track
+  sizes, `gridAutoColumns` and `gridAutoRows`, dense and column-first flow,
+  subgrid, baselines, and `justifyContent` and `alignContent` on a grid (its
+  tracks start at its content box's start, and auto tracks stretch into free
+  space).
 
 Why the slot map over a parent-owned tree: worldsim's three ownership fixes
 (a pointer taken before arena placement, a focus registration gone stale on a

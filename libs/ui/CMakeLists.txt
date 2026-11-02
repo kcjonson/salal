@@ -79,6 +79,7 @@ add_library(salal_ui STATIC
     ui/debug/TreeSnapshot.cpp
     ui/detail/Dispatcher.cpp
     ui/detail/FocusManager.cpp
+    ui/detail/Grid.cpp
     ui/detail/LayoutEngine.cpp
     ui/shapes/Circle.cpp
     ui/shapes/Chevron.cpp
