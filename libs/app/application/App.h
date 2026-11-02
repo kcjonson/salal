@@ -12,6 +12,7 @@
 #include "application/FrameCapture.h"
 #include "clipboard/Clipboard.h"
 #include "detail/TypeKey.h"
+#include "diagnostics/Diagnostics.h"
 #include "input/Input.h"
 #include "platform/Platform.h"
 #include "saves/SaveStore.h"
@@ -43,7 +44,7 @@ namespace app {
 		static std::unique_ptr<App> create(AppConfig config, std::unique_ptr<Platform> platform);
 
 		// shutdown() if it hasn't run, then the fonts, the renderer and the window, then the dev server,
-		// which answers an exit request only now.
+		// which answers an exit request only now, and last the crash handler and the log file.
 		~App();
 
 		App(const App&) = delete;
@@ -164,6 +165,7 @@ namespace app {
 
 		App(AppConfig appConfig, std::unique_ptr<Platform> appPlatform);
 		bool start();
+		void openDiagnostics();
 		bool startFonts();
 		void openStorage();
 		void applyWindowSettings();
@@ -198,6 +200,7 @@ namespace app {
 		void  showCursor();
 		void  recordCapturedFrame(double frameSeconds);
 
+		std::unique_ptr<Diagnostics>				diagnostics; // first, so it goes last and the teardown is logged and covered
 		AppConfig									config;
 		std::unique_ptr<Platform>					platform;
 		Renderer::CoordinateSystem					coordinates;
