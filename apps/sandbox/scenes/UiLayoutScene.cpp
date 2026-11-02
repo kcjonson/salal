@@ -1,9 +1,9 @@
 // ui_layout: Flex and Free placement, after worldsim's ui-sandbox layout scene (apps/ui-sandbox/scenes/
 // LayoutScene.cpp, a4226e17). Six columns, one per justifyContent; four per alignItems, then a padded
-// plate with children placed by a fraction of it and a strip of chips that wraps; a row of a fixed box and two growing ones at 1x and
-// 2x; a column whose body grows; a nested card; a wrapping text in a column that hugs it; and
-// absolutely placed badges in a card's corners. The stage is a full-viewport column, so a resize lays
-// it all out again.
+// plate with children placed by a fraction of it and a strip of chips that wraps; a row of a fixed
+// box and two growing ones at 1x and 2x; a column whose body grows; a nested card; a wrapping text in
+// a column that hugs it; and absolutely placed badges in a card's corners. The stage is a
+// full-viewport column, so a resize lays it all out again.
 
 #include "Scenes.h"
 
