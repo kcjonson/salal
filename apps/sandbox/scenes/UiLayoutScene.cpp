@@ -1,9 +1,9 @@
 // ui_layout: Flex and Free placement, after worldsim's ui-sandbox layout scene (apps/ui-sandbox/scenes/
 // LayoutScene.cpp, a4226e17). Six columns, one per justifyContent; four per alignItems, then a padded
-// plate with children placed by a fraction of it; a row of a fixed box and two growing ones at 1x and
-// 2x; a column whose body grows; a nested card; a wrapping text in a column that hugs it; and
-// absolutely placed badges in a card's corners. The stage is a full-viewport column, so a resize lays
-// it all out again.
+// plate with children placed by a fraction of it and a strip of chips that wraps; a row of a fixed
+// box and two growing ones at 1x and 2x; a column whose body grows; a nested card; a wrapping text in
+// a column that hugs it; and absolutely placed badges in a card's corners. The stage is a
+// full-viewport column, so a resize lays it all out again.
 
 #include "Scenes.h"
 
@@ -62,6 +62,7 @@ namespace {
 			Ref<Component> secondRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
 			alignments(secondRow);
 			fractions(secondRow);
+			wrappingStrip(secondRow);
 			Ref<Component> lastRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
 			growRow(lastRow);
 			growColumn(lastRow);
@@ -140,6 +141,22 @@ namespace {
 				{.right = ui::percent(40.0F), .bottom = ui::percent(10.0F), .left = ui::percent(40.0F)},
 				kMoss
 			);
+		}
+
+		// A strip of chips that breaks onto new lines, each line as tall as its tallest chip.
+		static void wrappingStrip(Ref<Component> row) {
+			ui::Layout layout = flex(FlexDirection::Row, 6.0F, 6.0F);
+			layout.flexWrap = ui::FlexWrap::Wrap;
+			Ref<Rectangle>						   strip = captioned(row, "wrapping strip", {240.0F, ui::kAuto}, layout);
+			const std::array<float, 7>			   widths{70.0F, 50.0F, 90.0F, 60.0F, 40.0F, 80.0F, 55.0F};
+			const std::array<Foundation::Color, 4> colours{kSlate, kRust, kMoss, kSand};
+			for (std::size_t i = 0; i < widths.size(); ++i) {
+				strip.addChild<Rectangle>({
+					.id = "chip_" + std::to_string(i),
+					.size = {widths[i], i == 1 ? 30.0F : 20.0F},
+					.style = {.backgroundColor = colours[i % colours.size()]},
+				});
+			}
 		}
 
 		static void growRow(Ref<Component> row) {

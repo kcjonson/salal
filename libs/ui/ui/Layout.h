@@ -7,7 +7,8 @@
 //   Free  the default. Each child sits at its own `position` in the parent's box; an auto size hugs
 //         the children's boxes. This is the free placement every screen had before layout.
 //   Flex  children flow along flexDirection, spaced by gap inside padding, sized by flexGrow and
-//         flexShrink on the main axis and alignItems or alignSelf on the cross one. A child with
+//         flexShrink on the main axis and alignItems or alignSelf on the cross one. With flexWrap
+//         they break onto new lines across it instead of shrinking past the main size. A child with
 //         `position: Absolute` leaves the flow and is placed as under Free, or by `inset`.
 //   Grid  children sit in the cells of gridTemplateColumns and gridTemplateRows, inside padding with
 //         gap between tracks both ways: each where its gridColumn and gridRow put it, or flowed row by
@@ -132,6 +133,12 @@ namespace ui {
 
 	enum class Display : std::uint8_t { Free, Flex, Grid, None };
 	enum class FlexDirection : std::uint8_t { Row, Column };
+	// A flex container's lines (CSS flex-wrap). NoWrap keeps every child on one line, shrunk by
+	// flexShrink to fit. Wrap starts a new line where the next child's margin box would pass the main
+	// size, or, for an auto width, the room there is, as a text wraps. Each line grows and shrinks its
+	// own children and is as tall (or wide) as its biggest; the lines pack from the start, gap apart,
+	// and alignItems and alignSelf align a child in its line.
+	enum class FlexWrap : std::uint8_t { NoWrap, Wrap };
 	// alignItems on a flex container, alignSelf on one child: the cross axis. On a grid container
 	// alignItems and justifyItems, alignSelf and justifySelf on one child: down and across its area.
 	// Stretch fills the axis for a child whose size on it is auto and starts one whose isn't; the others
@@ -260,8 +267,9 @@ namespace ui {
 		// As a container.
 		Display		  display = Display::Free;
 		FlexDirection flexDirection = FlexDirection::Row;
-		// px between flex children, negative overlapping them; between a grid's columns and between its
-		// rows, where a negative one is 0, as CSS has it.
+		FlexWrap	  flexWrap = FlexWrap::NoWrap;
+		// px between flex children, negative overlapping them; between a wrapping flex container's lines
+		// and between a grid's columns and its rows, where a negative one is 0, as CSS has it.
 		float		   gap = 0.0F;
 		Edges		   padding;
 		AlignItems	   alignItems = AlignItems::Stretch;

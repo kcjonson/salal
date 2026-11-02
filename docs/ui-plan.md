@@ -173,7 +173,7 @@ its own session: the renderer (1, 2, 3 and 4 in order),
 the ui core (5 to 8 in order), theme, icons and display components (9 beside
 6, 10 once 2 and 5 are in, 13a once 6 and 9 are), and Grid (15, started now,
 merged after 6). Then 11 follows 9, 12 follows 8 and 11, 13b follows 8, 10, 11
-and 13a, and 14 closes the salal side. Wrap layout, Popover, NumberInput, the
+and 13a, and 14 closes the salal side. Popover, NumberInput, the
 standalone Scrollbar, Counter, the drag service and the rounded clip are not in
 the sequence. None of worldsim's screens or asteroids' screen designs uses one;
 each comes when a game asks, dual-deck-builder's port most likely first.
