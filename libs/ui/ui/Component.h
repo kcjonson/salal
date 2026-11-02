@@ -63,7 +63,8 @@
 //              style)
 //   enabled    reported by the snapshot; input reads it
 //   position   the margin box's top-left in the parent's box, under a Free parent or Absolute
-//   size       px, ui::percent() of the parent's box, or ui::kAuto (the default): its content
+//   size       px, ui::percent() of the parent's box, or ui::kAuto (the default): its content; a
+//              declared size takes the padding in, or out with layout.boxSizing ContentBox
 //   minSize    clamps a resolved size; auto is 0
 //   maxSize    clamps a resolved size; auto is none
 //   margin     space around the box, outside its size

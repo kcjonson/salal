@@ -543,10 +543,10 @@ root().removeChild(row);   // health.get() is null from here on
     `margin`, `transform` (render and hit test only)
   - layout: `layout`, with CSS names as taffy uses them: `display` (Free,
     Flex, Grid, None), `flexDirection`, `flexWrap`, `gap`, `padding`,
-    `alignItems`, `justifyItems`, `justifyContent`, `gridTemplateColumns`,
-    `gridTemplateRows`, and as a child `flexGrow`, `flexShrink`, `alignSelf`,
-    `justifySelf`, `gridColumn`, `gridRow`, `position` (Relative or Absolute)
-    and `inset`. `display: Free`, the
+    `boxSizing`, `alignItems`, `justifyItems`, `justifyContent`,
+    `gridTemplateColumns`, `gridTemplateRows`, and as a child `flexGrow`,
+    `flexShrink`, `alignSelf`, `justifySelf`, `gridColumn`, `gridRow`,
+    `position` (Relative or Absolute) and `inset`. `display: Free`, the
     default, places each child at its own top-level `position`, its auto size
     hugging their boxes; Flex (and Grid) flow theirs, and `position:
     Absolute` takes a child out of a flowing parent to its `position` or
@@ -615,6 +615,16 @@ root().removeChild(row);   // health.get() is null from here on
   height, where CSS's initial `align-content` stretches them into a fixed
   container's free space. Not built until a game asks: `wrap-reverse` and
   `alignContent`.
+- **Box sizing is CSS's `box-sizing`** (decided 2026-11-02), border-box by
+  default, which is what every node did before it: a px or percentage
+  `size`, `minSize` and `maxSize` are the whole box, padding in. `boxSizing:
+  ContentBox` makes them the content box with the padding added outside,
+  which is CSS's initial value; salal keeps border-box as its default, as
+  most stylesheets reset it. An auto size is the content and the padding
+  either way. Layout has no border, so the padding is all the difference. An
+  absolutely placed child places against its parent's whole box, CSS's
+  padding box, whatever the parent's box sizing, and a flowing child's
+  percentage is of the parent's content box either way.
 
 Why the slot map over a parent-owned tree: worldsim's three ownership fixes
 (a pointer taken before arena placement, a focus registration gone stale on a

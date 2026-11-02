@@ -1,9 +1,9 @@
 // ui_layout: Flex and Free placement, after worldsim's ui-sandbox layout scene (apps/ui-sandbox/scenes/
-// LayoutScene.cpp, a4226e17). Six columns, one per justifyContent; four per alignItems, then a padded
-// plate with children placed by a fraction of it and a strip of chips that wraps; a row of a fixed
-// box and two growing ones at 1x and 2x; a column whose body grows; a nested card; a wrapping text in
-// a column that hugs it; and absolutely placed badges in a card's corners. The stage is a
-// full-viewport column, so a resize lays it all out again.
+// LayoutScene.cpp, a4226e17). Six columns, one per justifyContent, then a padded frame in each box
+// sizing; four per alignItems, then a padded plate with children placed by a fraction of it and a
+// strip of chips that wraps; a row of a fixed box and two growing ones at 1x and 2x; a column whose
+// body grows; a nested card; a wrapping text in a column that hugs it; and absolutely placed badges
+// in a card's corners. The stage is a full-viewport column, so a resize lays it all out again.
 
 #include "Scenes.h"
 
@@ -58,7 +58,9 @@ namespace {
 			stage.alignItems = AlignItems::Start;
 			root().get()->setLayout(stage);
 			root().addChild<Text>({.id = "title", .style = {.color = Foundation::Color::white(), .fontSize = 20.0F}, .text = "Layout"});
-			distributions(root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)}));
+			Ref<Component> firstRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
+			distributions(firstRow);
+			boxSizings(firstRow);
 			Ref<Component> secondRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
 			alignments(secondRow);
 			fractions(secondRow);
@@ -91,6 +93,26 @@ namespace {
 				for (const Foundation::Color& colour : {kSlate, kRust, kMoss}) {
 					frame.addChild<Rectangle>({.size = {60.0F, 24.0F}, .style = {.backgroundColor = colour}});
 				}
+			}
+		}
+
+		// The same declared 120 by 60 and 12 of padding in each box sizing: the content box is the padding
+		// bigger all round, and its fill is the declared size.
+		static void boxSizings(Ref<Component> row) {
+			struct Mode {
+				ui::BoxSizing sizing;
+				const char*	  caption;
+				const char*	  fill;
+			};
+			constexpr std::array<Mode, 2> kModes{{
+				{ui::BoxSizing::BorderBox, "border-box", "border_fill"},
+				{ui::BoxSizing::ContentBox, "content-box", "content_fill"},
+			}};
+			for (const Mode& mode : kModes) {
+				ui::Layout layout = flex(FlexDirection::Column, 0.0F, 12.0F);
+				layout.boxSizing = mode.sizing;
+				Ref<Rectangle> frame = captioned(row, mode.caption, {120.0F, 60.0F}, layout);
+				frame.addChild<Rectangle>({.id = mode.fill, .layout = {.flexGrow = 1.0F}, .style = {.backgroundColor = kSlate}});
 			}
 		}
 
