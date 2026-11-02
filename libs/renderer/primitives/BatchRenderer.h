@@ -39,8 +39,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	class CoordinateSystem;
 	struct BoundaryLoops;
 
-	// What addTriangles adds: an indexed mesh, in one colour or a colour per vertex, and
-	// optionally its boundary loops (findBoundaryLoops) for a feather ring.
+	// What addTriangles adds: an indexed mesh, in one colour or a colour per vertex, moved by
+	// `offset` in its own units, and optionally its boundary loops (findBoundaryLoops) for a
+	// feather ring `featherWidth` local units wide, or a device pixel at 0 (a shadow's is its blur).
 	struct TriangleMeshArgs {
 		std::span<const Foundation::Vec2> vertices;
 		std::span<const uint16_t>		  indices;
@@ -49,6 +50,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		int32_t							  key = 0;
 		Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha;
 		const BoundaryLoops*			  feather = nullptr;
+		Foundation::Vec2				  offset{0.0F, 0.0F};
+		float							  featherWidth = 0.0F;
 	};
 
 	// A text quad's edge: its outline grown by `spread` px and softened over `blur` px either side,
@@ -160,11 +163,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		);
 
 		// Add an indexed triangle mesh as one draw group (drawTriangles, drawLine, a
-		// polygon's fill), a flat quad a triangle. With `mesh.feather`, a ring one device pixel wide runs outside
-		// each loop in the same group, each boundary vertex's colour fading to alpha 0
-		// across it, a linear coverage ramp. Its outer edge sits on the miter of the
-		// vertex's two edges, at most 4 pixels out, outward through any transform,
-		// mirrored or not.
+		// polygon's fill and shadow), a flat quad a triangle. With `mesh.feather`, a ring
+		// mesh.featherWidth wide (one device pixel at 0) runs outside each loop in the same
+		// group, each boundary vertex's colour fading to alpha 0 across it, a linear coverage
+		// ramp. Its outer edge sits on the miter of the vertex's two edges, at most 4 widths
+		// out, outward through any transform, mirrored or not. A ring wider than an edge is
+		// long folds over itself at that edge's notch.
 		void addTriangles(const TriangleMeshArgs& mesh);
 
 		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
@@ -435,8 +439,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// The index `hook` has in the base shader, or 0, logged once per `id`, when it is another's.
 		uint8_t fillIndex(const backend::FillHook& hook, const char* id);
 
-		// addTriangles' feather ring along `loops`, over meshPositions and meshColors.
-		void addFeather(const BoundaryLoops& loops, Primitives::BlendMode blend);
+		// addTriangles' feather ring along `loops`, over meshPositions and meshColors, `width`
+		// logical pixels wide on screen.
+		void addFeather(const BoundaryLoops& loops, float width, Primitives::BlendMode blend);
 
 		// The backend and what this batch made on it.
 		backend::Backend& gpu;

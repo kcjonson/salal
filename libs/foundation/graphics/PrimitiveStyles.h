@@ -34,10 +34,11 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		bool  horizontal = false; // false = vertical (top->bottom)
 	};
 
-	// An outer shadow or glow: a rect's (CSS box-shadow, outset only), and text's
-	// (CSS text-shadow with a spread, which is a halo's width; Primitives::drawGlyphShadow).
-	// Rendered by the SDF shader as a soft falloff over `blur` px either side of the
-	// `spread`-grown shape's edge, so it is one draw, perfectly rounded, no stacked geometry.
+	// An outer shadow or glow: a rect's (CSS box-shadow, outset only), a circle's and
+	// a polygon's, and text's (CSS text-shadow with a spread, which is a halo's width;
+	// Primitives::drawGlyphShadow). Rendered by the SDF shader as a soft falloff over
+	// `blur` px either side of the `spread`-grown shape's edge, so it is one draw,
+	// perfectly rounded, no stacked geometry; a polygon's is its fill again (PolygonStyle).
 	struct BoxShadow {
 		Color color = Color(0.0F, 0.0F, 0.0F, 0.5F);
 		float blur = 8.0F;			 // softness radius (px)
@@ -59,17 +60,24 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		float width = 1.0F;
 	};
 
-	// Circle visual style
+	// Circle visual style. The shadow is a rect's: a disk grown by `spread`, its edge
+	// fading over `blur` either side.
 	struct CircleStyle {
 		Color					   fill = Color::white();
 		std::optional<BorderStyle> border = std::nullopt;
+		std::optional<BoxShadow>   shadow = std::nullopt;
 	};
 
 	// Polygon visual style. The border is a stroke outside the outline, `width`
 	// wide, that reaches a pixel under the fill's edge so nothing shows between them.
+	// The shadow is the fill's shape grown by `spread`, solid to that outline and
+	// fading to nothing `blur` outside it, where a rect's or a circle's fades from
+	// `blur` inside its edge: at the same blur a polygon's shadow reads about half a
+	// blur wider.
 	struct PolygonStyle {
 		Color					 fill = Color::white();
 		std::optional<LineStyle> border = std::nullopt;
+		std::optional<BoxShadow> shadow = std::nullopt;
 	};
 
 	// Text horizontal alignment

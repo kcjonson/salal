@@ -435,6 +435,12 @@ namespace Renderer::Primitives {
 			return;
 		}
 
+		// A disk is a rounded box whose radius is its half size, so its shadow is a rect's.
+		if (args.style.shadow.has_value()) {
+			const Foundation::Rect box{args.center.x - args.radius, args.center.y - args.radius, args.radius * 2.0F, args.radius * 2.0F};
+			g_batchRenderer->addShadowQuad(box, *args.style.shadow, args.radius, args.key, args.blend);
+		}
+
 		if (args.style.fill.a > 0.0F) {
 			g_batchRenderer->addArc(
 				{.center = args.center,
@@ -528,6 +534,31 @@ namespace Renderer::Primitives {
 	void drawPolygon(const PolygonArgs& args) {
 		if (g_batchRenderer == nullptr || args.vertices.size() < 3) {
 			return;
+		}
+
+		// The fill's shape again, grown by the spread (its own tessellation, cached by its
+		// outline like the fill's), moved by the offset, its feather as wide as the blur.
+		if (args.style.shadow.has_value() && args.style.shadow->color.a > 0.0F) {
+			const Foundation::BoxShadow&					  shadow = *args.style.shadow;
+			static thread_local std::vector<Foundation::Vec2> grown;
+			std::span<const Foundation::Vec2>				  outline = args.vertices;
+			if (shadow.spread != 0.0F) {
+				offsetOutline(args.vertices, shadow.spread, grown);
+				outline = grown;
+			}
+			const PolygonCacheEntry& cast = polygonFill(outline);
+			if (!cast.mesh.indices.empty()) {
+				g_batchRenderer->addTriangles(
+					{.vertices = cast.mesh.vertices,
+					 .indices = cast.mesh.indices,
+					 .color = shadow.color,
+					 .key = args.key,
+					 .blend = args.blend,
+					 .feather = &cast.boundary,
+					 .offset = shadow.offset,
+					 .featherWidth = std::max(shadow.blur, 0.0F)}
+				);
+			}
 		}
 
 		if (args.style.fill.a > 0.0F) {

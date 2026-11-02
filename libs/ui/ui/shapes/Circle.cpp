@@ -39,13 +39,21 @@ namespace ui {
 				.position = Foundation::BorderPosition::Inside,
 			};
 		}
+		std::optional<Foundation::BoxShadow> shadow = style.boxShadow;
+		if (shadow) {
+			shadow->color = detail::withOpacity(shadow->color, alpha);
+		}
 		Renderer::Primitives::drawCircle({
 			.center = size * 0.5F,
 			.radius = std::min(size.x, size.y) * 0.5F,
-			.style = {.fill = detail::withOpacity(style.backgroundColor.value_or(kBackground), alpha), .border = border},
+			.style = {.fill = detail::withOpacity(style.backgroundColor.value_or(kBackground), alpha), .border = border, .shadow = shadow},
 			.id = getId().empty() ? nullptr : getId().c_str(),
 			.key = drawKey(),
 		});
+	}
+
+	float Circle::inkExtent() const {
+		return detail::shadowReach(style.boxShadow);
 	}
 
 } // namespace ui

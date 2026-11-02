@@ -172,7 +172,10 @@ read (BatchRenderer.h has the table). A text shadow or halo
 (`Primitives::drawGlyphShadow`, built 2026-11-02) is its glyphs' quads again in
 the text mode, its spread and blur in the halves a rect keeps its border width
 and outset in, which text never read; the shader widens the coverage ramp by
-them, so a plain glyph pays a max, a min and a divide a pixel.
+them, so a plain glyph pays a max, a min and a divide a pixel. A circle's shadow
+is a rect's shadow quad with the radius at every corner, and a polygon's is its
+fill's flat quads again with the feather ring widened to the blur; neither adds
+a field or a line of shader.
 
 Why: the per-vertex layout writes everything about a rect (colour, border,
 radius, clip, mode) into each of its four 80-byte vertices plus six indices,

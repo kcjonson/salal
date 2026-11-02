@@ -173,13 +173,8 @@ namespace ui {
 		Renderer::Primitives::drawGlyphs(glyphs.data(), glyphs.size(), drawKey());
 	}
 
-	// A shadow reaches its spread and blur past the glyphs, moved by its offset.
 	float Text::inkExtent() const {
-		if (!style.textShadow) {
-			return 0.0F;
-		}
-		const Foundation::BoxShadow& shadow = *style.textShadow;
-		return std::max(0.0F, shadow.blur + shadow.spread + std::max(std::abs(shadow.offset.x), std::abs(shadow.offset.y)));
+		return detail::shadowReach(style.textShadow);
 	}
 
 	void Text::describe(nlohmann::json& node) const {

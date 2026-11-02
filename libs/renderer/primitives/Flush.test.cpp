@@ -872,6 +872,59 @@ namespace Renderer {
 		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 12U);
 	}
 
+	TEST_F(FlushTest, ACirclesShadowIsARectShadowRoundedWholeAndAPolygonsIsItsFillMovedAndFeathered) {
+		const Foundation::BoxShadow shadow{.color = {0.0F, 0.0F, 0.0F, 0.5F}, .blur = 4.0F, .spread = 2.0F, .offset = {3.0F, 5.0F}};
+		Primitives::beginFrame();
+		Primitives::drawCircle({.center = {100.0F, 100.0F}, .radius = 20.0F, .style = {.shadow = shadow}});
+		Primitives::endFrame();
+		std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 2U);
+		// Behind the fill: the disk grown by the spread, its radius its half size, reaching the blur past it.
+		EXPECT_EQ(static_cast<QuadMode>(uploaded[0].mode), QuadMode::Shadow);
+		EXPECT_EQ(uploaded[0].geometry, Foundation::Vec4(22.0F, 22.0F, 26.0F, 26.0F));
+		EXPECT_EQ(glm::unpackHalf2x16(uploaded[0].radii[0]), Foundation::Vec2(22.0F, 22.0F));
+		EXPECT_EQ(uploaded[0].radii[1], uploaded[0].radii[0]);
+		EXPECT_EQ(uploaded[0].corners[0], Foundation::Vec2(77.0F, 79.0F));
+		EXPECT_EQ(static_cast<QuadMode>(uploaded[1].mode), QuadMode::Arc);
+
+		// A polygon's shadow, no spread: its fill's two triangles and four ring quads moved by the
+		// offset, the ring the blur wide, before the fill's own, whose ring is a pixel.
+		gpu->clearRecord();
+		Primitives::beginFrame();
+		Primitives::drawPolygon(
+			{.vertices = kSquare,
+			 .style = {.fill = Foundation::Color::white(), .shadow = Foundation::BoxShadow{.blur = 4.0F, .offset = {3.0F, 5.0F}}}}
+		);
+		Primitives::endFrame();
+		uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 12U);
+		const std::vector<Foundation::Vec2> cast = fadedCorners({uploaded.begin(), uploaded.begin() + 6});
+		ASSERT_EQ(cast.size(), 8U);
+		for (const Foundation::Vec2& corner : cast) {
+			const bool onX = std::abs(corner.x - 9.0F) < 1e-4F || std::abs(corner.x - 37.0F) < 1e-4F;
+			const bool onY = std::abs(corner.y - 11.0F) < 1e-4F || std::abs(corner.y - 39.0F) < 1e-4F;
+			EXPECT_TRUE(onX && onY) << corner.x << ", " << corner.y;
+		}
+		for (const Foundation::Vec2& corner : fadedCorners({uploaded.begin() + 6, uploaded.end()})) {
+			EXPECT_TRUE(std::abs(corner.x - 9.0F) < 1e-4F || std::abs(corner.x - 31.0F) < 1e-4F) << corner.x;
+		}
+
+		// Spread grows the outline first: the ring's corners move out by it as well.
+		gpu->clearRecord();
+		Primitives::beginFrame();
+		Primitives::drawPolygon(
+			{.vertices = kSquare,
+			 .style = {
+				 .fill = Foundation::Color::white(), .shadow = Foundation::BoxShadow{.blur = 4.0F, .spread = 2.0F, .offset = {3.0F, 5.0F}}
+			 }}
+		);
+		Primitives::endFrame();
+		uploaded = quads(gpu->draws()[0]);
+		for (const Foundation::Vec2& corner : fadedCorners({uploaded.begin(), uploaded.begin() + 6})) {
+			EXPECT_TRUE(std::abs(corner.x - 7.0F) < 1e-4F || std::abs(corner.x - 39.0F) < 1e-4F) << corner.x;
+		}
+	}
+
 	TEST_F(FlushTest, APolylineDropsTheSamePointsAtEveryZoomAndNoneFurtherOffThanAQuarterPixel) {
 		// Drawn at 1x and at 2x, a closed three-point line and a line whose second point turns
 		// its butt cap upload the same pieces; under scale(4, 0.25) a point 0.24 units off the

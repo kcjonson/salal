@@ -31,7 +31,7 @@ namespace Renderer {
 
 		constexpr float kTwoPi = 2.0F * std::numbers::pi_v<float>;
 
-		// How far a feather ring's outer edge may run out at a sharp corner, in pixels.
+		// How far a feather ring's outer edge may run out at a sharp corner, in ring widths.
 		constexpr float kFeatherMiterLimit = 4.0F;
 
 		// The stream buffer's first size; the backend grows it as a flush needs.
@@ -333,7 +333,7 @@ namespace Renderer {
 		meshPositions.resize(mesh.vertices.size());
 		meshColors.resize(mesh.vertices.size());
 		for (size_t i = 0; i < mesh.vertices.size(); ++i) {
-			meshPositions[i] = TransformPosition(mesh.vertices[i], currentTransform, isIdentity);
+			meshPositions[i] = TransformPosition(mesh.vertices[i] + mesh.offset, currentTransform, isIdentity);
 			meshColors[i] = mesh.colors != nullptr ? premultiplied(mesh.colors[i].toVec4()) : uniformColor;
 		}
 
@@ -351,14 +351,16 @@ namespace Renderer {
 		}
 
 		if (mesh.feather != nullptr && !mesh.feather->empty()) {
-			addFeather(*mesh.feather, mesh.blend);
+			// A local width reaches its area scale's worth of logical pixels on screen.
+			const float width = mesh.featherWidth > 0.0F ? mesh.featherWidth / pixelPadding
+														 : 1.0F / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
+			addFeather(*mesh.feather, width, mesh.blend);
 		}
 
 		recordGroup(groupStart, mesh.key, mesh.blend);
 	}
 
-	void BatchRenderer::addFeather(const BoundaryLoops& loops, Primitives::BlendMode blend) {
-		const float pixel = 1.0F / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
+	void BatchRenderer::addFeather(const BoundaryLoops& loops, float width, Primitives::BlendMode blend) {
 		// The loops keep the mesh on their left; a mirroring transform turns it to the right.
 		const float determinant = (currentTransform[0][0] * currentTransform[1][1]) - (currentTransform[0][1] * currentTransform[1][0]);
 		const float side = determinant < 0.0F ? -1.0F : 1.0F;
@@ -384,12 +386,12 @@ namespace Renderer {
 				} else if (normalOut == Foundation::Vec2(0.0F, 0.0F)) {
 					normalOut = normalIn;
 				}
-				// The miter is 1 / cos(half the turn), 2 / |sum|, pixels long; a spike back on
-				// itself has no miter and goes a pixel along its last edge's normal.
+				// The miter is 1 / cos(half the turn), 2 / |sum|, widths long; a spike back on
+				// itself has no miter and goes a width along its last edge's normal.
 				const Foundation::Vec2 sum = normalIn + normalOut;
 				const float			   sumLength = glm::length(sum);
-				featherOuter[v] = here + (sumLength > 1e-6F ? sum * (pixel * std::min(kFeatherMiterLimit, 2.0F / sumLength) / sumLength)
-															: normalOut * pixel);
+				featherOuter[v] = here + (sumLength > 1e-6F ? sum * (width * std::min(kFeatherMiterLimit, 2.0F / sumLength) / sumLength)
+															: normalOut * width);
 			}
 			// A quad an edge, its inner side the fill's colour fading to transparent outside
 			for (uint32_t v = 0; v < size; ++v) {

@@ -209,6 +209,26 @@ namespace Renderer {
 		EXPECT_LT(pixel(5, 16)[3], edge);
 	}
 
+	TEST_F(PrimitivesDrawTest, ACirclesShadowFadesAsARectsAndAPolygonsFadesOutsideItsOutline) {
+		const Foundation::Color		clear(0.0F, 0.0F, 0.0F, 0.0F);
+		const Foundation::BoxShadow shadow{.color = Foundation::Color::white(), .blur = 4.0F};
+		render(clear, [&] {
+			Primitives::drawCircle({.center = {16.0F, 16.0F}, .radius = 6.0F, .style = {.fill = clear, .shadow = shadow}});
+		});
+		// Half way at the edge, over the blur either side: 0.52 px out is smoothstep at 0.565.
+		expectNear(pixel(16, 16), {255, 255, 255, 255});
+		EXPECT_NEAR(pixel(22, 16)[3], 103, 3);
+		EXPECT_EQ(pixel(26, 16)[3], 0);
+
+		// A polygon's is solid to its outline, x = 24, and linear to nothing 4 px past it.
+		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
+		render(clear, [&] { Primitives::drawPolygon({.vertices = square, .style = {.fill = clear, .shadow = shadow}}); });
+		expectNear(pixel(16, 16), {255, 255, 255, 255});
+		EXPECT_NEAR(pixel(25, 16)[3], 159, 2);
+		EXPECT_NEAR(pixel(27, 16)[3], 32, 2);
+		EXPECT_EQ(pixel(29, 16)[3], 0);
+	}
+
 	TEST_F(PrimitivesDrawTest, TextCoversWhereItsAtlasIsInside) {
 		// A one-texel atlas, every channel at 1 (inside) or 0 (outside), stretched over a glyph's quad.
 		const std::array<uint8_t, 3> inside = {255, 255, 255};

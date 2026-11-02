@@ -4,9 +4,6 @@
 
 #include <primitives/Primitives.h>
 
-#include <algorithm>
-#include <cmath>
-
 namespace ui {
 
 	namespace {
@@ -14,13 +11,8 @@ namespace ui {
 		constexpr Foundation::Color kBorder = Foundation::Color::white();
 	} // namespace
 
-	// A shadow reaches its blur and spread past the box, moved by its offset.
 	float Rectangle::inkExtent() const {
-		if (!style.boxShadow) {
-			return 0.0F;
-		}
-		const Foundation::BoxShadow& shadow = *style.boxShadow;
-		return std::max(0.0F, shadow.blur + shadow.spread + std::max(std::abs(shadow.offset.x), std::abs(shadow.offset.y)));
+		return detail::shadowReach(style.boxShadow);
 	}
 
 	void Rectangle::describe(nlohmann::json& node) const {

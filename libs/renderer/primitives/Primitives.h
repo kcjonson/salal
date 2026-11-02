@@ -291,6 +291,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   - style.fill: Fill color (set alpha to 0 to disable fill)
 		//   - style.border: Optional border; `position` puts its width inside the radius,
 		//     centred on it (the default) or outside it, and `cornerRadius` is unused
+		//   - style.shadow: Optional shadow behind it at the same key, a rect's shadow quad
+		//     with the circle's radius at every corner, so it blurs exactly as a rect's does
 		//   - id: Optional debug identifier
 		void drawCircle(const CircleArgs& args);
 
@@ -328,6 +330,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// outline and its inner edge a pixel inside, over the fill's edge, so no background
 		// shows between them. A notch is mitered into its corner, except beside an edge
 		// too short for its cut, where it is round with a flat piece into the corner.
+		//
+		// A shadow is drawn first, behind both at the same key: the fill's mesh again in the
+		// shadow's colour, moved by its offset, its outline grown by its spread first
+		// (offsetOutline, tessellated and cached as an outline of its own), and its feather ring
+		// as wide as its blur, so it is solid to that outline and fades linearly to nothing
+		// `blur` past it. The ring is the fill's one-pixel ring widened, so it costs what the
+		// fill does; at a notch beside an edge shorter than about the blur the ring folds over
+		// itself and shows a darker sliver.
 		void drawPolygon(const PolygonArgs& args);
 
 		// Arguments for DrawPolyline
