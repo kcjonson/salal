@@ -1,5 +1,5 @@
-// Font rendering system using MSDF (Multi-channel Signed Distance Field) atlas
-// Renders text with pre-generated SDF atlas for high-quality scalable text
+// Text from MSDF (multi-channel signed distance field) atlases as msdf-atlas-gen writes them. Text is
+// UTF-8, laid out by code point.
 
 #pragma once
 
@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <glm/glm.hpp>
-#include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -34,7 +34,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	/**
 	 * One atlas for FontRenderer::Initialize: the family the game loads it as, and the
-	 * MSDF atlas's PNG and JSON metadata, as paths the renderer opens as given.
+	 * atlas's PNG and the JSON msdf-atlas-gen wrote with it, as paths the renderer opens
+	 * as given.
 	 */
 	struct FontAtlasSource {
 		FontFamily	family;
@@ -62,6 +63,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		 * The sources load in order. One that fails to load is logged and skipped, and
 		 * its family draws with the default, as does any family not given.
 		 *
+		 * The JSON is msdf-atlas-gen's for one font: glyphs keyed by code point, with
+		 * planeBounds and atlasBounds or only an advance (whitespace), either yOrigin, any
+		 * emSize, and kerning pairs, which measuring and layout apply. The atlas type is
+		 * one the text mode's median of red, green and blue reads: msdf or mtsdf, or sdf
+		 * or psdf, whose one channel loads into all three. A JSON that isn't this, or a
+		 * PNG of another size than it says, fails that atlas with the reason logged.
+		 *
 		 * A second call frees the atlases the first made, so a handle from
 		 * getAtlasTexture goes stale: a game that handed one to Primitives::setFontAtlas
 		 * hands over the new one. So does every GlyphQuad laid out before it, which
@@ -79,7 +87,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		/**
 		 * Calculate the dimensions of a text string with the given scale
-		 * @param text The text to measure
+		 * @param text UTF-8. A code point the atlas lacks measures and draws as U+FFFD, or as
+		 *        '?' where the atlas lacks that too, and each ill-formed sequence as one U+FFFD
 		 * @param scale Scaling factor (default 1.0F)
 		 * @param family Font family to measure with (default: the game's default family)
 		 * @param letterSpacing Extra px between glyphs (CSS letter-spacing); 0 = none
@@ -138,7 +147,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		/**
 		 * Generate glyph quads for batched rendering (does not render immediately)
-		 * @param text The string to generate quads for
+		 * @param text UTF-8, read as MeasureText reads it
 		 * @param position Top-left position of the text in screen space
 		 * @param scale Scaling factor for the text size (1.0F = 16px base size)
 		 * @param color RGBA color of the text (0-1 range)
@@ -208,13 +217,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		/**
 		 * The glyphs of the atlas this family draws with (the default's, for a family
-		 * that isn't loaded) whose sampled area leaves their atlas cell. A quad reads
-		 * its atlas out to half the distance range past the glyph's atlasBounds, plus
-		 * half a texel of bilinear footprint; where that crosses the cell the atlas
-		 * JSON gives the glyph, it draws slivers of its neighbours. Loading warns
-		 * about them; a glyph whose JSON gives no cell of four numbers is not checked.
+		 * that isn't loaded) whose quads read the atlas where another glyph's quad does.
+		 * A quad reads half a texel past its glyph's atlasBounds, as far as bilinear
+		 * filtering reaches at its edge. msdf-atlas-gen insets atlasBounds by that half
+		 * texel from each glyph's box, so packed boxes touch and no glyph reads into
+		 * another's; where two reads overlap, each glyph draws slivers of the other.
+		 * Loading warns about them.
 		 * @param family Font family whose atlas to check (default: the game's default family)
-		 * @return The offending glyphs in character order; empty when none, or nothing is loaded
+		 * @return The offending glyphs in code point order, as UTF-8; empty when none, or nothing is loaded
 		 */
 		std::string crampedGlyphs(FontFamily family = FontFamily::Default) const;
 
@@ -237,63 +247,64 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	  private:
 		/**
-		 * SDF atlas-based glyph information
+		 * One glyph in the units its quad is built in: em, y up from the pen on the
+		 * baseline, and UVs into the atlas as uploaded, its first row the image's bottom.
+		 * msdf-atlas-gen's bounds hold the half of the distance range the edge fades
+		 * over, so the quad is the plane bounds and samples the atlas bounds as given.
 		 */
-		struct SDFGlyph {
-			glm::vec2 atlasBoundsMin; // Bottom-left UV of actual glyph content
-			glm::vec2 atlasBoundsMax; // Top-right UV of actual glyph content
-			glm::vec2 planeBoundsMin; // Glyph bounds min (in em units)
-			glm::vec2 planeBoundsMax; // Glyph bounds max (in em units)
-			glm::vec2 cellMin;		  // Bottom-left UV of the atlas cell the glyph was given
-			glm::vec2 cellMax;		  // Top-right UV of that cell
-			float	  advance;		  // Horizontal advance (in em units)
-			bool	  hasGeometry;	  // False for whitespace characters
-			bool	  hasCell;		  // False when the JSON gives no cell of four numbers
+		struct Glyph {
+			glm::vec2 planeMin{};
+			glm::vec2 planeMax{};
+			glm::vec2 uvMin{};
+			glm::vec2 uvMax{};
+			float	  advance = 0.0F;
+			bool	  hasGeometry = false; // False for whitespace: an advance and nothing to draw
+		};
+
+		// What a code point draws as: itself, the atlas's fallback, or nothing (a null glyph).
+		struct Lookup {
+			char32_t	 codePoint = 0;
+			const Glyph* glyph = nullptr;
+		};
+
+		struct Metrics {
+			float distanceRange = 0.0F; // In texels
+			float emTexels = 0.0F;		// Texels an em, msdf-atlas-gen's atlas.size
+			int	  width = 0;			// Of the atlas, in texels
+			int	  height = 0;
+			float ascender = 0.0F;	 // Above the baseline, in em
+			float lineHeight = 0.0F; // In em
 		};
 
 		/**
-		 * SDF atlas metadata
-		 */
-		struct SDFAtlasMetadata {
-			float distanceRange; // Distance field range in pixels
-			int	  glyphSize;	 // Size of each glyph in atlas
-			int	  atlasWidth;	 // Atlas texture width
-			int	  atlasHeight;	 // Atlas texture height
-			float emSize;		 // Font em size
-			float ascender;		 // Font ascender (in em units)
-			float descender;	 // Font descender (in em units)
-			float lineHeight;	 // Line height (in em units)
-		};
-
-		/**
-		 * A single loaded font: its glyphs, atlas metadata, atlas texture, and the
-		 * font metrics derived from them. One Atlas per loaded family.
+		 * A single loaded font: its glyphs, kerning, metrics and atlas texture. One Atlas
+		 * per loaded family.
 		 */
 		struct Atlas {
-			std::map<char, SDFGlyph> glyphs;						// Map of SDF glyphs
-			SDFAtlasMetadata		 metadata{};					// SDF atlas metadata
-			Texture					 texture;						// SDF atlas texture in the renderer's table, owned here
-			float					 scaledAscender = 0.0F;			// Ascender for the base font size
-			float					 maxGlyphHeightUnscaled = 0.0F; // Unscaled max glyph height
-			bool					 loaded = false;				// True once successfully loaded
+			std::unordered_map<char32_t, Glyph>		 glyphs;
+			std::unordered_map<std::uint64_t, float> kerning;  // In em, by the pair of code points
+			std::optional<char32_t>					 fallback; // U+FFFD, or '?' without it, when the atlas has either
+			Metrics									 metrics{};
+			Texture									 texture; // In the renderer's table, owned here
+			bool									 loaded = false;
+
+			Lookup lookUp(char32_t codePoint) const;
+			// The extra advance, in em, between two glyphs drawn side by side.
+			float kern(char32_t left, char32_t right) const;
 		};
 
 		/**
-		 * Load an SDF atlas from PNG and JSON files into the given Atlas slot.
-		 * @param atlas Destination atlas (glyphs, metadata, texture filled in)
-		 * @param pngPath Path to the PNG atlas texture
-		 * @param jsonPath Path to the JSON metadata file
-		 * @return true if atlas was loaded successfully
+		 * Load an atlas from its PNG and msdf-atlas-gen JSON into the given slot, or log
+		 * why it can't be.
+		 * @return true if the atlas loaded
 		 */
-		bool LoadSDFAtlas(Atlas& atlas, const std::string& pngPath, const std::string& jsonPath);
+		bool loadAtlas(Atlas& atlas, const std::string& pngPath, const std::string& jsonPath);
 
-		// The glyphs of `atlas` whose sampled area leaves their cell (see crampedGlyphs).
+		// The glyphs of `atlas` whose quads read into another's (see crampedGlyphs).
 		static std::string findCrampedGlyphs(const Atlas& atlas);
 
-		// Whether an atlas's distance range is under a sixth of its em, both in atlas pixels.
-		static bool thinDistanceRange(const SDFAtlasMetadata& metadata) {
-			return metadata.distanceRange * 6.0F < static_cast<float>(metadata.glyphSize);
-		}
+		// Whether an atlas's distance range is under a sixth of its em, both in texels.
+		static bool thinDistanceRange(const Metrics& metrics) { return metrics.distanceRange * 6.0F < metrics.emTexels; }
 
 		/**
 		 * The family a request draws with: itself when it is loaded, otherwise the

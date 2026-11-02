@@ -1,54 +1,105 @@
-// Font rendering implementation using MSDF (Multi-channel Signed Distance Field) atlas
+// Text from msdf-atlas-gen's MSDF atlases, laid out by code point
 
 #include "font/FontRenderer.h"
 #include "primitives/Primitives.h"
 #include "utils/Log.h"
+#include "utils/Utf8.h"
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
+#include <string_view>
 
 namespace Renderer {
 
 	namespace {
+		constexpr float kBaseFontSize = 16.0F; // scale 1 draws an em this many pixels
+
+		// How far past its UV edge a quad reads its atlas: bilinear filtering's half a texel.
+		constexpr float kBilinearFootprintTexels = 0.5F;
+
+		std::uint64_t kerningKey(char32_t left, char32_t right) {
+			return (static_cast<std::uint64_t>(left) << 32U) | right;
+		}
+
 		// The single advance iteration shared by MeasureText and generateGlyphQuads,
 		// so measured width always equals rendered width (alignment depends on it).
-		// Resolves each char with '?' fallback, invokes fn(glyph, penX) at the
-		// glyph's pen position, and returns the final pen x. Letter-spacing sits
-		// between glyphs only (n glyphs -> n-1 gaps).
-		template <typename GlyphMap, typename Fn>
-		float ForEachGlyph(const GlyphMap& glyphs, const std::string& text, float fontSize, float letterSpacing, Fn&& fn) {
-			float penX = 0.0F;
-			for (size_t i = 0; i < text.size(); ++i) {
-				auto it = glyphs.find(text[i]);
-				if (it == glyphs.end()) {
-					it = glyphs.find('?');
+		// Decodes the text by code point, resolves each to its glyph or the atlas's
+		// fallback, kerns each glyph against the one drawn before it, invokes
+		// fn(glyph, penX) at the glyph's pen position, and returns the final pen x.
+		// Letter-spacing sits between characters only (n characters -> n-1 gaps).
+		template <typename AtlasType, typename Fn>
+		float forEachGlyph(const AtlasType& atlas, std::string_view text, float fontSize, float letterSpacing, Fn&& fn) {
+			float					penX = 0.0F;
+			std::optional<char32_t> previous;
+			for (std::size_t at = 0; at < text.size();) {
+				const foundation::UTF8::Character character = foundation::UTF8::decodeAt(text, at);
+				at += character.length;
+				const auto drawn = atlas.lookUp(character.codePoint);
+				if (drawn.glyph != nullptr) {
+					if (previous) {
+						penX += atlas.kern(*previous, drawn.codePoint) * fontSize;
+					}
+					fn(*drawn.glyph, penX);
+					penX += drawn.glyph->advance * fontSize;
+					previous = drawn.codePoint;
 				}
-				if (it != glyphs.end()) {
-					fn(it->second, penX);
-					penX += it->second.advance * fontSize;
-				}
-				if (i + 1 < text.size()) {
+				if (at < text.size()) {
 					penX += letterSpacing;
 				}
 			}
 			return penX;
 		}
 
-		// How far generateGlyphQuads grows each quad past its glyph's atlasBounds, in
-		// texels: the half of the distance range that holds the edge's falloff.
-		float quadPadTexels(float distanceRange) {
-			return distanceRange * 0.5F;
+		const nlohmann::json* member(const nlohmann::json& object, const char* name) {
+			const auto found = object.is_object() ? object.find(name) : object.end();
+			return found != object.end() ? &*found : nullptr;
 		}
 
-		// How far past a glyph's atlasBounds its quad reads the atlas, in texels: the
-		// quad's padding, plus half a texel of bilinear footprint at the quad's edge.
-		float sampleReachTexels(float distanceRange) {
-			constexpr float kBilinearFootprintTexels = 0.5F;
-			return quadPadTexels(distanceRange) + kBilinearFootprintTexels;
+		std::optional<double> numberOf(const nlohmann::json& object, const char* name) {
+			const nlohmann::json* value = member(object, name);
+			return value != nullptr && value->is_number() ? std::optional(value->get<double>()) : std::nullopt;
+		}
+
+		// A Unicode scalar value, which msdf-atlas-gen writes as an integer.
+		std::optional<char32_t> codePointOf(const nlohmann::json& object, const char* name) {
+			const std::optional<double> value = numberOf(object, name);
+			if (!value || *value < 0.0 || *value > 0x10FFFF || *value != static_cast<double>(static_cast<std::uint32_t>(*value)) ||
+				(*value >= 0xD800 && *value <= 0xDFFF)) {
+				return std::nullopt;
+			}
+			return static_cast<char32_t>(*value);
+		}
+
+		struct Bounds {
+			double left;
+			double bottom;
+			double right;
+			double top;
+		};
+
+		std::optional<Bounds> boundsOf(const nlohmann::json& object, const char* name) {
+			const nlohmann::json* value = member(object, name);
+			if (value == nullptr) {
+				return std::nullopt;
+			}
+			const std::array sides{
+				numberOf(*value, "left"), numberOf(*value, "bottom"), numberOf(*value, "right"), numberOf(*value, "top")
+			};
+			if (!std::ranges::all_of(sides, [](const std::optional<double>& side) { return side.has_value(); })) {
+				return std::nullopt;
+			}
+			return Bounds{.left = *sides[0], .bottom = *sides[1], .right = *sides[2], .top = *sides[3]};
+		}
+
+		std::string nameOf(char32_t codePoint) {
+			std::array<char, 16> name{};
+			std::snprintf(name.data(), name.size(), "U+%04X", static_cast<unsigned>(codePoint));
+			return name.data();
 		}
 	} // namespace
 
@@ -89,10 +140,10 @@ namespace Renderer {
 
 		// In order. A family that fails is logged and skipped, and draws with the default;
 		// the default failing ends it, holding nothing, as there is nothing to fall back to.
-		// LoadSDFAtlas's error names the file; two paths would outrun the log line.
+		// loadAtlas's error names the file; two paths would outrun the log line.
 		atlases.resize(slots);
 		for (const FontAtlasSource& source : sources) {
-			if (LoadSDFAtlas(atlases[static_cast<size_t>(source.family)], source.pngPath, source.jsonPath)) {
+			if (loadAtlas(atlases[static_cast<size_t>(source.family)], source.pngPath, source.jsonPath)) {
 				continue;
 			}
 			if (source.family == defaultFamily) {
@@ -129,236 +180,260 @@ namespace Renderer {
 		return kNoAtlas;
 	}
 
+	FontRenderer::Lookup FontRenderer::Atlas::lookUp(char32_t codePoint) const {
+		auto found = glyphs.find(codePoint);
+		if (found == glyphs.end() && fallback) {
+			found = glyphs.find(*fallback);
+		}
+		return found != glyphs.end() ? Lookup{.codePoint = found->first, .glyph = &found->second} : Lookup{};
+	}
+
+	float FontRenderer::Atlas::kern(char32_t left, char32_t right) const {
+		if (kerning.empty()) {
+			return 0.0F;
+		}
+		const auto found = kerning.find(kerningKey(left, right));
+		return found != kerning.end() ? found->second : 0.0F;
+	}
+
 	glm::vec2 FontRenderer::MeasureText(const std::string& text, float scale, FontFamily family, float letterSpacing) const {
 		if (text.empty()) {
 			return glm::vec2(0.0F, 0.0F);
 		}
 
 		const Atlas& atlas = atlasFor(family);
-
-		constexpr float BASE_FONT_SIZE = 16.0F;			   // scale=1.0 renders at this size
-		float			fontSize = BASE_FONT_SIZE * scale; // Requested rendering size, not atlas size
-
-		float totalWidth = ForEachGlyph(atlas.glyphs, text, fontSize, letterSpacing, [](const auto&, float) {});
-
-		// For height, use the line height from atlas metadata
-		float textHeight = atlas.metadata.lineHeight * fontSize;
-
-		return glm::vec2(totalWidth, textHeight);
+		const float	 fontSize = kBaseFontSize * scale; // Requested rendering size, not atlas size
+		const float	 totalWidth = forEachGlyph(atlas, text, fontSize, letterSpacing, [](const Glyph&, float) {});
+		return glm::vec2(totalWidth, atlas.metrics.lineHeight * fontSize);
 	}
 
 	float FontRenderer::getMaxGlyphHeight(float scale, FontFamily family) const {
-		return atlasFor(family).maxGlyphHeightUnscaled * scale;
+		return atlasFor(family).metrics.lineHeight * scale;
 	}
 
 	float FontRenderer::getAscent(float scale, FontFamily family) const {
-		return atlasFor(family).scaledAscender * scale;
+		return atlasFor(family).metrics.ascender * kBaseFontSize * scale;
 	}
 
-	bool FontRenderer::LoadSDFAtlas(Atlas& atlas, const std::string& pngPath, const std::string& jsonPath) {
-		LOG_INFO(UI, "Loading SDF atlas from: %s", pngPath.c_str());
-		LOG_INFO(UI, "Loading SDF metadata from: %s", jsonPath.c_str());
+	bool FontRenderer::loadAtlas(Atlas& atlas, const std::string& pngPath, const std::string& jsonPath) {
+		LOG_INFO(UI, "Loading font atlas %s and %s", jsonPath.c_str(), pngPath.c_str());
 
-		// Load JSON metadata
-		std::ifstream jsonFile(jsonPath);
-		if (!jsonFile.is_open()) {
-			LOG_ERROR(UI, "Failed to open SDF metadata file: %s", jsonPath.c_str());
-			return false;
-		}
+		// The file name, not the path, and the reason last: the logger stops at 256 characters.
+		const std::string file = std::filesystem::path(jsonPath).filename().string();
+		const auto		  fail = [&file](const std::string& reason) {
+			   LOG_ERROR(UI, "SDF atlas %s: %s", file.c_str(), reason.c_str());
+			   return false;
+		};
 
 		nlohmann::json json;
-		try {
-			jsonFile >> json;
-		} catch (const std::exception& e) {
-			LOG_ERROR(UI, "Failed to parse SDF metadata JSON %s: %s", jsonPath.c_str(), e.what());
-			return false;
+		{
+			std::ifstream in(jsonPath);
+			if (!in.is_open()) {
+				return fail("can't be opened");
+			}
+			try {
+				in >> json;
+			} catch (const std::exception& e) {
+				return fail(std::string("isn't JSON: ") + e.what());
+			}
 		}
 
-		SDFAtlasMetadata& atlasMetadata = atlas.metadata;
+		if (member(json, "variants") != nullptr) {
+			return fail("holds several fonts; give each family an atlas of its own");
+		}
+		const nlohmann::json* meta = member(json, "atlas");
+		const nlohmann::json* metrics = member(json, "metrics");
+		const nlohmann::json* glyphs = member(json, "glyphs");
+		if (meta == nullptr || !meta->is_object() || metrics == nullptr || !metrics->is_object() || glyphs == nullptr) {
+			return fail("needs atlas, metrics and glyphs");
+		}
+		if (!glyphs->is_array()) {
+			return fail(
+				"its glyphs aren't an array, as msdf-atlas-gen writes them; scripts/convert-font-atlas.mjs converts salal's old JSON"
+			);
+		}
 
-		// Parse atlas metadata with error handling
-		try {
-			if (!json.contains("atlas") || !json.contains("metrics") || !json.contains("glyphs")) {
-				LOG_ERROR(UI, "SDF metadata JSON missing atlas, metrics or glyphs: %s", jsonPath.c_str());
-				return false;
+		const nlohmann::json*		type = member(*meta, "type");
+		constexpr std::array		kFieldTypes{"msdf", "mtsdf", "sdf", "psdf"};
+		const std::optional<double> range = numberOf(*meta, "distanceRange");
+		const std::optional<double> size = numberOf(*meta, "size");
+		const std::optional<double> width = numberOf(*meta, "width");
+		const std::optional<double> height = numberOf(*meta, "height");
+		const nlohmann::json*		yOrigin = member(*meta, "yOrigin");
+		if (type == nullptr || std::ranges::none_of(kFieldTypes, [type](const char* name) { return *type == name; })) {
+			return fail("atlas.type isn't a distance field the text mode reads: msdf, mtsdf, sdf or psdf");
+		}
+		if (!range || *range <= 0.0 || !size || *size <= 0.0) {
+			return fail("atlas.distanceRange and atlas.size must be positive numbers");
+		}
+		const auto positiveInteger = [](const std::optional<double>& value) {
+			return value && *value >= 1.0 && *value <= 65536.0 && *value == static_cast<double>(static_cast<int>(*value));
+		};
+		if (!positiveInteger(width) || !positiveInteger(height)) {
+			return fail("atlas.width and atlas.height must be positive integers");
+		}
+		// The text mode takes the field's middle for the edge.
+		if (numberOf(*meta, "distanceRangeMiddle").value_or(0.0) != 0.0) {
+			return fail("atlas.distanceRangeMiddle must be 0");
+		}
+		// Older msdf-atlas-gen writes no yOrigin, and measures from the bottom.
+		if (yOrigin != nullptr && *yOrigin != "top" && *yOrigin != "bottom") {
+			return fail("atlas.yOrigin must be \"top\" or \"bottom\"");
+		}
+		const bool fromTop = yOrigin != nullptr && *yOrigin == "top";
+
+		const std::optional<double> emSize = numberOf(*metrics, "emSize");
+		const std::optional<double> lineHeight = numberOf(*metrics, "lineHeight");
+		const std::optional<double> ascender = numberOf(*metrics, "ascender");
+		if (!emSize || *emSize <= 0.0 || !lineHeight || !ascender) {
+			return fail("metrics needs a positive emSize, a lineHeight and an ascender");
+		}
+
+		// Everything below goes to em (divided by emSize) and to y up, flipping a top-origin
+		// file: its plane bounds and ascender point down, and its atlas bounds count rows
+		// from the image's top.
+		const double atlasWidth = *width;
+		const double atlasHeight = *height;
+		const double up = fromTop ? -1.0 : 1.0;
+		Metrics&	 atlasMetrics = atlas.metrics;
+		atlasMetrics = {
+			.distanceRange = static_cast<float>(*range),
+			.emTexels = static_cast<float>(*size),
+			.width = static_cast<int>(atlasWidth),
+			.height = static_cast<int>(atlasHeight),
+			.ascender = static_cast<float>(up * *ascender / *emSize),
+			.lineHeight = static_cast<float>(*lineHeight / *emSize),
+		};
+
+		for (const nlohmann::json& entry : *glyphs) {
+			const std::optional<char32_t> codePoint = codePointOf(entry, "unicode");
+			if (!codePoint) {
+				return fail(
+					member(entry, "index") != nullptr
+						? "its glyphs are by glyph index; generate it from a charset, so they're by code point"
+						: "a glyph has no unicode code point"
+				);
 			}
+			const std::string			name = nameOf(*codePoint);
+			const std::optional<double> advance = numberOf(entry, "advance");
+			if (!advance) {
+				return fail(name + " has no advance");
+			}
+			Glyph glyph{.advance = static_cast<float>(*advance / *emSize)};
 
-			for (const char* field : {"distanceRange", "size", "width", "height"}) {
-				if (!json["atlas"].contains(field)) {
-					LOG_ERROR(UI, "SDF metadata missing atlas.%s: %s", field, jsonPath.c_str());
-					return false;
+			const bool hasPlane = member(entry, "planeBounds") != nullptr;
+			const bool hasAtlas = member(entry, "atlasBounds") != nullptr;
+			if (hasPlane != hasAtlas) {
+				return fail(name + " has " + (hasPlane ? "planeBounds and no atlasBounds" : "atlasBounds and no planeBounds"));
+			}
+			if (hasPlane) {
+				const std::optional<Bounds> plane = boundsOf(entry, "planeBounds");
+				const std::optional<Bounds> box = boundsOf(entry, "atlasBounds");
+				if (!plane || !box) {
+					return fail(name + "'s bounds aren't four numbers each");
 				}
-			}
-			for (const char* field : {"emSize", "ascender", "descender", "lineHeight"}) {
-				if (!json["metrics"].contains(field)) {
-					LOG_ERROR(UI, "SDF metadata missing metrics.%s: %s", field, jsonPath.c_str());
-					return false;
+				const double planeBottom = up * plane->bottom / *emSize;
+				const double planeTop = up * plane->top / *emSize;
+				const double boxBottom = fromTop ? atlasHeight - box->bottom : box->bottom;
+				const double boxTop = fromTop ? atlasHeight - box->top : box->top;
+				if (plane->left > plane->right || planeBottom > planeTop) {
+					return fail(name + "'s planeBounds are inverted");
 				}
+				if (box->left > box->right || boxBottom > boxTop || box->left < 0.0 || boxBottom < 0.0 || box->right > atlasWidth ||
+					boxTop > atlasHeight) {
+					return fail(name + "'s atlasBounds are inverted or leave the atlas");
+				}
+				glyph.planeMin = glm::vec2(static_cast<float>(plane->left / *emSize), static_cast<float>(planeBottom));
+				glyph.planeMax = glm::vec2(static_cast<float>(plane->right / *emSize), static_cast<float>(planeTop));
+				glyph.uvMin = glm::vec2(static_cast<float>(box->left / atlasWidth), static_cast<float>(boxBottom / atlasHeight));
+				glyph.uvMax = glm::vec2(static_cast<float>(box->right / atlasWidth), static_cast<float>(boxTop / atlasHeight));
+				glyph.hasGeometry = true;
 			}
+			if (!atlas.glyphs.emplace(*codePoint, glyph).second) {
+				return fail(name + " is given twice");
+			}
+		}
+		for (const char32_t candidate : {foundation::UTF8::kReplacement, U'?'}) {
+			if (atlas.glyphs.contains(candidate)) {
+				atlas.fallback = candidate;
+				break;
+			}
+		}
 
-			atlasMetadata.distanceRange = json["atlas"]["distanceRange"].get<float>();
-			atlasMetadata.glyphSize = json["atlas"]["size"].get<int>();
-			atlasMetadata.atlasWidth = json["atlas"]["width"].get<int>();
-			atlasMetadata.atlasHeight = json["atlas"]["height"].get<int>();
-			atlasMetadata.emSize = json["metrics"]["emSize"].get<float>();
-			atlasMetadata.ascender = json["metrics"]["ascender"].get<float>();
-			atlasMetadata.descender = json["metrics"]["descender"].get<float>();
-			atlasMetadata.lineHeight = json["metrics"]["lineHeight"].get<float>();
-		} catch (const std::exception& e) {
-			LOG_ERROR(UI, "Failed to parse SDF atlas metadata %s: %s", jsonPath.c_str(), e.what());
-			return false;
+		// Older msdf-atlas-gen writes no kerning.
+		if (const nlohmann::json* pairs = member(json, "kerning")) {
+			if (!pairs->is_array()) {
+				return fail("its kerning isn't an array");
+			}
+			for (const nlohmann::json& pair : *pairs) {
+				const std::optional<char32_t> left = codePointOf(pair, "unicode1");
+				const std::optional<char32_t> right = codePointOf(pair, "unicode2");
+				const std::optional<double>	  advance = numberOf(pair, "advance");
+				if (!left || !right || !advance) {
+					return fail(
+						member(pair, "index1") != nullptr ? "its kerning is by glyph index; generate it from a charset"
+														  : "a kerning pair needs unicode1, unicode2 and advance"
+					);
+				}
+				atlas.kerning[kerningKey(*left, *right)] = static_cast<float>(*advance / *emSize);
+			}
 		}
 
 		LOG_INFO(
 			UI,
-			"Atlas metadata: size=%dx%d, glyphSize=%d, range=%.1f",
-			atlasMetadata.atlasWidth,
-			atlasMetadata.atlasHeight,
-			atlasMetadata.glyphSize,
-			atlasMetadata.distanceRange
+			"Atlas metadata: size=%dx%d, em=%.1f texels, range=%.1f, %zu glyphs, %zu kerning pairs",
+			atlasMetrics.width,
+			atlasMetrics.height,
+			atlasMetrics.emTexels,
+			atlasMetrics.distanceRange,
+			atlas.glyphs.size(),
+			atlas.kerning.size()
 		);
-		if (thinDistanceRange(atlasMetadata)) {
+		if (thinDistanceRange(atlasMetrics)) {
 			LOG_WARNING(
 				UI,
-				"SDF atlas %s: a distance range of %.1f texels is under a sixth of its %d-texel em, too thin for small text; generate it "
+				"SDF atlas %s: a distance range of %.1f texels is under a sixth of its %g-texel em, too thin for small text; generate it "
 				"with %d or more",
-				std::filesystem::path(jsonPath).filename().string().c_str(),
-				atlasMetadata.distanceRange,
-				atlasMetadata.glyphSize,
-				(atlasMetadata.glyphSize + 5) / 6
+				file.c_str(),
+				atlasMetrics.distanceRange,
+				atlasMetrics.emTexels,
+				static_cast<int>(std::ceil(atlasMetrics.emTexels / 6.0F))
 			);
 		}
 
-		std::map<char, SDFGlyph>& sdfGlyphs = atlas.glyphs;
-
-		// Parse glyphs with error handling
-		int missingAtlasBounds = 0;
-		int missingPlaneBounds = 0;
-		try {
-			const auto& glyphsJson = json["glyphs"];
-			for (auto it = glyphsJson.begin(); it != glyphsJson.end(); ++it) {
-				const std::string& key = it.key();
-				if (key.empty())
-					continue;
-
-				char		c = key[0]; // Get first character (handles escaped chars)
-				const auto& glyphJson = it.value();
-
-				if (!glyphJson.contains("advance")) {
-					LOG_WARNING(UI, "Glyph '%c' missing advance field, skipping", c);
-					continue;
-				}
-
-				SDFGlyph glyph{};
-				glyph.advance = glyphJson["advance"].get<float>();
-
-				// A null "atlas" marks whitespace (advance only). A non-null one
-				// requires atlasBounds (actual glyph content within the cell,
-				// https://github.com/Chlumsky/msdf-atlas-gen/issues/2) and plane
-				// bounds; sampling the full cell instead would bleed neighboring
-				// glyphs, so incomplete glyphs are kept advance-only. Where "atlas" is
-				// the glyph's cell (x, y, width, height), findCrampedGlyphs checks the
-				// glyph's sampled area against it.
-				if (glyphJson.contains("atlas") && !glyphJson["atlas"].is_null()) {
-					const bool hasAtlasBounds = glyphJson.contains("atlasBounds") && !glyphJson["atlasBounds"].is_null();
-					const bool hasPlaneBounds = glyphJson.contains("plane") && !glyphJson["plane"].is_null();
-					if (hasAtlasBounds && hasPlaneBounds) {
-						glyph.hasGeometry = true;
-						glyph.atlasBoundsMin.x = glyphJson["atlasBounds"]["left"].get<float>();
-						glyph.atlasBoundsMin.y = glyphJson["atlasBounds"]["bottom"].get<float>();
-						glyph.atlasBoundsMax.x = glyphJson["atlasBounds"]["right"].get<float>();
-						glyph.atlasBoundsMax.y = glyphJson["atlasBounds"]["top"].get<float>();
-						glyph.planeBoundsMin.x = glyphJson["plane"]["left"].get<float>();
-						glyph.planeBoundsMin.y = glyphJson["plane"]["bottom"].get<float>();
-						glyph.planeBoundsMax.x = glyphJson["plane"]["right"].get<float>();
-						glyph.planeBoundsMax.y = glyphJson["plane"]["top"].get<float>();
-
-						// A cell that isn't four numbers is not checked; it doesn't fail the atlas.
-						const auto& cell = glyphJson["atlas"];
-						glyph.hasCell =
-							cell.is_object() && std::ranges::all_of(std::array{"x", "y", "width", "height"}, [&](const char* field) {
-								return cell.contains(field) && cell[field].is_number();
-							});
-						if (glyph.hasCell) {
-							glyph.cellMin = glm::vec2(cell["x"].get<float>(), cell["y"].get<float>());
-							glyph.cellMax = glyph.cellMin + glm::vec2(cell["width"].get<float>(), cell["height"].get<float>());
-						}
-					} else {
-						missingAtlasBounds += hasAtlasBounds ? 0 : 1;
-						missingPlaneBounds += hasPlaneBounds ? 0 : 1;
-						glyph.hasGeometry = false;
-					}
-				} else {
-					glyph.hasGeometry = false;
-				}
-
-				sdfGlyphs[c] = glyph;
-			}
-		} catch (const std::exception& e) {
-			LOG_ERROR(UI, "Failed to parse SDF glyphs %s: %s", jsonPath.c_str(), e.what());
-			return false;
-		}
-
-		if (missingAtlasBounds > 0 || missingPlaneBounds > 0) {
-			LOG_WARNING(
-				UI,
-				"SDF atlas %s: %d glyphs missing atlasBounds, %d missing plane bounds (rendered as whitespace)",
-				jsonPath.c_str(),
-				missingAtlasBounds,
-				missingPlaneBounds
-			);
-		}
-
-		LOG_INFO(UI, "Loaded %zu SDF glyphs", sdfGlyphs.size());
-
-		// Load PNG atlas texture using stb_image
-		int width = 0;
-		int height = 0;
-		int channels = 0;
 		// OpenGL expects (0,0) at bottom-left, but images are stored with (0,0) at top-left
 		// Flip vertically so texture coordinates match
 		stbi_set_flip_vertically_on_load(1);
-
-		unsigned char* imageDataRaw = stbi_load(pngPath.c_str(), &width, &height, &channels, 3); // Force RGB
-
-		if (!imageDataRaw) {
-			LOG_ERROR(UI, "Failed to load SDF atlas texture: %s", pngPath.c_str());
-			return false;
+		int		   pngWidth = 0;
+		int		   pngHeight = 0;
+		int		   channels = 0;
+		const auto image = std::unique_ptr<unsigned char, decltype(&stbi_image_free)>(
+			stbi_load(pngPath.c_str(), &pngWidth, &pngHeight, &channels, 3), &stbi_image_free // Force RGB
+		);
+		if (image == nullptr) {
+			return fail("its PNG doesn't load: " + std::filesystem::path(pngPath).filename().string());
 		}
-
-		// Use RAII to ensure imageData is freed even if OpenGL operations fail
-		std::unique_ptr<unsigned char, decltype(&stbi_image_free)> imageData(imageDataRaw, stbi_image_free);
-
-		LOG_INFO(UI, "Loaded atlas texture: %dx%d, %d channels", width, height, channels);
+		if (pngWidth != atlasMetrics.width || pngHeight != atlasMetrics.height) {
+			return fail(
+				"is for a " + std::to_string(atlasMetrics.width) + "x" + std::to_string(atlasMetrics.height) + " atlas, and its PNG is " +
+				std::to_string(pngWidth) + "x" + std::to_string(pngHeight)
+			);
+		}
 
 		// RGB8, linear, clamped: the SDF is sampled bilinearly and decoded in the shader.
 		atlas.texture = Primitives::createTexture(
-			{.width = width, .height = height, .format = TextureFormat::Rgb8, .linear = true, .pixels = imageData.get()}
+			{.width = pngWidth, .height = pngHeight, .format = TextureFormat::Rgb8, .linear = true, .pixels = image.get()}
 		);
 		if (!atlas.texture.isValid()) {
-			LOG_ERROR(UI, "Failed to create SDF atlas texture: %s", pngPath.c_str());
-			return false;
+			return fail("its texture couldn't be made");
 		}
-
-		// imageData automatically freed by unique_ptr
-
-		// Update font metrics for compatibility with existing code
-		// Use BASE_FONT_SIZE (16px) not glyphSize (32px) since atlas is 2x oversampled for quality
-		constexpr float BASE_FONT_SIZE = 16.0F;
-		atlas.scaledAscender = atlasMetadata.ascender * BASE_FONT_SIZE;
-		atlas.maxGlyphHeightUnscaled = atlasMetadata.lineHeight;
 		atlas.loaded = true;
 
 		const std::string cramped = findCrampedGlyphs(atlas);
 		if (!cramped.empty()) {
-			// The file name, not the path, and the glyphs last: the logger stops at 256 characters.
+			// The glyphs last: the logger stops at 256 characters.
 			LOG_WARNING(
-				UI,
-				"SDF atlas %s: glyphs read past their cells, which need %.1f texels of room around the glyph, and draw slivers of their "
-				"neighbours: %s",
-				std::filesystem::path(jsonPath).filename().string().c_str(),
-				sampleReachTexels(atlasMetadata.distanceRange),
-				cramped.c_str()
+				UI, "SDF atlas %s: glyphs whose quads read into another's, and draw slivers of it: %s", file.c_str(), cramped.c_str()
 			);
 		}
 
@@ -375,17 +450,15 @@ namespace Renderer {
 		FontFamily				family,
 		float					letterSpacing
 	) const {
-		const FontFamily				resolved = resolve(family);
-		const Atlas&					atlas = atlasFor(resolved);
-		const std::map<char, SDFGlyph>& sdfGlyphs = atlas.glyphs;
+		const FontFamily resolved = resolve(family);
+		const Atlas&	 atlas = atlasFor(resolved);
 
 		// IMPORTANT: fontSize should be the REQUESTED rendering size, not atlas glyph size!
 		// The atlas may be generated at higher resolution (e.g., 32px) for quality,
-		// but scale=1.0 should render at BASE_FONT_SIZE (16px), not glyphSize (32px).
+		// but scale=1.0 should render at kBaseFontSize (16px), not the atlas's em.
 		// The glyph metrics are in EM units, so we scale by the requested pixel size.
-		constexpr float BASE_FONT_SIZE = 16.0F;							// scale=1.0 renders at this size
-		float			fontSize = BASE_FONT_SIZE * scale;				// Requested rendering size in pixels
-		float			baselineY = atlas.metadata.ascender * fontSize; // Relative to origin for caching
+		const float fontSize = kBaseFontSize * scale;			   // Requested rendering size in pixels
+		const float baselineY = atlas.metrics.ascender * fontSize; // Relative to origin for caching
 
 		// The run origin the renderer snaps to the pixel grid is the pen origin AT
 		// THE BASELINE (not the box top-left): aligning the baseline is what makes
@@ -424,47 +497,20 @@ namespace Renderer {
 		// Cache miss or caching disabled - generate quads
 		size_t startIdx = outQuads.size(); // Track where we started adding
 
-		// atlasBounds/planeBounds are the tight glyph outline, but the MSDF stays
-		// valid for distanceRange/2 texels beyond it, and that half holds the
-		// anti-aliased edge falloff. A quad clipped to the tight bounds cuts that
-		// falloff at its own (clamped) UV edge: invisible at large sizes, but at
-		// small sizes baseline snapping lands a cap top on an unlucky subpixel and
-		// the top AA row vanishes, shearing glyph tops flat and clipping the trailing
-		// glyph. Grow each quad by the valid half-range (not the full range, whose
-		// faint tail shows as edge lines on large text) in geometry and matching UV.
-		// Bilinear filtering then reads half a texel past the quad's UV edge, so the
-		// quad samples distanceRange/2 + 0.5 texels past atlasBounds
-		// (sampleReachTexels). The atlas generator (worldsim's tools/generate_sdf_atlas)
-		// has to leave that much room around each glyph inside its cell, or the glyph
-		// draws slivers of its neighbours; loading warns about any that lack it.
-		const float glyphSizeTexels = atlas.metadata.glyphSize > 0 ? static_cast<float>(atlas.metadata.glyphSize) : 32.0F;
-		const float halfRangeTexels = quadPadTexels(atlas.metadata.distanceRange);
-		const float padPx = (halfRangeTexels / glyphSizeTexels) * fontSize;
-		const float padU = atlas.metadata.atlasWidth > 0 ? halfRangeTexels / static_cast<float>(atlas.metadata.atlasWidth) : 0.0F;
-		const float padV = atlas.metadata.atlasHeight > 0 ? halfRangeTexels / static_cast<float>(atlas.metadata.atlasHeight) : 0.0F;
-
-		ForEachGlyph(sdfGlyphs, text, fontSize, letterSpacing, [&](const SDFGlyph& glyph, float penX) {
+		forEachGlyph(atlas, text, fontSize, letterSpacing, [&](const Glyph& glyph, float penX) {
 			// Only generate quad if glyph has geometry (not whitespace)
 			if (!glyph.hasGeometry) {
 				return;
 			}
 
-			// Use atlasBounds (actual glyph content) instead of the full atlas cell,
-			// grown by the valid SDF half-range (see note above).
-			// Reference: https://github.com/Chlumsky/msdf-atlas-gen/issues/2
 			GlyphQuad quad{};
-			quad.position =
-				glm::vec2(penX + glyph.planeBoundsMin.x * fontSize - padPx, baselineY - glyph.planeBoundsMax.y * fontSize - padPx);
-			quad.size = glm::vec2(
-				(glyph.planeBoundsMax.x - glyph.planeBoundsMin.x) * fontSize + 2.0F * padPx,
-				(glyph.planeBoundsMax.y - glyph.planeBoundsMin.y) * fontSize + 2.0F * padPx
-			);
-			// Clamp to [0,1] so an edge glyph's padded UV can't overshoot the atlas.
-			quad.uvMin = glm::clamp(glm::vec2(glyph.atlasBoundsMin.x - padU, glyph.atlasBoundsMin.y - padV), 0.0F, 1.0F);
-			quad.uvMax = glm::clamp(glm::vec2(glyph.atlasBoundsMax.x + padU, glyph.atlasBoundsMax.y + padV), 0.0F, 1.0F);
+			quad.position = glm::vec2(penX + glyph.planeMin.x * fontSize, baselineY - glyph.planeMax.y * fontSize);
+			quad.size = (glyph.planeMax - glyph.planeMin) * fontSize;
+			quad.uvMin = glyph.uvMin;
+			quad.uvMax = glyph.uvMax;
 			quad.color = color;
 			quad.atlas = atlas.texture.handle();
-			quad.pixelRange = atlas.metadata.distanceRange;
+			quad.pixelRange = atlas.metrics.distanceRange;
 
 			outQuads.push_back(quad);
 		});
@@ -522,10 +568,7 @@ namespace Renderer {
 		WrappedTextResult result;
 		result.family = key.family;
 		result.scale = scale;
-
-		constexpr float BASE_FONT_SIZE = 16.0F;
-		float			fontSize = BASE_FONT_SIZE * scale;
-		result.lineHeight = atlasFor(family).metadata.lineHeight * fontSize;
+		result.lineHeight = atlasFor(family).metrics.lineHeight * kBaseFontSize * scale;
 
 		// Handle empty text
 		if (text.empty()) {
@@ -554,10 +597,11 @@ namespace Renderer {
 			return wrappedTextCache[key].result;
 		}
 
-		// Word-based wrapping algorithm
+		// Word-based wrapping. Spaces and newlines are single bytes that no other character's
+		// bytes contain, so splitting at them splits no character. A line is measured whole as
+		// it grows, so the kerning across its spaces counts.
 		std::string currentLine;
 		float		currentLineWidth = 0.0F;
-		float		spaceWidth = MeasureText(" ", scale, family).x;
 
 		size_t i = 0;
 		while (i < text.size()) {
@@ -583,25 +627,24 @@ namespace Renderer {
 				++i;
 			}
 			std::string word = text.substr(wordStart, i - wordStart);
-			float		wordWidth = MeasureText(word, scale, family).x;
 
-			// Check if word fits on current line
-			float neededWidth = currentLine.empty() ? wordWidth : (currentLineWidth + spaceWidth + wordWidth);
-
-			if (neededWidth <= maxWidth || currentLine.empty()) {
-				// Word fits, or line is empty (must add word even if too long)
-				if (!currentLine.empty()) {
-					currentLine += ' ';
-					currentLineWidth += spaceWidth;
-				}
-				currentLine += word;
-				currentLineWidth += wordWidth;
+			if (currentLine.empty()) {
+				// An empty line takes the word even if it's too long
+				currentLine = std::move(word);
+				currentLineWidth = MeasureText(currentLine, scale, family).x;
 			} else {
-				// Word doesn't fit - start new line
-				result.lines.push_back(currentLine);
-				result.lineWidths.push_back(currentLineWidth);
-				currentLine = word;
-				currentLineWidth = wordWidth;
+				std::string longer = currentLine + ' ' + word;
+				const float longerWidth = MeasureText(longer, scale, family).x;
+				if (longerWidth <= maxWidth) {
+					currentLine = std::move(longer);
+					currentLineWidth = longerWidth;
+				} else {
+					// Word doesn't fit - start new line
+					result.lines.push_back(currentLine);
+					result.lineWidths.push_back(currentLineWidth);
+					currentLine = std::move(word);
+					currentLineWidth = MeasureText(currentLine, scale, family).x;
+				}
 			}
 
 			// Skip single space after word (will be handled by next iteration)
@@ -699,26 +742,46 @@ namespace Renderer {
 	}
 
 	std::string FontRenderer::findCrampedGlyphs(const Atlas& atlas) {
-		// In texels. The tolerance absorbs the rounding of the JSON's normalized
-		// coordinates, far under a texel; a glyph whose reach ends on its cell's edge fits.
+		// In texels. The tolerance absorbs the rounding in the JSON's coordinates, far under a
+		// texel; two reads that meet at an edge, as packed boxes do, don't overlap.
 		constexpr float kToleranceTexels = 0.01F;
-		const glm::vec2 atlasSize(static_cast<float>(atlas.metadata.atlasWidth), static_cast<float>(atlas.metadata.atlasHeight));
-		const float		reach = sampleReachTexels(atlas.metadata.distanceRange);
-
-		std::string cramped;
-		for (const auto& [c, glyph] : atlas.glyphs) {
-			if (!glyph.hasGeometry || !glyph.hasCell) {
-				continue;
-			}
-			const glm::vec2 readMin = glyph.atlasBoundsMin * atlasSize - reach;
-			const glm::vec2 readMax = glyph.atlasBoundsMax * atlasSize + reach;
-			const glm::vec2 cellMin = glyph.cellMin * atlasSize - kToleranceTexels;
-			const glm::vec2 cellMax = glyph.cellMax * atlasSize + kToleranceTexels;
-			if (readMin.x < cellMin.x || readMin.y < cellMin.y || readMax.x > cellMax.x || readMax.y > cellMax.y) {
-				cramped += c;
+		const glm::vec2 atlasSize(static_cast<float>(atlas.metrics.width), static_cast<float>(atlas.metrics.height));
+		struct Read {
+			glm::vec2 min;
+			glm::vec2 max;
+			char32_t  codePoint;
+		};
+		std::vector<Read> reads;
+		for (const auto& [codePoint, glyph] : atlas.glyphs) {
+			if (glyph.hasGeometry) {
+				reads.push_back(
+					{.min = glyph.uvMin * atlasSize - kBilinearFootprintTexels,
+					 .max = glyph.uvMax * atlasSize + kBilinearFootprintTexels,
+					 .codePoint = codePoint}
+				);
 			}
 		}
-		return cramped;
+
+		// Swept left to right, so each read is checked only against those that start before it ends.
+		std::ranges::sort(reads, {}, [](const Read& read) { return read.min.x; });
+		std::vector<char32_t> cramped;
+		for (size_t i = 0; i < reads.size(); ++i) {
+			for (size_t j = i + 1; j < reads.size() && reads[j].min.x < reads[i].max.x - kToleranceTexels; ++j) {
+				if (reads[j].min.y < reads[i].max.y - kToleranceTexels && reads[i].min.y < reads[j].max.y - kToleranceTexels) {
+					cramped.push_back(reads[i].codePoint);
+					cramped.push_back(reads[j].codePoint);
+				}
+			}
+		}
+		std::ranges::sort(cramped);
+		const auto [duplicates, end] = std::ranges::unique(cramped);
+		cramped.erase(duplicates, end);
+
+		std::string named;
+		for (const char32_t codePoint : cramped) {
+			named += foundation::UTF8::encode(codePoint);
+		}
+		return named;
 	}
 
 	void FontRenderer::updateFrame() {

@@ -4,9 +4,9 @@
 #include "ui/theme/Tokens.h"
 
 #include <primitives/Primitives.h>
+#include <utils/Utf8.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -72,9 +72,7 @@ namespace ui {
 		if (style.textTransform.value_or(Foundation::TextTransform::None) != Foundation::TextTransform::Uppercase) {
 			return text;
 		}
-		std::string upper = text;
-		std::ranges::transform(upper, upper.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-		return upper;
+		return foundation::UTF8::uppercase(text);
 	}
 
 	// Wrapping and explicit newlines take FontRenderer's wrapped path, which has no letter spacing.

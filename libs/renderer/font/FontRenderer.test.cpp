@@ -5,7 +5,7 @@
 // The key assertion renders a doubled string (s+s): the second copy's quads
 // must sit exactly MeasureText(s) + letterSpacing to the right of the first
 // copy's, which proves measured width == rendered pen advance, including the
-// '?' fallback for characters missing from the atlas.
+// fallback for characters missing from the atlas.
 //
 // Initialize takes its atlases from the caller: the contract tests check what it
 // refuses, that a refusal leaves nothing loaded, and what a family that is not
@@ -15,17 +15,19 @@
 // drawGlyphs samples it: there is no second place to name a family, and so no way
 // to draw one family's quads with another's atlas.
 //
-// A quad reads its atlas past the glyph's bounds, and the atlas generator has to
-// leave that much room in each glyph's cell; loading checks it, and crampedGlyphs
-// says what it found.
+// A quad reads its atlas half a texel past the glyph's atlasBounds, and no glyph's
+// read may cross another's; loading checks it, and crampedGlyphs says what it found.
 //
-// The atlases are synthetic, in the JSON layout worldsim's generate_sdf_atlas
-// writes: printable ASCII as boxes on a 16 x 6 grid of 32 px cells, each glyph
-// with an advance of its own, and a one-texel PNG. These tests read metrics, not
-// outlines, so no font goes into them.
+// The atlases are synthetic, in the JSON msdf-atlas-gen writes: printable ASCII,
+// three characters past it (two, three and four bytes of UTF-8) and optionally
+// U+FFFD, each glyph's box 32 texels square, packed 16 to a row from the atlas's
+// bottom so neighbouring boxes touch, its atlasBounds inset half a texel from the
+// box, each glyph with an advance of its own, and a blank PNG of the atlas's size.
+// These tests read metrics, not outlines, so no font goes into them.
 
 #include "font/FontRenderer.h"
 #include "BaseShader.h"
+#include "PngEncoder.h"
 #include "backend/NullBackend.h"
 #include "primitives/Primitives.h"
 #include "utils/Log.h"
@@ -33,6 +35,7 @@
 #include <glm/gtc/packing.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -54,79 +57,126 @@ namespace Renderer {
 		constexpr FontFamily kBody{0};
 		constexpr FontFamily kMono{3};
 
-		// stbi_load needs a real image; the null backend keeps none of its pixels.
-		constexpr unsigned char kOneTexelPng[] = {
-			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
-			0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
-			0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x04, 0x00, 0x01, 0xc8,
-			0xea, 0xeb, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
-		};
+		constexpr float kBox = 32.0F; // Texels a glyph's box, and an em
+		constexpr int	kAtlasWidth = 512;
+		constexpr int	kAtlasHeight = 256;
+		// Every glyph's plane bounds, in em: an em less a texel at each edge, as its box is.
+		constexpr float kPlaneLeft = -0.1F;
+		constexpr float kPlaneBottom = -0.25F;
+		constexpr float kPlaneExtent = (kBox - 1.0F) / kBox;
 
-		// Texels between a glyph and each edge of its cell.
-		struct Room {
-			float left = 4.0F;
-			float bottom = 4.0F;
-			float right = 4.0F;
-			float top = 4.0F;
+		struct KerningPair {
+			char32_t left;
+			char32_t right;
+			float	 advance; // In em
 		};
-
-		constexpr Room roomAround(float texels) {
-			return {.left = texels, .bottom = texels, .right = texels, .top = texels};
-		}
 
 		struct AtlasMetrics {
-			float				 ascender = 0.9F;
-			float				 lineHeight = 1.2F;
-			float				 advanceScale = 1.0F;  // Every advance, and the glyph boxes with them
-			float				 distanceRange = 4.0F; // Texels
-			std::map<char, Room> room;				   // Where not 4 texels on every side
-			std::string			 cellless;			   // Glyphs whose "atlas" gives no cell rect
-			std::string			 oddCells;			   // Glyphs whose cell has fields that aren't numbers
+			float						  ascender = 0.9F;
+			float						  lineHeight = 1.2F;
+			float						  advanceScale = 1.0F;	// Every advance
+			float						  distanceRange = 4.0F; // Texels
+			bool						  yOriginTop = false;
+			bool						  replacement = false; // U+FFFD among the glyphs
+			std::vector<KerningPair>	  kerning;
+			std::map<char32_t, glm::vec2> shift; // Texels a glyph's atlasBounds move, right and up
 		};
+
+		// The glyphs in their boxes' order: space has a box it doesn't use.
+		std::vector<char32_t> codePoints(bool replacement) {
+			std::vector<char32_t> glyphs;
+			for (char32_t c = U' '; c <= U'~'; ++c) {
+				glyphs.push_back(c);
+			}
+			glyphs.insert(glyphs.end(), {0xE9, 0x20AC, 0x1F600}); // é, €, 😀
+			if (replacement) {
+				glyphs.push_back(0xFFFD);
+			}
+			return glyphs;
+		}
+
+		size_t boxOf(char32_t codePoint) {
+			const std::vector<char32_t> glyphs = codePoints(true);
+			return static_cast<size_t>(std::ranges::find(glyphs, codePoint) - glyphs.begin());
+		}
+
+		// The bottom-left corner of a glyph's box, in texels from the atlas's bottom-left.
+		glm::vec2 boxCorner(size_t box) {
+			return {static_cast<float>(box % 16) * kBox, static_cast<float>(box / 16) * kBox};
+		}
+
+		float advanceOf(size_t box, float scale) {
+			return (0.45F + 0.03F * static_cast<float>(box % 9)) * scale;
+		}
 
 		std::string number(float value) {
 			return std::to_string(value);
 		}
 
-		// Space has no geometry; every other glyph is a box in its own cell.
 		std::string atlasJson(const AtlasMetrics& metrics) {
-			std::string json =
-				R"({"atlas":{"type":"msdf","distanceRange":)" + number(metrics.distanceRange) + R"(,"size":32,"width":512,"height":192},)";
-			json += R"("metrics":{"emSize":1,"ascender":)" + number(metrics.ascender) + R"(,"descender":-0.25,"lineHeight":)" +
-					number(metrics.lineHeight) + R"(},"glyphs":{)";
-			for (int c = ' '; c <= '~'; ++c) {
-				const int	cell = c - ' ';
-				const float advance = (0.45F + 0.03F * static_cast<float>(cell % 9)) * metrics.advanceScale;
-				std::string key(1, static_cast<char>(c));
-				if (c == '"' || c == '\\') {
-					key = "\\" + key;
+			// A top-origin file says the same glyphs with y pointing down: plane bounds and the
+			// ascender negated, atlas rows counted from the image's top.
+			const float up = metrics.yOriginTop ? -1.0F : 1.0F;
+			const auto	row = [&](float texels) {
+				 return number(metrics.yOriginTop ? static_cast<float>(kAtlasHeight) - texels : texels);
+			};
+			std::string json = R"({"atlas":{"type":"msdf","distanceRange":)" + number(metrics.distanceRange) +
+							   R"(,"distanceRangeMiddle":0,"size":32,"width":512,"height":256,"yOrigin":")" +
+							   (metrics.yOriginTop ? "top" : "bottom") + R"("},)";
+			json += R"("name":"Test","metrics":{"emSize":1,"lineHeight":)" + number(metrics.lineHeight) + R"(,"ascender":)" +
+					number(up * metrics.ascender) + R"(,"descender":)" + number(up * -0.25F) + R"(},"glyphs":[)";
+			const std::vector<char32_t> glyphs = codePoints(metrics.replacement);
+			for (size_t box = 0; box < glyphs.size(); ++box) {
+				json += box == 0 ? "{" : ",{";
+				json += R"("unicode":)" + std::to_string(static_cast<unsigned>(glyphs[box])) + R"(,"advance":)" +
+						number(advanceOf(box, metrics.advanceScale));
+				if (glyphs[box] != U' ') {
+					const auto		shifted = metrics.shift.find(glyphs[box]);
+					const glm::vec2 offset = shifted != metrics.shift.end() ? shifted->second : glm::vec2(0.0F);
+					const glm::vec2 low = boxCorner(box) + 0.5F + offset;
+					const glm::vec2 high = boxCorner(box) + (kBox - 0.5F) + offset;
+					json += R"(,"planeBounds":{"left":)" + number(kPlaneLeft) + R"(,"bottom":)" + number(up * kPlaneBottom) +
+							R"(,"right":)" + number(kPlaneLeft + kPlaneExtent) + R"(,"top":)" + number(up * (kPlaneBottom + kPlaneExtent)) +
+							"}";
+					json += R"(,"atlasBounds":{"left":)" + number(low.x) + R"(,"bottom":)" + row(low.y) + R"(,"right":)" + number(high.x) +
+							R"(,"top":)" + row(high.y) + "}";
 				}
-				json += (c == ' ' ? "\"" : ",\"") + key + "\":{";
-				if (c == ' ') {
-					json += R"("atlas":null,"atlasBounds":null,"plane":null,)";
-				} else {
-					const float col = static_cast<float>(cell % 16);
-					const float row = static_cast<float>(cell / 16);
-					const auto	room = metrics.room.find(static_cast<char>(c));
-					const Room	inset = room != metrics.room.end() ? room->second : Room{};
-					if (metrics.cellless.find(static_cast<char>(c)) != std::string::npos) {
-						json += R"("atlas":{},)";
-					} else if (metrics.oddCells.find(static_cast<char>(c)) != std::string::npos) {
-						json += R"("atlas":{"x":null,"y":0,"width":"wide","height":0.0625},)";
-					} else {
-						json += R"("atlas":{"x":)" + number(col / 16.0F) + R"(,"y":)" + number(row / 6.0F) +
-								R"(,"width":0.0625,"height":)" + number(1.0F / 6.0F) + "},";
-					}
-					json += R"("atlasBounds":{"left":)" + number((col * 32.0F + inset.left) / 512.0F) + R"(,"bottom":)" +
-							number((row * 32.0F + inset.bottom) / 192.0F) + R"(,"right":)" +
-							number((col * 32.0F + 32.0F - inset.right) / 512.0F) + R"(,"top":)" +
-							number((row * 32.0F + 32.0F - inset.top) / 192.0F) + "},";
-					json += R"("plane":{"left":0.05,"bottom":-0.1,"right":)" + number(advance - 0.05F) + R"(,"top":0.7},)";
-				}
-				json += R"("advance":)" + number(advance) + "}";
+				json += "}";
 			}
-			json += "}}";
+			json += R"(],"kerning":[)";
+			for (size_t i = 0; i < metrics.kerning.size(); ++i) {
+				const KerningPair& pair = metrics.kerning[i];
+				json += (i == 0 ? R"({"unicode1":)" : R"(,{"unicode1":)") + std::to_string(static_cast<unsigned>(pair.left)) +
+						R"(,"unicode2":)" + std::to_string(static_cast<unsigned>(pair.right)) + R"(,"advance":)" + number(pair.advance) +
+						"}";
+			}
+			json += "]}";
 			return json;
+		}
+
+		// One glyph, 'A', in a 64 x 48 atlas, written as msdf-atlas-gen writes a game's atlas
+		// (top origin, so the ascender and the plane's tops are negative and atlas rows count
+		// down from the image's top), every length in em times `em`, the file's emSize. 'A' fills
+		// 8.5 to 40.5 texels across and 4.5 to 36.5 down; its plane is an em square, 0.125 em left
+		// of the pen and reaching 0.75 em above the baseline.
+		std::string oneGlyphJson(double em = 1.0) {
+			const auto lengths = [em](double value) {
+				return std::to_string(value * em);
+			};
+			std::string json = R"({"atlas":{"type":"mtsdf","distanceRange":8,"distanceRangeMiddle":0,"size":48,"width":64,"height":48,)";
+			json += R"("yOrigin":"top"},"metrics":{"emSize":)" + lengths(1.0) + R"(,"lineHeight":)" + lengths(1.25) + R"(,"ascender":)" +
+					lengths(-1.0) + R"(,"descender":)" + lengths(0.25) + R"(},"glyphs":[)";
+			json += R"({"unicode":32,"advance":)" + lengths(0.25) + "},";
+			json += R"({"unicode":65,"advance":)" + lengths(0.5) + R"(,"planeBounds":{"left":)" + lengths(-0.125) + R"(,"top":)" +
+					lengths(-0.75) + R"(,"right":)" + lengths(0.875) + R"(,"bottom":)" + lengths(0.25) +
+					R"(},"atlasBounds":{"left":8.5,"top":4.5,"right":40.5,"bottom":36.5}}],"kerning":[]})";
+			return json;
+		}
+
+		std::string replaced(std::string text, const std::string& from, const std::string& to) {
+			const size_t at = text.find(from);
+			EXPECT_NE(at, std::string::npos) << from;
+			return at == std::string::npos ? text : text.replace(at, from.size(), to);
 		}
 
 		// A folder of its own per test, removed with it.
@@ -148,10 +198,15 @@ namespace Renderer {
 			AtlasFolder& operator=(const AtlasFolder&) = delete;
 
 			FontAtlasSource write(FontFamily family, const std::string& name, const AtlasMetrics& metrics = {}) const {
+				return writeJson(family, name, atlasJson(metrics), kAtlasWidth, kAtlasHeight);
+			}
+
+			// The JSON as given, and a blank PNG of the size given.
+			FontAtlasSource writeJson(FontFamily family, const std::string& name, const std::string& json, int width, int height) const {
 				const FontAtlasSource source{.family = family, .pngPath = file(name + ".png"), .jsonPath = file(name + ".json")};
-				std::ofstream(source.jsonPath, std::ios::binary) << atlasJson(metrics);
-				std::ofstream(source.pngPath, std::ios::binary)
-					.write(reinterpret_cast<const char*>(kOneTexelPng), static_cast<std::streamsize>(sizeof(kOneTexelPng)));
+				std::ofstream(source.jsonPath, std::ios::binary) << json;
+				const std::vector<unsigned char> blank(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+				EXPECT_TRUE(writePngToFile(blank.data(), width, height, source.pngPath));
 				return source;
 			}
 
@@ -160,6 +215,34 @@ namespace Renderer {
 
 		  private:
 			std::filesystem::path path;
+		};
+
+		// The UI records logged at one level while it lives.
+		class UiLog {
+		  public:
+			explicit UiLog(foundation::LogLevel level)
+				: level(level) {
+				foundation::Logger::setSink(
+					[](void* context, const foundation::LogRecord& record) {
+						auto* log = static_cast<UiLog*>(context);
+						if (record.category == foundation::LogCategory::UI && record.level == log->level) {
+							log->messages.emplace_back(record.message);
+						}
+					},
+					this
+				);
+			}
+			~UiLog() { foundation::Logger::setSink(nullptr, nullptr); }
+
+			UiLog(const UiLog&) = delete;
+			UiLog& operator=(const UiLog&) = delete;
+			UiLog(UiLog&&) = delete;
+			UiLog& operator=(UiLog&&) = delete;
+
+			std::vector<std::string> messages;
+
+		  private:
+			foundation::LogLevel level;
 		};
 
 		class FontRendererFixture : public ::testing::Test {
@@ -184,6 +267,27 @@ namespace Renderer {
 			// Atlas textures it has made since the test began, released or not.
 			int atlasTexturesMade() const { return nullBackend->texturesMade() - texturesMadeBefore; }
 
+			std::vector<FontRenderer::GlyphQuad>
+			quadsFor(const std::string& text, float scale = 1.0F, float letterSpacing = 0.0F, FontFamily family = kBody) const {
+				std::vector<FontRenderer::GlyphQuad> quads;
+				fontRenderer->generateGlyphQuads(text, glm::vec2(0.0F, 0.0F), scale, glm::vec4(1.0F), quads, family, letterSpacing);
+				return quads;
+			}
+
+			// Two strings draw alike: the same width, and quads in the same places sampling the same texels.
+			void expectDrawnAlike(const std::string& text, const std::string& like, FontFamily family = kBody) const {
+				EXPECT_FLOAT_EQ(fontRenderer->MeasureText(text, 1.0F, family).x, fontRenderer->MeasureText(like, 1.0F, family).x)
+					<< testing::PrintToString(text);
+				const auto quads = quadsFor(text, 1.0F, 0.0F, family);
+				const auto expected = quadsFor(like, 1.0F, 0.0F, family);
+				ASSERT_EQ(quads.size(), expected.size()) << testing::PrintToString(text);
+				for (size_t i = 0; i < quads.size(); ++i) {
+					EXPECT_EQ(quads[i].position, expected[i].position) << testing::PrintToString(text) << " glyph " << i;
+					EXPECT_EQ(quads[i].uvMin, expected[i].uvMin) << testing::PrintToString(text) << " glyph " << i;
+					EXPECT_EQ(quads[i].uvMax, expected[i].uvMax) << testing::PrintToString(text) << " glyph " << i;
+				}
+			}
+
 			AtlasFolder					  folder;
 			backend::NullBackend*		  nullBackend = nullptr;
 			size_t						  texturesBefore = 0;
@@ -196,12 +300,6 @@ namespace Renderer {
 			void SetUp() override {
 				FontRendererFixture::SetUp();
 				ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body")}, kBody));
-			}
-
-			std::vector<FontRenderer::GlyphQuad> quadsFor(const std::string& text, float scale, float letterSpacing) const {
-				std::vector<FontRenderer::GlyphQuad> quads;
-				fontRenderer->generateGlyphQuads(text, glm::vec2(0.0F, 0.0F), scale, glm::vec4(1.0F), quads, kBody, letterSpacing);
-				return quads;
 			}
 		};
 
@@ -223,11 +321,18 @@ namespace Renderer {
 
 	TEST_F(FontRendererTest, MeasuredWidthMatchesRenderedAdvance) {
 		// Includes '\x01', a character absent from the atlas (exercises the '?'
-		// fallback inside the doubled-string advance check).
+		// fallback inside the doubled-string advance check), and characters of two to four bytes.
 		const std::string missingChar = std::string("mi") + '\x01' + "ssing";
-		const std::string testStrings[] = {"Hello, World!", "iiiillll", "A B C", missingChar};
-		const float		  letterSpacings[] = {0.0F, 2.5F};
-		const float		  scales[] = {1.0F, 1.25F};
+		const std::string testStrings[] = {
+			"Hello, World!",
+			"iiiillll",
+			"A B C",
+			missingChar,
+			"caf\xC3\xA9 \xE2\x82\xAC"
+			"5 \xF0\x9F\x98\x80"
+		};
+		const float letterSpacings[] = {0.0F, 2.5F};
+		const float scales[] = {1.0F, 1.25F};
 
 		for (const std::string& text : testStrings) {
 			for (float letterSpacing : letterSpacings) {
@@ -256,29 +361,65 @@ namespace Renderer {
 		}
 	}
 
-	TEST_F(FontRendererTest, MissingGlyphMeasuresAndRendersAsFallback) {
-		const std::string withMissing = std::string("a") + '\x01' + "b";
-		const std::string withFallback = "a?b";
-
-		EXPECT_FLOAT_EQ(fontRenderer->MeasureText(withMissing, 1.0F).x, fontRenderer->MeasureText(withFallback, 1.0F).x);
-
-		const auto quadsMissing = quadsFor(withMissing, 1.0F, 0.0F);
-		const auto quadsFallback = quadsFor(withFallback, 1.0F, 0.0F);
-		ASSERT_EQ(quadsMissing.size(), quadsFallback.size());
-		for (size_t i = 0; i < quadsMissing.size(); ++i) {
-			EXPECT_FLOAT_EQ(quadsMissing[i].position.x, quadsFallback[i].position.x);
-			EXPECT_FLOAT_EQ(quadsMissing[i].position.y, quadsFallback[i].position.y);
-			EXPECT_FLOAT_EQ(quadsMissing[i].uvMin.x, quadsFallback[i].uvMin.x);
-			EXPECT_FLOAT_EQ(quadsMissing[i].uvMax.x, quadsFallback[i].uvMax.x);
+	TEST_F(FontRendererTest, CharactersPastAsciiLayOutByCodePoint) {
+		// é, € and 😀: two, three and four bytes, one glyph each, from their own boxes.
+		const std::string			  text = "\xC3\xA9\xE2\x82\xAC\xF0\x9F\x98\x80";
+		const std::array<char32_t, 3> expected{0xE9, 0x20AC, 0x1F600};
+		const auto					  quads = quadsFor(text);
+		ASSERT_EQ(quads.size(), expected.size());
+		float width = 0.0F;
+		for (size_t i = 0; i < expected.size(); ++i) {
+			const size_t box = boxOf(expected[i]);
+			EXPECT_FLOAT_EQ(quads[i].uvMin.x, (boxCorner(box).x + 0.5F) / static_cast<float>(kAtlasWidth)) << "glyph " << i;
+			EXPECT_FLOAT_EQ(quads[i].uvMin.y, (boxCorner(box).y + 0.5F) / static_cast<float>(kAtlasHeight)) << "glyph " << i;
+			EXPECT_NEAR(quads[i].position.x, width + kPlaneLeft * 16.0F, 1e-4F) << "glyph " << i;
+			width += advanceOf(box, 1.0F) * 16.0F;
 		}
+		EXPECT_NEAR(fontRenderer->MeasureText(text, 1.0F).x, width, 1e-4F);
+	}
+
+	TEST_F(FontRendererTest, MissingGlyphMeasuresAndRendersAsFallback) {
+		// This atlas has no U+FFFD, so what it lacks draws as '?': a byte it has no glyph for, a
+		// character past ASCII (世), and each ill-formed sequence.
+		expectDrawnAlike(std::string("a") + '\x01' + "b", "a?b");
+		expectDrawnAlike(
+			"a\xE4\xB8\x96"
+			"b",
+			"a?b"
+		);
+		expectDrawnAlike(
+			"a\xE2\x82"
+			"b\x80\x80",
+			"a?b??"
+		);
+	}
+
+	TEST_F(FontRendererInitializeTest, WithAReplacementGlyphWhatTheAtlasLacksDrawsAsIt) {
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body", {.replacement = true})}, kBody));
+		const std::string replacement = "\xEF\xBF\xBD";
+		expectDrawnAlike(std::string("a") + '\x01' + "b", "a" + replacement + "b");
+		expectDrawnAlike(
+			"a\xE4\xB8\x96"
+			"b",
+			"a" + replacement + "b"
+		);
+		// One replacement a bad sequence: three bytes cut short, then two lone continuation bytes, then
+		// four cut short by the end.
+		expectDrawnAlike(
+			"a\xE2\x82"
+			"b\x80\x80"
+			"c\xF0\x9F\x98",
+			"a" + replacement + "b" + replacement + replacement + "c" + replacement
+		);
 	}
 
 	TEST_F(FontRendererTest, LetterSpacingSitsBetweenGlyphsOnly) {
-		const std::string text = "spacing";
+		// Between characters, not bytes: six characters in nine bytes, five gaps.
+		const std::string text = "caf\xC3\xA9 \xE2\x82\xAC";
 		const float		  letterSpacing = 3.0F;
 		const float		  base = fontRenderer->MeasureText(text, 1.0F).x;
 		const float		  spaced = fontRenderer->MeasureText(text, 1.0F, kBody, letterSpacing).x;
-		EXPECT_NEAR(spaced - base, letterSpacing * static_cast<float>(text.size() - 1), 1e-3F);
+		EXPECT_NEAR(spaced - base, letterSpacing * 5.0F, 1e-3F);
 
 		EXPECT_FLOAT_EQ(fontRenderer->MeasureText("", 1.0F).x, 0.0F);
 	}
@@ -341,6 +482,123 @@ namespace Renderer {
 				EXPECT_NEAR(quads[i].size.y, expected[i].size.y, 1e-3F) << "glyph " << i << " scale=" << scale;
 			}
 		}
+	}
+
+	// --- The atlas format ---
+
+	TEST_F(FontRendererInitializeTest, AGlyphsQuadIsItsPlaneBoundsSamplingItsAtlasBounds) {
+		// The same glyph in an em of 1 and of 2 lays out the same.
+		for (const double em : {1.0, 2.0}) {
+			ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.writeJson(kBody, "one", oneGlyphJson(em), 64, 48)}, kBody)) << em;
+			std::vector<FontRenderer::GlyphQuad> quads;
+			fontRenderer->generateGlyphQuads("A A", glm::vec2(10.0F, 20.0F), 1.0F, glm::vec4(1.0F), quads);
+			ASSERT_EQ(quads.size(), 2U) << em;
+
+			// An em is 16 px at a scale of 1, and the ascender of an em puts the baseline 16 px down.
+			EXPECT_FLOAT_EQ(fontRenderer->getAscent(1.0F), 16.0F) << em;
+			EXPECT_FLOAT_EQ(quads[0].position.x, 10.0F - 0.125F * 16.0F) << em;
+			EXPECT_FLOAT_EQ(quads[0].position.y, 20.0F + 16.0F - 0.75F * 16.0F) << em;
+			EXPECT_FLOAT_EQ(quads[0].size.x, 16.0F) << em;
+			EXPECT_FLOAT_EQ(quads[0].size.y, 16.0F) << em;
+			// Texels over the atlas's size, with y up in the atlas as uploaded: rows 36.5 and 4.5 down
+			// from the image's top are 11.5 and 43.5 up from its bottom.
+			EXPECT_FLOAT_EQ(quads[0].uvMin.x, 8.5F / 64.0F) << em;
+			EXPECT_FLOAT_EQ(quads[0].uvMax.x, 40.5F / 64.0F) << em;
+			EXPECT_FLOAT_EQ(quads[0].uvMin.y, 11.5F / 48.0F) << em;
+			EXPECT_FLOAT_EQ(quads[0].uvMax.y, 43.5F / 48.0F) << em;
+			EXPECT_FLOAT_EQ(quads[0].pixelRange, 8.0F) << em;
+
+			// The space has only an advance: the second A is an A's and a space's advance on.
+			EXPECT_FLOAT_EQ(quads[1].position.x - quads[0].position.x, (0.5F + 0.25F) * 16.0F) << em;
+			EXPECT_EQ(fontRenderer->MeasureText("A A", 1.0F), glm::vec2((0.5F + 0.25F + 0.5F) * 16.0F, 1.25F * 16.0F)) << em;
+		}
+	}
+
+	TEST_F(FontRendererInitializeTest, BothYOriginsLoadTheSameGlyphs) {
+		const std::array sources{folder.write(kBody, "bottom"), folder.write(kMono, "top", {.yOriginTop = true})};
+		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody));
+		EXPECT_FLOAT_EQ(fontRenderer->getAscent(1.0F, kMono), fontRenderer->getAscent(1.0F, kBody));
+		const std::string text = "Hello, caf\xC3\xA9 \xF0\x9F\x98\x80";
+		EXPECT_EQ(fontRenderer->MeasureText(text, 1.0F, kMono), fontRenderer->MeasureText(text, 1.0F, kBody));
+		const auto top = quadsFor(text, 1.0F, 0.0F, kMono);
+		const auto bottom = quadsFor(text, 1.0F, 0.0F, kBody);
+		ASSERT_EQ(top.size(), bottom.size());
+		for (size_t i = 0; i < top.size(); ++i) {
+			EXPECT_EQ(top[i].position, bottom[i].position) << "glyph " << i;
+			EXPECT_EQ(top[i].size, bottom[i].size) << "glyph " << i;
+			EXPECT_EQ(top[i].uvMin, bottom[i].uvMin) << "glyph " << i;
+			EXPECT_EQ(top[i].uvMax, bottom[i].uvMax) << "glyph " << i;
+		}
+	}
+
+	TEST_F(FontRendererInitializeTest, KerningAppliesInMeasuringLayingOutAndWrapping) {
+		// A then V closes up a tenth of an em, and V then a space a twentieth; V then A is unkerned.
+		const AtlasMetrics kerned{
+			.kerning = {{.left = U'A', .right = U'V', .advance = -0.1F}, {.left = U'V', .right = U' ', .advance = -0.05F}}
+		};
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body", kerned), folder.write(kMono, "plain")}, kBody));
+		const float a = advanceOf(boxOf(U'A'), 1.0F) * 16.0F;
+		const float v = advanceOf(boxOf(U'V'), 1.0F) * 16.0F;
+		const float space = advanceOf(boxOf(U' '), 1.0F) * 16.0F;
+
+		EXPECT_NEAR(fontRenderer->MeasureText("AV", 1.0F).x, a + v - 1.6F, 1e-4F);
+		EXPECT_NEAR(fontRenderer->MeasureText("VA", 1.0F).x, a + v, 1e-4F);
+		EXPECT_NEAR(fontRenderer->MeasureText("AV", 1.0F, kMono).x, a + v, 1e-4F);
+		const auto quads = quadsFor("AV");
+		ASSERT_EQ(quads.size(), 2U);
+		EXPECT_NEAR(quads[1].position.x - quads[0].position.x, a - 1.6F, 1e-4F);
+		// With letter spacing too, both go between the glyphs.
+		EXPECT_NEAR(fontRenderer->MeasureText("AV", 1.0F, kBody, 2.0F).x, a + v - 1.6F + 2.0F, 1e-4F);
+
+		// "AV AV" is 4 px narrower kerned (two A-Vs and a V-space), so it fits a width the
+		// sum of its words and the space doesn't, and one line measures what it draws.
+		const float kernedWidth = fontRenderer->MeasureText("AV AV", 1.0F).x;
+		EXPECT_NEAR(kernedWidth, 2.0F * (a + v) + space - 4.0F, 1e-4F);
+		const FontRenderer::WrappedTextResult& wrapped = fontRenderer->wrapText("AV AV", 1.0F, kernedWidth + 0.5F);
+		ASSERT_EQ(wrapped.lines.size(), 1U);
+		EXPECT_FLOAT_EQ(wrapped.totalWidth, kernedWidth);
+		EXPECT_EQ(fontRenderer->wrapText("AV AV", 1.0F, kernedWidth - 0.5F).lines.size(), 2U);
+	}
+
+	TEST_F(FontRendererInitializeTest, ABadAtlasFailsToLoadWithItsReasonLogged) {
+		// Each a file msdf-atlas-gen didn't write, or one it wrote that this can't draw, or a PNG that
+		// isn't the JSON's; each fails Initialize, as the default, naming the file and why.
+		const std::string json = oneGlyphJson();
+		const std::string glyphA = R"({"unicode":65,)";
+		struct Bad {
+			std::string json;
+			int			pngWidth;
+			std::string reason;
+		};
+		const Bad bad[] = {
+			{.json = R"({"atlas":{"type":"msdf","distanceRange":4,"size":32,"width":64,"height":48},"metrics":{"emSize":1,"ascender":1,)"
+					 R"("descender":-0.3,"lineHeight":1.3},"glyphs":{"A":{"advance":0.5}}})",
+			 .pngWidth = 64,
+			 .reason = "scripts/convert-font-atlas.mjs"},
+			{.json = replaced(json, glyphA, R"({"index":36,)"), .pngWidth = 64, .reason = "glyph index"},
+			{.json = replaced(json, R"("type":"mtsdf")", R"("type":"hardmask")"), .pngWidth = 64, .reason = "atlas.type"},
+			{.json = replaced(json, R"("yOrigin":"top")", R"("yOrigin":"middle")"), .pngWidth = 64, .reason = "atlas.yOrigin"},
+			{.json = replaced(json, R"("distanceRangeMiddle":0)", R"("distanceRangeMiddle":0.5)"),
+			 .pngWidth = 64,
+			 .reason = "distanceRangeMiddle"},
+			{.json = replaced(json, R"(,"atlasBounds":{"left":8.5,"top":4.5,"right":40.5,"bottom":36.5})", ""),
+			 .pngWidth = 64,
+			 .reason = "U+0041 has planeBounds and no atlasBounds"},
+			{.json = replaced(json, R"("right":40.5)", R"("right":64.5)"), .pngWidth = 64, .reason = "U+0041's atlasBounds"},
+			{.json = replaced(json, R"({"unicode":32,)", R"({"unicode":65,)"), .pngWidth = 64, .reason = "U+0041 is given twice"},
+			{.json = replaced(json, R"("glyphs":[)", R"("variants":[],"glyphs":[)"), .pngWidth = 64, .reason = "several fonts"},
+			{.json = json, .pngWidth = 32, .reason = "is for a 64x48 atlas, and its PNG is 32x48"},
+		};
+		for (const Bad& sample : bad) {
+			const UiLog errors(foundation::LogLevel::Error);
+			EXPECT_FALSE(fontRenderer->Initialize(std::array{folder.writeJson(kBody, "bad", sample.json, sample.pngWidth, 48)}, kBody))
+				<< sample.reason;
+			expectNothingLoaded();
+			ASSERT_FALSE(errors.messages.empty()) << sample.reason;
+			EXPECT_TRUE(errors.messages[0].starts_with("SDF atlas bad.json: ")) << errors.messages[0];
+			EXPECT_NE(errors.messages[0].find(sample.reason), std::string::npos) << errors.messages[0];
+		}
+		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.writeJson(kBody, "good", json, 64, 48)}, kBody));
 	}
 
 	// --- Initialize's contract ---
@@ -616,108 +874,68 @@ namespace Renderer {
 		}
 	}
 
-	// --- Room around each glyph in its cell ---
+	// --- Glyphs reading into each other ---
 
-	TEST_F(FontRendererInitializeTest, ARoomyAtlasHasNoCrampedGlyphs) {
-		// Four texels around every glyph, and a quad reads 2 + 0.5 past it at a distance range of 4.
+	TEST_F(FontRendererInitializeTest, APackedAtlasWhoseReadsMeetHasNoCrampedGlyphs) {
+		// Boxes touch, and each quad reads half a texel past atlasBounds inset half a texel: to the box's edge.
 		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body")}, kBody));
 		EXPECT_EQ(fontRenderer->crampedGlyphs(), "");
 		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "");
 	}
 
-	TEST_F(FontRendererInitializeTest, AGlyphWithLessRoomThanItsQuadReadsIsCramped) {
-		// The reach is half the distance range plus half a texel: 2.5 texels at a range of 4, and 1.5
-		// at a range of 2. Each of '(', ')', '[' and ']' is short on one edge only: the top (as a tall
-		// glyph is), the bottom, the left and the right. '{' has exactly the reach, and '|' reads
-		// 0.003 texels past its cell, inside the tolerance for the JSON's rounding.
-		const std::map<char, Room> room{
-			{'(', {.top = 1.0F}},
-			{')', {.bottom = 1.0F}},
-			{'[', {.left = 2.4F}},
-			{']', {.right = 2.4F}},
-			{'{', roomAround(2.5F)},
-			{'|', roomAround(2.497F)},
-			{'}', roomAround(3.0F)},
+	TEST_F(FontRendererInitializeTest, AGlyphReadingIntoAnothersIsCrampedAndSoIsTheOther) {
+		// '(' moves a fifth of a texel right into ')', '[' left into 'Z', '}' down into the 'm' below it
+		// and é left into '~'; '{' moves 0.005 texels right, inside the tolerance for the JSON's rounding.
+		const AtlasMetrics shifted{
+			.shift = {
+				{U'(', {0.2F, 0.0F}},
+				{U'[', {-0.2F, 0.0F}},
+				{U'}', {0.0F, -0.2F}},
+				{0xE9, {-0.2F, 0.0F}},
+				{U'{', {0.005F, 0.0F}},
+			}
 		};
 		const std::array sources{
-			folder.write(kBody, "body", {.room = room}),
-			folder.write(kMono, "mono", {.distanceRange = 2.0F, .room = room}),
+			folder.write(kBody, "body", shifted), folder.write(kMono, "mono", {.distanceRange = 8.0F, .shift = shifted.shift})
 		};
 		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody)); // warned about, still loaded
-		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "()[]");
-		EXPECT_EQ(fontRenderer->crampedGlyphs(kMono), "()");
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kBody), "()Z[m}~\xC3\xA9");
+		EXPECT_EQ(fontRenderer->crampedGlyphs(kMono), "()Z[m}~\xC3\xA9"); // the range doesn't move the read
 
 		std::vector<FontRenderer::GlyphQuad> quads;
 		fontRenderer->generateGlyphQuads("()", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads, kBody);
 		EXPECT_EQ(quads.size(), 2U);
 	}
 
-	TEST_F(FontRendererInitializeTest, AGlyphWithoutACellIsNotChecked) {
-		// ')' and ']' are as cramped as '(', but ')' has no cell and ']' a cell of null and a string,
-		// nothing to be cramped in. The atlas still loads, and both still draw.
-		const AtlasMetrics atlas{
-			.room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}, {']', roomAround(1.0F)}}, .cellless = ")", .oddCells = "]"
-		};
-		ASSERT_TRUE(fontRenderer->Initialize(std::array{folder.write(kBody, "body", atlas)}, kBody));
-		EXPECT_EQ(fontRenderer->crampedGlyphs(), "(");
-
-		std::vector<FontRenderer::GlyphQuad> quads;
-		fontRenderer->generateGlyphQuads(")]", glm::vec2(0.0F), 1.0F, glm::vec4(1.0F), quads);
-		EXPECT_EQ(quads.size(), 2U);
-	}
-
 #ifdef DEVELOPMENT_BUILD
-	// The UI warnings logged while it lives.
-	class UiWarnings {
-	  public:
-		UiWarnings() {
-			foundation::Logger::setSink(
-				[](void* context, const foundation::LogRecord& record) {
-					if (record.category == foundation::LogCategory::UI && record.level == foundation::LogLevel::Warning) {
-						static_cast<UiWarnings*>(context)->warnings.emplace_back(record.message);
-					}
-				},
-				this
-			);
-		}
-		~UiWarnings() { foundation::Logger::setSink(nullptr, nullptr); }
-
-		UiWarnings(const UiWarnings&) = delete;
-		UiWarnings& operator=(const UiWarnings&) = delete;
-		UiWarnings(UiWarnings&&) = delete;
-		UiWarnings& operator=(UiWarnings&&) = delete;
-
-		std::vector<std::string> warnings;
-	};
-
 	TEST_F(FontRendererInitializeTest, LoadingWarnsOncePerCrampedAtlasNamingItsGlyphs) {
-		const UiWarnings captured;
+		const UiLog captured(foundation::LogLevel::Warning);
 
 		// Two cramped atlases and a roomy one between them, at a range wide enough for small text.
 		constexpr FontFamily kDisplay{5};
 		const std::array	 sources{
-			folder.write(kBody, "body", {.distanceRange = 6.0F, .room = {{'(', roomAround(1.0F)}, {')', roomAround(1.0F)}}}),
+			folder.write(kBody, "body", {.distanceRange = 6.0F, .shift = {{U'(', {0.2F, 0.0F}}}}),
 			folder.write(kMono, "mono", {.distanceRange = 6.0F}),
-			folder.write(kDisplay, "display", {.distanceRange = 6.0F, .room = {{'[', roomAround(1.0F)}}}),
+			folder.write(kDisplay, "display", {.distanceRange = 6.0F, .shift = {{U'[', {-0.2F, 0.0F}}}}),
 		};
 		ASSERT_TRUE(fontRenderer->Initialize(sources, kBody));
-		ASSERT_EQ(captured.warnings.size(), 2U);
-		EXPECT_TRUE(captured.warnings[0].starts_with("SDF atlas body.json: ")) << captured.warnings[0];
-		EXPECT_TRUE(captured.warnings[0].ends_with(": ()")) << captured.warnings[0];
-		EXPECT_TRUE(captured.warnings[1].starts_with("SDF atlas display.json: ")) << captured.warnings[1];
-		EXPECT_TRUE(captured.warnings[1].ends_with(": [")) << captured.warnings[1];
+		ASSERT_EQ(captured.messages.size(), 2U);
+		EXPECT_TRUE(captured.messages[0].starts_with("SDF atlas body.json: ")) << captured.messages[0];
+		EXPECT_TRUE(captured.messages[0].ends_with(": ()")) << captured.messages[0];
+		EXPECT_TRUE(captured.messages[1].starts_with("SDF atlas display.json: ")) << captured.messages[1];
+		EXPECT_TRUE(captured.messages[1].ends_with(": Z[")) << captured.messages[1];
 	}
 
 	TEST_F(FontRendererInitializeTest, AnAtlasWhoseRangeIsUnderASixthOfItsEmWarns) {
-		const UiWarnings captured;
+		const UiLog captured(foundation::LogLevel::Warning);
 
 		// The test atlases' em is 32 texels: a range of 4 is under a sixth of it, 6 is not.
 		ASSERT_TRUE(
 			fontRenderer->Initialize(std::array{folder.write(kBody, "body", {.distanceRange = 6.0F}), folder.write(kMono, "mono")}, kBody)
 		);
-		ASSERT_EQ(captured.warnings.size(), 1U);
+		ASSERT_EQ(captured.messages.size(), 1U);
 		EXPECT_EQ(
-			captured.warnings[0],
+			captured.messages[0],
 			"SDF atlas mono.json: a distance range of 4.0 texels is under a sixth of its 32-texel em, too thin for small text; generate "
 			"it with 6 or more"
 		);

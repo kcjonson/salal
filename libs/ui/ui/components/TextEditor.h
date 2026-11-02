@@ -1,8 +1,10 @@
 #pragma once
 
 // A single line of editable text: its string, a caret and an optional selection, all byte offsets
-// on UTF-8 character boundaries. TextInput's editing, apart from the tree so it tests alone; the
-// rules are worldsim's TextInput's (libs/ui/components/TextInput, a4226e17).
+// on UTF-8 character boundaries. The string is kept well-formed, each ill-formed sequence given to it
+// stored as U+FFFD, so no edit can join bytes into a character a caret sits inside. TextInput's
+// editing, apart from the tree so it tests alone; the rules are worldsim's TextInput's
+// (libs/ui/components/TextInput, a4226e17).
 
 #include <cstddef>
 #include <optional>

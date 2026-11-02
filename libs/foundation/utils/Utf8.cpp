@@ -1,166 +1,161 @@
 #include "utils/Utf8.h"
-#include <cassert>
+
+#include <algorithm>
 
 namespace foundation {
 	namespace UTF8 {
 
-		size_t characterSize(unsigned char firstByte) {
-			// UTF-8 encoding:
-			// 0xxxxxxx = 1 byte (ASCII)
-			// 110xxxxx = 2 bytes
-			// 1110xxxx = 3 bytes
-			// 11110xxx = 4 bytes
-			// 10xxxxxx = continuation byte (invalid as first byte)
-
-			if ((firstByte & 0x80) == 0x00) {
-				return 1; // 0xxxxxxx
-			}
-			if ((firstByte & 0xE0) == 0xC0) {
-				return 2; // 110xxxxx
-			}
-			if ((firstByte & 0xF0) == 0xE0) {
-				return 3; // 1110xxxx
-			}
-			if ((firstByte & 0xF8) == 0xF0) {
-				return 4; // 11110xxx
+		namespace {
+			bool isContinuation(char byte) {
+				return (static_cast<unsigned char>(byte) & 0xC0U) == 0x80U;
 			}
 
-			// Invalid UTF-8 byte - treat as 1 byte
-			return 1;
-		}
-
-		size_t previousCharacterSize(const std::string& str, size_t offset) {
-			assert(offset > 0 && "previousCharacterSize: offset must be > 0");
-			assert(offset <= str.size() && "previousCharacterSize: offset out of bounds");
-
-			// Walk backwards from offset-1 until we find a non-continuation byte
-			size_t pos = offset - 1;
-
-			// Skip continuation bytes (10xxxxxx)
-			size_t count = 1;
-			while (pos > 0 && isContinuationByte(static_cast<unsigned char>(str[pos]))) {
-				pos--;
-				count++;
-				if (count > 4) {
-					// Invalid UTF-8 sequence (too many continuation bytes)
-					return 1;
+			char32_t capital(char32_t c) {
+				if ((c >= U'a' && c <= U'z') || (c >= 0xE0 && c <= 0xFE && c != 0xF7)) {
+					return c - 0x20;
 				}
+				if (c == 0x3C2) {
+					return 0x3A3; // final sigma
+				}
+				if ((c >= 0x3B1 && c <= 0x3CB) || (c >= 0x430 && c <= 0x44F)) {
+					return c - 0x20;
+				}
+				if (c >= 0x450 && c <= 0x45F) {
+					return c - 0x50;
+				}
+				return c;
 			}
+		} // namespace
 
-			// Verify the character size matches what the first byte indicates
-			size_t expectedSize = characterSize(static_cast<unsigned char>(str[pos]));
-			if (expectedSize != count) {
-				// Invalid UTF-8 sequence - return 1 byte as fallback
-				return 1;
+		Character decodeAt(std::string_view text, std::size_t offset) {
+			const auto byte = [&](std::size_t at) {
+				return static_cast<unsigned char>(text[at]);
+			};
+			const auto	  lead = byte(offset);
+			std::size_t	  length = 0;
+			char32_t	  codePoint = 0;
+			unsigned char low = 0x80;
+			unsigned char high = 0xBF;
+			// Table 3-7 of the Unicode standard: the lead byte sets the length and the range of the
+			// second byte, which keeps out overlong forms, surrogates and values past U+10FFFF.
+			if (lead < 0x80) {
+				return {.codePoint = lead, .length = 1};
 			}
-
-			return count;
-		}
-
-		std::string encode(char32_t codepoint) {
-			std::string result;
-
-			if (codepoint <= 0x7F) {
-				// 1 byte: 0xxxxxxx
-				result.push_back(static_cast<char>(codepoint));
-			} else if (codepoint <= 0x7FF) {
-				// 2 bytes: 110xxxxx 10xxxxxx
-				result.push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
-				result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-			} else if (codepoint <= 0xFFFF) {
-				// 3 bytes: 1110xxxx 10xxxxxx 10xxxxxx
-				result.push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
-				result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-				result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-			} else if (codepoint <= 0x10FFFF) {
-				// 4 bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
-				result.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
-				result.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
-				result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-				result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+			if (lead >= 0xC2 && lead <= 0xDF) {
+				length = 2;
+				codePoint = lead & 0x1FU;
+			} else if (lead >= 0xE0 && lead <= 0xEF) {
+				length = 3;
+				codePoint = lead & 0x0FU;
+				low = lead == 0xE0 ? 0xA0 : low;
+				high = lead == 0xED ? 0x9F : high;
+			} else if (lead >= 0xF0 && lead <= 0xF4) {
+				length = 4;
+				codePoint = lead & 0x07U;
+				low = lead == 0xF0 ? 0x90 : low;
+				high = lead == 0xF4 ? 0x8F : high;
 			} else {
-				// Invalid codepoint - return replacement character U+FFFD
-				result = "\xEF\xBF\xBD";
+				return {.codePoint = kReplacement, .length = 1};
 			}
-
-			return result;
+			for (std::size_t i = 1; i < length; ++i) {
+				if (offset + i >= text.size() || byte(offset + i) < low || byte(offset + i) > high) {
+					return {.codePoint = kReplacement, .length = i};
+				}
+				codePoint = (codePoint << 6U) | (byte(offset + i) & 0x3FU);
+				low = 0x80;
+				high = 0xBF;
+			}
+			return {.codePoint = codePoint, .length = length};
 		}
 
-		std::vector<char32_t> decode(const std::string& str) {
-			std::vector<char32_t> result;
-			result.reserve(str.size()); // Worst case: all ASCII
-
-			size_t i = 0;
-			while (i < str.size()) {
-				unsigned char firstByte = static_cast<unsigned char>(str[i]);
-				size_t		  charSize = characterSize(firstByte);
-
-				// Check if we have enough bytes
-				if (i + charSize > str.size()) {
-					// Incomplete UTF-8 sequence - add replacement character
-					result.push_back(0xFFFD);
-					break;
-				}
-
-				char32_t codepoint = 0;
-
-				if (charSize == 1) {
-					// ASCII: 0xxxxxxx
-					codepoint = firstByte;
-				} else if (charSize == 2) {
-					// 2 bytes: 110xxxxx 10xxxxxx
-					codepoint = ((firstByte & 0x1F) << 6) | (static_cast<unsigned char>(str[i + 1]) & 0x3F);
-				} else if (charSize == 3) {
-					// 3 bytes: 1110xxxx 10xxxxxx 10xxxxxx
-					codepoint = ((firstByte & 0x0F) << 12) | ((static_cast<unsigned char>(str[i + 1]) & 0x3F) << 6) |
-								(static_cast<unsigned char>(str[i + 2]) & 0x3F);
-				} else if (charSize == 4) {
-					// 4 bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
-					codepoint = ((firstByte & 0x07) << 18) | ((static_cast<unsigned char>(str[i + 1]) & 0x3F) << 12) |
-								((static_cast<unsigned char>(str[i + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(str[i + 3]) & 0x3F);
-				}
-
-				result.push_back(codepoint);
-				i += charSize;
+		std::string encode(char32_t codePoint) {
+			if ((codePoint >= 0xD800 && codePoint <= 0xDFFF) || codePoint > 0x10FFFF) {
+				codePoint = kReplacement;
 			}
-
-			return result;
+			std::string out;
+			if (codePoint <= 0x7F) {
+				out.push_back(static_cast<char>(codePoint));
+			} else if (codePoint <= 0x7FF) {
+				out.push_back(static_cast<char>(0xC0U | (codePoint >> 6U)));
+				out.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+			} else if (codePoint <= 0xFFFF) {
+				out.push_back(static_cast<char>(0xE0U | (codePoint >> 12U)));
+				out.push_back(static_cast<char>(0x80U | ((codePoint >> 6U) & 0x3FU)));
+				out.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+			} else {
+				out.push_back(static_cast<char>(0xF0U | (codePoint >> 18U)));
+				out.push_back(static_cast<char>(0x80U | ((codePoint >> 12U) & 0x3FU)));
+				out.push_back(static_cast<char>(0x80U | ((codePoint >> 6U) & 0x3FU)));
+				out.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+			}
+			return out;
 		}
 
-		size_t characterCount(const std::string& str) {
-			size_t count = 0;
-			size_t i = 0;
-
-			while (i < str.size()) {
-				size_t charSize = characterSize(static_cast<unsigned char>(str[i]));
-				count++;
-				i += charSize;
+		std::vector<char32_t> decode(std::string_view text) {
+			std::vector<char32_t> out;
+			out.reserve(text.size());
+			for (std::size_t at = 0; at < text.size();) {
+				const Character character = decodeAt(text, at);
+				out.push_back(character.codePoint);
+				at += character.length;
 			}
+			return out;
+		}
 
+		std::size_t characterCount(std::string_view text) {
+			std::size_t count = 0;
+			for (std::size_t at = 0; at < text.size(); at += decodeAt(text, at).length) {
+				++count;
+			}
 			return count;
 		}
 
-		bool isContinuationByte(unsigned char byte) {
-			// Continuation bytes: 10xxxxxx
-			return (byte & 0xC0) == 0x80;
+		std::string sanitize(std::string_view text) {
+			std::string out;
+			out.reserve(text.size());
+			for (std::size_t at = 0; at < text.size();) {
+				const Character character = decodeAt(text, at);
+				if (character.codePoint == kReplacement) {
+					out += encode(kReplacement);
+				} else {
+					out.append(text.substr(at, character.length));
+				}
+				at += character.length;
+			}
+			return out;
 		}
 
-		size_t nextCharacterBoundary(const std::string& str, size_t offset) {
-			if (offset >= str.size()) {
-				return str.size();
+		std::string uppercase(std::string_view text) {
+			std::string out;
+			out.reserve(text.size());
+			for (const char32_t c : decode(text)) {
+				out += encode(capital(c));
 			}
-
-			size_t charSize = characterSize(static_cast<unsigned char>(str[offset]));
-			return std::min(offset + charSize, str.size());
+			return out;
 		}
 
-		size_t previousCharacterBoundary(const std::string& str, size_t offset) {
-			if (offset == 0) {
-				return 0;
+		std::size_t characterStart(std::string_view text, std::size_t offset) {
+			if (offset >= text.size()) {
+				return text.size();
 			}
+			// A character's later bytes are all continuation bytes, so one holding `offset` starts at
+			// most three bytes back, at the nearest byte that isn't one, and only if it reaches this far.
+			for (std::size_t start = offset; start > 0 && offset - start < 3 && isContinuation(text[start]);) {
+				--start;
+				if (!isContinuation(text[start])) {
+					return start + decodeAt(text, start).length > offset ? start : offset;
+				}
+			}
+			return offset;
+		}
 
-			size_t charSize = previousCharacterSize(str, offset);
-			return offset - charSize;
+		std::size_t nextCharacterBoundary(std::string_view text, std::size_t offset) {
+			return offset >= text.size() ? text.size() : offset + decodeAt(text, offset).length;
+		}
+
+		std::size_t previousCharacterBoundary(std::string_view text, std::size_t offset) {
+			const std::size_t end = std::min(offset, text.size());
+			return end == 0 ? 0 : characterStart(text, end - 1);
 		}
 
 	} // namespace UTF8
