@@ -260,11 +260,13 @@ namespace ui {
 		EXPECT_EQ(half.get()->getSize(), Foundation::Vec2(65.0F, 60.0F)); // out of the hug, a share of it
 	}
 
+	// Against the card's whole box, its padding ignored, in px or a share of it, so a resize moves the
+	// placed children in the same pass, where the hit test and the lint find them.
 	TEST_F(UiLayoutTest, AnInsetAnchorsAnAbsoluteChildToTheCornerWhateverTheParentsSize) {
 		for (const float width : {200.0F, 500.0F}) {
 			Context		   fresh(kViewport);
-			Ref<Component> card = fresh.root().addChild<Component>({.size = {width, 100.0F}, .layout = row()});
-			card.addChild<Component>(box(40.0F, 40.0F));
+			Ref<Component> card = fresh.root().addChild<Component>({.size = {width, 100.0F}, .layout = row(0.0F, 10.0F)});
+			Ref<Component> nudged = card.addChild<Component>({.size = {40.0F, 40.0F}, .layout = {.inset = {.top = percent(25.0F)}}});
 			Ref<Component> badge = card.addChild<Component>(
 				{.size = {20.0F, 20.0F}, .layout = {.position = Position::Absolute, .inset = {.top = 4.0F, .right = 4.0F}}}
 			);
@@ -272,9 +274,28 @@ namespace ui {
 				{.size = {kAuto, 10.0F},
 				 .layout = {.position = Position::Absolute, .inset = {.right = 10.0F, .bottom = 0.0F, .left = 10.0F}}}
 			);
+			Ref<Component> plot = card.addChild<Component>({
+				.size = {percent(20.0F), percent(30.0F)},
+				.layout = {.position = Position::Absolute, .inset = {.top = percent(10.0F), .left = percent(25.0F)}},
+				.pointerEvents = PointerEvents::Auto,
+			});
+			Ref<Component> strip = card.addChild<Component>(
+				{.size = {kAuto, 10.0F},
+				 .layout = {
+					 .position = Position::Absolute, .inset = {.right = percent(10.0F), .bottom = percent(50.0F), .left = percent(60.0F)}
+				 }}
+			);
 			fresh.layout();
+			EXPECT_EQ(boundsOf(nudged), (Box{10.0F, 10.0F + 20.0F, 40.0F, 40.0F})); // a quarter of the 80 inside the padding
 			EXPECT_EQ(boundsOf(badge), (Box{width - 24.0F, 4.0F, 20.0F, 20.0F}));
 			EXPECT_EQ(boundsOf(band), (Box{10.0F, 90.0F, width - 20.0F, 10.0F}));
+			const auto share = [&](float percentage) {
+				return width * percentage / 100.0F;
+			}; // as a Length resolves it
+			EXPECT_EQ(boundsOf(plot), (Box{share(25.0F), 10.0F, share(20.0F), 30.0F}));
+			EXPECT_EQ(boundsOf(strip), (Box{share(60.0F), 40.0F, width - share(60.0F) - share(10.0F), 10.0F}));
+			EXPECT_EQ(fresh.hitTest({share(25.0F) + 1.0F, 11.0F}), plot.componentId());
+			EXPECT_TRUE(lint(fresh, kViewport).clean());
 		}
 	}
 

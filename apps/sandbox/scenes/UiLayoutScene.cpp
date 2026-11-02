@@ -1,8 +1,9 @@
 // ui_layout: Flex and Free placement, after worldsim's ui-sandbox layout scene (apps/ui-sandbox/scenes/
-// LayoutScene.cpp, a4226e17). Six columns, one per justifyContent; four per alignItems; a row of a
-// fixed box and two growing ones at 1x and 2x; a column whose body grows; a nested card; a wrapping
-// text in a column that hugs it; and absolutely placed badges in a card's corners. The stage is a
-// full-viewport column, so a resize lays it all out again.
+// LayoutScene.cpp, a4226e17). Six columns, one per justifyContent; four per alignItems, then a padded
+// plate with children placed by a fraction of it; a row of a fixed box and two growing ones at 1x and
+// 2x; a column whose body grows; a nested card; a wrapping text in a column that hugs it; and
+// absolutely placed badges in a card's corners. The stage is a full-viewport column, so a resize lays
+// it all out again.
 
 #include "Scenes.h"
 
@@ -58,7 +59,9 @@ namespace {
 			root().get()->setLayout(stage);
 			root().addChild<Text>({.id = "title", .style = {.color = Foundation::Color::white(), .fontSize = 20.0F}, .text = "Layout"});
 			distributions(root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)}));
-			alignments(root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)}));
+			Ref<Component> secondRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
+			alignments(secondRow);
+			fractions(secondRow);
 			Ref<Component> lastRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
 			growRow(lastRow);
 			growColumn(lastRow);
@@ -111,6 +114,32 @@ namespace {
 					);
 				}
 			}
+		}
+
+		// Placed by a share of the plate's whole box, its padding ignored, as hotspots on an illustration
+		// are, so they follow it through a resize in the same layout pass.
+		static void fractions(Ref<Component> row) {
+			Ref<Rectangle> plate = captioned(row, "inset by fraction", {200.0F, 100.0F}, {.padding = 10.0F});
+			const auto	   spot = [&](const char* id, ui::Size size, ui::Inset inset, const Foundation::Color& colour) {
+				plate.addChild<Rectangle>(
+					{.id = id,
+						 .size = size,
+						 .layout = {.position = ui::Position::Absolute, .inset = inset},
+						 .style = {.backgroundColor = colour}}
+				);
+			};
+			spot(
+				"fraction_left", {ui::percent(20.0F), ui::percent(40.0F)}, {.top = ui::percent(15.0F), .left = ui::percent(10.0F)}, kSlate
+			);
+			spot(
+				"fraction_right", {ui::percent(25.0F), ui::percent(25.0F)}, {.top = ui::percent(15.0F), .right = ui::percent(10.0F)}, kRust
+			);
+			spot(
+				"fraction_band",
+				{ui::kAuto, ui::percent(20.0F)},
+				{.right = ui::percent(40.0F), .bottom = ui::percent(10.0F), .left = ui::percent(40.0F)},
+				kMoss
+			);
 		}
 
 		static void growRow(Ref<Component> row) {
