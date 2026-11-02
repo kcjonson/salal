@@ -295,6 +295,53 @@ namespace ui {
 		EXPECT_EQ(stack.get()->getSize(), Foundation::Vec2(70.0F, 100.0F));
 	}
 
+	// --- Box sizing ---
+
+	// A content box's declared size, min and max are inside its padding, in Free, Flex and Grid alike;
+	// border-box, the default, takes the padding in.
+	TEST_F(UiLayoutTest, ContentBoxPutsThePaddingOutsideADeclaredSizeAndItsMinAndMax) {
+		Ref<Component> borderBox = context.root().addChild<Component>({.size = {100.0F, 50.0F}, .layout = {.padding = 10.0F}});
+		Ref<Component> contentBox = context.root().addChild<Component>(
+			{.position = {0.0F, 100.0F},
+			 .size = {100.0F, 50.0F},
+			 .maxSize = {kAuto, 40.0F},
+			 .layout = {.padding = 10.0F, .boxSizing = BoxSizing::ContentBox}}
+		);
+
+		Layout flexBox = row(0.0F, 10.0F);
+		flexBox.boxSizing = BoxSizing::ContentBox;
+		Ref<Component> strip = context.root().addChild<Component>({.position = {200.0F, 0.0F}, .size = {200.0F, kAuto}, .layout = flexBox});
+		Ref<Component> fixed = strip.addChild<Component>(box(50.0F, 30.0F));
+		Ref<Component> grower = strip.addChild<Component>({
+			.size = {0.0F, 20.0F},
+			.maxSize = {60.0F, kAuto},
+			.layout = {.padding = 5.0F, .boxSizing = BoxSizing::ContentBox, .flexGrow = 1.0F},
+		});
+
+		Ref<Component> grid = context.root().addChild<Component>({
+			.position = {200.0F, 100.0F},
+			.size = {200.0F, 40.0F},
+			.layout = {
+				.display = Display::Grid, .padding = 10.0F, .boxSizing = BoxSizing::ContentBox, .gridTemplateColumns = {fr(1), fr(1)}
+			},
+		});
+		Ref<Component> cell = grid.addChild<Component>({});
+		grid.addChild<Component>({});
+		Ref<Component> badge = grid.addChild<Component>(
+			{.size = {10.0F, 10.0F}, .layout = {.position = Position::Absolute, .inset = {.right = 0.0F, .bottom = 0.0F}}}
+		);
+		context.layout();
+
+		EXPECT_EQ(borderBox.get()->getSize(), Foundation::Vec2(100.0F, 50.0F));
+		EXPECT_EQ(contentBox.get()->getSize(), Foundation::Vec2(120.0F, 60.0F)); // 50 held to 40, then the padding
+		EXPECT_EQ(strip.get()->getSize(), Foundation::Vec2(220.0F, 50.0F));
+		EXPECT_EQ(boundsOf(fixed), (Box{10.0F, 10.0F, 50.0F, 30.0F}));
+		EXPECT_EQ(boundsOf(grower), (Box{60.0F, 10.0F, 70.0F, 30.0F})); // grown to its 60 and its padding
+		EXPECT_EQ(grid.get()->getSize(), Foundation::Vec2(220.0F, 60.0F));
+		EXPECT_EQ(boundsOf(cell), (Box{10.0F, 10.0F, 100.0F, 40.0F}));	// half the 200 inside
+		EXPECT_EQ(boundsOf(badge), (Box{210.0F, 50.0F, 10.0F, 10.0F})); // in the whole box, as ever
+	}
+
 	// --- Free, None and absolute children ---
 
 	TEST_F(UiLayoutTest, FreePlacesChildrenWhereTheySayAndHugsTheirBoxes) {

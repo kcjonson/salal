@@ -21,8 +21,9 @@
 //
 // Sizes are px, a percentage of the parent's box (inside its padding, for a flex or grid child), or
 // auto: a text's or a container's content, a stretched or grown flex child's share, a stretched grid
-// child's area. An assigned size never changes the declared one, so an auto axis is measured again
-// whenever its content changes.
+// child's area. A declared size, minSize and maxSize are the whole box, padding in, unless boxSizing
+// says they're the content box. An assigned size never changes the declared one, so an auto axis is
+// measured again whenever its content changes.
 
 #include <math/Types.h>
 
@@ -147,6 +148,12 @@ namespace ui {
 	// A flex container's only: a grid's tracks start at its content box's start.
 	enum class JustifyContent : std::uint8_t { Start, Center, End, SpaceBetween, SpaceAround, SpaceEvenly };
 	enum class Position : std::uint8_t { Relative, Absolute };
+	// What a component's declared size measures (CSS box-sizing). BorderBox, the default: a px or
+	// percentage width or height, and minSize and maxSize, are the whole box, its padding inside them
+	// (layout has no border). ContentBox: they're the content box, and the padding goes outside them.
+	// An auto size is the content and the padding either way, and absolutely placed children place
+	// against the whole box either way.
+	enum class BoxSizing : std::uint8_t { BorderBox, ContentBox };
 	// Clip cuts the children at the box; Scroll cuts them too and scrolls them, by the wheel and a
 	// thumb, over their union plus the padding (R4.13).
 	enum class Overflow : std::uint8_t { Visible, Clip, Scroll };
@@ -272,6 +279,7 @@ namespace ui {
 		// and between a grid's columns and its rows, where a negative one is 0, as CSS has it.
 		float		   gap = 0.0F;
 		Edges		   padding;
+		BoxSizing	   boxSizing = BoxSizing::BorderBox; // whether a declared size takes the padding in or out
 		AlignItems	   alignItems = AlignItems::Stretch;
 		AlignItems	   justifyItems = AlignItems::Stretch; // a grid's only
 		JustifyContent justifyContent = JustifyContent::Start;

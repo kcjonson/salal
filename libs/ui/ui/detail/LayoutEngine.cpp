@@ -13,20 +13,34 @@ namespace ui::detail {
 			return a.has_value() == b.has_value() && (!a || *a == *b);
 		}
 
-		float clampAxis(float value, const Length& minimum, const Length& maximum, float base) {
-			const float low = std::max(minimum.resolve(base).value_or(0.0F), 0.0F);
-			const float high = maximum.resolve(base).value_or(kUnbounded);
+		// The padding a component's declared sizes leave out, on each axis: all of it for a content box,
+		// none for a border box.
+		Foundation::Vec2 outsidePadding(const Component& node) {
+			const Layout& layout = node.getLayout();
+			return layout.boxSizing == BoxSizing::ContentBox ? layout.padding.total() : Foundation::Vec2{0.0F, 0.0F};
+		}
+
+		// A declared size, minSize or maxSize as the whole box it sets, `outside` the padding a content
+		// box adds; none for auto.
+		std::optional<float> boxSize(const Length& length, float base, float outside) {
+			const std::optional<float> value = length.resolve(base);
+			return value ? std::optional(*value + outside) : std::nullopt;
+		}
+
+		float clampAxis(float value, const Length& minimum, const Length& maximum, float base, float outside) {
+			const float low = std::max(boxSize(minimum, base, outside).value_or(0.0F), 0.0F);
+			const float high = boxSize(maximum, base, outside).value_or(kUnbounded);
 			return std::max(std::min(value, high), low);
 		}
 
 		// A grid child's minimum contribution on one axis, margins in, where it isn't CSS's automatic
 		// minimum: its size when that's definite, or its minSize.
-		std::optional<float> gridMinimum(bool definite, float size, const Length& minimum, float base, float margins) {
+		std::optional<float> gridMinimum(bool definite, float size, const Length& minimum, float base, float outside, float margins) {
 			if (definite) {
 				return size + margins;
 			}
 			if (!minimum.isAuto()) {
-				return std::max(minimum.resolve(base).value_or(0.0F), 0.0F) + margins;
+				return std::max(boxSize(minimum, base, outside).value_or(0.0F), 0.0F) + margins;
 			}
 			return std::nullopt;
 		}
@@ -98,14 +112,16 @@ namespace ui::detail {
 			}
 		}
 
+		const Foundation::Vec2 outside = outsidePadding(node); // what a content box adds to its declared sizes
+
 		const auto clampWidth = [&](float value) {
-			return clampAxis(value, node.minSpec.width, node.maxSpec.width, parentBox.x);
+			return clampAxis(value, node.minSpec.width, node.maxSpec.width, parentBox.x, outside.x);
 		};
 		const auto clampHeight = [&](float value) {
-			return clampAxis(value, node.minSpec.height, node.maxSpec.height, parentBox.y);
+			return clampAxis(value, node.minSpec.height, node.maxSpec.height, parentBox.y, outside.y);
 		};
-		std::optional<float> resolvedWidth = width ? width : node.sizeSpec.width.resolve(parentBox.x);
-		std::optional<float> resolvedHeight = height ? height : node.sizeSpec.height.resolve(parentBox.y);
+		std::optional<float> resolvedWidth = width ? width : boxSize(node.sizeSpec.width, parentBox.x, outside.x);
+		std::optional<float> resolvedHeight = height ? height : boxSize(node.sizeSpec.height, parentBox.y, outside.y);
 		if (resolvedWidth) {
 			resolvedWidth = clampWidth(*resolvedWidth);
 		}
@@ -116,7 +132,7 @@ namespace ui::detail {
 			const float		 room = resolvedWidth ? *resolvedWidth
 												  : std::min(
 													std::max(availableWidth - node.margin.horizontal(), 0.0F),
-													node.maxSpec.width.resolve(parentBox.x).value_or(kUnbounded)
+													boxSize(node.maxSpec.width, parentBox.x, outside.x).value_or(kUnbounded)
 												);
 			Foundation::Vec2 content = contentSize(node, resolvedWidth, resolvedHeight, room);
 			if (!resolvedWidth) {
@@ -236,6 +252,7 @@ namespace ui::detail {
 			const Length&		   minSpec = row ? child->minSpec.width : child->minSpec.height;
 			const Length&		   maxSpec = row ? child->maxSpec.width : child->maxSpec.height;
 			const float			   automaticMin = row ? std::min(child->minContentWidth(), basis) : 0.0F;
+			const float			   outsideMain = row ? outsidePadding(*child).x : outsidePadding(*child).y;
 			flowing.push_back({
 				.component = child,
 				.basis = basis,
@@ -243,8 +260,8 @@ namespace ui::detail {
 				.cross = row ? measured.y : measured.x,
 				.marginMain = marginMain,
 				.marginCross = marginCross,
-				.minMain = minSpec.isAuto() ? automaticMin : minSpec.resolve(mainBase).value_or(0.0F),
-				.maxMain = maxSpec.resolve(mainBase).value_or(kUnbounded),
+				.minMain = minSpec.isAuto() ? automaticMin : boxSize(minSpec, mainBase, outsideMain).value_or(0.0F),
+				.maxMain = boxSize(maxSpec, mainBase, outsideMain).value_or(kUnbounded),
 				.stretchedCross = stretched,
 				.frozen = false,
 			});
@@ -374,14 +391,16 @@ namespace ui::detail {
 			result.items[i].area = placed.areas[i];
 			const bool	definite = child.sizeSpec.width.resolve(box.x).has_value();
 			const float widest = measure(child, std::nullopt, std::nullopt, box, kUnbounded).x;
+			const float outside = outsidePadding(child).x;
 			const float narrowest =
-				definite ? widest : std::min(clampAxis(child.minContentWidth(), child.minSpec.width, child.maxSpec.width, box.x), widest);
+				definite ? widest
+						 : std::min(clampAxis(child.minContentWidth(), child.minSpec.width, child.maxSpec.width, box.x, outside), widest);
 			const float margins = child.margin.horizontal();
 			contributions[i] = {
 				.tracks = placed.areas[i].column,
 				.minContent = narrowest + margins,
 				.maxContent = widest + margins,
-				.minimum = gridMinimum(definite, widest, child.minSpec.width, box.x, margins),
+				.minimum = gridMinimum(definite, widest, child.minSpec.width, box.x, outside, margins),
 			};
 		}
 		sizeGridTracks({.tracks = tracks, .available = contentWidth, .gap = gap, .items = contributions}, result.columns);
@@ -407,7 +426,7 @@ namespace ui::detail {
 				.tracks = item.area.row,
 				.minContent = item.measured.y + margins,
 				.maxContent = item.measured.y + margins,
-				.minimum = gridMinimum(definite, item.measured.y, child.minSpec.height, box.y, margins),
+				.minimum = gridMinimum(definite, item.measured.y, child.minSpec.height, box.y, outsidePadding(child).y, margins),
 			};
 		}
 		sizeGridTracks({.tracks = tracks, .available = contentHeight, .gap = gap, .items = contributions}, result.rows);
