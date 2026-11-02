@@ -483,8 +483,8 @@ root().removeChild(row);   // health.get() is null from here on
   - geometry: `position`, `size` (px, percent or auto), `minSize`, `maxSize`,
     `margin`, `transform` (render and hit test only)
   - layout: `layout`, with CSS names as taffy uses them: `display` (Free,
-    Flex, Grid, None), `flexDirection`, `gap`, `padding`, `alignItems`,
-    `justifyItems`, `justifyContent`, `gridTemplateColumns`,
+    Flex, Grid, None), `flexDirection`, `flexWrap`, `gap`, `padding`,
+    `alignItems`, `justifyItems`, `justifyContent`, `gridTemplateColumns`,
     `gridTemplateRows`, and as a child `flexGrow`, `flexShrink`, `alignSelf`,
     `justifySelf`, `gridColumn`, `gridRow`, `position` (Relative or Absolute)
     and `inset`. `display: Free`, the
@@ -544,6 +544,18 @@ root().removeChild(row);   // health.get() is null from here on
   subgrid, baselines, and `justifyContent` and `alignContent` on a grid (its
   tracks start at its content box's start, and auto tracks stretch into free
   space).
+- **Flex wraps as CSS's `flex-wrap`** (decided 2026-11-02, for a game's
+  resource strip that wraps when the window narrows): `flexWrap: Wrap` starts
+  a new line where the next child's margin box, at its clamped basis, would
+  pass the main size, and a row with an auto width breaks at the room there
+  is and hugs its widest line, as a text wraps and an auto-width grid sizes
+  its columns. Each line grows and shrinks its own children and is as big
+  across as its biggest, a stretched child fills its line, and the lines are
+  `gap` apart, the one gap for both axes Grid settled. Where wrap follows
+  salal over CSS: the lines pack from the start, each its tallest child's
+  height, where CSS's initial `align-content` stretches them into a fixed
+  container's free space. Not built until a game asks: `wrap-reverse` and
+  `alignContent`.
 
 Why the slot map over a parent-owned tree: worldsim's three ownership fixes
 (a pointer taken before arena placement, a focus registration gone stale on a

@@ -246,6 +246,55 @@ namespace ui {
 		EXPECT_EQ(boundsOf(second)[0], 80.0F);
 	}
 
+	// --- Wrapping ---
+
+	TEST_F(UiLayoutTest, AWrappingRowBreaksWhereTheNextChildWontFitAndEachLineIsItsTallest) {
+		Layout layout = row(10.0F, 5.0F);
+		layout.flexWrap = FlexWrap::Wrap;
+		Ref<Component> strip = context.root().addChild<Component>({.size = {210.0F, kAuto}, .layout = layout});
+		Ref<Component> first = strip.addChild<Component>({.size = {80.0F, 20.0F}, .layout = {.alignSelf = AlignItems::Center}});
+		Ref<Component> tall = strip.addChild<Component>(box(80.0F, 30.0F));
+		Ref<Component> third = strip.addChild<Component>(box(80.0F, 20.0F));
+		Ref<Component> stretched = strip.addChild<Component>({.size = {50.0F, kAuto}});
+		Ref<Component> grower = strip.addChild<Component>({.size = {150.0F, 10.0F}, .layout = {.flexGrow = 1.0F}});
+		context.layout();
+		// 200 inside the padding: 80, 10, 80 fit and the third doesn't; 80, 10, 50 do and 150 doesn't.
+		EXPECT_EQ(boundsOf(first), (Box{5.0F, 10.0F, 80.0F, 20.0F})); // centred in its line, 30 tall
+		EXPECT_EQ(boundsOf(tall), (Box{95.0F, 5.0F, 80.0F, 30.0F}));
+		EXPECT_EQ(boundsOf(third), (Box{5.0F, 45.0F, 80.0F, 20.0F}));
+		EXPECT_EQ(boundsOf(stretched), (Box{95.0F, 45.0F, 50.0F, 20.0F})); // its line's height
+		EXPECT_EQ(boundsOf(grower), (Box{5.0F, 75.0F, 200.0F, 10.0F}));	   // its line's whole leftover
+		// Three lines and two gaps between them, in the padding.
+		EXPECT_EQ(strip.get()->getSize(), Foundation::Vec2(210.0F, 5.0F + 30.0F + 10.0F + 20.0F + 10.0F + 10.0F + 5.0F));
+		EXPECT_TRUE(lint(context, kViewport).clean());
+	}
+
+	TEST_F(UiLayoutTest, WrapBreaksAHuggingRowAtTheRoomThereIsAndAColumnAtItsHeight) {
+		Layout hug = row();
+		hug.flexWrap = FlexWrap::Wrap;
+		Ref<Component> parent = context.root().addChild<Component>(
+			{.size = {150.0F, kAuto},
+			 .layout = {.display = Display::Flex, .flexDirection = FlexDirection::Column, .alignItems = AlignItems::Start}}
+		);
+		Ref<Component> strip = parent.addChild<Component>({.layout = hug});
+		strip.addChild<Component>(box(60.0F, 20.0F));
+		strip.addChild<Component>(box(60.0F, 20.0F));
+		Ref<Component> last = strip.addChild<Component>(box(60.0F, 20.0F));
+		context.layout();
+		EXPECT_EQ(strip.get()->getSize(), Foundation::Vec2(120.0F, 40.0F)); // its widest line
+		EXPECT_EQ(boundsOf(last), (Box{0.0F, 20.0F, 60.0F, 20.0F}));
+
+		Layout down = column(0.0F);
+		down.flexWrap = FlexWrap::Wrap;
+		Ref<Component> stack = context.root().addChild<Component>({.position = {300.0F, 0.0F}, .size = {kAuto, 100.0F}, .layout = down});
+		stack.addChild<Component>(box(40.0F, 40.0F));
+		stack.addChild<Component>(box(40.0F, 40.0F));
+		Ref<Component> over = stack.addChild<Component>(box(30.0F, 40.0F));
+		context.layout();
+		EXPECT_EQ(boundsOf(over), (Box{40.0F, 0.0F, 30.0F, 40.0F}));
+		EXPECT_EQ(stack.get()->getSize(), Foundation::Vec2(70.0F, 100.0F));
+	}
+
 	// --- Free, None and absolute children ---
 
 	TEST_F(UiLayoutTest, FreePlacesChildrenWhereTheySayAndHugsTheirBoxes) {
