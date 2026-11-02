@@ -34,7 +34,10 @@ if(msdfgen_FOUND)
         PRIVATE
             ${Stb_INCLUDE_DIR}
     )
-    target_link_libraries(salal_ui_iconbuild PRIVATE msdfgen::msdfgen-core NanoSVG::nanosvg nlohmann_json::nlohmann_json)
+    target_link_libraries(salal_ui_iconbuild
+        PUBLIC salal_svg_build # the SVG markup scanner and its Problem, which SvgCheck.h names
+        PRIVATE msdfgen::msdfgen-core NanoSVG::nanosvg nlohmann_json::nlohmann_json
+    )
     add_executable(salal_icons_tool tools/IconsMain.cpp)
     target_link_libraries(salal_icons_tool PRIVATE salal_ui_iconbuild)
     set_target_properties(salal_ui_iconbuild salal_icons_tool PROPERTIES FOLDER salal)

@@ -7,6 +7,9 @@
 
 #include <graphics/Color.h>
 #include <primitives/Primitives.h>
+#include <sandbox_art/Art.h>
+#include <vector/SVGLoader.h>
+#include <vector/Types.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -98,6 +101,18 @@ namespace {
 		Renderer::Primitives::PopTransform();
 	}
 
+	// sandbox_art's emblem, tessellated; empty, and drawing nothing, if it fails to load.
+	renderer::TessellatedMesh loadEmblem() {
+		std::vector<renderer::LoadedSVGShape> shapes;
+		renderer::TessellatedMesh			  mesh;
+		if (renderer::loadSVG(sandbox_art::art("emblem"), 0.5F, shapes, "emblem")) {
+			for (const renderer::LoadedSVGShape& shape : shapes) {
+				renderer::appendShapeMesh(shape, mesh);
+			}
+		}
+		return mesh;
+	}
+
 	class PolygonScene final : public app::Scene {
 	  public:
 		const char* name() const override { return kSceneName; }
@@ -161,6 +176,20 @@ namespace {
 			}
 			label("one silhouette, five PushTransforms", 1100.0F, 1040.0F);
 
+			// Art salal_art() embedded, loaded from memory once and tessellated with its gradient
+			// and stroke baked into the vertices.
+			P::PushTransform(placed(2480.0F, 650.0F, 0.0F, 2.6F));
+			P::drawTriangles(
+				{.vertices = emblem.vertices.data(),
+				 .indices = emblem.indices.data(),
+				 .vertexCount = emblem.vertices.size(),
+				 .indexCount = emblem.indices.size(),
+				 .colors = emblem.colors.data(),
+				 .antiAlias = true}
+			);
+			P::PopTransform();
+			label("embedded SVG", 2610.0F, 1040.0F);
+
 			// Row 3: alpha and additive fills overlapping.
 			const std::array<Foundation::Color, 3> primaries = {
 				Foundation::Color(1.0F, 0.2F, 0.2F, 0.8F),
@@ -194,6 +223,7 @@ namespace {
 		const std::vector<Foundation::Vec2> square = ring(4, 110.0F, 110.0F);
 		const std::vector<Foundation::Vec2> triangle = ring(3, 120.0F, 120.0F);
 		const std::vector<Foundation::Vec2> notch = notched();
+		const renderer::TessellatedMesh		emblem = loadEmblem();
 	};
 
 } // namespace

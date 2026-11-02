@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 
 namespace {
@@ -51,6 +52,33 @@ TEST(SVGLoaderTest, LoadStrokeOnlyLineKeepsTwoVertexPath) {
 	EXPECT_TRUE(shapes[0].hasStroke);
 	ASSERT_EQ(shapes[0].paths.size(), 1U);
 	EXPECT_GE(shapes[0].paths[0].vertices.size(), 2U);
+}
+
+// The same text from memory, as salal_art() embeds it, loads as it does from a file; text nanosvg
+// can't parse fails the same way.
+TEST(SVGLoaderTest, BytesInMemoryLoadAsTheFileDoes) {
+	const std::string					  text = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+  <rect x="2" y="2" width="16" height="10" fill="#336699"/>
+  <circle cx="10" cy="15" r="4" fill="#993366" stroke="#000000" stroke-width="1"/>
+</svg>)";
+	const std::filesystem::path			  svg = writeTempSvg("salal_memory_twin.svg", text);
+	std::vector<renderer::LoadedSVGShape> fromFile;
+	const bool							  fileOk = renderer::loadSVG(svg.string(), 0.5F, fromFile);
+	std::filesystem::remove(svg);
+	std::vector<renderer::LoadedSVGShape> fromMemory;
+	ASSERT_TRUE(fileOk);
+	ASSERT_TRUE(renderer::loadSVG(std::as_bytes(std::span(text)), 0.5F, fromMemory, "twin"));
+	ASSERT_EQ(fromMemory.size(), fromFile.size());
+	for (size_t i = 0; i < fromFile.size(); ++i) {
+		EXPECT_EQ(fromMemory[i].fillColor.toVec4(), fromFile[i].fillColor.toVec4());
+		EXPECT_EQ(fromMemory[i].hasStroke, fromFile[i].hasStroke);
+		ASSERT_EQ(fromMemory[i].paths.size(), fromFile[i].paths.size());
+		EXPECT_EQ(fromMemory[i].paths[0].vertices, fromFile[i].paths[0].vertices);
+	}
+
+	const std::string empty;
+	EXPECT_FALSE(renderer::loadSVG(std::as_bytes(std::span(empty)), 0.5F, fromMemory, "empty"));
+	EXPECT_TRUE(fromMemory.empty());
 }
 
 // An open 2-point stroke is exactly one bevel-band quad: 4 verts, 2 triangles, no join wedges.

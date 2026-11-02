@@ -3,7 +3,10 @@
 #include "Types.h"
 #include "graphics/Color.h"
 
+#include <cstddef>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace renderer {
@@ -22,11 +25,9 @@ namespace renderer {
 		float					height{0.0F};	   ///< Original SVG height
 	};
 
-	/// Load an SVG file and convert to VectorPaths ready for tessellation.
-	///
-	/// Uses NanoSVG to parse the file, then flattens all cubic Bezier curves
-	/// using the existing flattenCubicBezier() function. The output is a set of
-	/// VectorPath objects that can be passed directly to Tessellator::Tessellate().
+	/// Load an SVG file and convert to VectorPaths ready for tessellation: the file's bytes, read
+	/// whole, through the overload below. A game resolves the path itself (Foundation::findResource
+	/// searches its resource roots and the executable's folder); SVGLoader takes no asset root.
 	///
 	/// @param filepath Path to the SVG file
 	/// @param curveTolerance Bezier flattening tolerance (smaller = more vertices, smoother curves)
@@ -34,6 +35,17 @@ namespace renderer {
 	/// @param outShapes Output vector of loaded shapes with fill colors
 	/// @return true if loading succeeded, false on error
 	bool loadSVG(const std::string& filepath, float curveTolerance, std::vector<LoadedSVGShape>& outShapes);
+
+	/// Load an SVG held in memory: its bytes, as salal_art() embeds them (<namespace>::art(name)) or as
+	/// a game read them. NanoSVG parses a copy (it writes into its buffer), then every cubic Bezier is
+	/// flattened with flattenCubicBezier(), so the VectorPaths go straight to Tessellator::Tessellate().
+	/// `name` is what the log calls it.
+	bool loadSVG(
+		std::span<const std::byte>	 svg,
+		float						 curveTolerance,
+		std::vector<LoadedSVGShape>& outShapes,
+		std::string_view			 name = "(memory)"
+	);
 
 	/// Tessellate a loaded SVG shape into colored triangles, appended to outMesh.
 	///

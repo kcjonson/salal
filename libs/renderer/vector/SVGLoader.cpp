@@ -8,7 +8,10 @@
 #include "utils/Log.h"
 
 #include <cmath>
+#include <fstream>
 #include <memory>
+#include <sstream>
+#include <string>
 
 namespace renderer {
 
@@ -213,17 +216,32 @@ namespace renderer {
 	} // anonymous namespace
 
 	bool loadSVG(const std::string& filepath, float curveTolerance, std::vector<LoadedSVGShape>& outShapes) {
-		outShapes.clear();
-
-		// Parse the SVG file with RAII wrapper for automatic cleanup
-		// Units: "px" = pixels, DPI: 96 is standard for screen rendering
-		NSVGImagePtr image(nsvgParseFromFile(filepath.c_str(), "px", 96.0F));
-		if (image == nullptr) {
+		std::ifstream file(filepath, std::ios::binary);
+		if (!file) {
+			outShapes.clear();
 			LOG_ERROR(Renderer, "Failed to load SVG: %s", filepath.c_str());
 			return false;
 		}
+		std::ostringstream text;
+		text << file.rdbuf();
+		const std::string bytes = text.str();
+		return loadSVG(std::as_bytes(std::span(bytes)), curveTolerance, outShapes, filepath);
+	}
 
-		LOG_DEBUG(Renderer, "Loading SVG: %s (%.1fx%.1f)", filepath.c_str(), image->width, image->height);
+	bool loadSVG(std::span<const std::byte> svg, float curveTolerance, std::vector<LoadedSVGShape>& outShapes, std::string_view name) {
+		outShapes.clear();
+		const std::string label(name);
+
+		// NanoSVG parses in place and wants the text ended by a NUL, so it gets a copy.
+		// Units: "px" = pixels, DPI: 96 is standard for screen rendering
+		std::string	 buffer(reinterpret_cast<const char*>(svg.data()), svg.size());
+		NSVGImagePtr image(nsvgParse(buffer.data(), "px", 96.0F));
+		if (image == nullptr) {
+			LOG_ERROR(Renderer, "Failed to load SVG: %s", label.c_str());
+			return false;
+		}
+
+		LOG_DEBUG(Renderer, "Loading SVG: %s (%.1fx%.1f)", label.c_str(), image->width, image->height);
 
 		// Process each shape in the SVG
 		for (NSVGshape* shape = image->shapes; shape != nullptr; shape = shape->next) {
@@ -292,7 +310,7 @@ namespace renderer {
 		}
 
 		// NSVGImagePtr automatically cleans up when going out of scope
-		LOG_INFO(Renderer, "Loaded SVG: %s (%zu shapes)", filepath.c_str(), outShapes.size());
+		LOG_INFO(Renderer, "Loaded SVG: %s (%zu shapes)", label.c_str(), outShapes.size());
 		return !outShapes.empty();
 	}
 

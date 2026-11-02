@@ -79,9 +79,20 @@ add_executable(salal_shader_assembler assembler/Main.cpp)
 target_link_libraries(salal_shader_assembler PRIVATE salal_shader_assembly)
 set_target_properties(salal_shader_assembly salal_shader_assembler PROPERTIES FOLDER salal)
 
+# The vector art build step, which salal_art() (cmake/SalalArt.cmake) runs for each consumer: a host
+# tool that checks a folder of SVG against what loadSVG reads and embeds it as C++. The library is
+# the check and the generator, on a scanner of SVG markup that ui's icon check shares, and needs
+# nothing else. Built whenever the renderer is.
+add_library(salal_svg_build STATIC vector/SvgMarkup.cpp vector/ArtBuild.cpp)
+target_compile_features(salal_svg_build PUBLIC cxx_std_20)
+target_include_directories(salal_svg_build PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
+add_executable(salal_art_tool tools/ArtMain.cpp)
+target_link_libraries(salal_art_tool PRIVATE salal_svg_build)
+set_target_properties(salal_svg_build salal_art_tool PROPERTIES FOLDER salal)
+
 salal_add_tests(renderer)
 if(TARGET salal_renderer_tests)
-    target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw salal_shader_assembly)
+    target_link_libraries(salal_renderer_tests PRIVATE OpenGL::GL GLEW::GLEW glfw salal_shader_assembly salal_svg_build)
     # PngEncoder.test.cpp decodes what it encoded with stb_image.
     target_include_directories(salal_renderer_tests PRIVATE ${Stb_INCLUDE_DIR})
     # The base shader as a consumer with no hooks gets it, for every fixture; again with the test
@@ -91,4 +102,16 @@ if(TARGET salal_renderer_tests)
     salal_base_shader(salal_renderer_tests)
     salal_base_shader(salal_renderer_tests HOOKS tests/hooks NAMESPACE offset_hook_shader HEADER generated/OffsetHookShader.h)
     salal_base_shader(salal_renderer_tests HOOKS tests/fill_hooks NAMESPACE stripes_shader HEADER generated/StripesShader.h)
+    # A folder of art embedded as a consumer embeds it, which SVGLoader.test.cpp loads from memory, and
+    # the tool run on a file it refuses, which has to fail naming the file, line and element.
+    salal_art(salal_renderer_tests tests/art NAMESPACE test_art HEADER generated/TestArt.h)
+    add_test(
+        NAME salal_art_refuses_a_filter_naming_its_file_line_and_element
+        COMMAND salal_art_tool ${CMAKE_CURRENT_SOURCE_DIR}/tests/art_refused refused Refused.h
+                ${CMAKE_CURRENT_BINARY_DIR}/salal_art/refused/Refused.h ${CMAKE_CURRENT_BINARY_DIR}/salal_art/refused/Refused.cpp
+    )
+    # The message is only printed when the tool fails, so matching it is the failure too.
+    set_tests_properties(
+        salal_art_refuses_a_filter_naming_its_file_line_and_element PROPERTIES PASS_REGULAR_EXPRESSION "glow\\.svg:4: <filter> "
+    )
 endif()
