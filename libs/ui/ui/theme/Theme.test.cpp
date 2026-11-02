@@ -70,7 +70,16 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	const ui::ThemeLoad light = ui::Theme::load({.tokens = &theme_test::tokenTable(), .inputs = {{"theme", "light"}}});
 	ASSERT_TRUE(dark.ok()) << describe(dark.diagnostics);
 	ASSERT_TRUE(light.ok()) << describe(light.diagnostics);
-	EXPECT_TRUE(dark.diagnostics.empty()) << describe(dark.diagnostics);
+	// Nothing wrong, and an info for each of ui's styles the game redefines, here its capitals on four;
+	// its own styles, under healthBar, aren't ui's.
+	std::vector<std::string> redefined;
+	for (const ui::dtcg::Diagnostic& d : dark.diagnostics) {
+		EXPECT_EQ(d.severity, ui::dtcg::Diagnostic::Severity::Info) << d.text();
+		EXPECT_NE(d.message.find("(textTransform)"), std::string::npos) << d.text();
+		redefined.push_back(d.path);
+	}
+	EXPECT_EQ(redefined, (std::vector<std::string>{"styles.button", "styles.segment", "styles.select", "styles.tab"}))
+		<< describe(dark.diagnostics);
 
 	// ui's pane, its background aliased by the game to its own palette, which the mode swaps.
 	expectColor(*dark.theme.style(ui::styles::pane.theme).backgroundColor, 0.1F, 0.12F, 0.16F);
@@ -88,6 +97,16 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	EXPECT_EQ(light.theme.style(ui::styles::button.theme).textTransform, Foundation::TextTransform::Uppercase);
 	EXPECT_FALSE(dark.theme.style(ui::styles::pane.theme).textTransform.has_value());
 	EXPECT_FALSE(ui::Theme::load({}).theme.style(ui::styles::button.theme).textTransform.has_value());
+
+	// A game style that takes ui's name merges into it: reported with the fields and the file.
+	const HandTable		tab(R"({ "styles": { "tab": { "color": { "$type": "color", "$value": "{base.color.white}" } } } })", {});
+	const ui::ThemeLoad collided = ui::Theme::load({.tokens = &tab.table});
+	ASSERT_EQ(collided.diagnostics.size(), 1U) << describe(collided.diagnostics);
+	EXPECT_EQ(
+		collided.diagnostics[0].text(),
+		"info: hand/hand.tokens.json: styles.tab: redefines ui's style (color); a game's own "
+		"styles belong under a group of their own"
+	);
 }
 
 TEST(Theme, FontRolesMapToTheGamesFamilies) {

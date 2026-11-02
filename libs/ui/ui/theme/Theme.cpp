@@ -56,6 +56,48 @@ namespace ui {
 			return std::string(style) + "." + std::string(field);
 		}
 
+		// Tokens layer by path, so a game's style that shares a name with one of ui's (its own `tab`)
+		// merges into ui's without a word. That's how a game restyles ui's components on purpose, so
+		// it's an info, not a warning: one for each ui style a later layer sets a field or salal's
+		// extension of, naming them.
+		void reportOverriddenStyles(
+			const dtcg::TokenSet&		 set,
+			const dtcg::SalalExtensions& extensions,
+			std::string_view			 uiLabel,
+			std::vector<Diagnostic>&	 diagnostics
+		) {
+			const std::string uiPrefix = std::string(uiLabel) + "/";
+			for (std::string_view style : tokens_detail::kTable.styles) {
+				std::string fields;
+				std::string file;
+				const auto	add = [&](std::string_view field, const std::string& from) {
+					 fields += (fields.empty() ? "" : ", ") + std::string(field);
+					 if (file.empty()) {
+						 file = from;
+					 }
+				};
+				for (const dtcg::StyleField& field : dtcg::kStyleFields) {
+					const auto origin = set.origins().find(stylePath(style, field.name));
+					if (origin != set.origins().end() && !origin->second.starts_with(uiPrefix)) {
+						add(field.name, origin->second);
+					}
+				}
+				const auto extension = extensions.find(style);
+				if (extension != extensions.end() && extension->second.textTransform.has_value() &&
+					!extension->second.file.starts_with(uiPrefix)) {
+					add("textTransform", extension->second.file);
+				}
+				if (!fields.empty()) {
+					diagnostics.push_back(
+						{.severity = Severity::Info,
+						 .file = file,
+						 .path = std::string(style),
+						 .message = "redefines ui's style (" + fields + "); a game's own styles belong under a group of their own"}
+					);
+				}
+			}
+		}
+
 		class FamilyMap {
 		  public:
 			FamilyMap(std::span<const FontFamilyName> names, std::vector<Diagnostic>& diagnostics)
@@ -109,6 +151,7 @@ namespace ui {
 		const dtcg::TokenSet	   set = dtcg::loadLayers(layers, args.inputs, result.diagnostics);
 		dtcg::SalalExtensions	   extensions;
 		const dtcg::ResolvedTokens resolved = dtcg::resolve(set, {.rootFontSize = args.rootFontSize}, result.diagnostics, &extensions);
+		reportOverriddenStyles(set, extensions, layers.front().label, result.diagnostics);
 
 		std::set<std::string, std::less<>> known;
 		std::set<std::string, std::less<>> stylePaths;
