@@ -26,6 +26,7 @@
 #include <glm/vec4.hpp>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -256,7 +257,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// logged once per id and the rect drawn as if it named none.
 		void drawRect(const RectArgs& args);
 
-		// Draw a line
+		// Draw a line: a rotated quad as two flat triangles, aliased, or with style.dash
+		// drawPolyline's stroke of the two points, butt-ended and anti-aliased, cut by the dash.
 		void drawLine(const LineArgs& args);
 
 		// Draw triangles from a mesh (for vector graphics tessellation). Aliased unless
@@ -290,6 +292,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   - style.fill: Fill color (set alpha to 0 to disable fill)
 		//   - style.border: Optional border; `position` puts its width inside the radius,
 		//     centred on it (the default) or outside it, and `cornerRadius` is unused
+		//   - style.shadow: Optional shadow behind it at the same key, a rect's shadow quad
+		//     with the circle's radius at every corner, so it blurs exactly as a rect's does
 		//   - id: Optional debug identifier
 		void drawCircle(const CircleArgs& args);
 
@@ -326,7 +330,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// pieces overlap where drawPolyline's do. Its outer edge runs its width outside the
 		// outline and its inner edge a pixel inside, over the fill's edge, so no background
 		// shows between them. A notch is mitered into its corner, except beside an edge
-		// too short for its cut, where it is round with a flat piece into the corner.
+		// too short for its cut, where it is round with a flat piece into the corner. A dashed
+		// border's pattern runs round its centre line, fitted to a whole number of periods; the
+		// flat piece in a sharp notch stays solid.
+		//
+		// A shadow is drawn first, behind both at the same key: the fill's mesh again in the
+		// shadow's colour, moved by its offset, its outline grown by its spread first
+		// (offsetOutline, tessellated and cached as an outline of its own), and its feather ring
+		// as wide as its blur, so it is solid to that outline and fades linearly to nothing
+		// `blur` past it. The ring is the fill's one-pixel ring widened, so it costs what the
+		// fill does; at a notch beside an edge shorter than about the blur the ring folds over
+		// itself and shows a darker sliver.
 		void drawPolygon(const PolygonArgs& args);
 
 		// Arguments for DrawPolyline
@@ -336,10 +350,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::Color				  color = Foundation::Color::white();
 			LineCap							  cap = LineCap::Butt;
 			LineJoin						  join = LineJoin::Round;
-			bool		closed = false; // Join the last point back to the first, uncapped; two points stay an open segment
-			const char* id = nullptr;
-			int32_t		key = 0;
-			BlendMode	blend = BlendMode::Alpha;
+			bool closed = false;						 // Join the last point back to the first, uncapped; two points stay an open segment
+			std::optional<Foundation::DashPattern> dash; // Along the line, each dash capped by its own cap
+			const char*							   id = nullptr;
+			int32_t								   key = 0;
+			BlendMode							   blend = BlendMode::Alpha;
 		};
 
 		// Draw a stroked polyline, anti-aliased: a convex SDF piece per segment, cut
@@ -352,6 +367,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// sub-pixel noise in the input (a hand's jitter, integer mouse samples) leaves no
 		// short segments behind; noise larger than that still can. A closed line keeps
 		// three points or more, and an end segment turns its cap by no more than that.
+		//
+		// A dash pattern is measured along the line's centre, each piece carrying where it
+		// lies, and cut per pixel in the shader, so a dashed line is as many quads as a
+		// solid one. A dash that crosses a joint bends round it; at a joint's outer corner
+		// the two pieces each measure from their own segment, so a dash's end there can sit
+		// a fraction of the stroke's width off where the other piece puts it.
 		void drawPolyline(const PolylineArgs& args);
 
 		// Arguments for DrawArc. Angles are radians from +x, and a positive sweep turns
@@ -403,10 +424,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			float			  scale = 1.0F;										 // Text scale (1.0F = 16px base size)
 			Foundation::Color color = Foundation::Color(1.0F, 1.0F, 1.0F, 1.0F); // RGBA
 			FontFamily		  font = FontFamily::Default;						 // Atlas to render with (the game's default)
-			// CSS text-shadow: when shadowColor.a > 0, the string is drawn once at
-			// position+shadowOffset in shadowColor (behind), then normally.
-			Foundation::Color shadowColor = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F);
-			Foundation::Vec2  shadowOffset{0.0F, 0.0F};
+			// CSS text-shadow, with a spread: the string drawn behind itself by drawGlyphShadow, at the
+			// same key. With no offset, a spread and a blur, it is a halo.
+			std::optional<Foundation::BoxShadow> shadow;
 			// CSS text-align / vertical alignment. When boxWidth/boxHeight > 0, the
 			// text is aligned within [position, position+box]; otherwise drawn at
 			// position (the box-less default matches plain top-left placement).
@@ -438,6 +458,21 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// and friends), each in its own colour, sampling the atlas it carries at that
 		// atlas's distance range, so one call can hold several families, at `key`.
 		void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, int32_t key = 0, BlendMode blend = BlendMode::Alpha);
+
+		// Batch the shadow of glyph quads: each moved by shadow.offset, in shadow.color, its outline
+		// grown by shadow.spread px and softened over shadow.blur px either side, in the text mode
+		// with the glyphs, so a shadow or halo is its glyphs' quads again and no extra pass. Draw it
+		// before the glyphs at their key. The distance field ends half its atlas's distanceRange (in
+		// texels) past the outline, scaled to the screen, and a spread and blur that reach further
+		// are scaled down to end there: an atlas of 32 texels to the em at a range of 4 holds a halo
+		// of one pixel round 16 px text, so a game that wants wider ones generates a wider range.
+		void drawGlyphShadow(
+			const FontRenderer::GlyphQuad* quads,
+			size_t						   count,
+			const Foundation::BoxShadow&   shadow,
+			int32_t						   key = 0,
+			BlendMode					   blend = BlendMode::Alpha
+		);
 
 		// --- World-Space Instancing ---
 

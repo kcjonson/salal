@@ -8,8 +8,9 @@
 // whole width when it doesn't wrap.
 //
 // Style: color (white), fontFamily (the game's default), fontSize (16), textAlign, verticalAlign,
-// letterSpacing (single-line text only) and textTransform. Its glyphs are laid out once and kept
-// until the text, its style, its size or its opacity changes.
+// letterSpacing (single-line text only), textTransform and textShadow (drawn from the same glyphs,
+// behind them). Its glyphs are laid out once and kept until the text, its style, its size or its
+// opacity changes.
 
 #include "ui/Component.h"
 
@@ -44,6 +45,7 @@ namespace ui {
 		[[nodiscard]] Extent measureExtent() const;
 
 		[[nodiscard]] const char* typeName() const override { return "Text"; }
+		[[nodiscard]] float		  inkExtent() const override;
 		// ui::styles::text::body.
 		[[nodiscard]] StyleId themeStyle() const override;
 		void				  describe(nlohmann::json& node) const override;

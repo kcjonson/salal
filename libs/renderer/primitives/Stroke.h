@@ -19,6 +19,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// SDF it is shaded with there, a box 2 halfLength long and 2 halfWidth wide around
 	// `center`, its length along the unit `axis`, its corners rounded by
 	// `cornerRadius`. A box of zero size is flat: coverage 1 over the whole polygon.
+	// `along` is how far down the stroke's centre line `center` lies, which a dash
+	// pattern is measured from.
 	struct StrokePiece {
 		static constexpr size_t kMaxCorners = 6;
 
@@ -27,6 +29,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		float									  halfLength = 0.0F;
 		float									  halfWidth = 0.0F;
 		float									  cornerRadius = 0.0F;
+		float									  along = 0.0F;
 		std::array<Foundation::Vec2, kMaxCorners> corners{};
 		uint8_t									  cornerCount = 0;
 	};
@@ -53,8 +56,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// turns; a closed line keeps three points or more, and an open one's end segment
 	// turns no further than moves its cap's corners by the tolerance. Fewer than two
 	// points draw nothing, and a closed line with only two left is
-	// the open segment between them, capped.
-	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out);
+	// the open segment between them, capped. Returns the length of the line laid out, which a
+	// dash pattern runs along (each piece's `along`), 0 when there are no pieces.
+	float strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out);
 
 	// `outline`, a closed polygon of either winding, with every edge moved
 	// `distance` outward and each vertex at its moved edges' meeting point. A convex
@@ -72,7 +76,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// joint left uncut (strokePolyline) or its centre line folded back over a feature
 	// narrower than the border, gets a flat piece that carries the border into it: the
 	// triangle from its edges' inner corners at the joint to where the border's inner
-	// edges meet, no further from the corner than 4 times half the stroke's width.
-	void strokeOutline(std::span<const Foundation::Vec2> outline, float width, float inset, std::vector<StrokePiece>& pieces);
+	// edges meet, no further from the corner than 4 times half the stroke's width. Returns the
+	// length of its centre line, which a dash pattern runs along; the flat triangles draw solid.
+	float strokeOutline(std::span<const Foundation::Vec2> outline, float width, float inset, std::vector<StrokePiece>& pieces);
 
 } // namespace Renderer

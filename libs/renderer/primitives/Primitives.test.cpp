@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <vector>
 
 namespace Renderer {
@@ -208,6 +209,26 @@ namespace Renderer {
 		EXPECT_LT(pixel(5, 16)[3], edge);
 	}
 
+	TEST_F(PrimitivesDrawTest, ACirclesShadowFadesAsARectsAndAPolygonsFadesOutsideItsOutline) {
+		const Foundation::Color		clear(0.0F, 0.0F, 0.0F, 0.0F);
+		const Foundation::BoxShadow shadow{.color = Foundation::Color::white(), .blur = 4.0F};
+		render(clear, [&] {
+			Primitives::drawCircle({.center = {16.0F, 16.0F}, .radius = 6.0F, .style = {.fill = clear, .shadow = shadow}});
+		});
+		// Half way at the edge, over the blur either side: 0.52 px out is smoothstep at 0.565.
+		expectNear(pixel(16, 16), {255, 255, 255, 255});
+		EXPECT_NEAR(pixel(22, 16)[3], 103, 3);
+		EXPECT_EQ(pixel(26, 16)[3], 0);
+
+		// A polygon's is solid to its outline, x = 24, and linear to nothing 4 px past it.
+		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
+		render(clear, [&] { Primitives::drawPolygon({.vertices = square, .style = {.fill = clear, .shadow = shadow}}); });
+		expectNear(pixel(16, 16), {255, 255, 255, 255});
+		EXPECT_NEAR(pixel(25, 16)[3], 159, 2);
+		EXPECT_NEAR(pixel(27, 16)[3], 32, 2);
+		EXPECT_EQ(pixel(29, 16)[3], 0);
+	}
+
 	TEST_F(PrimitivesDrawTest, TextCoversWhereItsAtlasIsInside) {
 		// A one-texel atlas, every channel at 1 (inside) or 0 (outside), stretched over a glyph's quad.
 		const std::array<uint8_t, 3> inside = {255, 255, 255};
@@ -235,6 +256,58 @@ namespace Renderer {
 		});
 		expectNear(pixel(8, 16), {0, 128, 0, 128});
 		expectNear(pixel(24, 16), {0, 0, 0, 0});
+	}
+
+	TEST_F(PrimitivesDrawTest, AGlyphsShadowGrowsByItsSpreadAndSoftensOverItsBlurInsideTheField) {
+		// An atlas whose distance runs across x, a texel a pixel at a range of 8: 16 - x px from the
+		// edge at x = 16, inside to the left, the field ending 4 px either side of it.
+		std::vector<uint8_t> ramp(static_cast<size_t>(kSize) * kSize * 3);
+		for (int y = 0; y < kSize; ++y) {
+			for (int x = 0; x < kSize; ++x) {
+				const float distance = 16.0F - (static_cast<float>(x) + 0.5F);
+				const auto	value = static_cast<uint8_t>(std::lround(std::clamp(0.5F + (distance / 8.0F), 0.0F, 1.0F) * 255.0F));
+				std::fill_n(ramp.begin() + ((static_cast<ptrdiff_t>(y) * kSize + x) * 3), 3, value);
+			}
+		}
+		const Texture atlas =
+			Primitives::createTexture({.width = kSize, .height = kSize, .format = TextureFormat::Rgb8, .pixels = ramp.data()});
+		const FontRenderer::GlyphQuad glyph{
+			.position = {0.0F, 0.0F},
+			.size = {static_cast<float>(kSize), static_cast<float>(kSize)},
+			.uvMin = {0.0F, 0.0F},
+			.uvMax = {1.0F, 1.0F},
+			.color = {1.0F, 1.0F, 1.0F, 1.0F},
+			.runOrigin = {0.0F, static_cast<float>(kSize)},
+			.atlas = atlas.handle(),
+			.pixelRange = 8.0F
+		};
+		const auto alphaAt = [&](int x, const std::optional<Foundation::BoxShadow>& shadow) {
+			render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+				if (shadow) {
+					Primitives::drawGlyphShadow(&glyph, 1, *shadow);
+				} else {
+					Primitives::drawGlyphs(&glyph, 1);
+				}
+			});
+			return pixel(x, 16)[3];
+		};
+
+		// The glyph's own edge ramps over a pixel; the spread moves it out 2 px.
+		EXPECT_EQ(alphaAt(15, std::nullopt), 255);
+		EXPECT_EQ(alphaAt(16, std::nullopt), 0);
+		const Foundation::BoxShadow spread{.color = Foundation::Color::white(), .blur = 0.0F, .spread = 2.0F};
+		EXPECT_EQ(alphaAt(17, spread), 255);
+		EXPECT_EQ(alphaAt(18, spread), 0);
+		// A blur of 2 ramps from 2 px inside to 2 px outside: smoothstep at 3/8 and 1/8 of the way.
+		const Foundation::BoxShadow blur{.color = Foundation::Color::white(), .blur = 2.0F};
+		EXPECT_NEAR(alphaAt(16, blur), 81, 2);
+		EXPECT_NEAR(alphaAt(17, blur), 11, 2);
+		EXPECT_EQ(alphaAt(18, blur), 0);
+		// A blur of 8 would run past the field's end, 4 px out, and stop hard there; it is fitted
+		// to end with the field instead.
+		const Foundation::BoxShadow wide{.color = Foundation::Color::white(), .blur = 8.0F};
+		EXPECT_LE(alphaAt(19, wide), 4);
+		EXPECT_EQ(alphaAt(24, wide), 0);
 	}
 
 	TEST_F(PrimitivesDrawTest, NineTexturesDrawInTwoCallsEachQuadSamplingItsOwn) {
@@ -385,6 +458,80 @@ namespace Renderer {
 		expectNear(pixel(16, 16), {0, 0, 128, 128});
 		expectNear(pixel(10, 16), {128, 128, 191, 191});
 		expectNear(pixel(5, 16), {128, 128, 128, 128});
+	}
+
+	TEST_F(PrimitivesDrawTest, ABorderOnThreeSidesRunsSquareToTheBareOnesEdgeAndRoundsOnlyBetweenBorderedSides) {
+		const auto tab = [&](Foundation::BorderPosition position) {
+			render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+				Primitives::drawRect(
+					{.bounds = {4.0F, 4.0F, 24.0F, 24.0F},
+					 .style = {
+						 .fill = Foundation::Color::red(),
+						 .border = Foundation::BorderStyle{
+							 .color = Foundation::Color::white(),
+							 .width = 3.0F,
+							 .cornerRadius = 8.0F,
+							 .position = position,
+							 .sides = {.bottom = false}
+						 }
+					 }}
+				);
+			});
+		};
+		const std::array<int, 4> white{255, 255, 255, 255};
+		const std::array<int, 4> red{255, 0, 0, 255};
+		const std::array<int, 4> clear{0, 0, 0, 0};
+
+		tab(Foundation::BorderPosition::Inside);
+		expectNear(pixel(5, 16), white);
+		expectNear(pixel(16, 5), white);
+		expectNear(pixel(16, 26), red);	 // the bare bottom
+		expectNear(pixel(5, 26), white); // the left side runs on to the bottom edge, its corner square
+		expectNear(pixel(4, 4), clear);	 // the top-left corner, between two bordered sides, rounds
+		expectNear(pixel(16, 29), clear);
+
+		// Centred, the left side reaches a pixel and a half outside, and still stops at the bottom
+		// edge, where a bottom border would cover half of this last pixel.
+		tab(Foundation::BorderPosition::Center);
+		expectNear(pixel(3, 26), white);
+		expectNear(pixel(3, 29), clear);
+		expectNear(pixel(16, 26), red);
+	}
+
+	TEST_F(PrimitivesDrawTest, DashesCutALineAndARectsBorderAlongTheirLength) {
+		const Foundation::Color clear(0.0F, 0.0F, 0.0F, 0.0F);
+		const auto				line = [&](const Foundation::DashPattern& dash) {
+			 const std::array<Foundation::Vec2, 2> points{{{0.0F, 16.0F}, {32.0F, 16.0F}}};
+			 render(clear, [&] { Primitives::drawPolyline({.points = points, .width = 4.0F, .dash = dash}); });
+		};
+		// Butt dashes 4 on, 4 off from the line's start: x 0 to 4 drawn, 4 to 8 not.
+		line({.dash = 4.0F, .gap = 4.0F});
+		EXPECT_EQ(pixel(2, 16)[3], 255);
+		EXPECT_EQ(pixel(6, 16)[3], 0);
+		EXPECT_EQ(pixel(10, 16)[3], 255);
+		// Round dots, a width across, every 8 px.
+		line({.dash = 0.0F, .gap = 8.0F, .cap = Foundation::DashCap::Round});
+		EXPECT_EQ(pixel(8, 16)[3], 255);
+		EXPECT_EQ(pixel(12, 16)[3], 0);
+
+		// A rect's inside border 4 wide, its centre line 80 round: seven periods of 80 / 7, a dash
+		// centred on the top-left corner, measured clockwise along the top.
+		render(clear, [] {
+			Primitives::drawRect(
+				{.bounds = {4.0F, 4.0F, 24.0F, 24.0F},
+				 .style = {
+					 .fill = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F),
+					 .border = Foundation::BorderStyle{
+						 .width = 4.0F,
+						 .position = Foundation::BorderPosition::Inside,
+						 .dash = Foundation::DashPattern{.dash = 6.0F, .gap = 6.0F}
+					 }
+				 }}
+			);
+		});
+		EXPECT_EQ(pixel(6, 5)[3], 255);
+		EXPECT_EQ(pixel(12, 5)[3], 0);
+		EXPECT_EQ(pixel(17, 5)[3], 255);
 	}
 
 	TEST_F(PrimitivesDrawTest, PolygonFillsAndItsBorderSitsOutside) {

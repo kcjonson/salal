@@ -227,7 +227,7 @@ There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
 renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
 `blend` and `input_test`), `fill_hook` (the renderer tests' fill hook, which the
-sandbox's base shader is assembled with), ui's (`ui_order`, `ui_text`, `ui_theme`,
+sandbox's base shader is assembled with), `border` (rect borders on some sides, and dashed), ui's (`ui_order`, `ui_text`, `ui_theme`,
 `ui_layout`, `ui_grid`, `ui_clip`, `ui_scroll`, `ui_input`, `ui_focus`, `ui_icons`, `ui_motion`, `ui_display`,
 `ui_controls`, `ui_overlays` and `ui_overlay_components`) and the perf suite's (`perf_quads`, `perf_text`,
 `perf_world` and `perf_ui`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
@@ -303,7 +303,10 @@ layout (worldsim's `tools/generate_sdf_atlas`). Text is UTF-8, measured, laid ou
 and wrapped by code point: one the atlas lacks draws as U+FFFD, or `?` without
 it, and so does each ill-formed sequence. Glyph quads carry their atlas and its
 range, so `drawGlyphs` takes no family, and wrapped text carries the family and
-scale it was wrapped in.
+scale it was wrapped in. `drawGlyphShadow` draws the same quads as a shadow or
+halo, grown by a spread and softened by a blur in the text mode, as far as the
+atlas's distance field reaches: half its `distanceRange` past the outline, so a
+game that wants a wide halo generates its atlas with a wide range.
 
 A theme is Design Tokens (2025.10, with the Resolver module) loaded at run time
 into `ui::Theme` ([docs/ui-design.md](docs/ui-design.md), "Theme"). ui's own

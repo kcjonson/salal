@@ -3,10 +3,13 @@
 // The tree snapshot's value shapes, for the serializer and the types' describe(). Internal to ui.
 
 #include <graphics/Color.h>
+#include <graphics/PrimitiveStyles.h>
 #include <graphics/Rect.h>
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <optional>
 
 namespace ui::detail {
@@ -34,6 +37,14 @@ namespace ui::detail {
 	inline Foundation::Color withOpacity(Foundation::Color color, float opacity) {
 		color.a *= opacity;
 		return color;
+	}
+
+	// How far a shadow draws past what casts it, its inkExtent: its blur and spread, moved by its offset.
+	inline float shadowReach(const std::optional<Foundation::BoxShadow>& shadow) {
+		if (!shadow) {
+			return 0.0F;
+		}
+		return std::max(0.0F, shadow->blur + shadow->spread + std::max(std::abs(shadow->offset.x), std::abs(shadow->offset.y)));
 	}
 
 } // namespace ui::detail

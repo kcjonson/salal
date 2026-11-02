@@ -45,6 +45,7 @@ namespace ui {
 			.width = lineWidth,
 			.color = detail::withOpacity(style.color.value_or(kStroke), opacity()),
 			.cap = roundCaps ? Renderer::Primitives::LineCap::Round : Renderer::Primitives::LineCap::Butt,
+			.dash = style.borderStyle ? style.borderStyle->dash(lineWidth) : std::nullopt,
 			.id = getId().empty() ? nullptr : getId().c_str(),
 			.key = drawKey(),
 		});

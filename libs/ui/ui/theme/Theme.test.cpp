@@ -92,6 +92,29 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	expectColor(*fill.backgroundColor, 230.0F / 255.0F, 102.0F / 255.0F, 26.0F / 255.0F);
 	EXPECT_FLOAT_EQ(fill.borderRadius.value_or(-1.0F), 2.0F);
 	EXPECT_TRUE(dark.theme.style(theme_test::styles::healthBar::track.theme).backgroundColor.has_value());
+	// A halo: a text shadow with no offset, its spread and blur from the token, its colour through the mode.
+	const std::optional<Foundation::BoxShadow> halo = light.theme.style(theme_test::styles::mapLabel.theme).textShadow;
+	ASSERT_TRUE(halo.has_value());
+	expectColor(halo->color, 0.08F, 0.09F, 0.11F);
+	EXPECT_FLOAT_EQ(halo->spread, 2.0F);
+	EXPECT_FLOAT_EQ(halo->blur, 1.0F);
+	EXPECT_EQ(halo->offset, Foundation::Vec2(0.0F, 0.0F));
+	// A tab's border on three sides, from salal's extension on its group, dashed by its strokeStyle.
+	const ui::Style& tab = dark.theme.style(theme_test::styles::sectionTab.theme);
+	ASSERT_TRUE(tab.borderSides.has_value());
+	EXPECT_TRUE(tab.borderSides->top && tab.borderSides->left && tab.borderSides->right && !tab.borderSides->bottom);
+	EXPECT_FALSE(dark.theme.style(ui::styles::pane.theme).borderSides.has_value());
+	ASSERT_TRUE(tab.borderStyle.has_value());
+	const std::optional<Foundation::DashPattern> dashes = tab.borderStyle->dash(2.0F);
+	ASSERT_TRUE(dashes.has_value());
+	EXPECT_EQ(dashes->dash, 6.0F);
+	EXPECT_EQ(dashes->gap, 3.0F);
+	EXPECT_EQ(dashes->cap, Foundation::DashCap::Round);
+	// CSS's keywords, sized by the stroke's width.
+	EXPECT_EQ(ui::StrokeStyle{.kind = ui::StrokeStyle::Kind::Dashed}.dash(2.0F)->gap, 6.0F);
+	const std::optional<Foundation::DashPattern> dots = ui::StrokeStyle{.kind = ui::StrokeStyle::Kind::Dotted}.dash(2.0F);
+	EXPECT_TRUE(dots->dash == 0.0F && dots->gap == 4.0F && dots->cap == Foundation::DashCap::Round);
+	EXPECT_FALSE(ui::StrokeStyle{}.dash(2.0F).has_value());
 	expectColor(light.theme.get(theme_test::tokens::palette::slate::_900), 0.96F, 0.97F, 0.98F);
 	// The game's capitals on ui's button, from salal's extension on the style's group; ui sets none.
 	EXPECT_EQ(dark.theme.style(ui::styles::button.theme).textTransform, Foundation::TextTransform::Uppercase);
@@ -100,8 +123,8 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	EXPECT_FALSE(ui::Theme::load({}).theme.style(ui::styles::button.theme).textTransform.has_value());
 
 	// A game style that takes ui's name merges into it: reported with the fields and the file.
-	const HandTable		tab(R"({ "styles": { "tab": { "color": { "$type": "color", "$value": "{base.color.white}" } } } })", {});
-	const ui::ThemeLoad collided = ui::Theme::load({.tokens = &tab.table});
+	const HandTable		collidingTab(R"({ "styles": { "tab": { "color": { "$type": "color", "$value": "{base.color.white}" } } } })", {});
+	const ui::ThemeLoad collided = ui::Theme::load({.tokens = &collidingTab.table});
 	ASSERT_EQ(collided.diagnostics.size(), 1U) << describe(collided.diagnostics);
 	EXPECT_EQ(
 		collided.diagnostics[0].text(),
@@ -183,6 +206,15 @@ TEST(Theme, AnUnknownPathWarns) {
 	ASSERT_EQ(aboveLoad.diagnostics.size(), 1U) << describe(aboveLoad.diagnostics);
 	EXPECT_EQ(aboveLoad.diagnostics[0].path, "styles.text");
 	EXPECT_FALSE(aboveLoad.theme.style(ui::styles::text::body.theme).textTransform.has_value());
+
+	// A stroke style the renderer can't draw draws solid, and says so, after the info that ui's pane is restyled.
+	const HandTable		doubled(R"({ "styles": { "pane": { "borderStyle": { "$type": "strokeStyle", "$value": "double" } } } })", {});
+	const ui::ThemeLoad doubledLoad = ui::Theme::load({.tokens = &doubled.table});
+	EXPECT_TRUE(doubledLoad.ok()) << describe(doubledLoad.diagnostics);
+	ASSERT_EQ(doubledLoad.diagnostics.size(), 2U) << describe(doubledLoad.diagnostics);
+	EXPECT_EQ(doubledLoad.diagnostics[0].severity, ui::dtcg::Diagnostic::Severity::Info);
+	EXPECT_EQ(doubledLoad.diagnostics[1].path, "styles.pane.borderStyle");
+	EXPECT_EQ(doubledLoad.theme.style(ui::styles::pane.theme).borderStyle->kind, ui::StrokeStyle::Kind::Solid);
 }
 
 TEST(Theme, AMissingPathIsAnErrorWhenStrictAndADefaultEitherWay) {

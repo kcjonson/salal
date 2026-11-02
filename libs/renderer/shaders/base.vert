@@ -36,7 +36,8 @@ out vec4		 v_fill;	 // premultiplied, but straight for the instanced and baked p
 flat out vec2	 v_halfSize; // rect, shadow and stroke
 flat out vec4	 v_radii;	 // rect, shadow and stroke: corner radii (tl, tr, br, bl); arc: (inner, outer, halfSweep, 0)
 flat out vec4	 v_border;	 // premultiplied
-flat out vec4	 v_shape;	 // (border width, reach, blur or range, opacity)
+flat out vec4	 v_shape;	 // per mode (BatchRenderer.h): rect (border width, dash, gap, dash offset); stroke (0, dash, gap,
+							 // offset); shadow z the blur; arc y the reach; text (spread, blur, range)
 flat out vec4	 v_clip;
 flat out uvec3	 v_mode;	   // (mode, flags, texture slot or a rect's fill hook)
 flat out uvec3	 v_fillParams; // a hooked rect's params, its fill's corners 1 to 3
@@ -108,11 +109,15 @@ void main() {
 
 	if (mode == kModeStroke) {
 		// A convex piece shaded by its box: local is the piece's frame (geometry, its rows)
-		// times the offset from its centre, all in screen space, so any affine transform holds
+		// times the offset from its centre, all in screen space, so any affine transform holds.
+		// Its colour is corner 0's; the other corners carry a dash pattern, its dash and gap
+		// and where it stands at the piece's centre, which base.frag cuts along local x.
 		vec2 offset = position - uintBitsToFloat(a_radii);
 		v_local = vec2(dot(a_geometry.xy, offset), dot(a_geometry.zw, offset));
 		v_halfSize = uintBitsToFloat(a_shape);
 		v_radii = vec4(uintBitsToFloat(a_border));
+		v_fill = rgba8(a_fills[0]);
+		v_shape = vec4(0.0, halves(a_fills.y), uintBitsToFloat(a_fills.z));
 		v_mode.x = kModeRect;
 		return;
 	}

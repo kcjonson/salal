@@ -28,6 +28,38 @@ namespace ui {
 			return Foundation::TextTransform::None;
 		}
 
+		// A strokeStyle token as ui strokes it, and in `why` what of it doesn't draw: double, groove,
+		// ridge, outset and inset draw solid, and a dashArray draws its first dash and gap (one
+		// length is both, as in SVG).
+		StrokeStyle toStrokeStyle(const dtcg::StrokeStyleValue& value, std::string& why) {
+			if (!value.keyword.empty()) {
+				if (value.keyword == "dashed") {
+					return {.kind = StrokeStyle::Kind::Dashed};
+				}
+				if (value.keyword == "dotted") {
+					return {.kind = StrokeStyle::Kind::Dotted};
+				}
+				if (value.keyword != "solid") {
+					why = "strokeStyle " + value.keyword + " draws solid; salal draws solid, dashed, dotted and a dashArray";
+				}
+				return {};
+			}
+			const std::vector<float>& lengths = value.dashArray;
+			if (lengths.size() > 2) {
+				why = "a dashArray of " + std::to_string(lengths.size()) + " lengths draws its first dash and gap only";
+			}
+			Foundation::DashCap cap = Foundation::DashCap::Butt;
+			if (value.lineCap == "round") {
+				cap = Foundation::DashCap::Round;
+			} else if (value.lineCap == "square") {
+				cap = Foundation::DashCap::Square;
+			}
+			return {
+				.kind = StrokeStyle::Kind::Pattern,
+				.pattern = {.dash = lengths.front(), .gap = lengths.size() > 1 ? lengths[1] : lengths.front(), .cap = cap}
+			};
+		}
+
 		std::string textOf(const EmbeddedFile& file) {
 			std::string text;
 			for (std::string_view piece : file.pieces) {
@@ -294,23 +326,36 @@ namespace ui {
 				color("backgroundColor", themed.backgroundColor);
 				color("borderColor", themed.borderColor);
 				number("borderWidth", dtcg::TokenType::Dimension, themed.borderWidth);
-				number("borderRadius", dtcg::TokenType::Dimension, themed.borderRadius);
-				// The renderer draws one outer shadow; the first outer layer is it.
-				if (const dtcg::ResolvedToken* token = field("boxShadow", dtcg::TokenType::Shadow)) {
-					for (const dtcg::ShadowLayer& layer : std::get<dtcg::ShadowValue>(token->value).layers) {
-						if (!layer.inset) {
-							themed.boxShadow = Foundation::BoxShadow{
-								.color = toColor(layer.color),
-								.blur = layer.blur,
-								.spread = layer.spread,
-								.offset = {layer.offsetX, layer.offsetY}
-							};
-							break;
-						}
+				if (const dtcg::ResolvedToken* token = field("borderStyle", dtcg::TokenType::StrokeStyle)) {
+					std::string why;
+					themed.borderStyle = toStrokeStyle(std::get<dtcg::StrokeStyleValue>(token->value), why);
+					if (!why.empty()) {
+						result.diagnostics.push_back(
+							{.severity = Severity::Warning, .file = token->file, .path = stylePath(style, "borderStyle"), .message = why}
+						);
 					}
 				}
+				number("borderRadius", dtcg::TokenType::Dimension, themed.borderRadius);
+				// The renderer draws one outer shadow; the first outer layer is it.
+				const auto shadow = [&](std::string_view name, std::optional<Foundation::BoxShadow>& out) {
+					if (const dtcg::ResolvedToken* token = field(name, dtcg::TokenType::Shadow)) {
+						for (const dtcg::ShadowLayer& layer : std::get<dtcg::ShadowValue>(token->value).layers) {
+							if (!layer.inset) {
+								out = Foundation::BoxShadow{
+									.color = toColor(layer.color),
+									.blur = layer.blur,
+									.spread = layer.spread,
+									.offset = {layer.offsetX, layer.offsetY}
+								};
+								break;
+							}
+						}
+					}
+				};
+				shadow("boxShadow", themed.boxShadow);
 				number("opacity", dtcg::TokenType::Number, themed.opacity);
 				color("color", themed.color);
+				shadow("textShadow", themed.textShadow);
 				if (const dtcg::ResolvedToken* token = field("fontFamily", dtcg::TokenType::FontFamily)) {
 					familyValue = &std::get<dtcg::FontFamilyValue>(token->value);
 					familyToken = token;
@@ -323,9 +368,16 @@ namespace ui {
 				if (familyValue != nullptr) {
 					themed.fontFamily = families.map(*familyValue, themed.fontWeight.value_or(400.0F), *familyToken, familyPath);
 				}
-				if (const auto found = extensions.find(style); found != extensions.end() && found->second.textTransform.has_value()) {
-					themed.textTransform = toTextTransform(*found->second.textTransform);
-					any = true;
+				if (const auto found = extensions.find(style); found != extensions.end()) {
+					if (const std::optional<dtcg::TextTransform>& transform = found->second.textTransform) {
+						themed.textTransform = toTextTransform(*transform);
+						any = true;
+					}
+					if (const std::optional<dtcg::BorderSides>& sides = found->second.borderSides) {
+						themed.borderSides =
+							Foundation::BorderSides{.top = sides->top, .right = sides->right, .bottom = sides->bottom, .left = sides->left};
+						any = true;
+					}
 				}
 				if (!any) {
 					missing(*table, style);

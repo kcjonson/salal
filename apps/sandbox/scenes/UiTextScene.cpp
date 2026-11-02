@@ -4,8 +4,8 @@
 // wrapping at a given width with the height hugging, explicit newlines, per-line centring; letter
 // spacing and upper case; weights picking a face of the body role, registered as a regular and a
 // bold (the sandbox's one atlas loaded as two families, so they look alike and the tree's
-// text.fontFamily tells them apart). Worldsim's point-anchored alignment is gone: a Text's position
-// is always its box's top-left.
+// text.fontFamily tells them apart); a halo and a drop shadow from textShadow over striped art.
+// Worldsim's point-anchored alignment is gone: a Text's position is always its box's top-left.
 
 #include "Scenes.h"
 
@@ -62,6 +62,7 @@ namespace {
 			wrapping(stage);
 			spacing(stage);
 			weights(stage);
+			halo(stage);
 		}
 
 		void render(float /*alpha*/) override { Renderer::Primitives::clear(kBackground); }
@@ -194,6 +195,43 @@ namespace {
 				.position = {320.0F, 600.0F},
 				.style = {.color = Color(1.0F, 0.75F, 0.5F), .fontSize = 16.0F, .textTransform = Foundation::TextTransform::Uppercase},
 				.text = "upper case at draw time",
+			});
+		}
+
+		// A label over busy art reads by its halo, a text shadow with no offset in the paper's colour.
+		// At 32 px the sandbox's atlas holds 2 px of it.
+		static void halo(Ref<Component> stage) {
+			const Color	   paper(0.93F, 0.89F, 0.78F);
+			const Color	   ink(0.15F, 0.12F, 0.1F);
+			Ref<Rectangle> art = stage.addChild<Rectangle>(
+				{.id = "halo_art",
+				 .position = {600.0F, 560.0F},
+				 .size = {360.0F, 90.0F},
+				 .style = {.backgroundColor = Color(0.3F, 0.45F, 0.3F)}}
+			);
+			for (int i = 0; i < 12; ++i) {
+				art.addChild<Rectangle>({
+					.position = {static_cast<float>(i) * 30.0F, 0.0F},
+					.size = {12.0F, 90.0F},
+					.style = {.backgroundColor = ink},
+					.pointerEvents = ui::PointerEvents::None,
+				});
+			}
+			art.addChild<Text>({
+				.id = "halo",
+				.position = {20.0F, 6.0F},
+				.style =
+					{.color = ink, .textShadow = Foundation::BoxShadow{.color = paper, .blur = 0.5F, .spread = 1.5F}, .fontSize = 32.0F},
+				.text = "Halo label",
+			});
+			art.addChild<Text>({
+				.id = "drop_shadow",
+				.position = {20.0F, 50.0F},
+				.style =
+					{.color = paper,
+					 .textShadow = Foundation::BoxShadow{.color = ink, .blur = 1.0F, .offset = {2.0F, 2.0F}},
+					 .fontSize = 24.0F},
+				.text = "Drop shadow",
 			});
 		}
 	};

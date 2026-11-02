@@ -162,9 +162,19 @@ namespace ui {
 		if (glyphOpacity != opacity() || glyphSize != size) {
 			layOut();
 		}
-		if (!glyphs.empty()) {
-			Renderer::Primitives::drawGlyphs(glyphs.data(), glyphs.size(), drawKey());
+		if (glyphs.empty()) {
+			return;
 		}
+		if (style.textShadow) {
+			Foundation::BoxShadow shadow = *style.textShadow;
+			shadow.color = detail::withOpacity(shadow.color, glyphOpacity);
+			Renderer::Primitives::drawGlyphShadow(glyphs.data(), glyphs.size(), shadow, drawKey());
+		}
+		Renderer::Primitives::drawGlyphs(glyphs.data(), glyphs.size(), drawKey());
+	}
+
+	float Text::inkExtent() const {
+		return detail::shadowReach(style.textShadow);
 	}
 
 	void Text::describe(nlohmann::json& node) const {

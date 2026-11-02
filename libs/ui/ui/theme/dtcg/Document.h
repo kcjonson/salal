@@ -67,9 +67,11 @@ namespace ui::dtcg {
 	// salal's extension on a group, `"$extensions": {"salal": {...}}`, as the group has it after
 	// $extends (docs/ui-design.md, "Theme"). The merge treats $extensions as one property, so a later
 	// file's replaces an earlier one's whole. Checked with the document's structure: it goes on a
-	// group, and holds nothing but a text transform by one of kTextTransforms' names.
+	// group, and holds nothing but a text transform by one of kTextTransforms' names and the border's
+	// sides, a list of kBorderSideNames, each once.
 	struct SalalExtension {
 		std::optional<TextTransform> textTransform;
+		std::optional<BorderSides>	 borderSides;
 		std::string					 file; // a file that set one of the group's $ properties, for messages
 	};
 
