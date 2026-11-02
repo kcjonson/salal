@@ -434,6 +434,9 @@ namespace ui {
 		void					 finishReconcile(const std::vector<ComponentId>& kept);
 		// Its callback for an event type, if it has one.
 		[[nodiscard]] const std::function<void(PointerEvent&)>* callbackFor(PointerEvent::Type type) const;
+		// Its hover, press or a player's focus on it changed; the dispatcher and focus call it once the
+		// new state is set. Control turns it into onInteractionChanged.
+		virtual void interactionChanged() {}
 
 		void		setCommon(const Args& args);
 		void		registerOverlay(ComponentId entry, OverlayOptions options);

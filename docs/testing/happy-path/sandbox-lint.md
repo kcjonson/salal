@@ -9,5 +9,5 @@ Each scene started with `--scene=<name>`, `/api/ui/lint` read once it has drawn,
 5. `ui_input`: count 0; drag the knob to the end of its track: still 0.
 6. `ui_focus`: count 0; open the dialog, then Escape: still 0, the status reads "Dialog cancelled".
 7. `ui_display` and `ui_controls`: count 0. In ui_controls' tree, Sound and Music carry `value` true or false and `state.selected` to match, View its segment's index, Volume its number.
-8. In ui_controls, check Sound off, then drag Volume to each end: still 0, Sound's `value` false, Volume's 0 and then 1.
+8. In ui_controls, check Sound off, then drag Volume to each end: still 0, Sound's `value` false, Volume's 0 and then 1. Hover Lift: its tree `transform.translate` is [0, -2], and `transform` null once the pointer leaves. Tab to Lift and press Enter: it dips and washes pressed for a moment, and the status reads "pressed lift".
 9. `ui_overlays`: count 0. `ui_overlay_components`: count 0, and still 0 with the difficulty menu open, the "Abandon run?" dialog open, a critical toast up and Save's tooltip showing.
