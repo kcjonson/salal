@@ -1,7 +1,8 @@
 // ui_theme: the theme through ui's components (docs/ui-design.md, "Theme"). ui's theme styles on
 // Rectangles and Texts, which restyle in place when the theme changes, and swatches computed from the
 // theme: the tone set, the state layers over a control's colour, and the focus ring. T switches the
-// sandbox's tokens (apps/sandbox/tokens/) between dark and light; /api/state?what=scene has the mode.
+// sandbox's tokens (apps/sandbox/tokens/) between dark and light, whose button is ui's restyled on
+// purpose; /api/state?what=scene has the mode and the load's diagnostics, which it also logs.
 
 #include "Scenes.h"
 
@@ -12,10 +13,14 @@
 #include <ui/shapes/Text.h>
 #include <ui/theme/Tokens.h>
 #include <ui/theme/Variants.h>
+#include <utils/Log.h>
+
+#include <nlohmann/json.hpp>
 
 #include <array>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -62,11 +67,29 @@ namespace {
 
 		void render(float /*alpha*/) override { Renderer::Primitives::clear(ui().getTheme().get(ui::tokens::color::surface::base)); }
 
-		std::string exportState() const override { return std::string(R"({"mode":")") + (light ? "light" : "dark") + R"("})"; }
+		std::string exportState() const override {
+			return nlohmann::json{{"mode", light ? "light" : "dark"}, {"diagnostics", diagnostics}}.dump();
+		}
 
 	  private:
 		void applyMode() {
-			ui().setTheme(ui::Theme::load({.tokens = &sandbox_theme::tokenTable(), .inputs = {{"theme", light ? "light" : "dark"}}}).theme);
+			ui::ThemeLoad load = ui::Theme::load({.tokens = &sandbox_theme::tokenTable(), .inputs = {{"theme", light ? "light" : "dark"}}});
+			diagnostics.clear();
+			for (const ui::dtcg::Diagnostic& diagnostic : load.diagnostics) {
+				diagnostics.push_back(diagnostic.text());
+				switch (diagnostic.severity) {
+					case ui::dtcg::Diagnostic::Severity::Info:
+						LOG_INFO(UI, "theme: %s", diagnostics.back().c_str());
+						break;
+					case ui::dtcg::Diagnostic::Severity::Warning:
+						LOG_WARNING(UI, "theme: %s", diagnostics.back().c_str());
+						break;
+					case ui::dtcg::Diagnostic::Severity::Error:
+						LOG_ERROR(UI, "theme: %s", diagnostics.back().c_str());
+						break;
+				}
+			}
+			ui().setTheme(std::move(load.theme));
 		}
 
 		static void surfaces(Ref<Component> stage) {
@@ -169,8 +192,9 @@ namespace {
 			swatches.addChild<Text>({.position = {520.0F, 116.0F}, .style = styles::text::caption, .text = "focus ring"});
 		}
 
-		Ref<Component> swatches;
-		bool		   light = false;
+		Ref<Component>			 swatches;
+		bool					 light = false;
+		std::vector<std::string> diagnostics; // the last load's, as text
 	};
 
 } // namespace

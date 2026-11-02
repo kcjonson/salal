@@ -83,6 +83,7 @@ namespace ui::detail {
 			Component* left = find(id);
 			if (left != nullptr && std::ranges::find(chain, id) == chain.end()) {
 				left->hovered = false;
+				left->interactionChanged();
 				PointerEvent leave = base;
 				leave.type = PointerEvent::Type::Leave;
 				deliverTo(*left, leave);
@@ -92,6 +93,7 @@ namespace ui::detail {
 			Component* entered = find(*it);
 			if (entered != nullptr && std::ranges::find(before, *it) == before.end()) {
 				entered->hovered = true;
+				entered->interactionChanged();
 				PointerEvent enter = base;
 				enter.type = PointerEvent::Type::Enter;
 				deliverTo(*entered, enter);
@@ -101,7 +103,10 @@ namespace ui::detail {
 
 	void Dispatcher::setPressed(ComponentId target, bool value) {
 		for (Component* node = find(target); node != nullptr; node = find(node->parentId)) {
-			node->pressed = value;
+			if (node->pressed != value) {
+				node->pressed = value;
+				node->interactionChanged();
+			}
 		}
 	}
 
@@ -168,6 +173,7 @@ namespace ui::detail {
 			const bool inside = captor->containsPoint(captor->screenToLocal(event.screen));
 			if (inside != captor->hovered) {
 				captor->hovered = inside;
+				captor->interactionChanged();
 				PointerEvent boundary = event;
 				boundary.type = inside ? PointerEvent::Type::Enter : PointerEvent::Type::Leave;
 				deliverTo(*captor, boundary);

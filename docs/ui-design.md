@@ -214,6 +214,12 @@ A theme is design tokens in the
 - **A game's tokens file overrides any tier.** Aliases are the mapping: a game
   keeps its own base names and points ui's semantic tokens at them, or
   overrides a component token directly. There is no separate mapping format.
+  Files layer by path, so a game style that takes a name ui's styles already
+  use (`styles.tab`) merges into ui's and restyles every tab. That is how a
+  game restyles ui's components on purpose, so it isn't an error, but the
+  load reports each ui style a game's layer redefines as an info naming the
+  fields, and a game's own styles go under a group of their own
+  (`styles.hud.tab`, not `styles.tab`).
 - **Modes through the Resolver module.** Light and dark, per-screen themes and
   high contrast are contexts of a resolver file.
 - **Only the root has a theme.** A scene's root carries the resolved theme.
@@ -240,6 +246,15 @@ off, `dotted` round dots a width across and a width apart, and a `dashArray`
 draws its first dash and gap (one length is both) with its `lineCap`. `double`,
 `groove`, `ridge`, `outset` and `inset`, and a `dashArray` of more than two
 lengths, load with a warning and draw solid or with their first two.
+
+A font is one weight, so a role with several (a display face in semibold and
+bold) is several families under one name: the game registers each with its
+weight (`ThemeArgs::fontFamilies`), and a style's `fontWeight` picks the face,
+the nearest by CSS's matching rule ([CSS Fonts 4, 5.2](https://www.w3.org/TR/css-fonts-4/#font-style-matching)),
+when the theme resolves the style. So `title` at 600 draws the semibold, a
+style extended to 700 the bold, and a control passes its weight to its label
+with its family. A family registered under two names picks among the first
+one's faces.
 
 A text transform (CSS's `text-transform`) has no type in the format, so it is
 salal's extension, in the place the format leaves for one: a style's group
@@ -284,12 +299,17 @@ foot.
 
 What ui's tokens define, beyond palette roles (surfaces, text, lines, scrim,
 focus ring), spacing, radii and motion: font roles (display, body, mono), each
-naming a game family; a semantic tone set (default, accent, info, positive,
+naming a game family, its faces picked by weight; a semantic tone set (default, accent, info, positive,
 warning, danger, plus `Auto`, picked by value); and `size` (sm, md, lg)
 setting font size and control height. State layers apply in R11.12's order
 (base, hover, pressed, open and active, focus ring), their washes coming from
 tokens. A disabled control draws whole at the disabled opacity, fill, border,
-label and icon, so one with a clear fill still reads as disabled. Worldsim's design language (elevation by tint, its line
+label and icon, so one with a clear fill still reads as disabled. A key or pad
+activation has no release to end a press, so it shows the pressed layer for
+`state.pressed.hold`, and a press looks the same however it comes. A control's
+state (hovered, pressed, active, focused, focus-visible) is readable to its
+subclasses, which hear it change as it happens (`Control::onInteractionChanged`),
+for a look the layers don't draw, a lift on hover. Worldsim's design language (elevation by tint, its line
 alphas, two accents, its radius scale and control heights, Panel's kicker and
 bracket ticks) is worldsim's tokens and components, not engine rules.
 

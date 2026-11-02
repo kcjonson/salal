@@ -184,6 +184,8 @@ namespace ui {
 			{"content", text},
 			{"measured", {{"w", extent.size.x}, {"h", extent.size.y}, {"lines", extent.lines}}},
 			{"overflow", overflows ? "overflowing" : "none"},
+			{"fontFamily", style.fontFamily ? nlohmann::json(static_cast<int>(*style.fontFamily)) : nlohmann::json(nullptr)},
+			{"fontWeight", style.fontWeight ? nlohmann::json(*style.fontWeight) : nlohmann::json(nullptr)},
 		};
 		node["style"] = detail::styleJson(std::nullopt, style.color.value_or(kColor), std::nullopt);
 	}
