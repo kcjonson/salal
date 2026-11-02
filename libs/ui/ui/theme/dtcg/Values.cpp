@@ -42,7 +42,7 @@ namespace ui::dtcg {
 	}
 
 	std::string Diagnostic::text() const {
-		std::string out = severity == Severity::Error ? "error: " : "warning: ";
+		std::string out = severity == Severity::Error ? "error: " : (severity == Severity::Warning ? "warning: " : "info: ");
 		if (!file.empty()) {
 			out += file + ": ";
 		}

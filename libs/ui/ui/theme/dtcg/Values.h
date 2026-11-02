@@ -117,10 +117,10 @@ namespace ui::dtcg {
 		GradientValue,
 		TypographyValue>;
 
-	// Where a load went wrong. `file` is the tokens or resolver file as the load named it, `path`
-	// the token's dot path; either may be empty.
+	// Where a load went wrong, or for an Info, what it did that a reader may not have meant. `file` is
+	// the tokens or resolver file as the load named it, `path` the token's dot path; either may be empty.
 	struct Diagnostic {
-		enum class Severity : std::uint8_t { Warning, Error };
+		enum class Severity : std::uint8_t { Info, Warning, Error };
 
 		Severity	severity = Severity::Error;
 		std::string file;

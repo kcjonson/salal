@@ -7,7 +7,9 @@
 // The load's rules: a wrong $type, a broken alias or a bad value fails it; a token no table names
 // is a warning; a token a table names that the loaded files lack is an error in a development
 // build and a warning otherwise, and reads as the type's default. A path ui names and a game's
-// file leaves out falls back to ui's value, since ui's tokens are always the bottom layer.
+// file leaves out falls back to ui's value, since ui's tokens are always the bottom layer. A ui
+// style a game's layer sets a field of is an info naming the fields, since a game style sharing
+// ui's name merges into ui's.
 
 #include "ui/Style.h"
 #include "ui/theme/TokenTable.h"

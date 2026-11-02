@@ -193,6 +193,12 @@ A theme is design tokens in the
 - **A game's tokens file overrides any tier.** Aliases are the mapping: a game
   keeps its own base names and points ui's semantic tokens at them, or
   overrides a component token directly. There is no separate mapping format.
+  Files layer by path, so a game style that takes a name ui's styles already
+  use (`styles.tab`) merges into ui's and restyles every tab. That is how a
+  game restyles ui's components on purpose, so it isn't an error, but the
+  load reports each ui style a game's layer redefines as an info naming the
+  fields, and a game's own styles go under a group of their own
+  (`styles.hud.tab`, not `styles.tab`).
 - **Modes through the Resolver module.** Light and dark, per-screen themes and
   high contrast are contexts of a resolver file.
 - **Only the root has a theme.** A scene's root carries the resolved theme.
