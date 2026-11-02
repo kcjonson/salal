@@ -3,7 +3,9 @@
 #include "ui/theme/Tokens.h"
 #include "ui/theme/dtcg/Resolver.h"
 
+#include <algorithm>
 #include <set>
+#include <utility>
 
 namespace ui {
 
@@ -24,6 +26,38 @@ namespace ui {
 					break;
 			}
 			return Foundation::TextTransform::None;
+		}
+
+		// A strokeStyle token as ui strokes it, and in `why` what of it doesn't draw: double, groove,
+		// ridge, outset and inset draw solid, and a dashArray draws its first dash and gap (one
+		// length is both, as in SVG).
+		StrokeStyle toStrokeStyle(const dtcg::StrokeStyleValue& value, std::string& why) {
+			if (!value.keyword.empty()) {
+				if (value.keyword == "dashed") {
+					return {.kind = StrokeStyle::Kind::Dashed};
+				}
+				if (value.keyword == "dotted") {
+					return {.kind = StrokeStyle::Kind::Dotted};
+				}
+				if (value.keyword != "solid") {
+					why = "strokeStyle " + value.keyword + " draws solid; salal draws solid, dashed, dotted and a dashArray";
+				}
+				return {};
+			}
+			const std::vector<float>& lengths = value.dashArray;
+			if (lengths.size() > 2) {
+				why = "a dashArray of " + std::to_string(lengths.size()) + " lengths draws its first dash and gap only";
+			}
+			Foundation::DashCap cap = Foundation::DashCap::Butt;
+			if (value.lineCap == "round") {
+				cap = Foundation::DashCap::Round;
+			} else if (value.lineCap == "square") {
+				cap = Foundation::DashCap::Square;
+			}
+			return {
+				.kind = StrokeStyle::Kind::Pattern,
+				.pattern = {.dash = lengths.front(), .gap = lengths.size() > 1 ? lengths[1] : lengths.front(), .cap = cap}
+			};
 		}
 
 		std::string textOf(const EmbeddedFile& file) {
@@ -52,8 +86,64 @@ namespace ui {
 			return layer;
 		}
 
+		// matchWeight's order for one weight, lowest first: the tier, then the place in it.
+		std::pair<int, float> weightRank(float weight, float desired) {
+			if (desired >= 400.0F && desired <= 500.0F) {
+				if (weight >= desired && weight <= 500.0F) {
+					return {0, weight};
+				}
+				return weight < desired ? std::pair{1, -weight} : std::pair{2, weight};
+			}
+			if (desired < 400.0F) {
+				return weight <= desired ? std::pair{0, -weight} : std::pair{1, weight};
+			}
+			return weight >= desired ? std::pair{0, weight} : std::pair{1, -weight};
+		}
+
 		std::string stylePath(std::string_view style, std::string_view field) {
 			return std::string(style) + "." + std::string(field);
+		}
+
+		// Tokens layer by path, so a game's style that shares a name with one of ui's (its own `tab`)
+		// merges into ui's without a word. That's how a game restyles ui's components on purpose, so
+		// it's an info, not a warning: one for each ui style a later layer sets a field or salal's
+		// extension of, naming them.
+		void reportOverriddenStyles(
+			const dtcg::TokenSet&		 set,
+			const dtcg::SalalExtensions& extensions,
+			std::string_view			 uiLabel,
+			std::vector<Diagnostic>&	 diagnostics
+		) {
+			const std::string uiPrefix = std::string(uiLabel) + "/";
+			for (std::string_view style : tokens_detail::kTable.styles) {
+				std::string fields;
+				std::string file;
+				const auto	add = [&](std::string_view field, const std::string& from) {
+					 fields += (fields.empty() ? "" : ", ") + std::string(field);
+					 if (file.empty()) {
+						 file = from;
+					 }
+				};
+				for (const dtcg::StyleField& field : dtcg::kStyleFields) {
+					const auto origin = set.origins().find(stylePath(style, field.name));
+					if (origin != set.origins().end() && !origin->second.starts_with(uiPrefix)) {
+						add(field.name, origin->second);
+					}
+				}
+				const auto extension = extensions.find(style);
+				if (extension != extensions.end() && extension->second.textTransform.has_value() &&
+					!extension->second.file.starts_with(uiPrefix)) {
+					add("textTransform", extension->second.file);
+				}
+				if (!fields.empty()) {
+					diagnostics.push_back(
+						{.severity = Severity::Info,
+						 .file = file,
+						 .path = std::string(style),
+						 .message = "redefines ui's style (" + fields + "); a game's own styles belong under a group of their own"}
+					);
+				}
+			}
 		}
 
 		class FamilyMap {
@@ -62,14 +152,20 @@ namespace ui {
 				: names(names),
 				  diagnostics(diagnostics) {}
 
-			// The first of the value's names the game registered; the default family, with a warning
-			// unless the game registered none, if there's none.
-			Renderer::FontFamily map(const dtcg::FontFamilyValue& value, const dtcg::ResolvedToken& token, std::string_view path) {
+			// The face nearest `weight` of the first of the value's names the game registered; the
+			// default family, with a warning unless the game registered none, if there's none.
+			Renderer::FontFamily
+			map(const dtcg::FontFamilyValue& value, float weight, const dtcg::ResolvedToken& token, std::string_view path) {
 				for (const std::string& wanted : value.names) {
+					const FontFamilyName* best = nullptr;
 					for (const FontFamilyName& name : names) {
-						if (name.name == wanted) {
-							return name.family;
+						if (name.name == wanted &&
+							(best == nullptr || weightRank(name.weight, weight) < weightRank(best->weight, weight))) {
+							best = &name;
 						}
+					}
+					if (best != nullptr) {
+						return best->family;
 					}
 				}
 				if (!names.empty() && warned.insert(std::string(path)).second) {
@@ -109,6 +205,7 @@ namespace ui {
 		const dtcg::TokenSet	   set = dtcg::loadLayers(layers, args.inputs, result.diagnostics);
 		dtcg::SalalExtensions	   extensions;
 		const dtcg::ResolvedTokens resolved = dtcg::resolve(set, {.rootFontSize = args.rootFontSize}, result.diagnostics, &extensions);
+		reportOverriddenStyles(set, extensions, layers.front().label, result.diagnostics);
 
 		std::set<std::string, std::less<>> known;
 		std::set<std::string, std::less<>> stylePaths;
@@ -153,6 +250,17 @@ namespace ui {
 			);
 		};
 		FamilyMap families(args.fontFamilies, result.diagnostics);
+
+		std::vector<std::string_view> names;
+		for (const FontFamilyName& registered : args.fontFamilies) {
+			auto listed = std::ranges::find(names, registered.name);
+			if (listed == names.end()) {
+				listed = names.insert(names.end(), registered.name);
+			}
+			result.theme.faces.push_back(
+				{.name = static_cast<std::size_t>(listed - names.begin()), .family = registered.family, .weight = registered.weight}
+			);
+		}
 		for (const TokenTable* table : chain) {
 			Table loaded{.table = table};
 			for (const TokenEntry& entry : table->tokens) {
@@ -171,9 +279,9 @@ namespace ui {
 				} else {
 					slot.value = found->second.value;
 					if (const auto* family = std::get_if<dtcg::FontFamilyValue>(&*slot.value)) {
-						slot.family = families.map(*family, found->second, entry.path);
+						slot.family = families.map(*family, 400.0F, found->second, entry.path);
 					} else if (const auto* typography = std::get_if<dtcg::TypographyValue>(&*slot.value)) {
-						slot.family = families.map(typography->fontFamily, found->second, entry.path);
+						slot.family = families.map(typography->fontFamily, typography->fontWeight, found->second, entry.path);
 					}
 				}
 				loaded.tokens.push_back(std::move(slot));
@@ -200,9 +308,16 @@ namespace ui {
 						out = std::get<float>(token->value);
 					}
 				};
+
+				// The family maps once the weight is known, which the font or the fontWeight field sets.
+				const dtcg::FontFamilyValue* familyValue = nullptr;
+				const dtcg::ResolvedToken*	 familyToken = nullptr;
+				std::string					 familyPath;
 				if (const dtcg::ResolvedToken* token = field("font", dtcg::TokenType::Typography)) {
 					const auto& font = std::get<dtcg::TypographyValue>(token->value);
-					themed.fontFamily = families.map(font.fontFamily, *token, stylePath(style, "font"));
+					familyValue = &font.fontFamily;
+					familyToken = token;
+					familyPath = stylePath(style, "font");
 					themed.fontSize = font.fontSize;
 					themed.fontWeight = font.fontWeight;
 					themed.lineHeight = font.lineHeight;
@@ -211,33 +326,58 @@ namespace ui {
 				color("backgroundColor", themed.backgroundColor);
 				color("borderColor", themed.borderColor);
 				number("borderWidth", dtcg::TokenType::Dimension, themed.borderWidth);
-				number("borderRadius", dtcg::TokenType::Dimension, themed.borderRadius);
-				// The renderer draws one outer shadow; the first outer layer is it.
-				if (const dtcg::ResolvedToken* token = field("boxShadow", dtcg::TokenType::Shadow)) {
-					for (const dtcg::ShadowLayer& layer : std::get<dtcg::ShadowValue>(token->value).layers) {
-						if (!layer.inset) {
-							themed.boxShadow = Foundation::BoxShadow{
-								.color = toColor(layer.color),
-								.blur = layer.blur,
-								.spread = layer.spread,
-								.offset = {layer.offsetX, layer.offsetY}
-							};
-							break;
-						}
+				if (const dtcg::ResolvedToken* token = field("borderStyle", dtcg::TokenType::StrokeStyle)) {
+					std::string why;
+					themed.borderStyle = toStrokeStyle(std::get<dtcg::StrokeStyleValue>(token->value), why);
+					if (!why.empty()) {
+						result.diagnostics.push_back(
+							{.severity = Severity::Warning, .file = token->file, .path = stylePath(style, "borderStyle"), .message = why}
+						);
 					}
 				}
+				number("borderRadius", dtcg::TokenType::Dimension, themed.borderRadius);
+				// The renderer draws one outer shadow; the first outer layer is it.
+				const auto shadow = [&](std::string_view name, std::optional<Foundation::BoxShadow>& out) {
+					if (const dtcg::ResolvedToken* token = field(name, dtcg::TokenType::Shadow)) {
+						for (const dtcg::ShadowLayer& layer : std::get<dtcg::ShadowValue>(token->value).layers) {
+							if (!layer.inset) {
+								out = Foundation::BoxShadow{
+									.color = toColor(layer.color),
+									.blur = layer.blur,
+									.spread = layer.spread,
+									.offset = {layer.offsetX, layer.offsetY}
+								};
+								break;
+							}
+						}
+					}
+				};
+				shadow("boxShadow", themed.boxShadow);
 				number("opacity", dtcg::TokenType::Number, themed.opacity);
 				color("color", themed.color);
+				shadow("textShadow", themed.textShadow);
 				if (const dtcg::ResolvedToken* token = field("fontFamily", dtcg::TokenType::FontFamily)) {
-					themed.fontFamily = families.map(std::get<dtcg::FontFamilyValue>(token->value), *token, stylePath(style, "fontFamily"));
+					familyValue = &std::get<dtcg::FontFamilyValue>(token->value);
+					familyToken = token;
+					familyPath = stylePath(style, "fontFamily");
 				}
 				number("fontSize", dtcg::TokenType::Dimension, themed.fontSize);
 				number("fontWeight", dtcg::TokenType::FontWeight, themed.fontWeight);
 				number("lineHeight", dtcg::TokenType::Number, themed.lineHeight);
 				number("letterSpacing", dtcg::TokenType::Dimension, themed.letterSpacing);
-				if (const auto found = extensions.find(style); found != extensions.end() && found->second.textTransform.has_value()) {
-					themed.textTransform = toTextTransform(*found->second.textTransform);
-					any = true;
+				if (familyValue != nullptr) {
+					themed.fontFamily = families.map(*familyValue, themed.fontWeight.value_or(400.0F), *familyToken, familyPath);
+				}
+				if (const auto found = extensions.find(style); found != extensions.end()) {
+					if (const std::optional<dtcg::TextTransform>& transform = found->second.textTransform) {
+						themed.textTransform = toTextTransform(*transform);
+						any = true;
+					}
+					if (const std::optional<dtcg::BorderSides>& sides = found->second.borderSides) {
+						themed.borderSides =
+							Foundation::BorderSides{.top = sides->top, .right = sides->right, .bottom = sides->bottom, .left = sides->left};
+						any = true;
+					}
 				}
 				if (!any) {
 					missing(*table, style);
@@ -342,7 +482,35 @@ namespace ui {
 	Style Theme::resolve(const Style& declared, StyleId typeStyle) const {
 		Style resolved = style(typeStyle).extend(style(declared.theme)).extend(declared);
 		resolved.theme = declared.theme;
+		if (resolved.fontFamily && resolved.fontWeight) {
+			resolved.fontFamily = face(*resolved.fontFamily, *resolved.fontWeight);
+		}
 		return resolved;
+	}
+
+	// A family registered under two names picks among the first name's faces.
+	Renderer::FontFamily Theme::face(Renderer::FontFamily family, float weight) const {
+		const auto own = std::ranges::find(faces, family, &Face::family);
+		if (own == faces.end()) {
+			return family;
+		}
+		const Face* best = &*own;
+		for (const Face& each : faces) {
+			if (each.name == own->name && weightRank(each.weight, weight) < weightRank(best->weight, weight)) {
+				best = &each;
+			}
+		}
+		return best->family;
+	}
+
+	std::size_t matchWeight(std::span<const float> weights, float desired) {
+		std::size_t best = 0;
+		for (std::size_t i = 1; i < weights.size(); ++i) {
+			if (weightRank(weights[i], desired) < weightRank(weights[best], desired)) {
+				best = i;
+			}
+		}
+		return best;
 	}
 
 } // namespace ui

@@ -1,8 +1,9 @@
 // ui_controls: ui's controls, after worldsim's ui-sandbox button, tab bar, text input and tree view
 // scenes (apps/ui-sandbox/scenes/, a4226e17): buttons in each variant and size, with an icon and
-// disabled; a checkbox, a toggle and a radio group; a segmented control and a tab bar; sliders; text
-// inputs; a list of rows; and a tree. What each last did shows in a status line, and
-// /api/state?what=scene has it too.
+// disabled, and one that lifts on hover and settles on a press from its interaction state; a
+// checkbox, a toggle and a radio group; a segmented control and a tab bar; sliders; text inputs; a
+// list of rows; and a tree. What each last did shows in a status line, and /api/state?what=scene
+// has it too.
 
 #include "Scenes.h"
 
@@ -34,6 +35,20 @@ namespace {
 	Layout flex(FlexDirection direction, float gap) {
 		return {.display = Display::Flex, .flexDirection = direction, .gap = gap, .alignItems = AlignItems::Start};
 	}
+
+	// What a game's own control does with the state the theme's layers don't draw: it rises on hover
+	// or a focus ring and settles below its place while pressed, by key as by pointer.
+	class LiftButton final : public Button {
+	  public:
+		using Button::Button;
+
+	  protected:
+		void onInteractionChanged(const InteractionState& /*previous*/) override {
+			const InteractionState now = interaction();
+			const float			   lift = now.pressed ? 1.0F : (now.hovered || now.focusVisible ? -2.0F : 0.0F);
+			setTransform({.translate = {0.0F, lift}});
+		}
+	};
 
 	class UiControlsScene final : public app::Scene {
 	  public:
@@ -85,6 +100,7 @@ namespace {
 			sizes.addChild<Button>({.label = "Small", .controlSize = ControlSize::Sm});
 			sizes.addChild<Button>({.label = "Medium"});
 			sizes.addChild<Button>({.label = "Large", .controlSize = ControlSize::Lg});
+			sizes.addChild<LiftButton>({.id = "lift", .label = "Lift", .onPress = [this] { did("pressed lift"); }});
 		}
 
 		void choices(Ref<Component> column) {

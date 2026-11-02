@@ -11,6 +11,7 @@
 #include "vector/Tessellator.h"
 #include "vector/Types.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
@@ -361,27 +362,39 @@ namespace Renderer::Primitives {
 			return;
 		}
 
-		// Use SDF-based rendering for fill, border, and corner radius
-		// Extract corner radius from border if present, otherwise use 0
-		float cornerRadius = 0.0F;
-		if (args.style.border.has_value() && args.style.border.value().cornerRadius > 0.0F) {
-			cornerRadius = args.style.border.value().cornerRadius;
-		}
+		// The corners round by the border's radius, square beside a side it leaves bare.
+		const std::optional<Foundation::BorderStyle>& border = args.style.border;
+		const CornerRadii radii = rectCornerRadii(border.has_value() ? std::max(border->cornerRadius, 0.0F) : 0.0F, border);
 
 		// Outer box-shadow / glow sits behind the fill (emit first).
 		if (args.style.boxShadow.has_value()) {
-			g_batchRenderer->addShadowQuad(args.bounds, args.style.boxShadow.value(), cornerRadius, args.key, args.blend);
+			g_batchRenderer->addShadowQuad(args.bounds, args.style.boxShadow.value(), radii, args.key, args.blend);
 		}
 
 		// Single AddQuad call handles fill, border, rounded corners, and an optional
 		// gradient (per-corner vertex colors) or fill hook via the GPU.
 		g_batchRenderer->addQuad(
-			args.bounds, args.style.fill, args.style.border, cornerRadius, args.style.gradient, args.key, args.blend, args.fill, args.id
+			args.bounds, args.style.fill, border, radii, args.style.gradient, args.key, args.blend, args.fill, args.id
 		);
 	}
 
 	void drawLine(const LineArgs& args) {
 		if (g_batchRenderer == nullptr) {
+			return;
+		}
+
+		// A dashed line is cut along its length in the shader, which the stroke's SDF pieces carry.
+		if (args.style.dash.has_value()) {
+			const std::array<Foundation::Vec2, 2> points{args.start, args.end};
+			drawPolyline(
+				{.points = points,
+				 .width = args.style.width,
+				 .color = args.style.color,
+				 .dash = args.style.dash,
+				 .id = args.id,
+				 .key = args.key,
+				 .blend = args.blend}
+			);
 			return;
 		}
 
@@ -433,6 +446,14 @@ namespace Renderer::Primitives {
 	void drawCircle(const CircleArgs& args) {
 		if (g_batchRenderer == nullptr || !(args.radius > 0.0F)) {
 			return;
+		}
+
+		// A disk is a rounded box whose radius is its half size, so its shadow is a rect's.
+		if (args.style.shadow.has_value()) {
+			const Foundation::Rect box{args.center.x - args.radius, args.center.y - args.radius, args.radius * 2.0F, args.radius * 2.0F};
+			g_batchRenderer->addShadowQuad(
+				box, *args.style.shadow, {args.radius, args.radius, args.radius, args.radius}, args.key, args.blend
+			);
 		}
 
 		if (args.style.fill.a > 0.0F) {
@@ -530,6 +551,31 @@ namespace Renderer::Primitives {
 			return;
 		}
 
+		// The fill's shape again, grown by the spread (its own tessellation, cached by its
+		// outline like the fill's), moved by the offset, its feather as wide as the blur.
+		if (args.style.shadow.has_value() && args.style.shadow->color.a > 0.0F) {
+			const Foundation::BoxShadow&					  shadow = *args.style.shadow;
+			static thread_local std::vector<Foundation::Vec2> grown;
+			std::span<const Foundation::Vec2>				  outline = args.vertices;
+			if (shadow.spread != 0.0F) {
+				offsetOutline(args.vertices, shadow.spread, grown);
+				outline = grown;
+			}
+			const PolygonCacheEntry& cast = polygonFill(outline);
+			if (!cast.mesh.indices.empty()) {
+				g_batchRenderer->addTriangles(
+					{.vertices = cast.mesh.vertices,
+					 .indices = cast.mesh.indices,
+					 .color = shadow.color,
+					 .key = args.key,
+					 .blend = args.blend,
+					 .feather = &cast.boundary,
+					 .offset = shadow.offset,
+					 .featherWidth = std::max(shadow.blur, 0.0F)}
+				);
+			}
+		}
+
 		if (args.style.fill.a > 0.0F) {
 			const PolygonCacheEntry& fill = polygonFill(args.vertices);
 			if (!fill.mesh.indices.empty()) {
@@ -550,8 +596,14 @@ namespace Renderer::Primitives {
 			// pixel either side) lies over the fill, and outside the outline, where the
 			// fill's feather fades, the border is whole.
 			static thread_local std::vector<StrokePiece> pieces;
-			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces);
-			g_batchRenderer->addStroke(pieces, border.color, args.key, args.blend);
+			const float length = strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces);
+			g_batchRenderer->addStroke(
+				pieces,
+				border.color,
+				args.key,
+				args.blend,
+				border.dash.has_value() ? resolveDash(*border.dash, border.width, length, true) : ResolvedDash{}
+			);
 		}
 	}
 
@@ -562,9 +614,10 @@ namespace Renderer::Primitives {
 		static thread_local std::vector<StrokePiece> pieces;
 		// Points within a quarter of a device pixel of the line drawn without them go, so a
 		// noisy line's near-repeats don't uncut the joints either side.
-		strokePolyline(args, g_batchRenderer->getLocalPixel(), 0.25F * g_batchRenderer->getLocalDevicePixel(), pieces);
+		const float length = strokePolyline(args, g_batchRenderer->getLocalPixel(), 0.25F * g_batchRenderer->getLocalDevicePixel(), pieces);
 		if (!pieces.empty()) {
-			g_batchRenderer->addStroke(pieces, args.color, args.key, args.blend);
+			const ResolvedDash dash = args.dash.has_value() ? resolveDash(*args.dash, args.width, length, args.closed) : ResolvedDash{};
+			g_batchRenderer->addStroke(pieces, args.color, args.key, args.blend, dash);
 		}
 	}
 
@@ -614,21 +667,46 @@ namespace Renderer::Primitives {
 			}
 		}
 
-		// Emit one pass of the string at a position/color (shared by the shadow
-		// and the main text so text-shadow is a single inline property, not a
-		// caller-side double draw).
-		const auto emit = [&](Foundation::Vec2 pos, const Foundation::Color& col) {
-			std::vector<FontRenderer::GlyphQuad> quads;
-			g_fontRenderer->generateGlyphQuads(
-				effective, glm::vec2(pos.x, pos.y), args.scale, glm::vec4(col.r, col.g, col.b, col.a), quads, args.font, args.letterSpacing
-			);
-			drawGlyphs(quads.data(), quads.size(), args.key, args.blend);
-		};
-
-		if (args.shadowColor.a > 0.0F) {
-			emit({origin.x + args.shadowOffset.x, origin.y + args.shadowOffset.y}, args.shadowColor);
+		static thread_local std::vector<FontRenderer::GlyphQuad> quads;
+		quads.clear();
+		const Foundation::Color& color = args.color;
+		g_fontRenderer->generateGlyphQuads(
+			effective,
+			glm::vec2(origin.x, origin.y),
+			args.scale,
+			glm::vec4(color.r, color.g, color.b, color.a),
+			quads,
+			args.font,
+			args.letterSpacing
+		);
+		if (args.shadow.has_value()) {
+			drawGlyphShadow(quads.data(), quads.size(), *args.shadow, args.key, args.blend);
 		}
-		emit(origin, args.color);
+		drawGlyphs(quads.data(), quads.size(), args.key, args.blend);
+	}
+
+	void
+	drawGlyphShadow(const FontRenderer::GlyphQuad* quads, size_t count, const Foundation::BoxShadow& shadow, int32_t key, BlendMode blend) {
+		if (g_batchRenderer == nullptr || !(shadow.color.a > 0.0F)) {
+			return;
+		}
+		const Foundation::Vec2 offset = shadow.offset;
+		for (size_t i = 0; i < count; ++i) {
+			const FontRenderer::GlyphQuad& quad = quads[i];
+			g_batchRenderer->addTextQuad(
+				Foundation::Vec2(quad.position.x, quad.position.y) + offset,
+				Foundation::Vec2(quad.size.x, quad.size.y),
+				Foundation::Vec2(quad.uvMin.x, quad.uvMin.y),
+				Foundation::Vec2(quad.uvMax.x, quad.uvMax.y),
+				shadow.color,
+				Foundation::Vec2(quad.runOrigin.x, quad.runOrigin.y) + offset,
+				quad.atlas,
+				quad.pixelRange,
+				key,
+				blend,
+				{.spread = std::max(shadow.spread, 0.0F), .blur = std::max(shadow.blur, 0.0F)}
+			);
+		}
 	}
 
 	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, int32_t key, BlendMode blend) {

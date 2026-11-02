@@ -7,6 +7,8 @@
 
 #include <primitives/Primitives.h>
 
+#include <utility>
+
 namespace ui {
 
 	namespace {
@@ -25,6 +27,7 @@ namespace ui {
 	void Control::describe(nlohmann::json& node) const {
 		Rectangle::describe(node);
 		node["state"]["active"] = active;
+		node["state"]["pressed"] = interaction().pressed; // a key's moment of press too
 	}
 
 	void Control::onMount() {
@@ -32,11 +35,47 @@ namespace ui {
 		if (!getCursor()) {
 			setCursor(Cursor::Pointer);
 		}
-		background.attach(*this, style.backgroundColor.value_or(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F)), interaction());
+		reported = interaction();
+		background.attach(*this, style.backgroundColor.value_or(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F)), reported);
 	}
 
 	InteractionState Control::interaction() const {
-		return {.hovered = isHovered(), .pressed = isPressed(), .active = active};
+		return {
+			.hovered = isHovered(),
+			.pressed = isPressed() || keyPressed,
+			.active = active,
+			.focused = isFocused(),
+			.focusVisible = isFocusVisible(),
+		};
+	}
+
+	void Control::setActive(bool value) {
+		if (active != value) {
+			active = value;
+			interactionChanged();
+		}
+	}
+
+	void Control::interactionChanged() {
+		const InteractionState now = interaction();
+		if (getContext() != nullptr && now != reported) {
+			const InteractionState previous = std::exchange(reported, now);
+			onInteractionChanged(previous);
+		}
+	}
+
+	void Control::pressBriefly() {
+		Context* owner = getContext();
+		if (owner == nullptr) {
+			return;
+		}
+		owner->getAnimator().cancel(keyRelease);
+		keyPressed = true;
+		interactionChanged();
+		keyRelease = after(owner->getTheme().get(tokens::state::pressed::hold), [this] {
+			keyPressed = false;
+			interactionChanged();
+		});
 	}
 
 	float Control::stateOpacity() const {
@@ -91,6 +130,7 @@ namespace ui {
 	void Control::handleKey(KeyEvent& event) {
 		if (event.type == KeyEvent::Type::Activate && isEnabledInTree() && !fromOverlay(*this, event.target)) {
 			activator = event.player;
+			pressBriefly();
 			activate();
 			event.consume();
 		}

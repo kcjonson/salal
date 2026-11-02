@@ -1,6 +1,6 @@
 // polygon: Primitives::drawPolygon. Convex, concave and self-crossing fills, borders that sit outside
-// the outline, one silhouette under several transforms (tessellated once, then cached), and additive
-// fills.
+// the outline, one silhouette under several transforms (tessellated once, then cached), additive
+// fills, and soft shadows under a silhouette and a circle.
 
 #include "DesignCanvas.h"
 #include "Scenes.h"
@@ -212,6 +212,14 @@ namespace {
 				BlendMode::Additive
 			);
 			label("additive fill and border", 1700.0F, 1500.0F);
+
+			// Soft shadows on a pale plate: a silhouette's (its fill again, feathered over the
+			// blur) and a disk's (a rect's shadow rounded whole).
+			const Foundation::BoxShadow cast{.color = {0.1F, 0.08F, 0.05F, 0.5F}, .blur = 18.0F, .offset = {16.0F, 20.0F}};
+			P::drawRect({.bounds = {2060.0F, 1170.0F, 880.0F, 310.0F}, .style = {.fill = {0.86F, 0.82F, 0.72F, 1.0F}}});
+			draw(rock, {.fill = {0.45F, 0.5F, 0.35F, 1.0F}, .shadow = cast}, placed(2300.0F, 1320.0F, 0.4F, 0.9F));
+			P::drawCircle({.center = {2700.0F, 1320.0F}, .radius = 95.0F, .style = {.fill = {0.7F, 0.35F, 0.25F, 1.0F}, .shadow = cast}});
+			label("soft shadows", 2500.0F, 1500.0F);
 			P::PopTransform();
 		}
 

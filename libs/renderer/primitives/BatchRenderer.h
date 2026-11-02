@@ -39,8 +39,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	class CoordinateSystem;
 	struct BoundaryLoops;
 
-	// What addTriangles adds: an indexed mesh, in one colour or a colour per vertex, and
-	// optionally its boundary loops (findBoundaryLoops) for a feather ring.
+	// What addTriangles adds: an indexed mesh, in one colour or a colour per vertex, moved by
+	// `offset` in its own units, and optionally its boundary loops (findBoundaryLoops) for a
+	// feather ring `featherWidth` local units wide, or a device pixel at 0 (a shadow's is its blur).
 	struct TriangleMeshArgs {
 		std::span<const Foundation::Vec2> vertices;
 		std::span<const uint16_t>		  indices;
@@ -49,6 +50,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		int32_t							  key = 0;
 		Primitives::BlendMode			  blend = Primitives::BlendMode::Alpha;
 		const BoundaryLoops*			  feather = nullptr;
+		Foundation::Vec2				  offset{0.0F, 0.0F};
+		float							  featherWidth = 0.0F;
+	};
+
+	// A text quad's edge: its outline grown by `spread` px and softened over `blur` px either side,
+	// a shadow's or a halo's (Primitives::drawGlyphShadow); zero for a glyph's own.
+	struct TextEdge {
+		float spread = 0.0F;
+		float blur = 0.0F;
 	};
 
 	// BatchInstance (backend/Backend.h), the batch's quad: its mode is how base.frag
@@ -60,15 +70,23 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	//   Rect    geometry: half size, then the quad's half extent; radii: the corners' (tl, tr,
 	//           br, bl); fills: each corner's, for a gradient, or with a fill hook its one fill
 	//           then its three params; slot: its fill hook's index, 0 for none; border: the
-	//           border's colour; shape.x: its width; flags: its position
+	//           border's colour; shape.x: its width; flags: its position and its bare sides;
+	//           a dashed border's shape.y: the dash, shape.z: the gap, negative for round caps,
+	//           shape.w: the pattern's offset at the top-left corner's middle
 	//   Shadow  geometry: half size, then the quad's half extent; radii: the corners'; shape.z: the blur
 	//   Arc     geometry: inner and outer radius, half the sweep, the middle's angle; shape.y: how
 	//           far the quad reaches past the outer radius
 	//   Image   geometry: the uv rect, the top-left corner's then the bottom-right's
-	//   Text    geometry: the uv rect; shape.z: the atlas's distance range in texels
+	//   Text    geometry: the uv rect; shape.x: a shadow's spread, shape.y: its blur, shape.z: the
+	//           atlas's distance range in texels
 	//   Stroke  a convex piece, a fan's quad; geometry: the rows of the map from a screen offset
 	//           to the piece's frame; radii: its centre on screen; shape: its half size; border:
-	//           its corner radius; all floats
+	//           its corner radius; all floats; fills: its colour in corner 0's, then when dashed
+	//           the dash and gap as halves (the gap negative for round caps) and as a float the
+	//           pattern's offset at its centre
+	//
+	// A rect's border dash and a stroke's share base.frag's cut, the rect's measured round its
+	// outline and the stroke's along its piece's axis.
 	//
 	// Halves (radii, shape) are glm::packHalf2x16's, rgba8 (fills, border) glm::packUnorm4x8's.
 	enum class QuadMode : uint8_t { Flat, Rect, Shadow, Arc, Image, Text, Stroke };
@@ -76,6 +94,33 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// BatchInstance::flags
 	constexpr uint8_t kQuadAdditive = 1U;	 // the colour adds to what is under it, its alpha 0
 	constexpr uint8_t kQuadBorderShift = 1U; // a rect's border position from this bit, two bits: inside, centred, outside
+	constexpr uint8_t kQuadBareShift = 3U;	 // a rect's sides with no border from this bit, four: top, right, bottom, left
+
+	// A rect's corner radii, (top-left, top-right, bottom-right, bottom-left).
+	using CornerRadii = std::array<float, 4>;
+
+	// `radius` at each corner, but square beside a side `border` leaves bare when it has a width.
+	CornerRadii rectCornerRadii(float radius, const std::optional<Foundation::BorderStyle>& border);
+
+	// A dash pattern as the shader cuts it: `dash` drawn, then `gap` not, the pattern standing
+	// `offset` in where the path's length is 0 (in [0, dash + gap)), each dash butt or round.
+	// A gap of 0 is solid.
+	struct ResolvedDash {
+		float dash = 0.0F;
+		float gap = 0.0F;
+		float offset = 0.0F;
+		bool  round = false;
+	};
+
+	// `pattern` on a stroke `width` wide along a path `length` long: a square cap as a butt
+	// one a width longer and starting half a width early, and on a closed path the dash and
+	// gap stretched together so a whole number of periods fits its length. Solid (gap 0)
+	// when the pattern's gap is used up or anything is negative or not finite.
+	ResolvedDash resolveDash(const Foundation::DashPattern& pattern, float width, float length, bool closed);
+
+	// The length of a rect's border's centre line, the box half `halfSize` and its corners
+	// `radii` moved out by `centre` (negative inward), as the shader measures it.
+	float rectOutlineLength(Foundation::Vec2 halfSize, const CornerRadii& radii, float centre);
 
 	// The GPU blend state a mode draws in. Output is premultiplied and blended
 	// (ONE, ONE_MINUS_SRC_ALPHA); Additive is that state with the output alpha
@@ -117,8 +162,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Shape rendering (SDF) ---
 
-		// Add shape quad to batch (with optional SDF border and corner radius).
-		// When `gradient` is set, the quad's four corners are colored from the
+		// Add shape quad to batch (with optional SDF border and corner radii, rectCornerRadii's
+		// for its border). When `gradient` is set, the quad's four corners are colored from the
 		// gradient stops (interpolated by the GPU) instead of the flat fillColor;
 		// the border/SDF/corner radius are unaffected. With `fill.hook`, one of this
 		// batch's base shader's fill hooks, the hook gives the colour over fillColor and a
@@ -128,7 +173,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::Rect&							 bounds,
 			const Foundation::Color&						 fillColor,
 			const std::optional<Foundation::BorderStyle>&	 border = std::nullopt,
-			float											 cornerRadius = 0.0F,
+			const CornerRadii&								 radii = {},
 			const std::optional<Foundation::LinearGradient>& gradient = std::nullopt,
 			int32_t											 key = 0,
 			Primitives::BlendMode							 blend = Primitives::BlendMode::Alpha,
@@ -140,32 +185,35 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// hooks: then its block's new values would reach that quad, drawn before them.
 		bool holdsFill(std::string_view hook) const;
 
-		// Add an outer box-shadow / glow quad behind a rect. The SDF shader renders
-		// it as a soft falloff over `shadow.blur` px outside the (spread-grown)
-		// shape. Emit before the element's own quad so it sits behind.
+		// Add an outer box-shadow / glow quad behind a rect, or a circle (its radius at every
+		// corner). The SDF shader renders it as a soft falloff over `shadow.blur` px either
+		// side of the (spread-grown) shape's edge, each radius grown by the spread too. Emit
+		// before the element's own quad so it sits behind.
 		void addShadowQuad(
 			const Foundation::Rect&		 bounds,
 			const Foundation::BoxShadow& shadow,
-			float						 cornerRadius,
+			const CornerRadii&			 radii,
 			int32_t						 key = 0,
 			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
 		);
 
 		// Add an indexed triangle mesh as one draw group (drawTriangles, drawLine, a
-		// polygon's fill), a flat quad a triangle. With `mesh.feather`, a ring one device pixel wide runs outside
-		// each loop in the same group, each boundary vertex's colour fading to alpha 0
-		// across it, a linear coverage ramp. Its outer edge sits on the miter of the
-		// vertex's two edges, at most 4 pixels out, outward through any transform,
-		// mirrored or not.
+		// polygon's fill and shadow), a flat quad a triangle. With `mesh.feather`, a ring
+		// mesh.featherWidth wide (one device pixel at 0) runs outside each loop in the same
+		// group, each boundary vertex's colour fading to alpha 0 across it, a linear coverage
+		// ramp. Its outer edge sits on the miter of the vertex's two edges, at most 4 widths
+		// out, outward through any transform, mirrored or not. A ring wider than an edge is
+		// long folds over itself at that edge's notch.
 		void addTriangles(const TriangleMeshArgs& mesh);
 
 		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
-		// its polygon as a fan of quads, shaded by its SDF box.
+		// its polygon as a fan of quads, shaded by its SDF box and cut by `dash` along it.
 		void addStroke(
 			std::span<const StrokePiece> pieces,
 			const Foundation::Color&	 color,
 			int32_t						 key = 0,
-			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
+			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha,
+			const ResolvedDash&			 dash = {}
 		);
 
 		// Add a ring, arc or pie as one SDF quad (see Primitives::ArcArgs).
@@ -193,6 +241,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		//   its draw. A stale atlas adds nothing, warned once.
 		// pixelRange: that atlas's distance range in texels, which the shader turns
 		//   into the edge width. With an invalid atlas, setFontAtlas()'s range instead.
+		// edge: a shadow's spread and blur, which the shader fits inside the field.
 		void addTextQuad(
 			const Foundation::Vec2&	 position,
 			const Foundation::Vec2&	 size,
@@ -203,7 +252,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			TextureHandle			 atlas,
 			float					 pixelRange,
 			int32_t					 key = 0,
-			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha
+			Primitives::BlendMode	 blend = Primitives::BlendMode::Alpha,
+			const TextEdge&			 edge = {}
 		);
 
 		// Set the default MSDF font atlas and its distance range, which text quads
@@ -425,8 +475,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// The index `hook` has in the base shader, or 0, logged once per `id`, when it is another's.
 		uint8_t fillIndex(const backend::FillHook& hook, const char* id);
 
-		// addTriangles' feather ring along `loops`, over meshPositions and meshColors.
-		void addFeather(const BoundaryLoops& loops, Primitives::BlendMode blend);
+		// addTriangles' feather ring along `loops`, over meshPositions and meshColors, `width`
+		// logical pixels wide on screen.
+		void addFeather(const BoundaryLoops& loops, float width, Primitives::BlendMode blend);
 
 		// The backend and what this batch made on it.
 		backend::Backend& gpu;

@@ -162,9 +162,19 @@ namespace ui {
 		if (glyphOpacity != opacity() || glyphSize != size) {
 			layOut();
 		}
-		if (!glyphs.empty()) {
-			Renderer::Primitives::drawGlyphs(glyphs.data(), glyphs.size(), drawKey());
+		if (glyphs.empty()) {
+			return;
 		}
+		if (style.textShadow) {
+			Foundation::BoxShadow shadow = *style.textShadow;
+			shadow.color = detail::withOpacity(shadow.color, glyphOpacity);
+			Renderer::Primitives::drawGlyphShadow(glyphs.data(), glyphs.size(), shadow, drawKey());
+		}
+		Renderer::Primitives::drawGlyphs(glyphs.data(), glyphs.size(), drawKey());
+	}
+
+	float Text::inkExtent() const {
+		return detail::shadowReach(style.textShadow);
 	}
 
 	void Text::describe(nlohmann::json& node) const {
@@ -174,6 +184,8 @@ namespace ui {
 			{"content", text},
 			{"measured", {{"w", extent.size.x}, {"h", extent.size.y}, {"lines", extent.lines}}},
 			{"overflow", overflows ? "overflowing" : "none"},
+			{"fontFamily", style.fontFamily ? nlohmann::json(static_cast<int>(*style.fontFamily)) : nlohmann::json(nullptr)},
+			{"fontWeight", style.fontWeight ? nlohmann::json(*style.fontWeight) : nlohmann::json(nullptr)},
 		};
 		node["style"] = detail::styleJson(std::nullopt, style.color.value_or(kColor), std::nullopt);
 	}

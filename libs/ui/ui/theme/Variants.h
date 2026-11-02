@@ -30,13 +30,17 @@ namespace ui {
 
 	struct InteractionState {
 		bool hovered = false;
-		bool pressed = false;
-		bool active = false; // open or selected
+		bool pressed = false;	   // a press held on it, or for a moment after a key or pad activated it
+		bool active = false;	   // open or selected
+		bool focused = false;	   // some player's focus is on it
+		bool focusVisible = false; // and shows a ring (CSS :focus-visible)
+
+		bool operator==(const InteractionState&) const = default;
 	};
 
 	// `base` under its state layers in R11.12's order: the hover, pressed and active washes
 	// composited over it. The focus ring comes last, drawn apart, and a disabled control fades whole
-	// (Control::stateOpacity) rather than in its fill.
+	// (Control::stateOpacity) rather than in its fill, so neither focus field changes the colour.
 	Foundation::Color applyStateLayers(const Theme& theme, Foundation::Color base, const InteractionState& state);
 
 	struct FocusRing {

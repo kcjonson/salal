@@ -265,7 +265,12 @@
       "wash": { "$type": "color", "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.06, "hex": "#ffffff"} }
     },
     "pressed": {
-      "wash": { "$type": "color", "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.1, "hex": "#ffffff"} }
+      "wash": { "$type": "color", "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.1, "hex": "#ffffff"} },
+      "hold": {
+        "$type": "duration",
+        "$value": "{motion.duration.fast}",
+        "$description": "How long a key or pad activation shows a control pressed, since it has no release to end the press."
+      }
     },
     "active": {
       "wash": {
