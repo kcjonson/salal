@@ -146,6 +146,7 @@ namespace ui::dtcg {
 		StyleField{.name = "backgroundColor", .type = TokenType::Color},
 		StyleField{.name = "borderColor", .type = TokenType::Color},
 		StyleField{.name = "borderWidth", .type = TokenType::Dimension},
+		StyleField{.name = "borderStyle", .type = TokenType::StrokeStyle},
 		StyleField{.name = "borderRadius", .type = TokenType::Dimension},
 		StyleField{.name = "boxShadow", .type = TokenType::Shadow},
 		StyleField{.name = "opacity", .type = TokenType::Number},

@@ -14,7 +14,7 @@ in vec4			v_fill;
 flat in vec2	v_halfSize;
 flat in vec4	v_radii;
 flat in vec4	v_border;
-flat in vec4	v_shape; // (border width, reach, blur or range, opacity)
+flat in vec4	v_shape; // per mode, as base.vert has it
 flat in vec4	v_clip;	 // (minX, minY, maxX, maxY), or zero for none
 flat in uvec3	v_mode;	 // (mode, flags, texture slot or a rect's fill hook)
 flat in uvec3	v_fillParams;
@@ -53,6 +53,39 @@ float sdRoundedBox(vec2 p, vec2 size, vec4 radii) {
 	radius = min(radius, min(size.x, size.y));
 	vec2 q = abs(p) - size + radius;
 	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+// How far round a rounded box's outline (half size `size`, corner radii (tl, tr, br, bl)) the
+// point nearest p lies, clockwise on screen from the middle of the top-left corner: the runs
+// and quarter arcs in turn, each arc's length its radius times the angle into it.
+// BatchRenderer's rectOutlineLength is the whole loop.
+float outlineLength(vec2 p, vec2 size, vec4 radii) {
+	vec4  r = min(radii, vec4(min(size.x, size.y)));
+	float quarter = 0.5 * kPi;
+	float topStart = 0.5 * quarter * r.x;
+	float topRight = topStart + 2.0 * size.x - r.x - r.y;
+	float right = topRight + quarter * r.y;
+	float bottomRight = right + 2.0 * size.y - r.y - r.z;
+	float bottom = bottomRight + quarter * r.z;
+	float bottomLeft = bottom + 2.0 * size.x - r.z - r.w;
+	float left = bottomLeft + quarter * r.w;
+	float topLeft = left + 2.0 * size.y - r.w - r.x;
+
+	bool  east = p.x >= 0.0;
+	bool  south = p.y >= 0.0;
+	float radius = east ? (south ? r.z : r.y) : (south ? r.w : r.x);
+	vec2  d = p - vec2(east ? size.x - radius : radius - size.x, south ? size.y - radius : radius - size.y);
+	if ((east ? d.x > 0.0 : d.x < 0.0) && (south ? d.y > 0.0 : d.y < 0.0)) {
+		if (east) {
+			return south ? bottomRight + radius * atan(d.y, d.x) : topRight + radius * atan(d.x, -d.y);
+		}
+		return south ? bottomLeft + radius * atan(-d.x, d.y) : topLeft + radius * atan(-d.y, -d.x);
+	}
+	vec2 q = abs(p) - size;
+	if (q.x > q.y) {
+		return east ? right + p.y + size.y - r.y : left + size.y - r.w - p.y;
+	}
+	return south ? bottom + size.x - r.z - p.x : topStart + p.x + size.x - r.x;
 }
 
 // Median of three values (for multi-channel SDF)
@@ -196,6 +229,37 @@ void main() {
 				float holeDist = sdRoundedBox(v_local - (holeLow + holeHigh) * 0.5, (holeHigh - holeLow) * 0.5, rounded * max(v_radii + borderInner, 0.0));
 				bandCover = coverage(0.0, outerDist, boxPixel) - coverage(0.0, max(outerDist, holeDist), boxPixel);
 				bandOverFill = fillCover - coverage(0.0, max(boxDist, holeDist), boxPixel);
+			}
+		}
+
+		// A dash pattern, when there's a gap: a border's measured round its centre line, a
+		// stroke's along its piece's axis, v_shape.w where the pattern stands at length 0.
+		// Each dash is a box across the line, or with round caps (a negative gap) a capsule
+		// half the line's width past its ends.
+		if (v_shape.z != 0.0) {
+			float along;
+			float across;
+			float halfWidth;
+			if (borderWidth > 0.001) {
+				float centre = (borderInner + borderOuter) * 0.5;
+				along = outlineLength(v_local, v_halfSize + centre, max(v_radii + centre, 0.0));
+				across = boxDist - centre;
+				halfWidth = borderWidth * 0.5;
+			} else {
+				along = v_local.x;
+				across = v_local.y;
+				halfWidth = v_halfSize.y;
+			}
+			float dash = v_shape.y;
+			float gap = abs(v_shape.z);
+			float u = mod(along + v_shape.w, dash + gap);
+			float outside = u < dash ? -min(u, dash - u) : min(u - dash, dash + gap - u);
+			float dashCover = coverage(0.0, v_shape.z < 0.0 ? length(vec2(max(outside, 0.0), across)) - halfWidth : outside, boxPixel);
+			if (borderWidth > 0.001) {
+				bandCover = min(bandCover, dashCover);
+				bandOverFill = min(bandOverFill, dashCover);
+			} else {
+				fillCover = min(fillCover, dashCover);
 			}
 		}
 		if (fillCover + bandCover < 0.001) {

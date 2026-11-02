@@ -11,6 +11,7 @@
 #include "vector/Tessellator.h"
 #include "vector/Types.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
@@ -382,6 +383,21 @@ namespace Renderer::Primitives {
 			return;
 		}
 
+		// A dashed line is cut along its length in the shader, which the stroke's SDF pieces carry.
+		if (args.style.dash.has_value()) {
+			const std::array<Foundation::Vec2, 2> points{args.start, args.end};
+			drawPolyline(
+				{.points = points,
+				 .width = args.style.width,
+				 .color = args.style.color,
+				 .dash = args.style.dash,
+				 .id = args.id,
+				 .key = args.key,
+				 .blend = args.blend}
+			);
+			return;
+		}
+
 		// Draw line as thin rectangle
 		Foundation::Vec2 dir = args.end - args.start;
 		float			 length = glm::length(dir);
@@ -580,8 +596,14 @@ namespace Renderer::Primitives {
 			// pixel either side) lies over the fill, and outside the outline, where the
 			// fill's feather fades, the border is whole.
 			static thread_local std::vector<StrokePiece> pieces;
-			strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces);
-			g_batchRenderer->addStroke(pieces, border.color, args.key, args.blend);
+			const float length = strokeOutline(args.vertices, border.width, g_batchRenderer->getLocalPixel(), pieces);
+			g_batchRenderer->addStroke(
+				pieces,
+				border.color,
+				args.key,
+				args.blend,
+				border.dash.has_value() ? resolveDash(*border.dash, border.width, length, true) : ResolvedDash{}
+			);
 		}
 	}
 
@@ -592,9 +614,10 @@ namespace Renderer::Primitives {
 		static thread_local std::vector<StrokePiece> pieces;
 		// Points within a quarter of a device pixel of the line drawn without them go, so a
 		// noisy line's near-repeats don't uncut the joints either side.
-		strokePolyline(args, g_batchRenderer->getLocalPixel(), 0.25F * g_batchRenderer->getLocalDevicePixel(), pieces);
+		const float length = strokePolyline(args, g_batchRenderer->getLocalPixel(), 0.25F * g_batchRenderer->getLocalDevicePixel(), pieces);
 		if (!pieces.empty()) {
-			g_batchRenderer->addStroke(pieces, args.color, args.key, args.blend);
+			const ResolvedDash dash = args.dash.has_value() ? resolveDash(*args.dash, args.width, length, args.closed) : ResolvedDash{};
+			g_batchRenderer->addStroke(pieces, args.color, args.key, args.blend, dash);
 		}
 	}
 

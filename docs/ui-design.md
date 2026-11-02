@@ -179,7 +179,14 @@ a field or a line of shader. A rect's border on some sides takes four of the
 flags byte's five free bits, its bare sides, leaving one; the corners beside a
 bare side ride in the radii as 0. A rect whose border is on every side pays an
 integer test a pixel for it, and only one with a bare side measures the second
-and third rounded boxes its band then lies between.
+and third rounded boxes its band then lies between. A dash pattern takes no
+field and no flag: a rect's border carries its dash, its gap (negative for
+round caps) and its offset in the three shape halves a rect left at 0, and a
+stroke piece carries them in fill corners 1 and 2, its colour in corner 0's.
+`base.frag` measures a border round its centre line and a stroke along its
+piece's axis, so a dashed border is still one quad and a dashed line as many as
+a solid one. Every rect and stroke pixel pays one float compare for it; only a
+dashed one walks the outline (a dashed border, an `atan` on its corners).
 
 Why: the per-vertex layout writes everything about a rect (colour, border,
 radius, clip, mode) into each of its four 80-byte vertices plus six indices,
@@ -227,7 +234,12 @@ the load; `dimension` in px (rem times a root size); `duration` in ms;
 game's `FontFamily` ids by name; `shadow` and `border` to the renderer's
 styles. A style's `boxShadow` and `textShadow` each take the first outer layer
 of their shadow token; `textShadow` is CSS's with the token's spread kept, which
-is a halo's width.
+is a halo's width. A style's `borderStyle`, a `strokeStyle` token, dashes a
+Rectangle's border and a Line's stroke: `dashed` is three widths on and three
+off, `dotted` round dots a width across and a width apart, and a `dashArray`
+draws its first dash and gap (one length is both) with its `lineCap`. `double`,
+`groove`, `ridge`, `outset` and `inset`, and a `dashArray` of more than two
+lengths, load with a warning and draw solid or with their first two.
 
 A text transform (CSS's `text-transform`) has no type in the format, so it is
 salal's extension, in the place the format leaves for one: a style's group

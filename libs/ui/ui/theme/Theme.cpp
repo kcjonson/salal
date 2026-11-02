@@ -26,6 +26,38 @@ namespace ui {
 			return Foundation::TextTransform::None;
 		}
 
+		// A strokeStyle token as ui strokes it, and in `why` what of it doesn't draw: double, groove,
+		// ridge, outset and inset draw solid, and a dashArray draws its first dash and gap (one
+		// length is both, as in SVG).
+		StrokeStyle toStrokeStyle(const dtcg::StrokeStyleValue& value, std::string& why) {
+			if (!value.keyword.empty()) {
+				if (value.keyword == "dashed") {
+					return {.kind = StrokeStyle::Kind::Dashed};
+				}
+				if (value.keyword == "dotted") {
+					return {.kind = StrokeStyle::Kind::Dotted};
+				}
+				if (value.keyword != "solid") {
+					why = "strokeStyle " + value.keyword + " draws solid; salal draws solid, dashed, dotted and a dashArray";
+				}
+				return {};
+			}
+			const std::vector<float>& lengths = value.dashArray;
+			if (lengths.size() > 2) {
+				why = "a dashArray of " + std::to_string(lengths.size()) + " lengths draws its first dash and gap only";
+			}
+			Foundation::DashCap cap = Foundation::DashCap::Butt;
+			if (value.lineCap == "round") {
+				cap = Foundation::DashCap::Round;
+			} else if (value.lineCap == "square") {
+				cap = Foundation::DashCap::Square;
+			}
+			return {
+				.kind = StrokeStyle::Kind::Pattern,
+				.pattern = {.dash = lengths.front(), .gap = lengths.size() > 1 ? lengths[1] : lengths.front(), .cap = cap}
+			};
+		}
+
 		std::string textOf(const EmbeddedFile& file) {
 			std::string text;
 			for (std::string_view piece : file.pieces) {
@@ -211,6 +243,15 @@ namespace ui {
 				color("backgroundColor", themed.backgroundColor);
 				color("borderColor", themed.borderColor);
 				number("borderWidth", dtcg::TokenType::Dimension, themed.borderWidth);
+				if (const dtcg::ResolvedToken* token = field("borderStyle", dtcg::TokenType::StrokeStyle)) {
+					std::string why;
+					themed.borderStyle = toStrokeStyle(std::get<dtcg::StrokeStyleValue>(token->value), why);
+					if (!why.empty()) {
+						result.diagnostics.push_back(
+							{.severity = Severity::Warning, .file = token->file, .path = stylePath(style, "borderStyle"), .message = why}
+						);
+					}
+				}
 				number("borderRadius", dtcg::TokenType::Dimension, themed.borderRadius);
 				// The renderer draws one outer shadow; the first outer layer is it.
 				const auto shadow = [&](std::string_view name, std::optional<Foundation::BoxShadow>& out) {

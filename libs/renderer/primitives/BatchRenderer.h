@@ -70,7 +70,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	//   Rect    geometry: half size, then the quad's half extent; radii: the corners' (tl, tr,
 	//           br, bl); fills: each corner's, for a gradient, or with a fill hook its one fill
 	//           then its three params; slot: its fill hook's index, 0 for none; border: the
-	//           border's colour; shape.x: its width; flags: its position and its bare sides
+	//           border's colour; shape.x: its width; flags: its position and its bare sides;
+	//           a dashed border's shape.y: the dash, shape.z: the gap, negative for round caps,
+	//           shape.w: the pattern's offset at the top-left corner's middle
 	//   Shadow  geometry: half size, then the quad's half extent; radii: the corners'; shape.z: the blur
 	//   Arc     geometry: inner and outer radius, half the sweep, the middle's angle; shape.y: how
 	//           far the quad reaches past the outer radius
@@ -79,7 +81,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	//           atlas's distance range in texels
 	//   Stroke  a convex piece, a fan's quad; geometry: the rows of the map from a screen offset
 	//           to the piece's frame; radii: its centre on screen; shape: its half size; border:
-	//           its corner radius; all floats
+	//           its corner radius; all floats; fills: its colour in corner 0's, then when dashed
+	//           the dash and gap as halves (the gap negative for round caps) and as a float the
+	//           pattern's offset at its centre
+	//
+	// A rect's border dash and a stroke's share base.frag's cut, the rect's measured round its
+	// outline and the stroke's along its piece's axis.
 	//
 	// Halves (radii, shape) are glm::packHalf2x16's, rgba8 (fills, border) glm::packUnorm4x8's.
 	enum class QuadMode : uint8_t { Flat, Rect, Shadow, Arc, Image, Text, Stroke };
@@ -94,6 +101,26 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	// `radius` at each corner, but square beside a side `border` leaves bare when it has a width.
 	CornerRadii rectCornerRadii(float radius, const std::optional<Foundation::BorderStyle>& border);
+
+	// A dash pattern as the shader cuts it: `dash` drawn, then `gap` not, the pattern standing
+	// `offset` in where the path's length is 0 (in [0, dash + gap)), each dash butt or round.
+	// A gap of 0 is solid.
+	struct ResolvedDash {
+		float dash = 0.0F;
+		float gap = 0.0F;
+		float offset = 0.0F;
+		bool  round = false;
+	};
+
+	// `pattern` on a stroke `width` wide along a path `length` long: a square cap as a butt
+	// one a width longer and starting half a width early, and on a closed path the dash and
+	// gap stretched together so a whole number of periods fits its length. Solid (gap 0)
+	// when the pattern's gap is used up or anything is negative or not finite.
+	ResolvedDash resolveDash(const Foundation::DashPattern& pattern, float width, float length, bool closed);
+
+	// The length of a rect's border's centre line, the box half `halfSize` and its corners
+	// `radii` moved out by `centre` (negative inward), as the shader measures it.
+	float rectOutlineLength(Foundation::Vec2 halfSize, const CornerRadii& radii, float centre);
 
 	// The GPU blend state a mode draws in. Output is premultiplied and blended
 	// (ONE, ONE_MINUS_SRC_ALPHA); Additive is that state with the output alpha
@@ -180,12 +207,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void addTriangles(const TriangleMeshArgs& mesh);
 
 		// Add a stroke as one draw group: its pieces (strokePolyline, strokeOutline), each
-		// its polygon as a fan of quads, shaded by its SDF box.
+		// its polygon as a fan of quads, shaded by its SDF box and cut by `dash` along it.
 		void addStroke(
 			std::span<const StrokePiece> pieces,
 			const Foundation::Color&	 color,
 			int32_t						 key = 0,
-			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
+			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha,
+			const ResolvedDash&			 dash = {}
 		);
 
 		// Add a ring, arc or pie as one SDF quad (see Primitives::ArcArgs).

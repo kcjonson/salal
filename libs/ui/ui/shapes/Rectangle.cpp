@@ -36,6 +36,7 @@ namespace ui {
 				.cornerRadius = radius,
 				.position = Foundation::BorderPosition::Inside,
 				.sides = style.borderSides.value_or(Foundation::BorderSides{}),
+				.dash = style.borderStyle ? style.borderStyle->dash(borderWidth) : std::nullopt,
 			};
 		}
 		std::optional<Foundation::BoxShadow> shadow = style.boxShadow;

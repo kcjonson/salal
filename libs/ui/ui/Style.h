@@ -17,14 +17,29 @@
 #include <graphics/PrimitiveStyles.h>
 #include <primitives/FontFamily.h>
 
+#include <cstdint>
 #include <optional>
 
 namespace ui {
+
+	// How a border or a line is stroked: solid, CSS's dashed and dotted, sized by the stroke's width,
+	// or a dash pattern in px (a strokeStyle token's dashArray and lineCap).
+	struct StrokeStyle {
+		enum class Kind : std::uint8_t { Solid, Dashed, Dotted, Pattern };
+
+		Kind					kind = Kind::Solid;
+		Foundation::DashPattern pattern{}; // Pattern's
+
+		// The renderer's dash for a stroke `width` wide: none when solid; dashed, 3 widths on and 3
+		// off; dotted, round dots a width across with a width between them.
+		[[nodiscard]] std::optional<Foundation::DashPattern> dash(float width) const;
+	};
 
 	struct Style {
 		std::optional<Foundation::Color>		   backgroundColor;
 		std::optional<Foundation::Color>		   borderColor;
 		std::optional<float>					   borderWidth; // px, inside the box
+		std::optional<StrokeStyle>				   borderStyle; // a border's, and a Line's stroke
 		std::optional<Foundation::BorderSides>	   borderSides; // unset, all four; from salal's extension in a theme
 		std::optional<float>					   borderRadius;
 		std::optional<Foundation::BoxShadow>	   boxShadow;

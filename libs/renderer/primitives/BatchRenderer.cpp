@@ -257,9 +257,61 @@ namespace Renderer {
 		}
 		quad.border = borderColor;
 		quad.shape[0] = halves(borderWidth, 0.0F);
+		// A dash runs round the border's centre line, a whole number of periods, one centred on
+		// the top-left corner's middle, where the shader starts measuring.
+		if (border.has_value() && border->dash.has_value() && borderWidth > 0.0F) {
+			const float		   centre = borderPosition == 0 ? -borderWidth * 0.5F : (borderPosition == 2 ? borderWidth * 0.5F : 0.0F);
+			const ResolvedDash dash = resolveDash(*border->dash, borderWidth, rectOutlineLength({halfW, halfH}, radii, centre), true);
+			if (dash.gap > 0.0F) {
+				quad.shape[0] = halves(borderWidth, dash.dash);
+				quad.shape[1] =
+					halves(dash.round ? -dash.gap : dash.gap, std::fmod(dash.offset + (dash.dash * 0.5F), dash.dash + dash.gap));
+			}
+		}
 		quad.flags |= static_cast<uint8_t>((borderPosition << kQuadBorderShift) | (bare << kQuadBareShift));
 
 		recordGroup(groupStart, key, blend);
+	}
+
+	ResolvedDash resolveDash(const Foundation::DashPattern& pattern, float width, float length, bool closed) {
+		float dash = pattern.dash;
+		float gap = pattern.gap;
+		float phase = pattern.phase;
+		if (pattern.cap == Foundation::DashCap::Square) {
+			dash += width;
+			gap -= width;
+			phase += width * 0.5F;
+		}
+		if (!(dash >= 0.0F) || !(gap > 0.0F) || !std::isfinite(dash + gap + phase)) {
+			return {};
+		}
+		float period = dash + gap;
+		if (closed && length > 0.0F && std::isfinite(length)) {
+			const float scale = length / (std::max(std::round(length / period), 1.0F) * period);
+			dash *= scale;
+			gap *= scale;
+			phase *= scale;
+			period *= scale;
+		}
+		float offset = std::fmod(phase, period);
+		if (offset < 0.0F) {
+			offset += period;
+		}
+		return {.dash = dash, .gap = gap, .offset = offset, .round = pattern.cap == Foundation::DashCap::Round};
+	}
+
+	float rectOutlineLength(Foundation::Vec2 halfSize, const CornerRadii& radii, float centre) {
+		const Foundation::Vec2 half = halfSize + centre;
+		if (!(half.x > 0.0F) || !(half.y > 0.0F)) {
+			return 0.0F;
+		}
+		// Four straight runs and four quarter arcs: each corner's radius takes 2r off the runs and
+		// gives back a quarter of its circle, as base.frag's outlineLength walks them.
+		float radiusSum = 0.0F;
+		for (const float radius : radii) {
+			radiusSum += std::clamp(radius + centre, 0.0F, std::min(half.x, half.y));
+		}
+		return (4.0F * (half.x + half.y)) + (((std::numbers::pi_v<float> * 0.5F) - 2.0F) * radiusSum);
 	}
 
 	CornerRadii rectCornerRadii(float radius, const std::optional<Foundation::BorderStyle>& border) {
@@ -423,13 +475,16 @@ namespace Renderer {
 		std::span<const StrokePiece> pieces,
 		const Foundation::Color&	 color,
 		int32_t						 key,
-		Primitives::BlendMode		 blend
+		Primitives::BlendMode		 blend,
+		const ResolvedDash&			 dash
 	) {
 		if (clipEmpty || !invertible) {
 			return;
 		}
 		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
 		const uint32_t fill = premultiplied(color.toVec4());
+		const float	   period = dash.dash + dash.gap;
+		const uint32_t dashWord = dash.gap > 0.0F ? halves(dash.dash, dash.round ? -dash.gap : dash.gap) : 0U;
 		const bool	   isIdentity = transformClass == TransformClass::kIdentity;
 		for (const StrokePiece& piece : pieces) {
 			Foundation::Vec2 onScreen[StrokePiece::kMaxCorners];
@@ -448,8 +503,14 @@ namespace Renderer {
 				const uint8_t		   last = std::min<uint8_t>(k + 2, piece.cornerCount - 1);
 				const Foundation::Vec2 corners[4] = {onScreen[0], onScreen[k], onScreen[k + 1], onScreen[last]};
 				BatchInstance&		   quad = pushScreenQuad(flat ? QuadMode::Flat : QuadMode::Stroke, corners, blend);
-				std::fill(std::begin(quad.fills), std::end(quad.fills), fill);
-				if (!flat) {
+				if (flat) {
+					std::fill(std::begin(quad.fills), std::end(quad.fills), fill);
+				} else {
+					quad.fills[0] = fill;
+					if (dashWord != 0U) {
+						quad.fills[1] = dashWord;
+						quad.fills[2] = std::bit_cast<uint32_t>(std::fmod(piece.along + dash.offset, period));
+					}
 					quad.geometry = {alongAxis.x, alongAxis.y, alongNormal.x, alongNormal.y};
 					quad.radii[0] = std::bit_cast<uint32_t>(center.x);
 					quad.radii[1] = std::bit_cast<uint32_t>(center.y);

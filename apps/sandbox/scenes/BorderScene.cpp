@@ -1,6 +1,7 @@
-// border: a rect's border on some of its sides. A tab on a panel, bordered on three sides, its top
-// corners round and its bottom square; one side alone; two facing sides; and three sides in each
-// position, the bordered sides running straight on to the bare one's edge.
+// border: a rect's border on some of its sides, and dashed. A tab on a panel, bordered on three
+// sides, its top corners round and its bottom square; one side alone; two facing sides; three sides
+// in each position, the bordered sides running straight on to the bare one's edge; then dashes,
+// dots, round and square caps, and a dash on three sides, each a whole number of periods round.
 
 #include "DesignCanvas.h"
 #include "Scenes.h"
@@ -15,7 +16,7 @@ namespace {
 
 	constexpr const char* kSceneName = "border";
 	constexpr float		  kCanvasWidth = 2400.0F;
-	constexpr float		  kCanvasHeight = 1300.0F;
+	constexpr float		  kCanvasHeight = 1800.0F;
 
 	const Foundation::Color kBackground(0.08F, 0.08F, 0.11F, 1.0F);
 	const Foundation::Color kLabel(0.75F, 0.75F, 0.8F, 1.0F);
@@ -64,7 +65,7 @@ namespace {
 			P::clear(kBackground);
 			P::PushTransform(sandbox::designCanvas(kCanvasWidth, kCanvasHeight));
 			P::drawText(
-				{.text = "drawRect: borders on some sides, square where a side is bare",
+				{.text = "drawRect: borders on some sides, square where a side is bare, and dashed",
 				 .position = {80.0F, 40.0F},
 				 .scale = 2.75F,
 				 .color = Foundation::Color::white()}
@@ -110,6 +111,34 @@ namespace {
 			label("centred", 1200.0F, 1060.0F);
 			sheet({1800.0F, 760.0F, 300.0F, 260.0F}, {.bottom = false}, Foundation::BorderPosition::Outside, 30.0F);
 			label("outside", 1950.0F, 1060.0F);
+
+			// Dashes round a border's centre line, one centred on the top-left corner.
+			const auto dashed =
+				[](const Foundation::Rect& bounds, float radius, Foundation::DashPattern dash, Foundation::BorderSides sides = {}) {
+					P::drawRect(
+						{.bounds = bounds,
+						 .style = {
+							 .fill = kSheet,
+							 .border = Foundation::BorderStyle{
+								 .color = kRule,
+								 .width = 8.0F,
+								 .cornerRadius = radius,
+								 .position = Foundation::BorderPosition::Center,
+								 .sides = sides,
+								 .dash = dash
+							 }
+						 }}
+					);
+				};
+			using Foundation::DashCap;
+			dashed({200.0F, 1260.0F, 300.0F, 220.0F}, 0.0F, {.dash = 24.0F, .gap = 14.0F});
+			label("dashed", 350.0F, 1530.0F);
+			dashed({700.0F, 1260.0F, 300.0F, 220.0F}, 40.0F, {.dash = 0.0F, .gap = 18.0F, .cap = DashCap::Round});
+			label("dotted, round corners", 850.0F, 1530.0F);
+			dashed({1200.0F, 1260.0F, 300.0F, 220.0F}, 20.0F, {.dash = 30.0F, .gap = 20.0F, .cap = DashCap::Round});
+			label("round caps", 1350.0F, 1530.0F);
+			dashed({1700.0F, 1260.0F, 300.0F, 220.0F}, 20.0F, {.dash = 20.0F, .gap = 24.0F, .cap = DashCap::Square}, {.bottom = false});
+			label("square caps, three sides", 1850.0F, 1530.0F);
 			P::PopTransform();
 		}
 	};

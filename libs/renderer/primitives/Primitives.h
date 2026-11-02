@@ -257,7 +257,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// logged once per id and the rect drawn as if it named none.
 		void drawRect(const RectArgs& args);
 
-		// Draw a line
+		// Draw a line: a rotated quad as two flat triangles, aliased, or with style.dash
+		// drawPolyline's stroke of the two points, butt-ended and anti-aliased, cut by the dash.
 		void drawLine(const LineArgs& args);
 
 		// Draw triangles from a mesh (for vector graphics tessellation). Aliased unless
@@ -329,7 +330,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// pieces overlap where drawPolyline's do. Its outer edge runs its width outside the
 		// outline and its inner edge a pixel inside, over the fill's edge, so no background
 		// shows between them. A notch is mitered into its corner, except beside an edge
-		// too short for its cut, where it is round with a flat piece into the corner.
+		// too short for its cut, where it is round with a flat piece into the corner. A dashed
+		// border's pattern runs round its centre line, fitted to a whole number of periods; the
+		// flat piece in a sharp notch stays solid.
 		//
 		// A shadow is drawn first, behind both at the same key: the fill's mesh again in the
 		// shadow's colour, moved by its offset, its outline grown by its spread first
@@ -347,10 +350,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Foundation::Color				  color = Foundation::Color::white();
 			LineCap							  cap = LineCap::Butt;
 			LineJoin						  join = LineJoin::Round;
-			bool		closed = false; // Join the last point back to the first, uncapped; two points stay an open segment
-			const char* id = nullptr;
-			int32_t		key = 0;
-			BlendMode	blend = BlendMode::Alpha;
+			bool closed = false;						 // Join the last point back to the first, uncapped; two points stay an open segment
+			std::optional<Foundation::DashPattern> dash; // Along the line, each dash capped by its own cap
+			const char*							   id = nullptr;
+			int32_t								   key = 0;
+			BlendMode							   blend = BlendMode::Alpha;
 		};
 
 		// Draw a stroked polyline, anti-aliased: a convex SDF piece per segment, cut
@@ -363,6 +367,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// sub-pixel noise in the input (a hand's jitter, integer mouse samples) leaves no
 		// short segments behind; noise larger than that still can. A closed line keeps
 		// three points or more, and an end segment turns its cap by no more than that.
+		//
+		// A dash pattern is measured along the line's centre, each piece carrying where it
+		// lies, and cut per pixel in the shader, so a dashed line is as many quads as a
+		// solid one. A dash that crosses a joint bends round it; at a joint's outer corner
+		// the two pieces each measure from their own segment, so a dash's end there can sit
+		// a fraction of the stroke's width off where the other piece puts it.
 		void drawPolyline(const PolylineArgs& args);
 
 		// Arguments for DrawArc. Angles are radians from +x, and a positive sweep turns

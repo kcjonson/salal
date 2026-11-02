@@ -134,7 +134,8 @@ namespace Renderer {
 		};
 
 		// The pieces for `layout`, and in `cut` a flag per point: whether its joint ended up cut.
-		void partition(const Layout& layout, std::vector<StrokePiece>& out, std::vector<uint8_t>& cut) {
+		// Returns the length of the line through the points.
+		float partition(const Layout& layout, std::vector<StrokePiece>& out, std::vector<uint8_t>& cut) {
 			out.clear();
 			const std::span<const Foundation::Vec2> points = layout.points;
 			const std::span<const uint8_t>			exact = layout.exact;
@@ -149,12 +150,17 @@ namespace Renderer {
 
 			static thread_local std::vector<Foundation::Vec2> directions;
 			static thread_local std::vector<float>			  lengths;
+			static thread_local std::vector<float>			  startsAt; // how far down the line each segment starts
 			directions.resize(segmentCount);
 			lengths.resize(segmentCount);
+			startsAt.resize(segmentCount);
+			float total = 0.0F;
 			for (size_t i = 0; i < segmentCount; ++i) {
 				const Foundation::Vec2 delta = points[(i + 1) % count] - points[i];
 				lengths[i] = glm::length(delta);
 				directions[i] = delta / lengths[i];
+				startsAt[i] = total;
+				total += lengths[i];
 			}
 
 			// Joint j is the point between segment j - 1 and segment j.
@@ -267,15 +273,17 @@ namespace Renderer {
 				addCorner(piece, start + (t * x) - (n * reach));
 				addCorner(piece, start + (t * x) + (n * reach));
 			};
-			// The SDF from `from` to `to` along the segment, a capsule when `round`.
-			const auto shade =
-				[&](StrokePiece& piece, const Foundation::Vec2& start, const Foundation::Vec2& t, float from, float to, bool round) {
-					piece.center = start + (t * ((from + to) * 0.5F));
-					piece.axis = t;
-					piece.halfLength = (to - from) * 0.5F;
-					piece.halfWidth = halfWidth;
-					piece.cornerRadius = round ? halfWidth : 0.0F;
-				};
+			// The SDF from `from` to `to` along segment `i`, a capsule when `round`.
+			const auto shade = [&](StrokePiece& piece, size_t i, float from, float to, bool round) {
+				const Foundation::Vec2& start = points[i];
+				const Foundation::Vec2& t = directions[i];
+				piece.center = start + (t * ((from + to) * 0.5F));
+				piece.along = startsAt[i] + ((from + to) * 0.5F);
+				piece.axis = t;
+				piece.halfLength = (to - from) * 0.5F;
+				piece.halfWidth = halfWidth;
+				piece.cornerRadius = round ? halfWidth : 0.0F;
+			};
 
 			// Each segment's pieces, laid out into its own slot. A segment whose pieces come out
 			// concave, too short for its joints' cuts, uncuts both joints and is laid out again,
@@ -317,7 +325,7 @@ namespace Renderer {
 					StrokePiece piece;
 					addEnd(piece, start, t, n, length, endJoint, endExtent);
 					addStart(piece, start, t, n, startJoint, startExtent);
-					shade(piece, start, t, -startExtent, length + endExtent, startRound);
+					shade(piece, i, -startExtent, length + endExtent, startRound);
 					slots[i][laid++] = piece;
 				} else {
 					// The halves meet halfway along the free stretch between how far the
@@ -340,12 +348,12 @@ namespace Renderer {
 					addCorner(first, middleRight);
 					addCorner(first, middleLeft);
 					addStart(first, start, t, n, startJoint, startExtent);
-					shade(first, start, t, -startExtent, middle + reach + (startRound ? halfWidth : 0.0F), startRound);
+					shade(first, i, -startExtent, middle + reach + (startRound ? halfWidth : 0.0F), startRound);
 					StrokePiece second;
 					addEnd(second, start, t, n, length, endJoint, endExtent);
 					addCorner(second, middleLeft);
 					addCorner(second, middleRight);
-					shade(second, start, t, middle - reach - (endRound ? halfWidth : 0.0F), length + endExtent, endRound);
+					shade(second, i, middle - reach - (endRound ? halfWidth : 0.0F), length + endExtent, endRound);
 					slots[i][laid++] = first;
 					slots[i][laid++] = second;
 				}
@@ -384,6 +392,7 @@ namespace Renderer {
 			for (size_t j = firstJoint; j < jointEnd; ++j) {
 				cut[j] = joints[j].cut ? 1 : 0;
 			}
+			return total;
 		}
 
 	} // namespace
@@ -400,20 +409,20 @@ namespace Renderer {
 		}
 	}
 
-	void strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out) {
+	float strokePolyline(const Primitives::PolylineArgs& args, float pixel, float tolerance, std::vector<StrokePiece>& out) {
 		out.clear();
 		if (!(args.width > 0.0F)) {
-			return;
+			return 0.0F;
 		}
 		static thread_local std::vector<Foundation::Vec2> points;
 		distinctPoints(args.points, args.closed, points);
 		dropNearlyStraightPoints(points, args.closed, args.width * 0.5F, tolerance);
 		if (points.size() < 2) {
-			return;
+			return 0.0F;
 		}
 		// Two points closed are one segment there and back: draw the segment.
 		static thread_local std::vector<uint8_t> cut;
-		partition(
+		return partition(
 			{.points = points,
 			 .closed = args.closed && points.size() > 2,
 			 .width = args.width,
@@ -501,11 +510,11 @@ namespace Renderer {
 		}
 	}
 
-	void strokeOutline(std::span<const Foundation::Vec2> outline, float width, float inset, std::vector<StrokePiece>& pieces) {
+	float strokeOutline(std::span<const Foundation::Vec2> outline, float width, float inset, std::vector<StrokePiece>& pieces) {
 		pieces.clear();
 		static thread_local std::vector<OutlineCorner> corners;
 		if (!(width + inset > 0.0F) || !outlineCorners(outline, corners)) {
-			return;
+			return 0.0F;
 		}
 
 		// The stroke's centre line runs halfway between its outer edge, `width` out, and
@@ -533,7 +542,7 @@ namespace Renderer {
 		}
 		const size_t count = centreLine.size();
 		if (count < 2) {
-			return;
+			return 0.0F;
 		}
 
 		// A notch's joint is mitered into its corner whatever its turn where the centre line
@@ -552,17 +561,17 @@ namespace Renderer {
 			exact[k] = glm::dot(before, corner.incoming) > 0.0F && glm::dot(after, corner.outgoing) > 0.0F ? 1 : 0;
 		}
 		static thread_local std::vector<uint8_t> cut;
-		partition(
-			{.points = centreLine,
-			 .exact = exact,
-			 .closed = count > 2,
-			 .width = width + inset,
-			 .cap = Primitives::LineCap::Butt,
-			 .join = Primitives::LineJoin::Miter,
-			 .pixel = inset},
-			pieces,
-			cut
-		);
+		const float								 length = partition(
+			 {.points = centreLine,
+										  .exact = exact,
+										  .closed = count > 2,
+										  .width = width + inset,
+										  .cap = Primitives::LineCap::Butt,
+										  .join = Primitives::LineJoin::Miter,
+										  .pixel = inset},
+			 pieces,
+			 cut
+		 );
 
 		// A notch sharper than a right angle that no exact miter draws keeps the flat triangle
 		// that carries the border into it, from its two edges' inner corners at the joint to
@@ -592,6 +601,7 @@ namespace Renderer {
 			addCorner(wedge, outCorner);
 			pieces.push_back(wedge);
 		}
+		return length;
 	}
 
 } // namespace Renderer

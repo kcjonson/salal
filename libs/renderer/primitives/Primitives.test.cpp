@@ -498,6 +498,42 @@ namespace Renderer {
 		expectNear(pixel(16, 26), red);
 	}
 
+	TEST_F(PrimitivesDrawTest, DashesCutALineAndARectsBorderAlongTheirLength) {
+		const Foundation::Color clear(0.0F, 0.0F, 0.0F, 0.0F);
+		const auto				line = [&](const Foundation::DashPattern& dash) {
+			 const std::array<Foundation::Vec2, 2> points{{{0.0F, 16.0F}, {32.0F, 16.0F}}};
+			 render(clear, [&] { Primitives::drawPolyline({.points = points, .width = 4.0F, .dash = dash}); });
+		};
+		// Butt dashes 4 on, 4 off from the line's start: x 0 to 4 drawn, 4 to 8 not.
+		line({.dash = 4.0F, .gap = 4.0F});
+		EXPECT_EQ(pixel(2, 16)[3], 255);
+		EXPECT_EQ(pixel(6, 16)[3], 0);
+		EXPECT_EQ(pixel(10, 16)[3], 255);
+		// Round dots, a width across, every 8 px.
+		line({.dash = 0.0F, .gap = 8.0F, .cap = Foundation::DashCap::Round});
+		EXPECT_EQ(pixel(8, 16)[3], 255);
+		EXPECT_EQ(pixel(12, 16)[3], 0);
+
+		// A rect's inside border 4 wide, its centre line 80 round: seven periods of 80 / 7, a dash
+		// centred on the top-left corner, measured clockwise along the top.
+		render(clear, [] {
+			Primitives::drawRect(
+				{.bounds = {4.0F, 4.0F, 24.0F, 24.0F},
+				 .style = {
+					 .fill = Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F),
+					 .border = Foundation::BorderStyle{
+						 .width = 4.0F,
+						 .position = Foundation::BorderPosition::Inside,
+						 .dash = Foundation::DashPattern{.dash = 6.0F, .gap = 6.0F}
+					 }
+				 }}
+			);
+		});
+		EXPECT_EQ(pixel(6, 5)[3], 255);
+		EXPECT_EQ(pixel(12, 5)[3], 0);
+		EXPECT_EQ(pixel(17, 5)[3], 255);
+	}
+
 	TEST_F(PrimitivesDrawTest, PolygonFillsAndItsBorderSitsOutside) {
 		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
 		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {

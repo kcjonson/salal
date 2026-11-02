@@ -31,7 +31,11 @@
     },
     "sectionTab": {
       "$extensions": { "salal": { "borderSides": ["left", "top", "right"] } },
-      "borderWidth": { "$type": "dimension", "$value": { "value": 2, "unit": "px" } }
+      "borderWidth": { "$type": "dimension", "$value": { "value": 2, "unit": "px" } },
+      "borderStyle": {
+        "$type": "strokeStyle",
+        "$value": { "dashArray": [{ "value": 6, "unit": "px" }, { "value": 3, "unit": "px" }], "lineCap": "round" }
+      }
     },
     "mapLabel": {
       "textShadow": {

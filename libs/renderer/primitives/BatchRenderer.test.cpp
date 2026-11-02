@@ -161,6 +161,57 @@ TEST(BatchModeTest, ARectCarriesItsBorderPremultipliedAndItsPosition) {
 	);
 }
 
+TEST(BatchModeTest, ADashFitsAClosedPathAndRidesInFieldsItsModeDoesntRead) {
+	using Foundation::DashCap;
+	const auto expectDash = [](const ResolvedDash& dash, float on, float off, float offset, bool round) {
+		EXPECT_NEAR(dash.dash, on, 1e-4F);
+		EXPECT_NEAR(dash.gap, off, 1e-4F);
+		EXPECT_NEAR(dash.offset, offset, 1e-4F);
+		EXPECT_EQ(dash.round, round);
+	};
+	// Open, as given; a negative phase wraps into the period.
+	expectDash(resolveDash({.dash = 4.0F, .gap = 4.0F, .phase = -1.0F}, 2.0F, 82.0F, false), 4.0F, 4.0F, 7.0F, false);
+	// Closed, 82 long: ten periods of 8.2.
+	expectDash(resolveDash({.dash = 4.0F, .gap = 4.0F}, 2.0F, 82.0F, true), 4.1F, 4.1F, 0.0F, false);
+	// A square cap is a butt one a width longer, starting half a width early; with its gap used up, solid.
+	expectDash(resolveDash({.dash = 4.0F, .gap = 4.0F, .cap = DashCap::Square}, 2.0F, 0.0F, false), 6.0F, 2.0F, 1.0F, false);
+	EXPECT_EQ(resolveDash({.dash = 4.0F, .gap = 2.0F, .cap = DashCap::Square}, 2.0F, 0.0F, false).gap, 0.0F);
+	// A rect's centre line: an inside border's runs a half width in, and a corner gives back a quarter circle for 2r.
+	EXPECT_FLOAT_EQ(rectOutlineLength({10.0F, 10.0F}, {}, -1.0F), 72.0F);
+	EXPECT_NEAR(
+		rectOutlineLength({10.0F, 10.0F}, {4.0F, 4.0F, 4.0F, 4.0F}, 0.0F),
+		80.0F - (16.0F * (2.0F - (std::numbers::pi_v<float> * 0.5F))),
+		1e-4F
+	);
+
+	backend::NullBackend gpu;
+	BatchRenderer		 batch(gpu, base_shader::source());
+	// A 20 px rect's inside border 2 wide: 72 round its centre line, nine periods of 8, a dash centred
+	// on the top-left corner; the gap negative for round caps.
+	const Foundation::BorderStyle border{
+		.width = 2.0F, .position = Foundation::BorderPosition::Inside, .dash = Foundation::DashPattern{.cap = DashCap::Round}
+	};
+	batch.addQuad({0.0F, 0.0F, 20.0F, 20.0F}, Foundation::Color::red(), border, {});
+	// A stroke piece 10 down its line: corner 0 its colour, then the dash and gap, then where the
+	// pattern stands at its centre.
+	const StrokePiece piece{
+		.center = {0.0F, 0.0F},
+		.halfLength = 2.0F,
+		.halfWidth = 1.0F,
+		.along = 10.0F,
+		.corners = {{{-3.0F, -2.0F}, {3.0F, -2.0F}, {3.0F, 2.0F}, {-3.0F, 2.0F}}},
+		.cornerCount = 4
+	};
+	batch.addStroke({&piece, 1}, Foundation::Color::white(), 0, BlendMode::Alpha, {.dash = 3.0F, .gap = 2.0F, .offset = 1.0F});
+
+	const std::span<const BatchInstance> quads = batch.getPendingInstances();
+	EXPECT_EQ(halves(quads[0].shape), Foundation::Vec4(2.0F, 4.0F, -4.0F, 2.0F));
+	EXPECT_EQ(quads[1].fills[0], glm::packUnorm4x8(Foundation::Vec4(1.0F)));
+	EXPECT_EQ(glm::unpackHalf2x16(quads[1].fills[1]), Foundation::Vec2(3.0F, 2.0F));
+	EXPECT_EQ(std::bit_cast<float>(quads[1].fills[2]), 1.0F);
+	EXPECT_EQ(quads[1].fills[3], 0U);
+}
+
 TEST(BatchModeTest, AGradientsCornersArePremultipliedBeforeTheyInterpolate) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());

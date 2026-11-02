@@ -17,6 +17,24 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		Outside // Border drawn outside rect bounds (total size increased)
 	};
 
+	// How each dash ends: flat at its length, or a half disk or half square past each end,
+	// half the stroke's width long, so a round dash of length 0 is a dot.
+	enum class DashCap { Butt, Round, Square };
+
+	// A dash pattern laid along a stroke, computed per pixel in the shader, so a dashed
+	// rect border is still one quad: `dash` px drawn, then `gap` px not, repeating, the
+	// pattern starting `phase` px in (SVG's stroke-dashoffset). A gap of 0 or less, after
+	// a square cap takes its width from it, draws solid. An open line's pattern starts at
+	// its first point; a closed one's (a rect's border, a closed polyline, a polygon's
+	// border) is stretched so a whole number of periods fits round it, so it has no
+	// seam, and a rect's is centred on its top-left corner.
+	struct DashPattern {
+		float	dash = 4.0F;
+		float	gap = 4.0F;
+		float	phase = 0.0F;
+		DashCap cap = DashCap::Butt;
+	};
+
 	// The sides of a rect its border is drawn on.
 	struct BorderSides {
 		bool top = true;
@@ -29,13 +47,15 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 	// width and position). A side left out of `sides` has no border, the sides beside it
 	// run straight on to the rect's edge and end square there, and with a width the
 	// corners beside it are square, fill and shadow too: `cornerRadius` rounds only a
-	// corner whose two sides both have the border, as a tab's top corners.
+	// corner whose two sides both have the border, as a tab's top corners. A dash runs
+	// round the border's centre line, bare sides and all, clockwise from the top-left.
 	struct BorderStyle {
-		Color		   color = Color::white();
-		float		   width = 1.0F;
-		float		   cornerRadius = 0.0F;
-		BorderPosition position = BorderPosition::Center;
-		BorderSides	   sides{};
+		Color					   color = Color::white();
+		float					   width = 1.0F;
+		float					   cornerRadius = 0.0F;
+		BorderPosition			   position = BorderPosition::Center;
+		BorderSides				   sides{};
+		std::optional<DashPattern> dash = std::nullopt;
 	};
 
 	// Two-stop linear gradient for rectangle fills. The gradient is realized by
@@ -67,10 +87,13 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		std::optional<BoxShadow>	  boxShadow = std::nullopt;
 	};
 
-	// Line visual style
+	// Line visual style: drawLine's, and a polygon's border. A dashed line is drawn as
+	// drawPolyline's stroke with butt ends, anti-aliased; a solid one stays drawLine's
+	// two flat triangles.
 	struct LineStyle {
-		Color color = Color::white();
-		float width = 1.0F;
+		Color					   color = Color::white();
+		float					   width = 1.0F;
+		std::optional<DashPattern> dash = std::nullopt;
 	};
 
 	// Circle visual style. The shadow is a rect's: a disk grown by `spread`, its edge
