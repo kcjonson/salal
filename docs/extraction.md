@@ -743,11 +743,11 @@ converted in three PRs: ui-sandbox and asset-manager ([worldsim#322](https://git
 scenes ([worldsim#323](https://github.com/kcjonson/worldsim/pull/323)), then the
 game ui ([worldsim#324](https://github.com/kcjonson/worldsim/pull/324)), which deleted worldsim's `libs/ui`, `UiBridge` and
 `UiScene`. Worldsim runs entirely on salal's ui, keyboard and mouse only.
+`display: Grid` followed on its own track, CSS Grid Level 1's placement and
+track sizing with taffy's names.
 
 Deferred, and still to do:
 
-- Grid. Built once and reverted for not following the spec; it comes back when
-  a game needs it.
 - The metrics the perf suite ([salal#41](https://github.com/kcjonson/salal/pull/41),
   with `perf_ui`) still lacks: flush and split reasons, texture binds and
   culled counts (R13.12 to R13.14).

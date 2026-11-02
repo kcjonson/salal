@@ -1,5 +1,5 @@
-// The layout pass: Flex's sizing and placement, Free placement, absolute children, and
-// invalidation to the relayout boundary. Ported from worldsim's LayoutContainer.test.cpp (a4226e17)
+// The layout pass: Flex's sizing and placement, Grid's through the tree, Free placement, absolute
+// children, and invalidation to the relayout boundary. Ported from worldsim's LayoutContainer.test.cpp (a4226e17)
 // where its cases still apply, with the spec's 10.9 cases; the two freeze tests come first. A fake
 // text with fixed word widths stands in for fonts, so it runs headless.
 
@@ -337,6 +337,104 @@ namespace ui {
 		context.layout();
 		EXPECT_EQ(boundsOf(second)[0], 30.0F);
 		EXPECT_TRUE(lint(context, kViewport).clean());
+	}
+
+	// --- Grid (its track sizing and placement alone are in detail/Grid.test.cpp) ---
+
+	TEST_F(UiLayoutTest, TheSpecsGameLayoutThroughTheLayoutPass) {
+		// CSS Grid's first example (1.1.1): title, stats and score down an auto column, the board over
+		// the first two rows of an fr column, the controls centred under it.
+		Ref<Component> game = context.root().addChild<Component>({
+			.size = {800.0F, 600.0F},
+			.layout = {.display = Display::Grid, .gridTemplateColumns = {kAuto, fr(1)}, .gridTemplateRows = {kAuto, fr(1), kAuto}},
+		});
+		Ref<FakeText>  title = game.addChild<FakeText>({.layout = {.gridColumn = line(1), .gridRow = line(1)}, .words = 3});
+		Ref<Component> score = game.addChild<Component>({.size = {90.0F, 40.0F}, .layout = {.gridColumn = line(1), .gridRow = line(3)}});
+		Ref<Component> stats = game.addChild<Component>(
+			{.size = {100.0F, 200.0F}, .layout = {.alignSelf = AlignItems::Start, .gridColumn = line(1), .gridRow = line(2)}}
+		);
+		Ref<Component> board = game.addChild<Component>({.layout = {.gridColumn = line(2), .gridRow = {line(1), span(2)}}});
+		Ref<Component> controls = game.addChild<Component>(
+			{.size = {200.0F, 50.0F}, .layout = {.justifySelf = AlignItems::Center, .gridColumn = line(2), .gridRow = line(3)}}
+		);
+		context.layout();
+		// The first column is the widest content in it, the title's 120; the rows are the title's 20, the
+		// controls' 50, and the fr row the rest.
+		EXPECT_EQ(boundsOf(title), (Box{0.0F, 0.0F, 120.0F, 20.0F}));
+		EXPECT_EQ(boundsOf(stats), (Box{0.0F, 20.0F, 100.0F, 200.0F}));
+		EXPECT_EQ(boundsOf(score), (Box{0.0F, 550.0F, 90.0F, 40.0F}));
+		EXPECT_EQ(boundsOf(board), (Box{120.0F, 0.0F, 680.0F, 550.0F}));
+		EXPECT_EQ(boundsOf(controls), (Box{360.0F, 550.0F, 200.0F, 50.0F}));
+		EXPECT_TRUE(lint(context, kViewport).clean());
+	}
+
+	TEST_F(UiLayoutTest, AnAutoSizedGridHugsItsTracksAndAnAbsoluteChildIsOutOfIt) {
+		Ref<Component> grid = context.root().addChild<Component>(
+			{.layout = {.display = Display::Grid, .gap = 5.0F, .padding = 10.0F, .gridTemplateColumns = {60.0F, kAuto}}}
+		);
+		Ref<Component> first = grid.addChild<Component>(box(60.0F, 30.0F));
+		Ref<FakeText>  text = grid.addChild<FakeText>({.words = 2});
+		Ref<Component> badge = grid.addChild<Component>(
+			{.size = {20.0F, 20.0F}, .layout = {.position = Position::Absolute, .inset = {.bottom = 0.0F, .left = 0.0F}}}
+		);
+		Ref<Component> third = grid.addChild<Component>(box(40.0F, 10.0F));
+		Ref<Component> fourth = grid.addChild<Component>(box(50.0F, 50.0F));
+		context.layout();
+		// Columns 60 and the text's 80, rows 30 and 50, a gap between each and the padding round them.
+		EXPECT_EQ(grid.get()->getSize(), Foundation::Vec2(165.0F, 105.0F));
+		EXPECT_EQ(boundsOf(first), (Box{10.0F, 10.0F, 60.0F, 30.0F}));
+		EXPECT_EQ(boundsOf(text), (Box{75.0F, 10.0F, 80.0F, 30.0F})); // stretched down its row
+		EXPECT_EQ(boundsOf(third), (Box{10.0F, 45.0F, 40.0F, 10.0F}));
+		EXPECT_EQ(boundsOf(fourth), (Box{75.0F, 45.0F, 50.0F, 50.0F}));
+		EXPECT_EQ(boundsOf(badge), (Box{0.0F, 85.0F, 20.0F, 20.0F}));
+		EXPECT_TRUE(lint(context, kViewport).clean());
+	}
+
+	TEST_F(UiLayoutTest, PercentTracksAndSizesAreOfTheGridsContentBox) {
+		Ref<Component> grid = context.root().addChild<Component>({
+			.size = {420.0F, 100.0F},
+			.layout = {.display = Display::Grid, .padding = {0.0F, 10.0F}, .gridTemplateColumns = {percent(25.0F), fr(1)}},
+		});
+		Ref<Component> stretched = grid.addChild<Component>({.size = {kAuto, 20.0F}});
+		Ref<Component> quarter = grid.addChild<Component>({.size = {percent(25.0F), 20.0F}});
+		context.layout();
+		EXPECT_EQ(boundsOf(stretched), (Box{10.0F, 0.0F, 100.0F, 20.0F}));
+		EXPECT_EQ(boundsOf(quarter), (Box{110.0F, 0.0F, 100.0F, 20.0F}));
+
+		// Hugging, a percent track is auto while the grid is sized, then a share of that size, as in CSS.
+		Context		   fresh(kViewport);
+		Ref<Component> hug =
+			fresh.root().addChild<Component>({.layout = {.display = Display::Grid, .gridTemplateColumns = {percent(50.0F), 100.0F}}});
+		hug.addChild<Component>(box(80.0F, 20.0F));
+		Ref<Component> second = hug.addChild<Component>(box(100.0F, 20.0F));
+		fresh.layout();
+		EXPECT_EQ(hug.get()->getSize(), Foundation::Vec2(180.0F, 20.0F));
+		EXPECT_EQ(boundsOf(second)[0], 90.0F);
+	}
+
+	TEST_F(UiLayoutTest, AGridChildsHeightIsMeasuredAtItsColumnsWidth) {
+		Ref<Component> grid = context.root().addChild<Component>(
+			{.size = {200.0F, kAuto}, .layout = {.display = Display::Grid, .gridTemplateColumns = {fr(1), fr(3)}}}
+		);
+		Ref<FakeText> narrow = grid.addChild<FakeText>({.words = 10});
+		Ref<FakeText> wide = grid.addChild<FakeText>({.words = 10});
+		context.layout();
+		// 50 wide is a word a line, ten lines; 150 is three a line, four lines, stretched to the row.
+		EXPECT_EQ(narrow.get()->getSize(), Foundation::Vec2(50.0F, 10.0F * kLine));
+		EXPECT_EQ(wide.get()->getSize(), Foundation::Vec2(150.0F, 10.0F * kLine));
+		EXPECT_EQ(grid.get()->getSize().y, 10.0F * kLine);
+	}
+
+	TEST_F(UiLayoutTest, AGridChildsMinSizeHoldsItsTrackAndItsMaxSizeCapsItsStretch) {
+		Ref<Component> grid = context.root().addChild<Component>(
+			{.size = {300.0F, 20.0F}, .layout = {.display = Display::Grid, .gridTemplateColumns = {kAuto, kAuto}}}
+		);
+		Ref<Component> held = grid.addChild<Component>({.size = {kAuto, 20.0F}, .minSize = {120.0F, kAuto}});
+		Ref<Component> capped = grid.addChild<Component>({.size = {kAuto, 20.0F}, .maxSize = {50.0F, kAuto}});
+		context.layout();
+		// 120 and 0 of content, and the 180 left shared between the two auto columns.
+		EXPECT_EQ(boundsOf(held), (Box{0.0F, 0.0F, 210.0F, 20.0F}));
+		EXPECT_EQ(boundsOf(capped), (Box{210.0F, 0.0F, 50.0F, 20.0F}));
 	}
 
 } // namespace ui

@@ -18,6 +18,58 @@ namespace ui::detail {
 			const float high = maximum.resolve(base).value_or(kUnbounded);
 			return std::max(std::min(value, high), low);
 		}
+
+		// A grid child's minimum contribution on one axis, margins in, where it isn't CSS's automatic
+		// minimum: its size when that's definite, or its minSize.
+		std::optional<float> gridMinimum(bool definite, float size, const Length& minimum, float base, float margins) {
+			if (definite) {
+				return size + margins;
+			}
+			if (!minimum.isAuto()) {
+				return std::max(minimum.resolve(base).value_or(0.0F), 0.0F) + margins;
+			}
+			return std::nullopt;
+		}
+
+		// Where each track starts, gaps between them.
+		std::vector<float> trackStarts(const std::vector<float>& sizes, float gap) {
+			std::vector<float> starts(sizes.size());
+			float			   at = 0.0F;
+			for (std::size_t i = 0; i < sizes.size(); ++i) {
+				starts[i] = at;
+				at += sizes[i] + gap;
+			}
+			return starts;
+		}
+
+		float areaExtent(const std::vector<float>& sizes, TrackRange range, float gap) {
+			float extent = gap * static_cast<float>(range.count - 1);
+			for (std::uint32_t i = range.start; i < range.end(); ++i) {
+				extent += sizes[i];
+			}
+			return extent;
+		}
+
+		// Where a margin box `size` long starts in `extent`; one that doesn't fit starts.
+		float alignedIn(float extent, float size, AlignItems align) {
+			switch (align) {
+				case AlignItems::Center:
+					return std::max((extent - size) * 0.5F, 0.0F);
+				case AlignItems::End:
+					return std::max(extent - size, 0.0F);
+				case AlignItems::Start:
+				case AlignItems::Stretch:
+					break;
+			}
+			return 0.0F;
+		}
+
+		// A relatively positioned child's inset nudges it from where the flow put it.
+		Foundation::Vec2 nudged(Foundation::Vec2 at, const Inset& inset) {
+			at.x += inset.left ? *inset.left : (inset.right ? -*inset.right : 0.0F);
+			at.y += inset.top ? *inset.top : (inset.bottom ? -*inset.bottom : 0.0F);
+			return at;
+		}
 	} // namespace
 
 	LayoutEngine::LayoutEngine(const Registry& owner, std::uint32_t layoutPass, std::vector<ComponentId>& movedComponents)
@@ -97,13 +149,19 @@ namespace ui::detail {
 		if (const std::optional<Foundation::Vec2> own = node.intrinsicSize(width, availableWidth)) {
 			return *own;
 		}
-		if (node.layout.display != Display::Flex) {
+		if (node.layout.display != Display::Flex && node.layout.display != Display::Grid) {
 			return freeContent(node, width, height);
 		}
 		const Edges&		 padding = node.layout.padding;
 		std::optional<float> contentWidth = width ? std::optional(std::max(*width - padding.horizontal(), 0.0F)) : std::nullopt;
 		std::optional<float> contentHeight = height ? std::optional(std::max(*height - padding.vertical(), 0.0F)) : std::nullopt;
-		flex(node, contentWidth, contentHeight, std::max(availableWidth - padding.horizontal(), 0.0F));
+		const float			 room = std::max(availableWidth - padding.horizontal(), 0.0F);
+		if (node.layout.display == Display::Grid) {
+			layoutGrid(node, contentWidth, contentHeight, room);
+			const float gap = std::max(node.layout.gap, 0.0F);
+			return {gridExtent(grid.columns, gap) + padding.horizontal(), gridExtent(grid.rows, gap) + padding.vertical()};
+		}
+		flex(node, contentWidth, contentHeight, room);
 		float main = 0.0F;
 		float cross = 0.0F;
 		for (const FlexItem& item : items) {
@@ -232,6 +290,81 @@ namespace ui::detail {
 		items = std::move(flowing);
 	}
 
+	// Leaves `grid` holding the tracks and each flowing child's area, decided width and measure. A
+	// nested measure lays out grids too, so this works on a local result and moves it in at the end.
+	void
+	LayoutEngine::layoutGrid(Component& node, std::optional<float> contentWidth, std::optional<float> contentHeight, float availableWidth) {
+		const Layout&		   layout = node.layout;
+		const float			   gap = std::max(layout.gap, 0.0F);
+		const Foundation::Vec2 box{contentWidth.value_or(-1.0F), contentHeight.value_or(-1.0F)};
+
+		GridResult				   result;
+		std::vector<GridItemLines> lines;
+		for (const ComponentId childId : node.children) {
+			Component* child = registry.find(childId);
+			if (child == nullptr || !child->isShown() || child->layout.position == Position::Absolute) {
+				continue;
+			}
+			result.items.push_back({.component = child, .area = {}, .width = std::nullopt, .measured = {0.0F, 0.0F}});
+			lines.push_back({.column = child->layout.gridColumn, .row = child->layout.gridRow});
+		}
+		PlacedGrid placed;
+		placeGridItems(
+			{.explicitColumns = static_cast<std::uint32_t>(layout.gridTemplateColumns.size()),
+			 .explicitRows = static_cast<std::uint32_t>(layout.gridTemplateRows.size()),
+			 .items = lines},
+			placed
+		);
+
+		// Columns, from each child's width unbounded and the narrowest a flex row takes it to.
+		std::vector<TrackSizingFunction> tracks;
+		std::vector<TrackContribution>	 contributions(result.items.size());
+		gridTracks(layout.gridTemplateColumns, placed.columnsBefore, placed.columns, tracks);
+		for (std::size_t i = 0; i < result.items.size(); ++i) {
+			Component& child = *result.items[i].component;
+			result.items[i].area = placed.areas[i];
+			const bool	definite = child.sizeSpec.width.resolve(box.x).has_value();
+			const float widest = measure(child, std::nullopt, std::nullopt, box, kUnbounded).x;
+			const float narrowest =
+				definite ? widest : std::min(clampAxis(child.minContentWidth(), child.minSpec.width, child.maxSpec.width, box.x), widest);
+			const float margins = child.margin.horizontal();
+			contributions[i] = {
+				.tracks = placed.areas[i].column,
+				.minContent = narrowest + margins,
+				.maxContent = widest + margins,
+				.minimum = gridMinimum(definite, widest, child.minSpec.width, box.x, margins),
+			};
+		}
+		sizeGridTracks({.tracks = tracks, .available = contentWidth, .gap = gap, .items = contributions}, result.columns);
+		if (!contentWidth && std::isfinite(availableWidth) && gridExtent(result.columns, gap) > availableWidth) {
+			sizeGridTracks({.tracks = tracks, .available = availableWidth, .gap = gap, .items = contributions}, result.columns);
+		}
+
+		// Rows, from each child's height at its columns' width: stretched to it when its width is auto,
+		// wrapped to it otherwise.
+		gridTracks(layout.gridTemplateRows, placed.rowsBefore, placed.rows, tracks);
+		for (std::size_t i = 0; i < result.items.size(); ++i) {
+			GridItem&		 item = result.items[i];
+			Component&		 child = *item.component;
+			const float		 areaWidth = areaExtent(result.columns, item.area.column, gap);
+			const AlignItems justify = child.layout.justifySelf.value_or(layout.justifyItems);
+			if (justify == AlignItems::Stretch && child.sizeSpec.width.isAuto()) {
+				item.width = std::max(areaWidth - child.margin.horizontal(), 0.0F);
+			}
+			item.measured = measure(child, item.width, std::nullopt, box, areaWidth);
+			const bool	definite = child.sizeSpec.height.resolve(box.y).has_value();
+			const float margins = child.margin.vertical();
+			contributions[i] = {
+				.tracks = item.area.row,
+				.minContent = item.measured.y + margins,
+				.maxContent = item.measured.y + margins,
+				.minimum = gridMinimum(definite, item.measured.y, child.minSpec.height, box.y, margins),
+			};
+		}
+		sizeGridTracks({.tracks = tracks, .available = contentHeight, .gap = gap, .items = contributions}, result.rows);
+		grid = std::move(result);
+	}
+
 	// --- Arranging ---
 
 	void LayoutEngine::arrange(Component& node) {
@@ -241,6 +374,8 @@ namespace ui::detail {
 		}
 		if (node.layout.display == Display::Flex) {
 			arrangeFlex(node);
+		} else if (node.layout.display == Display::Grid) {
+			arrangeGrid(node);
 		} else {
 			arrangeFree(node);
 		}
@@ -334,14 +469,49 @@ namespace ui::detail {
 			} else if (align == AlignItems::End) {
 				crossAt = std::max(contentCross - crossBox, 0.0F);
 			}
-			Foundation::Vec2 at = padding.topLeft() + (row ? Foundation::Vec2{cursor, crossAt} : Foundation::Vec2{crossAt, cursor});
-			const Inset&	 inset = child.layout.inset;
-			at.x += inset.left ? *inset.left : (inset.right ? -*inset.right : 0.0F);
-			at.y += inset.top ? *inset.top : (inset.bottom ? -*inset.bottom : 0.0F);
-			place(child, at, row ? Foundation::Vec2{item.main, item.cross} : Foundation::Vec2{item.cross, item.main});
+			const Foundation::Vec2 at = padding.topLeft() + (row ? Foundation::Vec2{cursor, crossAt} : Foundation::Vec2{crossAt, cursor});
+			place(
+				child,
+				nudged(at, child.layout.inset),
+				row ? Foundation::Vec2{item.main, item.cross} : Foundation::Vec2{item.cross, item.main}
+			);
 			cursor += item.main + item.marginMain + gap + between;
 		}
+		placeAbsoluteChildren(node);
+	}
 
+	void LayoutEngine::arrangeGrid(Component& node) {
+		const Edges& padding = node.layout.padding;
+		const float	 contentWidth = std::max(node.size.x - padding.horizontal(), 0.0F);
+		const float	 contentHeight = std::max(node.size.y - padding.vertical(), 0.0F);
+		layoutGrid(node, contentWidth, contentHeight, contentWidth);
+		const GridResult laid = std::move(grid);
+
+		const Foundation::Vec2	 box{contentWidth, contentHeight};
+		const float				 gap = std::max(node.layout.gap, 0.0F);
+		const std::vector<float> columnStarts = trackStarts(laid.columns, gap);
+		const std::vector<float> rowStarts = trackStarts(laid.rows, gap);
+		for (const GridItem& item : laid.items) {
+			Component&		 child = *item.component;
+			const float		 areaWidth = areaExtent(laid.columns, item.area.column, gap);
+			const float		 areaHeight = areaExtent(laid.rows, item.area.row, gap);
+			const AlignItems align = child.layout.alignSelf.value_or(node.layout.alignItems);
+			const AlignItems justify = child.layout.justifySelf.value_or(node.layout.justifyItems);
+			Foundation::Vec2 childSize = item.measured;
+			if (align == AlignItems::Stretch && child.sizeSpec.height.isAuto()) {
+				childSize = measure(child, item.width, std::max(areaHeight - child.margin.vertical(), 0.0F), box, areaWidth);
+			}
+			const Foundation::Vec2 margins = child.margin.total();
+			const Foundation::Vec2 at{
+				padding.left + columnStarts[item.area.column.start] + alignedIn(areaWidth, childSize.x + margins.x, justify),
+				padding.top + rowStarts[item.area.row.start] + alignedIn(areaHeight, childSize.y + margins.y, align),
+			};
+			place(child, nudged(at, child.layout.inset), childSize);
+		}
+		placeAbsoluteChildren(node);
+	}
+
+	void LayoutEngine::placeAbsoluteChildren(Component& node) {
 		for (const ComponentId childId : node.children) {
 			Component* child = registry.find(childId);
 			if (child != nullptr && child->isShown() && child->layout.position == Position::Absolute) {
