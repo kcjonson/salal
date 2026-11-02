@@ -11,3 +11,4 @@ Each scene started with `--scene=<name>`, `/api/ui/lint` read once it has drawn,
 7. `ui_display` and `ui_controls`: count 0. In ui_controls' tree, Sound and Music carry `value` true or false and `state.selected` to match, View its segment's index, Volume its number.
 8. In ui_controls, check Sound off, then drag Volume to each end: still 0, Sound's `value` false, Volume's 0 and then 1.
 9. `ui_overlays`: count 0. `ui_overlay_components`: count 0, and still 0 with the difficulty menu open, the "Abandon run?" dialog open, a critical toast up and Save's tooltip showing.
+10. In ui_text's tree, `weight_400`'s `text.fontFamily` is 0 and `weight_600`'s and `weight_700`'s are 1, the body role's bold face; the three look alike, being one atlas.

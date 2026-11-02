@@ -96,6 +96,7 @@ namespace ui {
 			.fontSize = sizeMetrics(theme, controlSize).fontSize,
 			.letterSpacing = style.letterSpacing,
 			.textTransform = style.textTransform,
+			.fontWeight = style.fontWeight,
 		};
 		if (Text* shown = text.get()) {
 			shown->setStyle(labelStyle);

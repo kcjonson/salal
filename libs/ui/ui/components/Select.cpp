@@ -89,6 +89,7 @@ namespace ui {
 			.fontSize = sizeMetrics(theme, controlSize).fontSize,
 			.letterSpacing = getStyle().letterSpacing,
 			.textTransform = getStyle().textTransform,
+			.fontWeight = getStyle().fontWeight,
 		});
 	}
 

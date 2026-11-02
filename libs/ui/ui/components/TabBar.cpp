@@ -36,6 +36,7 @@ namespace ui {
 						.fontSize = getStyle().fontSize,
 						.letterSpacing = getStyle().letterSpacing,
 						.textTransform = getStyle().textTransform,
+						.fontWeight = getStyle().fontWeight,
 					});
 				}
 				if (Rectangle* shown = underline.get()) {

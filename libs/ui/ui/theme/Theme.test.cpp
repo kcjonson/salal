@@ -1,6 +1,7 @@
 #include "ui/theme/Theme.h"
 
 #include "ui/Context.h"
+#include "ui/components/Button.h"
 #include "ui/shapes/Rectangle.h"
 #include "ui/shapes/Text.h"
 #include "ui/theme/Tokens.h"
@@ -100,6 +101,51 @@ TEST(Theme, FontRolesMapToTheGamesFamilies) {
 	// display and mono name families the game didn't register: the default family, and a warning.
 	EXPECT_EQ(load.theme.get(ui::tokens::font::family::display), Renderer::FontFamily::Default);
 	EXPECT_FALSE(load.diagnostics.empty());
+}
+
+// CSS Fonts 4's matching: from 400 to 500 up to 500 first, then lighter, then heavier; under 400
+// lighter first; over 500 heavier first.
+TEST(Theme, AWeightPicksTheNearestFaceOfItsRole) {
+	const float threeWeights[] = {300.0F, 500.0F, 700.0F};
+	const float twoWeights[] = {300.0F, 600.0F};
+	EXPECT_EQ(ui::matchWeight(threeWeights, 400.0F), 1U);
+	EXPECT_EQ(ui::matchWeight(threeWeights, 600.0F), 2U);
+	EXPECT_EQ(ui::matchWeight(threeWeights, 200.0F), 0U);
+	EXPECT_EQ(ui::matchWeight(threeWeights, 900.0F), 2U);
+	EXPECT_EQ(ui::matchWeight(threeWeights, 700.0F), 2U);
+	EXPECT_EQ(ui::matchWeight(twoWeights, 450.0F), 0U);
+	EXPECT_EQ(ui::matchWeight(twoWeights, 350.0F), 0U);
+
+	// A display role with a semibold and a bold face: title asks 600, display 700.
+	constexpr Renderer::FontFamily kBody{3};
+	constexpr Renderer::FontFamily kSemibold{4};
+	constexpr Renderer::FontFamily kBold{5};
+	const ui::FontFamilyName	   names[] = {
+		  {.name = "body", .family = kBody},
+		  {.name = "display", .family = kSemibold, .weight = 600.0F},
+		  {.name = "display", .family = kBold, .weight = 700.0F},
+	  };
+	ui::ThemeLoad load = ui::Theme::load({.fontFamilies = names});
+	EXPECT_EQ(load.theme.style(ui::styles::text::title.theme).fontFamily, kSemibold);
+	EXPECT_EQ(load.theme.style(ui::styles::text::display.theme).fontFamily, kBold);
+	EXPECT_EQ(load.theme.get(ui::tokens::typography::display).family, kBold);
+	EXPECT_EQ(load.theme.face(kBody, 700.0F), kBody); // body has one face
+
+	// Mounted, the weight a component sets picks the face, and a control's label takes its weight.
+	ui::Context context({800.0F, 600.0F});
+	context.setTheme(std::move(load.theme));
+	const auto lighter = context.root().addChild<ui::Text>({.style = ui::styles::text::display.extend({.fontWeight = 400.0F})});
+	EXPECT_EQ(lighter.get()->getStyle().fontFamily, kSemibold);
+	const auto button = context.root().addChild<ui::Button>({.style = {.fontFamily = kSemibold, .fontWeight = 700.0F}, .label = "Go"});
+	EXPECT_EQ(button.get()->getStyle().fontFamily, kBold);
+	const ui::Component* label = nullptr;
+	for (const ui::ComponentId id : button.get()->getChildren()) {
+		if (const ui::Component* child = context.find(id); child != nullptr && std::string_view(child->typeName()) == "Text") {
+			label = child;
+		}
+	}
+	ASSERT_NE(label, nullptr);
+	EXPECT_EQ(label->getStyle().fontFamily, kBold);
 }
 
 TEST(Theme, AnUnknownPathWarns) {

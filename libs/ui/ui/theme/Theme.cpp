@@ -3,7 +3,9 @@
 #include "ui/theme/Tokens.h"
 #include "ui/theme/dtcg/Resolver.h"
 
+#include <algorithm>
 #include <set>
+#include <utility>
 
 namespace ui {
 
@@ -52,6 +54,20 @@ namespace ui {
 			return layer;
 		}
 
+		// matchWeight's order for one weight, lowest first: the tier, then the place in it.
+		std::pair<int, float> weightRank(float weight, float desired) {
+			if (desired >= 400.0F && desired <= 500.0F) {
+				if (weight >= desired && weight <= 500.0F) {
+					return {0, weight};
+				}
+				return weight < desired ? std::pair{1, -weight} : std::pair{2, weight};
+			}
+			if (desired < 400.0F) {
+				return weight <= desired ? std::pair{0, -weight} : std::pair{1, weight};
+			}
+			return weight >= desired ? std::pair{0, weight} : std::pair{1, -weight};
+		}
+
 		std::string stylePath(std::string_view style, std::string_view field) {
 			return std::string(style) + "." + std::string(field);
 		}
@@ -62,14 +78,20 @@ namespace ui {
 				: names(names),
 				  diagnostics(diagnostics) {}
 
-			// The first of the value's names the game registered; the default family, with a warning
-			// unless the game registered none, if there's none.
-			Renderer::FontFamily map(const dtcg::FontFamilyValue& value, const dtcg::ResolvedToken& token, std::string_view path) {
+			// The face nearest `weight` of the first of the value's names the game registered; the
+			// default family, with a warning unless the game registered none, if there's none.
+			Renderer::FontFamily
+			map(const dtcg::FontFamilyValue& value, float weight, const dtcg::ResolvedToken& token, std::string_view path) {
 				for (const std::string& wanted : value.names) {
+					const FontFamilyName* best = nullptr;
 					for (const FontFamilyName& name : names) {
-						if (name.name == wanted) {
-							return name.family;
+						if (name.name == wanted &&
+							(best == nullptr || weightRank(name.weight, weight) < weightRank(best->weight, weight))) {
+							best = &name;
 						}
+					}
+					if (best != nullptr) {
+						return best->family;
 					}
 				}
 				if (!names.empty() && warned.insert(std::string(path)).second) {
@@ -153,6 +175,17 @@ namespace ui {
 			);
 		};
 		FamilyMap families(args.fontFamilies, result.diagnostics);
+
+		std::vector<std::string_view> names;
+		for (const FontFamilyName& registered : args.fontFamilies) {
+			auto listed = std::ranges::find(names, registered.name);
+			if (listed == names.end()) {
+				listed = names.insert(names.end(), registered.name);
+			}
+			result.theme.faces.push_back(
+				{.name = static_cast<std::size_t>(listed - names.begin()), .family = registered.family, .weight = registered.weight}
+			);
+		}
 		for (const TokenTable* table : chain) {
 			Table loaded{.table = table};
 			for (const TokenEntry& entry : table->tokens) {
@@ -171,9 +204,9 @@ namespace ui {
 				} else {
 					slot.value = found->second.value;
 					if (const auto* family = std::get_if<dtcg::FontFamilyValue>(&*slot.value)) {
-						slot.family = families.map(*family, found->second, entry.path);
+						slot.family = families.map(*family, 400.0F, found->second, entry.path);
 					} else if (const auto* typography = std::get_if<dtcg::TypographyValue>(&*slot.value)) {
-						slot.family = families.map(typography->fontFamily, found->second, entry.path);
+						slot.family = families.map(typography->fontFamily, typography->fontWeight, found->second, entry.path);
 					}
 				}
 				loaded.tokens.push_back(std::move(slot));
@@ -200,9 +233,16 @@ namespace ui {
 						out = std::get<float>(token->value);
 					}
 				};
+
+				// The family maps once the weight is known, which the font or the fontWeight field sets.
+				const dtcg::FontFamilyValue* familyValue = nullptr;
+				const dtcg::ResolvedToken*	 familyToken = nullptr;
+				std::string					 familyPath;
 				if (const dtcg::ResolvedToken* token = field("font", dtcg::TokenType::Typography)) {
 					const auto& font = std::get<dtcg::TypographyValue>(token->value);
-					themed.fontFamily = families.map(font.fontFamily, *token, stylePath(style, "font"));
+					familyValue = &font.fontFamily;
+					familyToken = token;
+					familyPath = stylePath(style, "font");
 					themed.fontSize = font.fontSize;
 					themed.fontWeight = font.fontWeight;
 					themed.lineHeight = font.lineHeight;
@@ -229,12 +269,17 @@ namespace ui {
 				number("opacity", dtcg::TokenType::Number, themed.opacity);
 				color("color", themed.color);
 				if (const dtcg::ResolvedToken* token = field("fontFamily", dtcg::TokenType::FontFamily)) {
-					themed.fontFamily = families.map(std::get<dtcg::FontFamilyValue>(token->value), *token, stylePath(style, "fontFamily"));
+					familyValue = &std::get<dtcg::FontFamilyValue>(token->value);
+					familyToken = token;
+					familyPath = stylePath(style, "fontFamily");
 				}
 				number("fontSize", dtcg::TokenType::Dimension, themed.fontSize);
 				number("fontWeight", dtcg::TokenType::FontWeight, themed.fontWeight);
 				number("lineHeight", dtcg::TokenType::Number, themed.lineHeight);
 				number("letterSpacing", dtcg::TokenType::Dimension, themed.letterSpacing);
+				if (familyValue != nullptr) {
+					themed.fontFamily = families.map(*familyValue, themed.fontWeight.value_or(400.0F), *familyToken, familyPath);
+				}
 				if (const auto found = extensions.find(style); found != extensions.end() && found->second.textTransform.has_value()) {
 					themed.textTransform = toTextTransform(*found->second.textTransform);
 					any = true;
@@ -342,7 +387,35 @@ namespace ui {
 	Style Theme::resolve(const Style& declared, StyleId typeStyle) const {
 		Style resolved = style(typeStyle).extend(style(declared.theme)).extend(declared);
 		resolved.theme = declared.theme;
+		if (resolved.fontFamily && resolved.fontWeight) {
+			resolved.fontFamily = face(*resolved.fontFamily, *resolved.fontWeight);
+		}
 		return resolved;
+	}
+
+	// A family registered under two names picks among the first name's faces.
+	Renderer::FontFamily Theme::face(Renderer::FontFamily family, float weight) const {
+		const auto own = std::ranges::find(faces, family, &Face::family);
+		if (own == faces.end()) {
+			return family;
+		}
+		const Face* best = &*own;
+		for (const Face& each : faces) {
+			if (each.name == own->name && weightRank(each.weight, weight) < weightRank(best->weight, weight)) {
+				best = &each;
+			}
+		}
+		return best->family;
+	}
+
+	std::size_t matchWeight(std::span<const float> weights, float desired) {
+		std::size_t best = 0;
+		for (std::size_t i = 1; i < weights.size(); ++i) {
+			if (weightRank(weights[i], desired) < weightRank(weights[best], desired)) {
+				best = i;
+			}
+		}
+		return best;
 	}
 
 } // namespace ui
