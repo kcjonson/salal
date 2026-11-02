@@ -460,6 +460,44 @@ namespace Renderer {
 		expectNear(pixel(5, 16), {128, 128, 128, 128});
 	}
 
+	TEST_F(PrimitivesDrawTest, ABorderOnThreeSidesRunsSquareToTheBareOnesEdgeAndRoundsOnlyBetweenBorderedSides) {
+		const auto tab = [&](Foundation::BorderPosition position) {
+			render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+				Primitives::drawRect(
+					{.bounds = {4.0F, 4.0F, 24.0F, 24.0F},
+					 .style = {
+						 .fill = Foundation::Color::red(),
+						 .border = Foundation::BorderStyle{
+							 .color = Foundation::Color::white(),
+							 .width = 3.0F,
+							 .cornerRadius = 8.0F,
+							 .position = position,
+							 .sides = {.bottom = false}
+						 }
+					 }}
+				);
+			});
+		};
+		const std::array<int, 4> white{255, 255, 255, 255};
+		const std::array<int, 4> red{255, 0, 0, 255};
+		const std::array<int, 4> clear{0, 0, 0, 0};
+
+		tab(Foundation::BorderPosition::Inside);
+		expectNear(pixel(5, 16), white);
+		expectNear(pixel(16, 5), white);
+		expectNear(pixel(16, 26), red);	 // the bare bottom
+		expectNear(pixel(5, 26), white); // the left side runs on to the bottom edge, its corner square
+		expectNear(pixel(4, 4), clear);	 // the top-left corner, between two bordered sides, rounds
+		expectNear(pixel(16, 29), clear);
+
+		// Centred, the left side reaches a pixel and a half outside, and still stops at the bottom
+		// edge, where a bottom border would cover half of this last pixel.
+		tab(Foundation::BorderPosition::Center);
+		expectNear(pixel(3, 26), white);
+		expectNear(pixel(3, 29), clear);
+		expectNear(pixel(16, 26), red);
+	}
+
 	TEST_F(PrimitivesDrawTest, PolygonFillsAndItsBorderSitsOutside) {
 		const std::array<Foundation::Vec2, 4> square = {{{8.0F, 8.0F}, {24.0F, 8.0F}, {24.0F, 24.0F}, {8.0F, 24.0F}}};
 		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {

@@ -17,12 +17,25 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 		Outside // Border drawn outside rect bounds (total size increased)
 	};
 
-	// Optional border style for rectangles and circles (a circle ignores cornerRadius)
+	// The sides of a rect its border is drawn on.
+	struct BorderSides {
+		bool top = true;
+		bool right = true;
+		bool bottom = true;
+		bool left = true;
+	};
+
+	// Optional border style for rectangles and circles (a circle draws only its color,
+	// width and position). A side left out of `sides` has no border, the sides beside it
+	// run straight on to the rect's edge and end square there, and with a width the
+	// corners beside it are square, fill and shadow too: `cornerRadius` rounds only a
+	// corner whose two sides both have the border, as a tab's top corners.
 	struct BorderStyle {
 		Color		   color = Color::white();
 		float		   width = 1.0F;
 		float		   cornerRadius = 0.0F;
 		BorderPosition position = BorderPosition::Center;
+		BorderSides	   sides{};
 	};
 
 	// Two-stop linear gradient for rectangle fills. The gradient is realized by

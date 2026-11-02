@@ -177,4 +177,16 @@ namespace ui::dtcg {
 		TextTransformName{.name = "uppercase", .value = TextTransform::Uppercase},
 	};
 
+	// The sides of a box its border is drawn on, which the format has no type for either: salal's
+	// extension on a style's group lists them, `"borderSides": ["top", "left", "right"]`, by these
+	// names, and a side it leaves out has no border.
+	struct BorderSides {
+		bool top = true;
+		bool right = true;
+		bool bottom = true;
+		bool left = true;
+	};
+
+	inline constexpr std::array<std::string_view, 4> kBorderSideNames{"top", "right", "bottom", "left"};
+
 } // namespace ui::dtcg

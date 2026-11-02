@@ -29,6 +29,10 @@
         "backgroundColor": { "$value": { "$ref": "#/color/surface/sunken/$value" } }
       }
     },
+    "sectionTab": {
+      "$extensions": { "salal": { "borderSides": ["left", "top", "right"] } },
+      "borderWidth": { "$type": "dimension", "$value": { "value": 2, "unit": "px" } }
+    },
     "mapLabel": {
       "textShadow": {
         "$type": "shadow",

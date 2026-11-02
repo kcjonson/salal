@@ -5,6 +5,7 @@ add_executable(salal_sandbox
     Picker.cpp
     scenes/ArcScene.cpp
     scenes/BlendScene.cpp
+    scenes/BorderScene.cpp
     scenes/FillHookScene.cpp
     scenes/InputTestScene.cpp
     scenes/PerfQuadsScene.cpp

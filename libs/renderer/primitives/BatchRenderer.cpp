@@ -155,7 +155,7 @@ namespace Renderer {
 		const Foundation::Rect&							 bounds,
 		const Foundation::Color&						 fillColor,
 		const std::optional<Foundation::BorderStyle>&	 border,
-		float											 cornerRadius,
+		const CornerRadii&								 radii,
 		const std::optional<Foundation::LinearGradient>& gradient,
 		int32_t											 key,
 		Primitives::BlendMode							 blend,
@@ -200,16 +200,17 @@ namespace Renderer {
 			}
 		}
 
-		// The border: its colour, width and position, centred when there is none
+		// The border: its colour, width, position, centred when there is none, and bare sides
 		uint32_t borderColor = 0;
 		float	 borderWidth = 0.0F;
 		uint8_t	 borderPosition = 1;
+		uint8_t	 bare = 0;
 		if (border.has_value()) {
 			borderColor = premultiplied(border->color.toVec4());
 			borderWidth = border->width;
-			if (border->cornerRadius > 0.0F) {
-				cornerRadius = border->cornerRadius;
-			}
+			const Foundation::BorderSides& sides = border->sides;
+			bare =
+				static_cast<uint8_t>((sides.top ? 0U : 1U) | (sides.right ? 0U : 2U) | (sides.bottom ? 0U : 4U) | (sides.left ? 0U : 8U));
 			switch (border->position) {
 				case Foundation::BorderPosition::Inside:
 					borderPosition = 0;
@@ -244,8 +245,8 @@ namespace Renderer {
 
 		BatchInstance& quad = pushQuad(QuadMode::Rect, corners, blend);
 		quad.geometry = {halfW, halfH, extentW, extentH};
-		quad.radii[0] = halves(cornerRadius, cornerRadius);
-		quad.radii[1] = quad.radii[0];
+		quad.radii[0] = halves(radii[0], radii[1]);
+		quad.radii[1] = halves(radii[2], radii[3]);
 		for (int i = 0; i < 4; ++i) {
 			quad.fills[i] = premultiplied(colors[i]);
 		}
@@ -256,9 +257,22 @@ namespace Renderer {
 		}
 		quad.border = borderColor;
 		quad.shape[0] = halves(borderWidth, 0.0F);
-		quad.flags |= static_cast<uint8_t>(borderPosition << kQuadBorderShift);
+		quad.flags |= static_cast<uint8_t>((borderPosition << kQuadBorderShift) | (bare << kQuadBareShift));
 
 		recordGroup(groupStart, key, blend);
+	}
+
+	CornerRadii rectCornerRadii(float radius, const std::optional<Foundation::BorderStyle>& border) {
+		if (!border.has_value() || !(border->width > 0.0F)) {
+			return {radius, radius, radius, radius};
+		}
+		const Foundation::BorderSides& sides = border->sides;
+		return {
+			sides.top && sides.left ? radius : 0.0F,
+			sides.top && sides.right ? radius : 0.0F,
+			sides.bottom && sides.right ? radius : 0.0F,
+			sides.bottom && sides.left ? radius : 0.0F,
+		};
 	}
 
 	uint8_t BatchRenderer::fillIndex(const backend::FillHook& hook, const char* id) {
@@ -290,7 +304,7 @@ namespace Renderer {
 	void BatchRenderer::addShadowQuad(
 		const Foundation::Rect&		 bounds,
 		const Foundation::BoxShadow& shadow,
-		float						 cornerRadius,
+		const CornerRadii&			 radii,
 		int32_t						 key,
 		Primitives::BlendMode		 blend
 	) {
@@ -303,7 +317,6 @@ namespace Renderer {
 			return;
 		}
 		const float			   blur = shadow.blur > 0.0F ? shadow.blur : 0.5F;
-		const float			   radius = cornerRadius + shadow.spread;
 		const float			   cx = bounds.x + (bounds.width * 0.5F) + shadow.offset.x;
 		const float			   cy = bounds.y + (bounds.height * 0.5F) + shadow.offset.y;
 		const float			   extentW = halfW + blur;
@@ -314,8 +327,8 @@ namespace Renderer {
 
 		BatchInstance& quad = pushQuad(QuadMode::Shadow, corners, blend);
 		quad.geometry = {halfW, halfH, extentW, extentH};
-		quad.radii[0] = halves(radius, radius);
-		quad.radii[1] = quad.radii[0];
+		quad.radii[0] = halves(radii[0] + shadow.spread, radii[1] + shadow.spread);
+		quad.radii[1] = halves(radii[2] + shadow.spread, radii[3] + shadow.spread);
 		const uint32_t color = premultiplied(shadow.color.toVec4());
 		std::fill(std::begin(quad.fills), std::end(quad.fills), color);
 		quad.shape[1] = halves(blur, 0.0F);

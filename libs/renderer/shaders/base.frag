@@ -41,6 +41,7 @@ const uint kModeImage = 4u;
 const uint kModeInstanced = 7u;
 const uint kFlagAdditive = 1u;
 const uint kFlagBorderShift = 1u; // two bits: the border inside, centred or outside
+const uint kFlagBareShift = 3u;	  // four bits: a rect's sides with no border, top, right, bottom, left
 
 const float kPi = 3.14159265;
 
@@ -172,9 +173,30 @@ void main() {
 			fillCover = coverage(0.0, boxDist, boxPixel);
 		}
 		if (borderWidth > 0.001) {
-			float innerCover = coverage(borderInner, boxDist, boxPixel);
-			bandCover = coverage(borderOuter, boxDist, boxPixel) - innerCover;
-			bandOverFill = fillCover - innerCover;
+			uint bare = (v_mode.y >> kFlagBareShift) & 15u;
+			if (bare == 0u) {
+				float innerCover = coverage(borderInner, boxDist, boxPixel);
+				bandCover = coverage(borderOuter, boxDist, boxPixel) - innerCover;
+				bandOverFill = fillCover - innerCover;
+			} else {
+				// Sides with no border: the band lies between two boxes, the outer one past a
+				// bordered side by borderOuter and on a bare side's edge, the hole in from a
+				// bordered side by borderInner and clear past a bare one, so a bordered side runs
+				// straight on to a bare one's edge and stops square there. Only a corner between
+				// two bordered sides rounds; the batch squared the rest.
+				vec4  on = vec4(equal(uvec4(bare) & uvec4(1u, 2u, 4u, 8u), uvec4(0u))); // top, right, bottom, left
+				vec4  rounded = on.xxzz * on.wyyw;									   // tl, tr, br, bl
+				vec4  outerReach = on * borderOuter;
+				vec4  holeReach = on * borderInner + (1.0 - on) * (2.0 * boxPixel);
+				vec2  outerLow = -v_halfSize - outerReach.wx;
+				vec2  outerHigh = v_halfSize + outerReach.yz;
+				vec2  holeLow = -v_halfSize - holeReach.wx;
+				vec2  holeHigh = v_halfSize + holeReach.yz;
+				float outerDist = sdRoundedBox(v_local - (outerLow + outerHigh) * 0.5, (outerHigh - outerLow) * 0.5, v_radii + rounded * borderOuter);
+				float holeDist = sdRoundedBox(v_local - (holeLow + holeHigh) * 0.5, (holeHigh - holeLow) * 0.5, rounded * max(v_radii + borderInner, 0.0));
+				bandCover = coverage(0.0, outerDist, boxPixel) - coverage(0.0, max(outerDist, holeDist), boxPixel);
+				bandOverFill = fillCover - coverage(0.0, max(boxDist, holeDist), boxPixel);
+			}
 		}
 		if (fillCover + bandCover < 0.001) {
 			discard;

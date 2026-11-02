@@ -39,7 +39,7 @@ namespace {
 	}
 
 	void addRect(BatchRenderer& batch, BlendMode blend = BlendMode::Alpha, int32_t key = 0, float x = 0.0F) {
-		batch.addQuad({x, 0.0F, 10.0F, 10.0F}, Foundation::Color::red(), std::nullopt, 0.0F, std::nullopt, key, blend);
+		batch.addQuad({x, 0.0F, 10.0F, 10.0F}, Foundation::Color::red(), std::nullopt, {}, std::nullopt, key, blend);
 	}
 
 	// Each quad's top-left x, in order.
@@ -91,7 +91,7 @@ TEST(BatchModeTest, EveryAddWritesItsModeAndTheAdditiveFlag) {
 	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	addRect(batch, BlendMode::Additive);
 	addGlyph(batch, kAtlasA, BlendMode::Additive);
-	batch.addShadowQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::BoxShadow{}, 0.0F, 0, BlendMode::Additive);
+	batch.addShadowQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::BoxShadow{}, {}, 0, BlendMode::Additive);
 	const Foundation::Vec2 triangle[3] = {{0.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, 1.0F}};
 	const uint16_t		   triangleIndices[3] = {0, 1, 2};
 	batch.addTriangles(
@@ -122,24 +122,18 @@ TEST(BatchModeTest, EveryAddWritesItsModeAndTheAdditiveFlag) {
 TEST(BatchModeTest, ARectCarriesItsBorderPremultipliedAndItsPosition) {
 	backend::NullBackend gpu;
 	BatchRenderer		 batch(gpu, base_shader::source());
-	const auto			 rectWithBorder = [&](float alpha, Foundation::BorderPosition position, BlendMode blend) {
-		  batch.addQuad(
-			  {0.0F, 0.0F, 10.0F, 10.0F},
-			  Foundation::Color::red(),
-			  Foundation::BorderStyle{.color = {1.0F, 1.0F, 1.0F, alpha}, .width = 2.0F, .position = position},
-			  3.0F,
-			  std::nullopt,
-			  0,
-			  blend
-		  );
+	const auto rectWithBorder = [&](float alpha, Foundation::BorderPosition position, BlendMode blend, Foundation::BorderSides sides = {}) {
+		const Foundation::BorderStyle border{.color = {1.0F, 1.0F, 1.0F, alpha}, .width = 2.0F, .position = position, .sides = sides};
+		batch.addQuad({0.0F, 0.0F, 10.0F, 10.0F}, Foundation::Color::red(), border, rectCornerRadii(3.0F, border), std::nullopt, 0, blend);
 	};
 	rectWithBorder(1.0F, Foundation::BorderPosition::Center, BlendMode::Alpha);
 	rectWithBorder(0.4F, Foundation::BorderPosition::Inside, BlendMode::Alpha);
 	rectWithBorder(0.0F, Foundation::BorderPosition::Outside, BlendMode::Additive);
 	addRect(batch);
+	rectWithBorder(1.0F, Foundation::BorderPosition::Inside, BlendMode::Alpha, {.bottom = false});
 
 	const std::span<const BatchInstance> quads = batch.getPendingInstances();
-	ASSERT_EQ(quads.size(), 4U);
+	ASSERT_EQ(quads.size(), 5U);
 	// Half size, then the quad's half extent: grown by the part of the border outside the shape.
 	EXPECT_EQ(quads[0].geometry, Foundation::Vec4(5.0F, 5.0F, 6.0F, 6.0F));
 	EXPECT_EQ(quads[1].geometry, Foundation::Vec4(5.0F, 5.0F, 5.0F, 5.0F));
@@ -158,6 +152,13 @@ TEST(BatchModeTest, ARectCarriesItsBorderPremultipliedAndItsPosition) {
 	for (const uint32_t fill : quads[0].fills) {
 		EXPECT_EQ(fill, glm::packUnorm4x8(Foundation::Vec4(1.0F, 0.0F, 0.0F, 1.0F)));
 	}
+	// A bare bottom: its bit, and the two corners beside it square.
+	EXPECT_EQ(quads[4].flags, 4 << kQuadBareShift);
+	EXPECT_EQ(halves(quads[4].radii), Foundation::Vec4(3.0F, 3.0F, 0.0F, 0.0F));
+	// With no width, the sides square nothing.
+	EXPECT_EQ(
+		rectCornerRadii(3.0F, Foundation::BorderStyle{.width = 0.0F, .sides = {.left = false}}), (CornerRadii{3.0F, 3.0F, 3.0F, 3.0F})
+	);
 }
 
 TEST(BatchModeTest, AGradientsCornersArePremultipliedBeforeTheyInterpolate) {
@@ -167,7 +168,7 @@ TEST(BatchModeTest, AGradientsCornersArePremultipliedBeforeTheyInterpolate) {
 		{0.0F, 0.0F, 10.0F, 10.0F},
 		Foundation::Color::white(),
 		std::nullopt,
-		0.0F,
+		{},
 		Foundation::LinearGradient{.from = {1.0F, 0.0F, 0.0F, 1.0F}, .to = {0.0F, 0.0F, 1.0F, 0.0F}, .horizontal = true}
 	);
 	// Left to right, red to transparent: transparent is zero whatever its colour, so

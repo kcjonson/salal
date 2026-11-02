@@ -47,6 +47,24 @@ namespace ui::dtcg {
 			return std::nullopt;
 		}
 
+		// The sides a list of kBorderSideNames names, each once; none for anything else.
+		std::optional<BorderSides> borderSidesNamed(const json& value) {
+			if (!value.is_array()) {
+				return std::nullopt;
+			}
+			BorderSides sides{.top = false, .right = false, .bottom = false, .left = false};
+			bool* const flags[] = {&sides.top, &sides.right, &sides.bottom, &sides.left};
+			for (const json& name : value) {
+				const auto known = name.is_string() ? std::find(kBorderSideNames.begin(), kBorderSideNames.end(), name.get<std::string>())
+													: kBorderSideNames.end();
+				if (known == kBorderSideNames.end() || *flags[known - kBorderSideNames.begin()]) {
+					return std::nullopt;
+				}
+				*flags[known - kBorderSideNames.begin()] = true;
+			}
+			return sides;
+		}
+
 		// "none or uppercase", from the table.
 		std::string textTransformChoices() {
 			std::string choices;
@@ -86,7 +104,7 @@ namespace ui::dtcg {
 				diagnostics.push_back({.severity = Severity::Warning, .file = file, .path = path, .message = std::move(message)});
 			}
 
-			// salal's extension: on a group, its text transform and nothing else.
+			// salal's extension: on a group, its text transform and border sides and nothing else.
 			void checkSalal(const json& salal, const std::string& path, bool token) {
 				if (token) {
 					error(path, "$extensions.salal goes on a style's group, not on a token");
@@ -97,10 +115,19 @@ namespace ui::dtcg {
 					return;
 				}
 				for (const auto& [key, value] : salal.items()) {
-					if (key != "textTransform") {
-						error(path, "$extensions.salal has no property " + inQuotes(key) + "; it takes textTransform");
-					} else if (!textTransformNamed(value).has_value()) {
-						error(path, "$extensions.salal.textTransform " + value.dump() + " is not " + textTransformChoices());
+					if (key == "textTransform") {
+						if (!textTransformNamed(value).has_value()) {
+							error(path, "$extensions.salal.textTransform " + value.dump() + " is not " + textTransformChoices());
+						}
+					} else if (key == "borderSides") {
+						if (!borderSidesNamed(value).has_value()) {
+							error(
+								path,
+								"$extensions.salal.borderSides " + value.dump() + " is not a list of top, right, bottom and left, each once"
+							);
+						}
+					} else {
+						error(path, "$extensions.salal has no property " + inQuotes(key) + "; it takes textTransform and borderSides");
 					}
 				}
 			}
@@ -1097,6 +1124,9 @@ namespace ui::dtcg {
 				SalalExtension extension;
 				if (salal.is_object() && salal.contains("textTransform")) {
 					extension.textTransform = textTransformNamed(salal.at("textTransform"));
+				}
+				if (salal.is_object() && salal.contains("borderSides")) {
+					extension.borderSides = borderSidesNamed(salal.at("borderSides"));
 				}
 				const auto file = origin.find(path);
 				extension.file = file == origin.end() ? "" : file->second;

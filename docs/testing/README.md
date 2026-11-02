@@ -46,7 +46,7 @@ screenshotting. They never run in CI.
 The sandbox scenes are the rendering test pages, for manual testing by people
 and agents and for the scene diffs: one scene per primitive or feature
 (`sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, `input_test`,
-`fill_hook`, and ui's `ui_` scenes; the `perf_` scenes are the perf suite's,
+`fill_hook`, `border`, and ui's `ui_` scenes; the `perf_` scenes are the perf suite's,
 below). A new
 drawing feature adds a scene or extends one.
 

@@ -361,22 +361,19 @@ namespace Renderer::Primitives {
 			return;
 		}
 
-		// Use SDF-based rendering for fill, border, and corner radius
-		// Extract corner radius from border if present, otherwise use 0
-		float cornerRadius = 0.0F;
-		if (args.style.border.has_value() && args.style.border.value().cornerRadius > 0.0F) {
-			cornerRadius = args.style.border.value().cornerRadius;
-		}
+		// The corners round by the border's radius, square beside a side it leaves bare.
+		const std::optional<Foundation::BorderStyle>& border = args.style.border;
+		const CornerRadii radii = rectCornerRadii(border.has_value() ? std::max(border->cornerRadius, 0.0F) : 0.0F, border);
 
 		// Outer box-shadow / glow sits behind the fill (emit first).
 		if (args.style.boxShadow.has_value()) {
-			g_batchRenderer->addShadowQuad(args.bounds, args.style.boxShadow.value(), cornerRadius, args.key, args.blend);
+			g_batchRenderer->addShadowQuad(args.bounds, args.style.boxShadow.value(), radii, args.key, args.blend);
 		}
 
 		// Single AddQuad call handles fill, border, rounded corners, and an optional
 		// gradient (per-corner vertex colors) or fill hook via the GPU.
 		g_batchRenderer->addQuad(
-			args.bounds, args.style.fill, args.style.border, cornerRadius, args.style.gradient, args.key, args.blend, args.fill, args.id
+			args.bounds, args.style.fill, border, radii, args.style.gradient, args.key, args.blend, args.fill, args.id
 		);
 	}
 
@@ -438,7 +435,9 @@ namespace Renderer::Primitives {
 		// A disk is a rounded box whose radius is its half size, so its shadow is a rect's.
 		if (args.style.shadow.has_value()) {
 			const Foundation::Rect box{args.center.x - args.radius, args.center.y - args.radius, args.radius * 2.0F, args.radius * 2.0F};
-			g_batchRenderer->addShadowQuad(box, *args.style.shadow, args.radius, args.key, args.blend);
+			g_batchRenderer->addShadowQuad(
+				box, *args.style.shadow, {args.radius, args.radius, args.radius, args.radius}, args.key, args.blend
+			);
 		}
 
 		if (args.style.fill.a > 0.0F) {

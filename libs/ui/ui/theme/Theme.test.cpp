@@ -89,6 +89,11 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	EXPECT_FLOAT_EQ(halo->spread, 2.0F);
 	EXPECT_FLOAT_EQ(halo->blur, 1.0F);
 	EXPECT_EQ(halo->offset, Foundation::Vec2(0.0F, 0.0F));
+	// A tab's border on three sides, from salal's extension on its group.
+	const ui::Style& tab = dark.theme.style(theme_test::styles::sectionTab.theme);
+	ASSERT_TRUE(tab.borderSides.has_value());
+	EXPECT_TRUE(tab.borderSides->top && tab.borderSides->left && tab.borderSides->right && !tab.borderSides->bottom);
+	EXPECT_FALSE(dark.theme.style(ui::styles::pane.theme).borderSides.has_value());
 	expectColor(light.theme.get(theme_test::tokens::palette::slate::_900), 0.96F, 0.97F, 0.98F);
 	// The game's capitals on ui's button, from salal's extension on the style's group; ui sets none.
 	EXPECT_EQ(dark.theme.style(ui::styles::button.theme).textTransform, Foundation::TextTransform::Uppercase);

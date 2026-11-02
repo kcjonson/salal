@@ -70,7 +70,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	//   Rect    geometry: half size, then the quad's half extent; radii: the corners' (tl, tr,
 	//           br, bl); fills: each corner's, for a gradient, or with a fill hook its one fill
 	//           then its three params; slot: its fill hook's index, 0 for none; border: the
-	//           border's colour; shape.x: its width; flags: its position
+	//           border's colour; shape.x: its width; flags: its position and its bare sides
 	//   Shadow  geometry: half size, then the quad's half extent; radii: the corners'; shape.z: the blur
 	//   Arc     geometry: inner and outer radius, half the sweep, the middle's angle; shape.y: how
 	//           far the quad reaches past the outer radius
@@ -87,6 +87,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// BatchInstance::flags
 	constexpr uint8_t kQuadAdditive = 1U;	 // the colour adds to what is under it, its alpha 0
 	constexpr uint8_t kQuadBorderShift = 1U; // a rect's border position from this bit, two bits: inside, centred, outside
+	constexpr uint8_t kQuadBareShift = 3U;	 // a rect's sides with no border from this bit, four: top, right, bottom, left
+
+	// A rect's corner radii, (top-left, top-right, bottom-right, bottom-left).
+	using CornerRadii = std::array<float, 4>;
+
+	// `radius` at each corner, but square beside a side `border` leaves bare when it has a width.
+	CornerRadii rectCornerRadii(float radius, const std::optional<Foundation::BorderStyle>& border);
 
 	// The GPU blend state a mode draws in. Output is premultiplied and blended
 	// (ONE, ONE_MINUS_SRC_ALPHA); Additive is that state with the output alpha
@@ -128,8 +135,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- Shape rendering (SDF) ---
 
-		// Add shape quad to batch (with optional SDF border and corner radius).
-		// When `gradient` is set, the quad's four corners are colored from the
+		// Add shape quad to batch (with optional SDF border and corner radii, rectCornerRadii's
+		// for its border). When `gradient` is set, the quad's four corners are colored from the
 		// gradient stops (interpolated by the GPU) instead of the flat fillColor;
 		// the border/SDF/corner radius are unaffected. With `fill.hook`, one of this
 		// batch's base shader's fill hooks, the hook gives the colour over fillColor and a
@@ -139,7 +146,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::Rect&							 bounds,
 			const Foundation::Color&						 fillColor,
 			const std::optional<Foundation::BorderStyle>&	 border = std::nullopt,
-			float											 cornerRadius = 0.0F,
+			const CornerRadii&								 radii = {},
 			const std::optional<Foundation::LinearGradient>& gradient = std::nullopt,
 			int32_t											 key = 0,
 			Primitives::BlendMode							 blend = Primitives::BlendMode::Alpha,
@@ -151,13 +158,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// hooks: then its block's new values would reach that quad, drawn before them.
 		bool holdsFill(std::string_view hook) const;
 
-		// Add an outer box-shadow / glow quad behind a rect. The SDF shader renders
-		// it as a soft falloff over `shadow.blur` px outside the (spread-grown)
-		// shape. Emit before the element's own quad so it sits behind.
+		// Add an outer box-shadow / glow quad behind a rect, or a circle (its radius at every
+		// corner). The SDF shader renders it as a soft falloff over `shadow.blur` px either
+		// side of the (spread-grown) shape's edge, each radius grown by the spread too. Emit
+		// before the element's own quad so it sits behind.
 		void addShadowQuad(
 			const Foundation::Rect&		 bounds,
 			const Foundation::BoxShadow& shadow,
-			float						 cornerRadius,
+			const CornerRadii&			 radii,
 			int32_t						 key = 0,
 			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
 		);

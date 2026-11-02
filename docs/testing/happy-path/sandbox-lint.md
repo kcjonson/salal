@@ -2,7 +2,7 @@
 
 Each scene started with `--scene=<name>`, `/api/ui/lint` read once it has drawn, and after any step below.
 
-1. `sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, `input_test` and `fill_hook`: lint count 0, with no ui to check.
+1. `sdf_minimal`, `polygon`, `arc`, `polyline`, `blend`, `input_test`, `fill_hook` and `border`: lint count 0, with no ui to check.
 2. `fill_hook`'s screenshot: amber and teal stripes in every rect but "no hook", cut by each rect's rounded corners and inside its border, cropped by the clip, turned with the 15-degree rect, the bar showing through the translucent one, and the last rect's stripes half a stripe over from the one before it.
 3. `ui_order`, `ui_text`, `ui_layout`, `ui_grid`, `ui_clip`, `ui_scroll`, `ui_motion` and `ui_icons`: lint count 0.
 4. `ui_theme`: count 0; press T for light: still 0.
@@ -14,3 +14,5 @@ Each scene started with `--scene=<name>`, `/api/ui/lint` read once it has drawn,
 10. `sdf_minimal`'s screenshot: under the alphabet, "Halo over stripes" in dark ink with a cream halo about 3 px wide that keeps it readable over the green stripes and the dark blue between them, its outer edge soft and not cut off square at any glyph's box; "Drop shadow" in cream with a soft dark copy down and right of it.
 11. `ui_text`'s screenshot: bottom right, over striped green art, "Halo label" in dark ink inside a cream halo, and "Drop shadow" in cream over a dark copy 2 px down and right.
 12. `polygon`'s screenshot: bottom right, on a pale plate, the green rock and the red disk each over a soft brown shadow down and right of it, both fading to nothing with no hard edge; the rock's shadow follows its notch without a dark sliver.
+13. `border`'s screenshot: a tab on a panel, its top corners round, its sides meeting the panel's top rule square, and the panel's rule not showing across the tab's opening; a sheet ruled down its left side only, all four corners square; one ruled top and bottom only; an underline; and three sheets open at the bottom, inside, centred and outside, each side rule running straight to the bottom edge of the red guide box and stopping square there.
+14. `ui_display`'s screenshot: under the key caps, a "Tab" box with no bottom rule and square bottom corners, and an "Underline" box ruled only along its bottom.

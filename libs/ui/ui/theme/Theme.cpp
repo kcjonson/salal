@@ -239,9 +239,16 @@ namespace ui {
 				number("fontWeight", dtcg::TokenType::FontWeight, themed.fontWeight);
 				number("lineHeight", dtcg::TokenType::Number, themed.lineHeight);
 				number("letterSpacing", dtcg::TokenType::Dimension, themed.letterSpacing);
-				if (const auto found = extensions.find(style); found != extensions.end() && found->second.textTransform.has_value()) {
-					themed.textTransform = toTextTransform(*found->second.textTransform);
-					any = true;
+				if (const auto found = extensions.find(style); found != extensions.end()) {
+					if (const std::optional<dtcg::TextTransform>& transform = found->second.textTransform) {
+						themed.textTransform = toTextTransform(*transform);
+						any = true;
+					}
+					if (const std::optional<dtcg::BorderSides>& sides = found->second.borderSides) {
+						themed.borderSides =
+							Foundation::BorderSides{.top = sides->top, .right = sides->right, .bottom = sides->bottom, .left = sides->left};
+						any = true;
+					}
 				}
 				if (!any) {
 					missing(*table, style);

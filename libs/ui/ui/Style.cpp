@@ -16,6 +16,7 @@ namespace ui {
 		over(out.backgroundColor, overrides.backgroundColor);
 		over(out.borderColor, overrides.borderColor);
 		over(out.borderWidth, overrides.borderWidth);
+		over(out.borderSides, overrides.borderSides);
 		over(out.borderRadius, overrides.borderRadius);
 		over(out.boxShadow, overrides.boxShadow);
 		over(out.opacity, overrides.opacity);

@@ -175,7 +175,11 @@ and outset in, which text never read; the shader widens the coverage ramp by
 them, so a plain glyph pays a max, a min and a divide a pixel. A circle's shadow
 is a rect's shadow quad with the radius at every corner, and a polygon's is its
 fill's flat quads again with the feather ring widened to the blur; neither adds
-a field or a line of shader.
+a field or a line of shader. A rect's border on some sides takes four of the
+flags byte's five free bits, its bare sides, leaving one; the corners beside a
+bare side ride in the radii as 0. A rect whose border is on every side pays an
+integer test a pixel for it, and only one with a bare side measures the second
+and third rounded boxes its band then lies between.
 
 Why: the per-vertex layout writes everything about a rect (colour, border,
 radius, clip, mode) into each of its four 80-byte vertices plus six indices,
@@ -254,6 +258,17 @@ theme's, as any field does. A label drawn in a text style (a list row's, a
 checkbox's, a menu item's) takes that style's. Badge, KeyCap, Divider, Stat's
 and ProgressBar's labels and Dialog's kicker set `uppercase` in code, so a
 theme doesn't change their case.
+
+The sides a box's border is drawn on have no type either (a `border` token is
+a colour, a width and a stroke style, all four sides), so they are salal's
+extension too, `"borderSides": ["left", "top", "right"]` beside or instead of
+`textTransform`, with the same rules: on the style's own group, a later file's
+replacing an earlier one's whole, and anything but a list of `top`, `right`,
+`bottom` and `left`, each once, an error. It sets `Style::borderSides`, which a
+Rectangle (and every control drawn as one) hands the renderer's `BorderSides`.
+A side left out has no border, and with a border width the corners beside it
+are square, so one `borderRadius` gives a tab round top corners and a square
+foot.
 
 What ui's tokens define, beyond palette roles (surfaces, text, lines, scrim,
 focus ring), spacing, radii and motion: font roles (display, body, mono), each

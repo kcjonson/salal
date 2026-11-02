@@ -25,6 +25,7 @@ namespace ui {
 		std::optional<Foundation::Color>		   backgroundColor;
 		std::optional<Foundation::Color>		   borderColor;
 		std::optional<float>					   borderWidth; // px, inside the box
+		std::optional<Foundation::BorderSides>	   borderSides; // unset, all four; from salal's extension in a theme
 		std::optional<float>					   borderRadius;
 		std::optional<Foundation::BoxShadow>	   boxShadow;
 		std::optional<float>					   opacity;	   // 0 to 1, multiplied down the tree
