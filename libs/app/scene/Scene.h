@@ -3,9 +3,17 @@
 // A scene is one screen of a game on the App's scene stack. Only the top scene gets events, fixed
 // ticks and update; the scenes under it keep rendering from the topmost opaque one up. Every call
 // the App makes into a scene is wrapped: an exception is logged and the frame goes on.
+//
+// Each scene has its own ui context (docs/ui-design.md, "Services and input routing"), made the first
+// time ui() is called, with its roots the window's logical size. A scene mounts its roots in onEnter;
+// the App updates the context after the scene's update, lays it out every frame the scene renders,
+// draws it after the scene's render() behind a sort barrier, so the scene's keys and ui's never
+// interleave, resizes it with the window before onResize, and destroys it, unmounting everything,
+// once onExit has run.
 
 #include <CoordinateSystem/CoordinateSystem.h>
 #include <input/InputTypes.h>
+#include <ui/Context.h>
 
 #include <cstdint>
 #include <memory>
@@ -71,6 +79,12 @@ namespace app {
 		virtual bool		opaque() const { return true; }	   // false: the scenes below keep rendering (a pause menu over the arena)
 		virtual std::string exportState() const { return {}; } // JSON for /api/state?what=scene; only the dev server calls it
 
+		// This scene's ui context, made on first use. From onEnter on; a scene's constructor runs before
+		// it is on the stack, so one made there is sized when the scene enters.
+		ui::Context& ui();
+		// ui().root(): the scene's first root.
+		ui::Ref<ui::Component> root();
+
 	  private:
 		friend class SceneStack;
 		template <typename A, typename R>
@@ -78,8 +92,9 @@ namespace app {
 
 		void finishWith(std::unique_ptr<detail::ResultBox> result);
 
-		SceneStack*	  stack = nullptr;
-		std::uint64_t stackId = 0; // which stack entry this is, never reused
+		SceneStack*					 stack = nullptr;
+		std::uint64_t				 stackId = 0; // which stack entry this is, never reused
+		std::unique_ptr<ui::Context> uiContext;
 	};
 
 	struct NoArgs {};

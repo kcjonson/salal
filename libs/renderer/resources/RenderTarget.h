@@ -3,8 +3,9 @@
 // An offscreen colour target: a texture from the renderer's table and a backend
 // render target drawing into it. begin() makes it the bound target and end()
 // rebinds the one below it on the renderer's own target stack (the backbuffer at
-// the bottom), so the GPU is never asked what is bound. The texture goes with the
-// target. Needs Primitives::init(); before it, create() logs and is invalid.
+// the bottom), so the GPU is never asked what is bound. The target owns its colour
+// texture (a Texture), which goes with it; texture() is the handle draws carry.
+// Needs Primitives::init(); before it, create() logs and is invalid.
 
 #include "Handle.h"
 #include "Texture.h"

@@ -4,10 +4,12 @@
 // buffers, and records what it is asked to do, so the renderer's tests (and a
 // game's) run headless and check what would have reached the GPU. Nothing is
 // drawn; readPixels() reads zeros where GL would read, and a timestamp is ready, at
-// 0, once it is written.
+// 0, once it is written. Not final, so a test can override what a GPU would answer
+// (timestamps that lag, or none).
 
 #include "backend/Backend.h"
 #include "backend/SlotTable.h"
+#include <array>
 #include <cstddef>
 #include <string>
 #include <utility>
@@ -15,7 +17,7 @@
 
 namespace Renderer::backend {
 
-	class NullBackend final : public Backend {
+	class NullBackend : public Backend {
 	  public:
 		// One setHookUniforms() call.
 		struct HookUniforms {
@@ -23,11 +25,20 @@ namespace Renderer::backend {
 			std::vector<std::byte> bytes;
 		};
 
+		// A rect a batched draw carried that names a fill hook: which of the draw's instances it
+		// is, from 0, the hook's fill index and its params.
+		struct RecordedFill {
+			uint32_t				instance = 0;
+			uint32_t				index = 0;
+			std::array<uint32_t, 3> params{};
+		};
+
 		// One DrawCall as submitted, with the uniforms it would have read.
 		struct RecordedDraw {
 			DrawCall				  call;
 			DrawUniforms			  uniforms;
 			std::vector<HookUniforms> hookUniforms;	  // the last write at each binding point written, by binding point
+			std::vector<RecordedFill> fills;		  // its hooked rects, in instance order
 			int						  submission = 0; // which draw() it came in, from 0
 
 			// What the draw read at `binding`; empty when nothing was written there.
@@ -71,6 +82,7 @@ namespace Renderer::backend {
 		TextureHandle createTexture(const TextureDesc& desc) override;
 		void		  updateTexture(TextureHandle texture, int x, int y, int width, int height, const void* pixels) override;
 		void		  destroyTexture(TextureHandle texture) override { textureTable.erase(texture); }
+		bool		  hasTexture(TextureHandle texture) const override { return textureTable.find(texture) != nullptr; }
 
 		RenderTargetHandle createRenderTarget(TextureHandle colour) override;
 		void			   setRenderTarget(RenderTargetHandle target) override { targetBinds.push_back(target); }
@@ -143,6 +155,9 @@ namespace Renderer::backend {
 		SlotTable<GeometryHandle, GeometryDesc>		 geometryTable;
 		SlotTable<PipelineHandle, PipelineRecord>	 pipelineTable;
 		SlotTable<QueryHandle, bool>				 queryTable; // written yet
+
+		// The hooked rects among a batched draw's instances.
+		std::vector<RecordedFill> fillsOf(const DrawCall& call) const;
 
 		std::vector<RecordedDraw>		recordedDraws;
 		std::vector<DrawUniforms>		uniformHistory;

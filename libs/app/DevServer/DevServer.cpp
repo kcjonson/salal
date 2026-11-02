@@ -253,6 +253,16 @@ namespace app {
 				const int ticks = std::stoi(request.params.at("ticks"));
 				app.step(ticks);
 				return okReply({{"action", "step"}, {"ticks", ticks}});
+			} else if (action == "capture") {
+				if (request.params.at("op") == "start") {
+					app.startCapture();
+					return okReply({{"action", "capture"}, {"op", "start"}});
+				}
+				const std::optional<CaptureSummary> summary = app.stopCapture();
+				if (!summary) {
+					return errorReply(409, "no capture is running");
+				}
+				return okReply({{"action", "capture"}, {"op", "stop"}, {"capture", summary->toJson()}});
 			}
 			return okReply({{"action", action}});
 		}

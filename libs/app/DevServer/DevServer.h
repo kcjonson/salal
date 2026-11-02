@@ -106,7 +106,7 @@ namespace app {
 		// without case. Refused, logged, as an inactive handle, for an empty handler or a bad verb.
 		[[nodiscard]] Registration route(std::string verb, Handler handler);
 		// /api/control?action=<action>, answered at step 3 after the actions before it. The built-in
-		// actions (exit, scene, pause, resume, reload, vsync, step) can't be registered.
+		// actions (exit, scene, pause, resume, reload, vsync, step, capture) can't be registered.
 		[[nodiscard]] Registration control(std::string action, Handler handler);
 		// /api/state?what=<what>, answered at step 10 with the provider's JSON; "ui.tree" and
 		// "ui.lint" also answer /api/ui/tree and /api/ui/lint, in place of the empty defaults.

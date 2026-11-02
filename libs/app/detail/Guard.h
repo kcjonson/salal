@@ -1,6 +1,6 @@
 #pragma once
 
-// Every call the App makes into game code (scenes, overlays, result callbacks, the dispatch) goes
+// Every call the App makes into game code (scenes, debug layers, result callbacks, the dispatch) goes
 // through guard(): what it throws is logged as "<owner>::<what>" and the frame goes on, as
 // worldsim's loop does for update and render.
 

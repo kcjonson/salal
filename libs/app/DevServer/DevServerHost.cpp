@@ -111,6 +111,9 @@ namespace app::detail {
 			if (request.name == "vsync" && param("value") != "0" && param("value") != "1") {
 				return errorReply(400, "Vsync action requires 'value' parameter (0 or 1)");
 			}
+			if (request.name == "capture" && param("op") != "start" && param("op") != "stop") {
+				return errorReply(400, "Capture action requires 'op' parameter (start or stop)");
+			}
 			if (request.name == "step") {
 				const std::string text = param("ticks").value_or("1");
 				int				  ticks = 0;
@@ -155,7 +158,7 @@ namespace app::detail {
             <li><a href="/api/ui/lint">/api/ui/lint</a> - UI layout lint</li>
             <li><a href="/api/state?what=scene">/api/state?what=scene</a> - The scene stack's state</li>
             <li><code>/api/input?ev=...</code> - Synthetic input</li>
-            <li><code>/api/control?action=...</code> - exit, scene, pause, resume, reload, vsync, step, and the game's</li>
+            <li><code>/api/control?action=...</code> - exit, scene, pause, resume, reload, vsync, step, capture, and the game's</li>
             <li><code>/api/dev/&lt;verb&gt;</code> - The game's routes</li>
             <li><a href="/stream/metrics">/stream/metrics</a> - Real-time metrics (SSE)</li>
             <li><a href="/stream/logs">/stream/logs</a> - Real-time logs (SSE)</li>

@@ -9,8 +9,8 @@ frame, input and the scene graph, so the games on top of it only have to be
 games. See [README.md](README.md).
 
 It is being **extracted from worldsim**, which has already implemented this
-architecture and is where the code comes from. `foundation`, `renderer` and
-`app` are in and worldsim runs on all three; `ui` is a placeholder until phase 3.
+architecture and is where the code comes from. `foundation`, `renderer`,
+`app` and `ui` are in, and worldsim runs on all four.
 
 ## Project management: Specboard
 
@@ -49,9 +49,9 @@ repo's `specboard.md`.
   backend-boundary design: the GL leaks the public surface had, the target
   handles and declarations, the backend seam, and the PR sequence that lands it.
 - **[docs/shader-hooks.md](docs/shader-hooks.md)** is the base shader's hook
-  contract: how a game adds vertex code to the one program at build time
-  (`salal_base_shader()`), the hook points, uniform blocks, and what fails the
-  build.
+  contract: how a game adds vertex code, and fill hooks that colour a rect per
+  pixel, to the one program at build time (`salal_base_shader()`), the hook
+  points, uniform blocks, and what fails the build.
 - **[docs/app-api.md](docs/app-api.md)** is the phase 2 design of `app`: the
   frame, input and the per-tick snapshot, scenes, settings and saves, the dev
   server, and the seven PRs that land it.
@@ -83,7 +83,8 @@ All three will consume this engine via CMake FetchContent pinned to a tag.
 The build skeleton is in, with CI on Windows, macOS and Linux. **`foundation`
 and `renderer` are imported** (plain copies of worldsim at `870dd755` and
 `2cc7e40a`, 2026-10-26); `app` is built from worldsim's `libs/engine` slice
-(phase 2, below); `ui` is a placeholder.
+(phase 2, below); `ui` is built in salal to [docs/ui-design.md](docs/ui-design.md)
+(phase 3, below).
 **Phase 0, the audit, is done** (2026-10-25); findings in
 [docs/phase-0-audit.md](docs/phase-0-audit.md). Worldsim's `libs/ui` reached
 into `libs/engine` through two small headers (`input/InputTypes.h` and
@@ -102,7 +103,9 @@ is tagged, and worldsim consumes this repo. The renderer boundary PRs are under
 way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PRs 1
 to 4 are in (`v0.2.0` to `v0.5.0`), and after them the base shader takes hooks
 assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which took
-worldsim's grass deform out of the renderer and into a worldsim hook.
+worldsim's grass deform out of the renderer and into a worldsim hook. Fill hooks,
+a game's surface computed per pixel of the rects that name one, followed
+(2026-10-31).
 `foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
 ported bit for bit (decision A).
 
@@ -110,16 +113,24 @@ ported bit for bit (decision A).
 seven PRs [docs/app-api.md](docs/app-api.md) sequences. Salal PRs 1 to 6 are
 `v0.10.0` to `v0.15.0`: the input types, the accumulator and `ActionMap` in
 `foundation/input/`, then `app`'s clock, GLFW and headless platforms, frame,
-scene stack, overlays and context object, then the GLFW device layer with
+scene stack, debug layers and context object, then the GLFW device layer with
 gamepads, player slots, key names, capture, axis edges and the clipboard, then
 the dev server behind its compile flags, then the settings file and saves, then
 the sandbox harness, a scene picker drawn with `Primitives` over worldsim's
 renderer-level scenes. Worldsim pinned `v0.15.0` ([worldsim#313](https://github.com/kcjonson/worldsim/pull/313))
 and then converted its three GUI apps onto `app` ([worldsim#314](https://github.com/kcjonson/worldsim/pull/314)),
 which deleted its own application, scene, input, clipboard and debug code. The
-accepted behaviour differences are owned in app-api.md. Next is phase 2b, audio,
-once decision B is settled, then phase 3, `ui`. The extraction doc has the detail
-and the reasoning for the order.
+accepted behaviour differences are owned in app-api.md.
+
+**Phase 3, `ui`, is done** (2026-10-30), in the PRs [docs/ui-plan.md](docs/ui-plan.md)
+sequences: four renderer PRs, then `ui` built in salal (core, layout, input,
+focus, theme and tokens, icons, animation, overlays, and the display, control
+and overlay components), then worldsim's conversion in three PRs, [worldsim#322](https://github.com/kcjonson/worldsim/pull/322)
+to [worldsim#324](https://github.com/kcjonson/worldsim/pull/324). Worldsim runs entirely on salal's ui at `v0.29.0`, keyboard and
+mouse only, with its `libs/ui` and the bridge deleted. Grid, the scene diff and the
+happy-path scripts were deferred and are still to do; the perf suite is in.
+Next is phase 2b, audio, once decision B is settled. The extraction doc has the
+detail and the reasoning for the order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
 consume this repo. Not one giant branch: worldsim is active, and a long-lived
@@ -214,8 +225,11 @@ removing legacy code. One way to do each thing.
 There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
 renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
-`blend` and `input_test`) on the GLFW platform, under a scene picker drawn with
-`Primitives` (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
+`blend` and `input_test`), `fill_hook` (the renderer tests' fill hook, which the
+sandbox's base shader is assembled with), ui's (`ui_order`, `ui_text`, `ui_theme`,
+`ui_layout`, `ui_clip`, `ui_scroll`, `ui_input`, `ui_focus`, `ui_icons`, `ui_motion`, `ui_display`,
+`ui_controls`, `ui_overlays` and `ui_overlay_components`) and the perf suite's (`perf_quads`, `perf_text`,
+`perf_world` and `perf_ui`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
 has its state and the tab's and rows' bounds). It serves the dev server on
 127.0.0.1:8090 in Debug and RelWithDebInfo (`--http-port <port>` for another).
 Run `build/apps/sandbox/Debug/sandbox.exe --scene=<name>` in the background,
@@ -266,24 +280,37 @@ or delete `build/`.
 
 `foundation` and `renderer` are worldsim's code, imported as plain copies.
 `app` is worldsim's `libs/engine` slice rebuilt to [docs/app-api.md](docs/app-api.md),
-in namespace `app`. `ui` is a placeholder until phase 3 moves its code in: one
-translation unit and one gtest, there to exercise the wiring. Its placeholder
-namespace (`ui`, lowercase per the coding-standards doc) is not a decision
-about the namespaces of moved worldsim code; that casing (the
-imported renderer has both `Renderer` and `renderer`) is an open worldsim
-follow-up. Blame and history for imported code live in worldsim;
+in namespace `app`. `ui` is built in salal to [docs/ui-design.md](docs/ui-design.md),
+ported from worldsim's `libs/ui` where its code still applies, in namespace
+`ui` with its headers under `ui/` (`#include <ui/Component.h>`). `app` links it and
+gives every scene a context (`Scene::ui()`). The casing of the imported
+renderer's namespaces (it has both `Renderer` and `renderer`) is an open
+worldsim follow-up. Blame and history for imported code live in worldsim;
 `git remote add worldsim ../worldsim && git fetch worldsim` makes
 `git blame worldsim/main -- libs/<lib>/<file>` work from here.
 
 The renderer's base shader is assembled and compiled into each consumer at build
 time by `salal_base_shader()` ([docs/shader-hooks.md](docs/shader-hooks.md)),
-with the consumer's hooks, so no shader files sit beside an executable; it ships
+with the consumer's vertex and fill hooks, so no shader files sit beside an executable; it ships
 no fonts: a game hands `FontRenderer::Initialize` its atlases, each a PNG and
-JSON path under a `FontFamily` id the game defines, and names its default
-family; a bad set comes back as `false`, never a process exit, and a glyph
-whose atlas cell is too small for what its quad samples is a warning at load.
-Glyph quads carry their atlas and its range, so `drawGlyphs` takes no family,
-and wrapped text carries the family and scale it was wrapped in.
+the JSON msdf-atlas-gen wrote with it (glyphs by code point, either `yOrigin`,
+kerning applied), under a `FontFamily` id the game defines, and names its default
+family; a bad set comes back as `false` with the reason logged, never a process
+exit, and a glyph whose quad reads into another's in the atlas is a warning at
+load. `scripts/convert-font-atlas.mjs` converts an atlas JSON in salal's old
+layout (worldsim's `tools/generate_sdf_atlas`). Text is UTF-8, measured, laid out
+and wrapped by code point: one the atlas lacks draws as U+FFFD, or `?` without
+it, and so does each ill-formed sequence. Glyph quads carry their atlas and its
+range, so `drawGlyphs` takes no family, and wrapped text carries the family and
+scale it was wrapped in.
+
+A theme is Design Tokens (2025.10, with the Resolver module) loaded at run time
+into `ui::Theme` ([docs/ui-design.md](docs/ui-design.md), "Theme"). ui's own
+tokens are `libs/ui/tokens/ui.tokens.json`, three tiers, always the bottom
+layer. `salal_tokens(<target> <dir>)` (`cmake/SalalTokens.cmake`) runs
+`salal_tokens_tool`, a host tool built in-tree on nlohmann-json, which checks
+the folder over ui's tokens in every mode, embeds it, and generates typed
+`<ns>::styles` and `<ns>::tokens` handles, so a misspelt style doesn't compile.
 
 Consumers inherit `-ffp-contract=off` from `salal::foundation` on GCC and Clang.
 The deterministic math and hash noise are header-inline polynomials; Clang fuses
@@ -307,10 +334,12 @@ Dependencies: `opengl`, `glfw3`, `glew`, `glm`, `nlohmann-json`, `stb`,
 `SALAL_WITH_DEV_SERVER` off needn't have it), `gtest`, `benchmark`, and
 `glslang` with its `tools` feature as a host dependency, whose
 `glslangValidator` checks the base shader at build time (a FetchContent
-consumer adds it to its own manifest). Worldsim's
-`pugixml`, `lua` and `sol2` serve its `assets` target, `msdfgen` its font-atlas
-tool, and all four stay behind; `msdfgen` comes back in phase 3 as a host
-dependency for the icon build step (`salal_icons()`, [docs/ui-design.md](docs/ui-design.md)).
+consumer adds it to its own manifest), and `msdfgen` without its default
+features, also a host dependency, which `salal_icons(<target> <dir>)`
+(`cmake/SalalIcons.cmake`) builds its icon tool on: every SVG in the folder
+checked against ui-design.md's icon rules, one MSDF atlas, its JSON and a name
+table embedded in the target (a game that builds no icons needn't have it).
+Worldsim's `pugixml`, `lua` and `sol2` serve its `assets` target and stay behind.
 An audio library is proposed and not decided
 (worldsim has none; `miniaudio` is the recommendation).
 
@@ -327,7 +356,7 @@ is protected pixel for pixel.
 - Drawing or rendering changes also diff the sandbox scenes against `main`,
   locally, never in CI, with no baselines committed.
 - Batching, shader, ui walk or app frame changes run the perf suite against
-  `main`. Performance is strict.
+  `main` (`node scripts/perf.mjs compare`). Performance is strict.
 - Unit tests (gtest) on real math, bounded: check for duplicates first. GL
   tests assert computed values, never stored images.
 

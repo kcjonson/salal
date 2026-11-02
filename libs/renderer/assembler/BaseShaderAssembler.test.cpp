@@ -23,6 +23,16 @@ namespace Renderer::assembler {
 			return {.fileName = name + ".vert.glsl", .text = text};
 		}
 
+		// A fill hook that returns the rect's fill, with a block when `block` is given.
+		HookFile fillFile(const std::string& name, const std::string& block = "") {
+			std::string text;
+			if (!block.empty()) {
+				text += "layout(std140) uniform " + block + " {\n\tvec4 tint;\n} " + name + ";\n";
+			}
+			text += "vec4 " + name + "_fill(vec4 color, vec2 local, vec2 halfSize, uvec3 params, float pixelSize) { return color; }\n";
+			return {.fileName = name + ".frag.glsl", .text = text};
+		}
+
 		std::string errorFor(std::vector<HookFile> files) {
 			return readHooks(std::move(files)).error;
 		}
@@ -52,11 +62,30 @@ namespace Renderer::assembler {
 		EXPECT_TRUE(read.hooks[2].instanceWorld);
 	}
 
-	TEST(ReadHooksTest, AnEmptyFolderMakesAnEmptyChain) {
+	TEST(ReadHooksTest, FillHooksNumberFromOneAndShareTheBindingPointsInFileNameOrder) {
+		const Hooks read = readHooks(
+			{hookFile("wind", "WindUniforms"), fillFile("paper", "PaperUniforms"), hookFile("bend"), fillFile("grime"), fillFile("ash")}
+		);
+		ASSERT_TRUE(read.error.empty()) << read.error;
+		ASSERT_EQ(read.hooks.size(), 5U);
+		EXPECT_EQ(read.hooks[0].name, "ash");
+		EXPECT_EQ(read.hooks[0].fillIndex, 1U);
+		EXPECT_FALSE(read.hooks[0].instanceLocal);
+		EXPECT_EQ(read.hooks[1].name, "bend");
+		EXPECT_EQ(read.hooks[1].fillIndex, 0U);
+		EXPECT_EQ(read.hooks[2].fillIndex, 2U); // grime
+		EXPECT_EQ(read.hooks[3].name, "paper");
+		EXPECT_EQ(read.hooks[3].fillIndex, 3U);
+		EXPECT_EQ(read.hooks[3].binding, 1U);
+		EXPECT_EQ(read.hooks[4].name, "wind");
+		EXPECT_EQ(read.hooks[4].binding, 2U);
+	}
+
+	TEST(ReadHooksTest, AnEmptyFolderMakesAnEmptyChainAndFill) {
 		const Hooks read = readHooks({});
 		EXPECT_TRUE(read.error.empty());
 		EXPECT_TRUE(read.hooks.empty());
-		const std::string chain = hookChain(read.hooks);
+		const std::string chain = vertexStageHooks(read.hooks);
 		EXPECT_NE(
 			chain.find("vec2 applyInstanceLocalHooks(vec2 position, vec2 instancePosition) {\n\treturn position;\n}"), std::string::npos
 		) << chain;
@@ -64,15 +93,25 @@ namespace Renderer::assembler {
 			chain.find("vec2 applyInstanceWorldHooks(vec2 position, vec2 localPosition, vec2 instancePosition) {\n\treturn position;\n}"),
 			std::string::npos
 		) << chain;
+		const std::string fill = fragmentStageHooks(read.hooks);
+		EXPECT_NE(
+			fill.find(
+				"vec4 applyFillHook(uint fill, vec4 color, vec2 local, vec2 halfSize, uvec3 params, float pixelSize) {\n\treturn color;\n}"
+			),
+			std::string::npos
+		) << fill;
 	}
 
-	TEST(ReadHooksTest, AFileThatIsNotAVertexHookFailsTheBuild) {
+	TEST(ReadHooksTest, AFileThatIsNotAHookFailsTheBuild) {
+		EXPECT_NE(errorFor({{.fileName = "notes.txt", .text = ""}}).find("notes.txt is not a hook"), std::string::npos);
+		EXPECT_NE(errorFor({{.fileName = "sway.vert", .text = ""}}).find("is not a hook"), std::string::npos);
+		EXPECT_NE(errorFor({{.fileName = "sway.glsl", .text = ""}}).find("is not a hook"), std::string::npos);
+	}
+
+	TEST(ReadHooksTest, ANameIsOneHook) {
 		EXPECT_NE(
-			errorFor({hookFile("sway"), {.fileName = "sway.frag.glsl", .text = ""}}).find("sway.frag.glsl is not a vertex hook"),
-			std::string::npos
+			errorFor({hookFile("sway"), fillFile("sway")}).find("sway.vert.glsl: sway is both a vertex and a fill hook"), std::string::npos
 		);
-		EXPECT_NE(errorFor({{.fileName = "notes.txt", .text = ""}}).find("notes.txt is not a vertex hook"), std::string::npos);
-		EXPECT_NE(errorFor({{.fileName = "sway.vert", .text = ""}}).find("is not a vertex hook"), std::string::npos);
 	}
 
 	TEST(ReadHooksTest, ANameThatIsNotAGlslIdentifierFailsTheBuild) {
@@ -101,6 +140,52 @@ namespace Renderer::assembler {
 		ASSERT_EQ(read.hooks.size(), 1U);
 		EXPECT_FALSE(read.hooks[0].instanceLocal);
 		EXPECT_TRUE(read.hooks[0].instanceWorld);
+	}
+
+	TEST(ReadHooksTest, AFillHookMustDefineItsPoint) {
+		const HookFile file{
+			.fileName = "paper.frag.glsl",
+			.text =
+				"// vec4 paper_fill(vec4 c, vec2 l, vec2 h, uvec3 p, float s) {}\nvec2 paper_instanceLocal(vec2 p, vec2 i) { return p; }\n"
+		};
+		EXPECT_NE(errorFor({file}).find("paper.frag.glsl defines no paper_fill"), std::string::npos);
+	}
+
+	TEST(ReadHooksTest, AFillHookNamesNoDerivativeOrTexture) {
+		const std::string point = "vec4 paper_fill(vec4 c, vec2 l, vec2 h, uvec3 p, float s) {\n";
+		for (const char* name : {"dFdx", "dFdy", "fwidth", "u_textures"}) {
+			const HookFile file{.fileName = "paper.frag.glsl", .text = point + "\tfloat d = " + name + "(l.x);\n\treturn c;\n}\n"};
+			EXPECT_NE(errorFor({file}).find(std::string("paper.frag.glsl:2: ") + name + " in a fill hook"), std::string::npos) << name;
+		}
+		// In a comment, or inside a longer name, it is neither.
+		EXPECT_TRUE(errorFor({{.fileName = "paper.frag.glsl",
+							   .text = "// fwidth(x)\nfloat paper_fwidth = 1.0;\n" + point + "\treturn c;\n}\n"}})
+						.empty());
+	}
+
+	TEST(ReadHooksTest, TheVertexHooksRulesHoldForFillHooks) {
+		const std::string point = "vec4 paper_fill(vec4 c, vec2 l, vec2 h, uvec3 p, float s) { return c; }\n";
+		EXPECT_NE(
+			errorFor({{.fileName = "paper.frag.glsl", .text = "#version 330 core\n" + point}}).find("paper.frag.glsl:1: #version"),
+			std::string::npos
+		);
+		EXPECT_NE(
+			errorFor({{.fileName = "paper.frag.glsl", .text = "uniform sampler2D paper_grain;\n" + point}}).find("uniform outside a block"),
+			std::string::npos
+		);
+		EXPECT_NE(errorFor({fillFile("paper", "Shared"), hookFile("sway", "Shared")}).find("already declared"), std::string::npos);
+	}
+
+	TEST(ReadHooksTest, NoMoreFillHooksThanAByteNames) {
+		std::vector<HookFile> files;
+		for (size_t i = 0; i < kMaxFillHooks + 1; ++i) {
+			files.push_back(fillFile("fill" + std::to_string(1000 + i)));
+		}
+		EXPECT_NE(errorFor(files).find("more than 255 fill hooks"), std::string::npos);
+		files.pop_back();
+		const Hooks read = readHooks(files);
+		ASSERT_TRUE(read.error.empty()) << read.error;
+		EXPECT_EQ(read.hooks.back().fillIndex, 255U);
 	}
 
 	TEST(ReadHooksTest, UniformsGoInOneStd140Block) {
@@ -173,27 +258,30 @@ namespace Renderer::assembler {
 		EXPECT_TRUE(read.hooks[0].text.starts_with("vec2 sway_instanceLocal"));
 	}
 
-	TEST(ReadHooksTest, NoMoreBlocksThanAStageHolds) {
+	TEST(ReadHooksTest, NoMoreBlocksThanAStageHoldsAcrossBothKinds) {
 		std::vector<HookFile> files;
 		for (int i = 0; i < static_cast<int>(kMaxHookBlocks) + 1; ++i) {
 			const std::string name = "hook" + std::to_string(10 + i);
-			files.push_back(hookFile(name, "Block" + std::to_string(i)));
+			const std::string block = "Block" + std::to_string(i);
+			files.push_back(i % 2 == 0 ? hookFile(name, block) : fillFile(name, block));
 		}
 		EXPECT_NE(errorFor(files).find("more than 11 hooks declare a uniform block"), std::string::npos);
 		files.pop_back();
 		EXPECT_TRUE(errorFor(files).empty());
 	}
 
-	TEST(HookChainTest, ItCallsEachHooksPointsInFileNameOrder) {
+	TEST(HookChainTest, ItCallsEachVertexHooksPointsInFileNameOrder) {
 		const Hooks read = readHooks({
 			hookFile("wind"),
 			{.fileName = "bend.vert.glsl", .text = "vec2 bend_instanceWorld(vec2 p, vec2 l, vec2 i) { return p; }"},
+			fillFile("paper"),
 			hookFile("aura"),
 		});
 		ASSERT_TRUE(read.error.empty()) << read.error;
-		const std::string chain = hookChain(read.hooks);
+		const std::string chain = vertexStageHooks(read.hooks);
 
-		// The hooks' text first, in order, the last one given a newline it lacked.
+		// The hooks' text first, in order, the last one given a newline it lacked; no fill hook's.
+		EXPECT_EQ(chain.find("paper"), std::string::npos);
 		EXPECT_LT(chain.find("// --- hook aura.vert.glsl ---"), chain.find("// --- hook bend.vert.glsl ---"));
 		EXPECT_LT(chain.find("// --- hook bend.vert.glsl ---"), chain.find("// --- hook wind.vert.glsl ---"));
 		EXPECT_NE(chain.find("{ return p; }\n// --- end of hook bend.vert.glsl ---"), std::string::npos);
@@ -216,6 +304,27 @@ namespace Renderer::assembler {
 			"\tposition = bend_instanceWorld(position, localPosition, instancePosition);\n"
 			"\tposition = wind_instanceWorld(position, localPosition, instancePosition);\n"
 			"\treturn position;\n"
+			"}\n"
+		);
+	}
+
+	TEST(HookChainTest, TheFragmentStagePicksAFillHookByItsIndex) {
+		const Hooks read = readHooks({fillFile("paper"), hookFile("aura"), fillFile("grime")});
+		ASSERT_TRUE(read.error.empty()) << read.error;
+		const std::string fill = fragmentStageHooks(read.hooks);
+
+		EXPECT_EQ(fill.find("aura"), std::string::npos);
+		EXPECT_LT(fill.find("// --- hook grime.frag.glsl ---"), fill.find("// --- hook paper.frag.glsl ---"));
+		const size_t pick = fill.find("vec4 applyFillHook(");
+		ASSERT_LT(fill.find("// --- end of hook paper.frag.glsl ---"), pick);
+		EXPECT_EQ(
+			fill.substr(pick),
+			"vec4 applyFillHook(uint fill, vec4 color, vec2 local, vec2 halfSize, uvec3 params, float pixelSize) {\n"
+			"\tswitch (fill) {\n"
+			"\t\tcase 1u: return grime_fill(color, local, halfSize, params, pixelSize);\n"
+			"\t\tcase 2u: return paper_fill(color, local, halfSize, params, pixelSize);\n"
+			"\t}\n"
+			"\treturn color;\n"
 			"}\n"
 		);
 	}
@@ -246,7 +355,7 @@ namespace Renderer::assembler {
 		);
 	}
 
-	TEST(AssembleTest, ItRefusesAMissingARepeatedOrAMisplacedInclude) {
+	TEST(AssembleTest, ItRefusesAMissingARepeatedOrAnAbsentInclude) {
 		EXPECT_NE(
 			assemble("base.vert", reader({{"base.vert", "#include \"gone.glsl\"\n#include \"hooks.glsl\"\n"}}), std::string())
 				.error.find("base.vert:1: cannot read gone.glsl"),
@@ -266,14 +375,9 @@ namespace Renderer::assembler {
 				.error.find("hooks.glsl is included twice"),
 			std::string::npos
 		);
-		// The fragment stage has no hooks, and the vertex stage must take them.
+		// Each stage must take its hooks.
 		EXPECT_NE(
-			assemble("base.frag", reader({{"base.frag", "#include \"hooks.glsl\"\n"}}), std::nullopt)
-				.error.find("hooks.glsl is for base.vert alone"),
-			std::string::npos
-		);
-		EXPECT_NE(
-			assemble("base.vert", reader({{"base.vert", "void main() {}\n"}}), std::string()).error.find("never includes hooks.glsl"),
+			assemble("base.frag", reader({{"base.frag", "void main() {}\n"}}), std::string()).error.find("never includes hooks.glsl"),
 			std::string::npos
 		);
 	}
@@ -317,7 +421,9 @@ namespace Renderer::assembler {
 	}
 
 	TEST(EmbedTest, TheHeaderCarriesEachBlocksBindingAndPaddedSize) {
-		const Hooks read = readHooks({hookFile("wind_sway", "WindUniforms"), hookFile("bend"), hookFile("aura", "AuraUniforms")});
+		const Hooks read = readHooks(
+			{hookFile("wind_sway", "WindUniforms"), hookFile("bend"), fillFile("paper", "PaperUniforms"), hookFile("aura", "AuraUniforms")}
+		);
 		ASSERT_TRUE(read.error.empty()) << read.error;
 		const Embedded embedded = embed({
 			.nameSpace = "game_shader",
@@ -327,6 +433,7 @@ namespace Renderer::assembler {
 			.hooks = read.hooks,
 			.blocks = {
 				{"AuraUniforms", {.size = 4, .members = {{.name = "AuraUniforms.glow", .type = "float", .offset = 0, .size = 4}}}},
+				{"PaperUniforms", {.size = 16, .members = {{.name = "PaperUniforms.tint", .type = "vec4", .offset = 0, .size = 16}}}},
 				{"WindUniforms",
 				 {.size = 28,
 				  .members =
@@ -340,7 +447,21 @@ namespace Renderer::assembler {
 		ASSERT_TRUE(embedded.error.empty()) << embedded.error;
 		EXPECT_NE(embedded.header.find("namespace game_shader {"), std::string::npos);
 		EXPECT_NE(embedded.header.find("const Renderer::backend::ShaderSource& source();"), std::string::npos);
-		EXPECT_NE(embedded.header.find("Hooks, in chain order: aura.vert.glsl, bend.vert.glsl, wind_sway.vert.glsl."), std::string::npos);
+		EXPECT_NE(
+			embedded.header.find("Hooks, in file-name order: aura.vert.glsl, bend.vert.glsl, paper.frag.glsl, wind_sway.vert.glsl."),
+			std::string::npos
+		);
+		EXPECT_NE(
+			embedded.header.find(
+				"\t// paper.frag.glsl, fill index 1.\n\tinline constexpr Renderer::backend::FillHook kPaperFill{.hook = \"paper\", .index "
+				"= 1};"
+			),
+			std::string::npos
+		) << embedded.header;
+		EXPECT_NE(
+			embedded.header.find("HookUniformBlock kPaper{\n\t\t.hook = \"paper\",\n\t\t.block = \"PaperUniforms\",\n\t\t.binding = 2,"),
+			std::string::npos
+		) << embedded.header;
 		EXPECT_NE(
 			embedded.header.find(
 				"HookUniformBlock kAura{\n\t\t.hook = \"aura\",\n\t\t.block = \"AuraUniforms\",\n\t\t.binding = 1,\n\t\t.size = 16,\n\t\t."
@@ -350,7 +471,7 @@ namespace Renderer::assembler {
 		) << embedded.header;
 		EXPECT_NE(
 			embedded.header.find(
-				"HookUniformBlock kWindSway{\n\t\t.hook = \"wind_sway\",\n\t\t.block = \"WindUniforms\",\n\t\t.binding = 2,\n\t\t.size = "
+				"HookUniformBlock kWindSway{\n\t\t.hook = \"wind_sway\",\n\t\t.block = \"WindUniforms\",\n\t\t.binding = 3,\n\t\t.size = "
 				"32,\n\t\t.members = kWindSwayMembers,\n\t};"
 			),
 			std::string::npos
@@ -370,17 +491,22 @@ namespace Renderer::assembler {
 		EXPECT_NE(embedded.source.find("R\"glsl(vertex text\n)glsl\","), std::string::npos);
 		EXPECT_NE(embedded.source.find("R\"glsl(fragment text\n)glsl\","), std::string::npos);
 		EXPECT_NE(
-			embedded.source.find("std::array<Renderer::backend::HookUniformBlock, 2> kHookBlocks = {kAura, kWindSway};"), std::string::npos
+			embedded.source.find("std::array<Renderer::backend::HookUniformBlock, 3> kHookBlocks = {kAura, kPaper, kWindSway};"),
+			std::string::npos
 		);
 		EXPECT_NE(embedded.source.find(".hookBlocks = kHookBlocks,"), std::string::npos);
+		EXPECT_NE(embedded.source.find("std::array<Renderer::backend::FillHook, 1> kFillHooks = {kPaperFill};"), std::string::npos);
+		EXPECT_NE(embedded.source.find(".fillHooks = kFillHooks,"), std::string::npos);
 	}
 
-	TEST(EmbedTest, NoHooksMeansNoBlocks) {
+	TEST(EmbedTest, NoHooksMeansNoBlocksAndNoFills) {
 		const Embedded embedded = embed({.nameSpace = "base_shader", .header = "BaseShader.h", .vertex = "v\n", .fragment = "f\n"});
 		ASSERT_TRUE(embedded.error.empty()) << embedded.error;
-		EXPECT_NE(embedded.header.find("Hooks, in chain order: none."), std::string::npos);
+		EXPECT_NE(embedded.header.find("Hooks, in file-name order: none."), std::string::npos);
 		EXPECT_NE(embedded.source.find(".hookBlocks = {},"), std::string::npos);
+		EXPECT_NE(embedded.source.find(".fillHooks = {},"), std::string::npos);
 		EXPECT_EQ(embedded.source.find("kHookBlocks"), std::string::npos);
+		EXPECT_EQ(embedded.source.find("kFillHooks"), std::string::npos);
 	}
 
 	TEST(EmbedTest, LongSourcesArePiecedAndJoinBackWhole) {
@@ -440,6 +566,17 @@ namespace Renderer::assembler {
 			 }}
 		);
 		EXPECT_NE(taken.error.find("kAuraGlowX, is already taken"), std::string::npos);
+		// A fill hook's constant is one name more: paper's is kPaperFill, which paper_fill's block also makes.
+		const Hooks	   both = readHooks({fillFile("paper"), hookFile("paper_fill", "PaperFillUniforms")});
+		const Embedded clash = embed(
+			{.nameSpace = "n",
+			 .header = "H.h",
+			 .vertex = "v",
+			 .fragment = "f",
+			 .hooks = both.hooks,
+			 .blocks = {{"PaperFillUniforms", {.size = 8, .members = {{.name = "PaperFillUniforms.shift", .type = "vec2", .size = 8}}}}}}
+		);
+		EXPECT_NE(clash.error.find("kPaperFill and kPaperFillMembers, are already taken"), std::string::npos) << clash.error;
 	}
 
 	TEST(EmbedTest, ABlockMissingFromTheLinkedProgramFailsTheBuild) {

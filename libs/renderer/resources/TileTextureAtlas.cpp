@@ -8,15 +8,11 @@
 namespace Renderer {
 
 	TileTextureAtlas::TileTextureAtlas(int atlasSize)
-		: handle_(Primitives::createTexture({.width = atlasSize, .height = atlasSize})),
-		  size_(handle_.isValid() ? atlasSize : 0) {}
-
-	TileTextureAtlas::~TileTextureAtlas() {
-		release();
-	}
+		: texture_(Primitives::createTexture({.width = atlasSize, .height = atlasSize})),
+		  size_(texture_.isValid() ? atlasSize : 0) {}
 
 	TileTextureAtlas::TileTextureAtlas(TileTextureAtlas&& other) noexcept
-		: handle_(std::exchange(other.handle_, TextureHandle{})),
+		: texture_(std::move(other.texture_)),
 		  size_(std::exchange(other.size_, 0)),
 		  cursorX_(std::exchange(other.cursorX_, 0)),
 		  cursorY_(std::exchange(other.cursorY_, 0)),
@@ -24,20 +20,13 @@ namespace Renderer {
 
 	TileTextureAtlas& TileTextureAtlas::operator=(TileTextureAtlas&& other) noexcept {
 		if (this != &other) {
-			release();
-			handle_ = std::exchange(other.handle_, TextureHandle{});
+			texture_ = std::move(other.texture_);
 			size_ = std::exchange(other.size_, 0);
 			cursorX_ = std::exchange(other.cursorX_, 0);
 			cursorY_ = std::exchange(other.cursorY_, 0);
 			currentRowHeight_ = std::exchange(other.currentRowHeight_, 0);
 		}
 		return *this;
-	}
-
-	void TileTextureAtlas::release() {
-		Primitives::destroyTexture(handle_);
-		handle_ = {};
-		size_ = 0;
 	}
 
 	AtlasRegion TileTextureAtlas::allocate(int width, int height) {
@@ -63,10 +52,10 @@ namespace Renderer {
 	}
 
 	bool TileTextureAtlas::upload(const AtlasRegion& region, const uint8_t* rgbaData) {
-		if (!region.valid || !handle_.isValid() || rgbaData == nullptr) {
+		if (!region.valid || !texture_.isValid() || rgbaData == nullptr) {
 			return false;
 		}
-		Primitives::updateTexture(handle_, region.x, region.y, region.width, region.height, rgbaData);
+		Primitives::updateTexture(texture_.handle(), region.x, region.y, region.width, region.height, rgbaData);
 		return true;
 	}
 

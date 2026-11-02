@@ -1,119 +1,53 @@
 #pragma once
 
+// UTF-8 in std::string, a character at a time. A character is a well-formed sequence, or one
+// ill-formed sequence, which reads as U+FFFD: the longest start of a well-formed sequence that the
+// next byte doesn't continue (Unicode's maximal subpart, as the WHATWG decoder takes it), or a
+// single byte that starts none. So "\xE2\x82" followed by 'x' is one replacement and then 'x', and
+// "\x80\x80" is two. Offsets are bytes.
+
 #include <cstddef>
-#include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace foundation {
 
-	/**
-	 * UTF8 Utility Functions
-	 *
-	 * Provides utilities for working with UTF-8 encoded strings in std::string.
-	 * Used by TextInput for cursor positioning and text editing.
-	 *
-	 * Key Concepts:
-	 * - std::string stores UTF-8 bytes (1-4 bytes per character)
-	 * - Cursor positions and offsets are BYTE offsets, not character counts
-	 * - These utilities handle multi-byte character boundaries
-	 */
 	namespace UTF8 {
 
-		/**
-		 * Get the byte size of the UTF-8 character starting at the given byte.
-		 *
-		 * @param firstByte - The first byte of the UTF-8 character
-		 * @return Character size in bytes (1-4)
-		 *
-		 * Example:
-		 *   'A' (0x41) → 1 byte
-		 *   'é' (0xC3 0xA9) → 2 bytes
-		 *   '世' (0xE4 0xB8 0x96) → 3 bytes
-		 *   '😀' (0xF0 0x9F 0x98 0x80) → 4 bytes
-		 */
-		size_t characterSize(unsigned char firstByte);
+		inline constexpr char32_t kReplacement = 0xFFFD;
 
-		/**
-		 * Get the byte size of the UTF-8 character immediately before the given offset.
-		 *
-		 * @param str - The UTF-8 string
-		 * @param offset - Byte offset in string (must be > 0)
-		 * @return Size of the previous character in bytes (1-4)
-		 *
-		 * Example:
-		 *   "Hello😀" at offset 8 → returns 4 (emoji is 4 bytes)
-		 *   "Hello😀" at offset 5 → returns 1 ('o' is 1 byte)
-		 */
-		size_t previousCharacterSize(const std::string& str, size_t offset);
+		struct Character {
+			char32_t	codePoint;
+			std::size_t length; // in bytes, 1 to 4
+		};
 
-		/**
-		 * Encode a Unicode codepoint to UTF-8 string.
-		 *
-		 * @param codepoint - Unicode codepoint (U+0000 to U+10FFFF)
-		 * @return UTF-8 encoded string (1-4 bytes)
-		 *
-		 * Example:
-		 *   U+0041 ('A') → "A" (1 byte)
-		 *   U+00E9 ('é') → "\xC3\xA9" (2 bytes)
-		 *   U+1F600 ('😀') → "\xF0\x9F\x98\x80" (4 bytes)
-		 */
-		std::string encode(char32_t codepoint);
+		// The character starting at `offset`, which is under text.size().
+		Character decodeAt(std::string_view text, std::size_t offset);
 
-		/**
-		 * Decode a UTF-8 string to a vector of Unicode codepoints.
-		 *
-		 * @param str - UTF-8 encoded string
-		 * @return Vector of Unicode codepoints
-		 *
-		 * Example:
-		 *   "Hello😀" → {U+0048, U+0065, U+006C, U+006C, U+006F, U+1F600}
-		 *
-		 * Note: Invalid UTF-8 sequences are replaced with U+FFFD (replacement character)
-		 */
-		std::vector<char32_t> decode(const std::string& str);
+		// U+FFFD's bytes for a surrogate or a value past U+10FFFF, which have none.
+		std::string encode(char32_t codePoint);
 
-		/**
-		 * Count the number of UTF-8 characters in a string (not bytes).
-		 *
-		 * @param str - UTF-8 encoded string
-		 * @return Number of characters (not bytes)
-		 *
-		 * Example:
-		 *   "Hello" → 5 characters (5 bytes)
-		 *   "Hello😀" → 6 characters (9 bytes)
-		 */
-		size_t characterCount(const std::string& str);
+		std::vector<char32_t> decode(std::string_view text);
 
-		/**
-		 * Check if a byte is a valid UTF-8 continuation byte (10xxxxxx).
-		 *
-		 * @param byte - Byte to check
-		 * @return True if byte is a continuation byte
-		 */
-		bool isContinuationByte(unsigned char byte);
+		std::size_t characterCount(std::string_view text);
 
-		/**
-		 * Find the byte offset of the next character boundary.
-		 *
-		 * @param str - UTF-8 string
-		 * @param offset - Current byte offset
-		 * @return Byte offset of next character (offset + 1-4 bytes)
-		 *
-		 * Returns str.size() if at end of string.
-		 */
-		size_t nextCharacterBoundary(const std::string& str, size_t offset);
+		// The text with each ill-formed sequence replaced by U+FFFD, so it is well-formed.
+		std::string sanitize(std::string_view text);
 
-		/**
-		 * Find the byte offset of the previous character boundary.
-		 *
-		 * @param str - UTF-8 string
-		 * @param offset - Current byte offset
-		 * @return Byte offset of previous character (offset - 1-4 bytes)
-		 *
-		 * Returns 0 if at start of string.
-		 */
-		size_t previousCharacterBoundary(const std::string& str, size_t offset);
+		// The capital of each small letter in ASCII, the Latin-1 Supplement, Greek and Cyrillic, the
+		// scripts most keyboards print on their main block; every other character as it is.
+		std::string uppercase(std::string_view text);
+
+		// The start of the character holding the byte at `offset`: `offset` itself on a boundary, and
+		// text.size() past the end.
+		std::size_t characterStart(std::string_view text, std::size_t offset);
+
+		// The boundary after the character at `offset`, a boundary; text.size() at the end.
+		std::size_t nextCharacterBoundary(std::string_view text, std::size_t offset);
+
+		// The boundary before `offset`, a boundary; 0 at the start.
+		std::size_t previousCharacterBoundary(std::string_view text, std::size_t offset);
 
 	} // namespace UTF8
 

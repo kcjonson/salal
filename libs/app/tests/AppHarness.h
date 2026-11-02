@@ -1,6 +1,6 @@
 #pragma once
 
-// What the app tests share: an App on a HeadlessPlatform, scenes and overlays that write each call
+// What the app tests share: an App on a HeadlessPlatform, scenes and debug layers that write each call
 // they get into one journal, and per-scene hooks for what a test needs a scene to do mid-frame.
 // The steps are powers of two so the clock's sums are exact and tick counts can be.
 
@@ -164,18 +164,18 @@ namespace app::testing {
 		}
 	};
 
-	// An overlay that records its calls as "<name>.<call>", and consumes events when told to.
-	class RecordingOverlay final : public Overlay {
+	// A debug layer that records its calls as "<name>.<call>", and consumes events when told to.
+	class RecordingDebugLayer final : public DebugLayer {
 	  public:
-		explicit RecordingOverlay(std::string overlayName, bool consumeEvents = false)
-			: label(std::move(overlayName)),
+		explicit RecordingDebugLayer(std::string layerName, bool consumeEvents = false)
+			: label(std::move(layerName)),
 			  consume(consumeEvents) {}
-		~RecordingOverlay() override { record(label, "destroyed"); }
+		~RecordingDebugLayer() override { record(label, "destroyed"); }
 
-		RecordingOverlay(const RecordingOverlay&) = delete;
-		RecordingOverlay& operator=(const RecordingOverlay&) = delete;
-		RecordingOverlay(RecordingOverlay&&) = delete;
-		RecordingOverlay& operator=(RecordingOverlay&&) = delete;
+		RecordingDebugLayer(const RecordingDebugLayer&) = delete;
+		RecordingDebugLayer& operator=(const RecordingDebugLayer&) = delete;
+		RecordingDebugLayer(RecordingDebugLayer&&) = delete;
+		RecordingDebugLayer& operator=(RecordingDebugLayer&&) = delete;
 
 		bool handleEvent(const foundation::InputEvent& /*event*/) override {
 			record(label, "handleEvent");

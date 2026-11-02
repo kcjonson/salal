@@ -61,6 +61,11 @@ namespace foundation {
 			return t * t * t * (t * (t * 6.0F - 15.0F) + 10.0F);
 		}
 
+		// d/dt of quintic: 30t^2(t - 1)^2
+		inline float quinticDerivative(float t) {
+			return 30.0F * t * t * (t * (t - 2.0F) + 1.0F);
+		}
+
 		inline float lerp(float a, float b, float t) {
 			return a + t * (b - a);
 		}
@@ -97,6 +102,31 @@ namespace foundation {
 			gx = kGrads[idx][0]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
 			gy = kGrads[idx][1]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
 			gz = kGrads[idx][2]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+		}
+
+		// Where each fractalNoise2 octave samples from, in its own lattice units, in
+		// 65536ths; octave i reads entry i % 16. Gradient noise is 0 at its lattice
+		// points, and unshifted octaves at lacunarity 2 all have a lattice point at every
+		// integer, so their sum is 0 there too. These keep every octave's lattice at
+		// least 1/32 of a cell, on each axis, from every other octave's at lacunarity 2
+		// and from the integers.
+		inline constexpr uint16_t kOctaveOffsetX[16] =
+			{3752, 32263, 47360, 59925, 19021, 17060, 7795, 54912, 9872, 26527, 18277, 55290, 50790, 4576, 51674, 16225};
+		inline constexpr uint16_t kOctaveOffsetY[16] =
+			{29970, 24750, 38559, 7890, 55392, 5978, 29888, 8584, 9040, 12153, 38523, 27056, 20525, 33387, 6834, 49365};
+
+		struct OctaveOffset {
+			float x = 0.0F;
+			float y = 0.0F;
+		};
+
+		inline OctaveOffset octaveOffset(int octave) {
+			const auto	slot = static_cast<uint32_t>(octave) & 15U;
+			const float unit = 1.0F / 65536.0F;
+			return {
+				.x = static_cast<float>(kOctaveOffsetX[slot]) * unit, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+				.y = static_cast<float>(kOctaveOffsetY[slot]) * unit, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+			};
 		}
 
 	} // namespace detail
@@ -228,6 +258,62 @@ namespace foundation {
 		return detail::lerp(x0, x1, uy);
 	}
 
+	// A noise value with its partial derivatives in x and y, per unit of input.
+	struct NoiseWithGradient {
+		float value = 0.0F;
+		float dx = 0.0F;
+		float dy = 0.0F;
+	};
+
+	// GradientNoise2WithGradient: gradientNoise2 and its analytic gradient. `value` is
+	// gradientNoise2 bit for bit.
+	inline NoiseWithGradient gradientNoise2WithGradient(float x, float y, uint32_t seed) {
+		int32_t ix = static_cast<int32_t>(x);
+		if (static_cast<float>(ix) > x)
+			--ix;
+		int32_t iy = static_cast<int32_t>(y);
+		if (static_cast<float>(iy) > y)
+			--iy;
+
+		const float fx = x - static_cast<float>(ix);
+		const float fy = y - static_cast<float>(iy);
+
+		const float ux = detail::quintic(fx);
+		const float uy = detail::quintic(fy);
+		const float dux = detail::quinticDerivative(fx);
+		const float duy = detail::quinticDerivative(fy);
+
+		struct Corner {
+			float dot;
+			float gx;
+			float gy;
+		};
+		auto corner = [](uint32_t h, float dx, float dy) -> Corner {
+			float gx{}, gy{}, gz{};
+			detail::gradient(h, gx, gy, gz);
+			return {gx * dx + gy * dy + gz * 0.0F, gx, gy};
+		};
+
+		const Corner c00 = corner(hash3(ix, iy, 0, seed), fx, fy);
+		const Corner c10 = corner(hash3(ix + 1, iy, 0, seed), fx - 1.0F, fy);
+		const Corner c01 = corner(hash3(ix, iy + 1, 0, seed), fx, fy - 1.0F);
+		const Corner c11 = corner(hash3(ix + 1, iy + 1, 0, seed), fx - 1.0F, fy - 1.0F);
+
+		const float x0 = detail::lerp(c00.dot, c10.dot, ux);
+		const float x1 = detail::lerp(c01.dot, c11.dot, ux);
+		// Each row's slope in x is its corner gradients blended plus the fade's slope
+		// times the rise along the row; in y only the gradients, until rows blend.
+		const float x0dx = detail::lerp(c00.gx, c10.gx, ux) + dux * (c10.dot - c00.dot);
+		const float x1dx = detail::lerp(c01.gx, c11.gx, ux) + dux * (c11.dot - c01.dot);
+		const float x0dy = detail::lerp(c00.gy, c10.gy, ux);
+		const float x1dy = detail::lerp(c01.gy, c11.gy, ux);
+		return {
+			.value = detail::lerp(x0, x1, uy),
+			.dx = detail::lerp(x0dx, x1dx, uy),
+			.dy = detail::lerp(x0dy, x1dy, uy) + duy * (x1 - x0),
+		};
+	}
+
 	// Two values of 2D gradient noise at one point, e.g. a domain warp's x and y.
 	struct NoisePair {
 		float first = 0.0F;
@@ -271,6 +357,9 @@ namespace foundation {
 	// FractalNoise3: fBm over gradientNoise3.
 	// lacunarity: frequency multiplier per octave (typically 2.0)
 	// gain: amplitude multiplier per octave (typically 0.5 for H=1 fBm)
+	// Its octaves are unshifted, unlike fractalNoise2's, so at an integer lacunarity
+	// they share lattice points and the sum is 0 at every integer (x, y, z). Worldsim's
+	// world generation is built on this output and hashes it against goldens.
 	inline float fractalNoise3(float x, float y, float z, uint32_t seed, int octaves, float lacunarity, float gain) {
 		float value = 0.0F;
 		float amplitude = 1.0F;
@@ -285,21 +374,43 @@ namespace foundation {
 		return maxAmp > 0.0F ? value / maxAmp : 0.0F;
 	}
 
-	// FractalNoise2: fractalNoise3(x, y, 0, ...) bit-for-bit over gradientNoise2, for
-	// planar callers that sample at z = 0 (an exact-zero octave's sign cannot reach the
-	// sum, which starts at +0).
+	// FractalNoise2: fBm over gradientNoise2, each octave read at its own offset
+	// (detail::octaveOffset) so the octaves' lattice zeros don't line up.
 	inline float fractalNoise2(float x, float y, uint32_t seed, int octaves, float lacunarity, float gain) {
 		float value = 0.0F;
 		float amplitude = 1.0F;
 		float frequency = 1.0F;
 		float maxAmp = 0.0F;
 		for (int i = 0; i < octaves; ++i) {
-			value += gradientNoise2(x * frequency, y * frequency, seed + static_cast<uint32_t>(i)) * amplitude;
+			const detail::OctaveOffset offset = detail::octaveOffset(i);
+			value += gradientNoise2(x * frequency + offset.x, y * frequency + offset.y, seed + static_cast<uint32_t>(i)) * amplitude;
 			maxAmp += amplitude;
 			amplitude *= gain;
 			frequency *= lacunarity;
 		}
 		return maxAmp > 0.0F ? value / maxAmp : 0.0F;
+	}
+
+	// FractalNoise2WithGradient: fractalNoise2 and its analytic gradient, per unit of
+	// (x, y). `value` is fractalNoise2 bit for bit.
+	inline NoiseWithGradient fractalNoise2WithGradient(float x, float y, uint32_t seed, int octaves, float lacunarity, float gain) {
+		NoiseWithGradient sum;
+		float			  amplitude = 1.0F;
+		float			  frequency = 1.0F;
+		float			  maxAmp = 0.0F;
+		for (int i = 0; i < octaves; ++i) {
+			const detail::OctaveOffset offset = detail::octaveOffset(i);
+			const NoiseWithGradient	   n =
+				gradientNoise2WithGradient(x * frequency + offset.x, y * frequency + offset.y, seed + static_cast<uint32_t>(i));
+			sum.value += n.value * amplitude;
+			sum.dx += n.dx * frequency * amplitude;
+			sum.dy += n.dy * frequency * amplitude;
+			maxAmp += amplitude;
+			amplitude *= gain;
+			frequency *= lacunarity;
+		}
+		return maxAmp > 0.0F ? NoiseWithGradient{.value = sum.value / maxAmp, .dx = sum.dx / maxAmp, .dy = sum.dy / maxAmp}
+							 : NoiseWithGradient{};
 	}
 
 	// FractalNoise2SplitPair: two fBm fields over gradientNoise2PairCell, at
@@ -310,8 +421,11 @@ namespace foundation {
 	// octave's cell index is found in integers (the position splits into whole
 	// wavelengths plus a remainder under one wavelength) and only that remainder is a
 	// float. `wavelength` >= 1, in the units of the whole part; frac in [0, 1). `first`
-	// is fractalNoise2 bit for bit whenever the position divided by the wavelength is
-	// exact in float at every octave; `second` is an independent field.
+	// is the plain fBm of gradientNoise2 (no octave offsets, unlike fractalNoise2) bit
+	// for bit whenever the position divided by the wavelength is exact in float at every
+	// octave; `second` is an independent field. Its octaves share lattice zeros at whole
+	// wavelengths, which worldsim reads off; its land shader mirrors this function
+	// (hash_noise.glsl, held to the C++ by SurfaceFieldGolden.test.cpp).
 	inline NoisePair fractalNoise2SplitPair(
 		int64_t	 wholeX,
 		int64_t	 wholeY,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Handle.h"
+#include "Texture.h"
 #include <cstdint>
 
 namespace Renderer {
@@ -19,7 +20,7 @@ namespace Renderer {
 	class TileTextureAtlas {
 	  public:
 		explicit TileTextureAtlas(int atlasSize = 4096);
-		~TileTextureAtlas();
+		~TileTextureAtlas() = default;
 
 		TileTextureAtlas(const TileTextureAtlas&) = delete;
 		TileTextureAtlas& operator=(const TileTextureAtlas&) = delete;
@@ -34,17 +35,15 @@ namespace Renderer {
 		// Returns true if upload succeeded, false if parameters are invalid.
 		bool upload(const AtlasRegion& region, const uint8_t* rgbaData);
 
-		[[nodiscard]] TextureHandle texture() const { return handle_; }
+		[[nodiscard]] TextureHandle texture() const { return texture_.handle(); }
 		[[nodiscard]] int			size() const { return size_; }
 
 	  private:
-		void release();
-
-		TextureHandle handle_;
-		int			  size_ = 0;
-		int			  cursorX_ = 0;
-		int			  cursorY_ = 0;
-		int			  currentRowHeight_ = 0;
+		Texture texture_;
+		int		size_ = 0;
+		int		cursorX_ = 0;
+		int		cursorY_ = 0;
+		int		currentRowHeight_ = 0;
 	};
 
 } // namespace Renderer

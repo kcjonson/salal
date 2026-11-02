@@ -8,7 +8,7 @@
 //
 // Scenes are built when their change applies, so of two switches in one frame only the last is
 // built. Arguments, results and result callbacks are typed per scene and may be move-only. A push
-// with a result callback remembers the scene on top when it was asked for, whoever asks (an overlay
+// with a result callback remembers the scene on top when it was asked for, whoever asks (a debug layer
 // or game code too), and is dropped, logged, if that scene has left the stack by the time it applies,
 // so a callback never outlives its pusher. A push without a callback queues in order regardless, so
 // it can land over a scene that replaced the one that asked.
@@ -31,6 +31,8 @@
 #include <vector>
 
 namespace app {
+
+	class Input;
 
 	namespace detail {
 		struct SceneBuilder {
@@ -188,14 +190,32 @@ namespace app {
 		// For the App. Step 6, with the top scene's alpha now, which a scene it covers keeps.
 		void   apply(float liveAlpha);
 		Entry* topEntry() { return entries.empty() ? nullptr : &entries.back(); }
-		// Every stacked scene's onResize, top down.
+		// Every stacked scene's ui viewport, then its onResize, top down.
 		void resized(const Renderer::Viewport& viewport);
+		// The top scene's ui update, after its own.
+		void updateTopUi(double dt);
+		// Each player slot's device, from Input, to the top scene's ui, whose focus it drives.
+		void routeTopUi(const Input& input);
+		// An event for the top scene's ui; true when the ui took it.
+		bool dispatchTopUi(const foundation::InputEvent& event);
+		// The cursor the top scene's ui asks for.
+		ui::Cursor topUiCursor() const;
+		// Every stacked scene's ui at the App's ui scale.
+		void scaleUi(float scale);
+		void reduceMotionUi(bool reduced);
+		// The ui of every scene render() draws, laid out.
+		void layoutUi();
 		// The stack from its topmost opaque scene up, the top at liveAlpha and each covered scene at the
-		// alpha it had when covered.
+		// alpha it had when covered, each scene's ui after it.
 		void render(float liveAlpha);
+		// /api/ui/tree and /api/ui/lint for the top scene's ui, at the window's logical size.
+		std::string uiTreeJson(const Renderer::Viewport& viewport) const;
+		std::string uiLintJson(const Renderer::Viewport& viewport) const;
 		// App::shutdown: every scene exits, top down, and nothing queued applies.
 		void exitAll();
 
+		// The first scene render() draws: the topmost opaque one.
+		std::size_t			   firstRendered() const;
 		void				   pushBuilt(Change& change, float liveAlpha);
 		void				   popTop();
 		void				   finishTop(Change& change);

@@ -43,6 +43,26 @@ static void BM_FractalNoise3_4Oct(benchmark::State& state) {
 }
 BENCHMARK(BM_FractalNoise3_4Oct);
 
+static void BM_FractalNoise2_4Oct(benchmark::State& state) {
+	float x = 0.5F, y = 1.7F;
+	for (auto _ : state) {
+		benchmark::DoNotOptimize(fractalNoise2(x, y, 0, 4, 2.0F, 0.5F));
+		x += 0.001F;
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FractalNoise2_4Oct);
+
+static void BM_FractalNoise2WithGradient_4Oct(benchmark::State& state) {
+	float x = 0.5F, y = 1.7F;
+	for (auto _ : state) {
+		benchmark::DoNotOptimize(fractalNoise2WithGradient(x, y, 0, 4, 2.0F, 0.5F));
+		x += 0.001F;
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_FractalNoise2WithGradient_4Oct);
+
 static void BM_RidgedNoise3_4Oct(benchmark::State& state) {
 	float x = 0.5F, y = 1.7F, z = -0.3F;
 	for (auto _ : state) {

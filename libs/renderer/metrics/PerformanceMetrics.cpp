@@ -19,6 +19,10 @@ namespace Foundation {
 		json << "\"drawCalls\":" << drawCalls << ",";
 		json << "\"vertexCount\":" << vertexCount << ",";
 		json << "\"triangleCount\":" << triangleCount << ",";
+		json << "\"instanceCount\":" << instanceCount << ",";
+		json << "\"uploadBytes\":" << uploadBytes << ",";
+		json << "\"flushCount\":" << flushCount << ",";
+		json << "\"flushMs\":" << flushMs << ",";
 		// Timing breakdown
 		json << "\"tileRenderMs\":" << tileRenderMs << ",";
 		json << "\"entityRenderMs\":" << entityRenderMs << ",";
@@ -59,6 +63,7 @@ namespace Foundation {
 		json << "\"pollEventsMs\":" << pollEventsMs << ",";
 		json << "\"inputHandleMs\":" << inputHandleMs << ",";
 		json << "\"sceneUpdateMs\":" << sceneUpdateMs << ",";
+		json << "\"uiLayoutMs\":" << uiLayoutMs << ",";
 		json << "\"sceneRenderMs\":" << sceneRenderMs << ",";
 		json << "\"swapBuffersMs\":" << swapBuffersMs;
 		json << "}";

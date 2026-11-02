@@ -10,6 +10,7 @@
 #include <CoordinateSystem/CoordinateSystem.h>
 #include <backend/Backend.h>
 #include <input/InputTypes.h>
+#include <ui/Input.h>
 
 #include <memory>
 #include <optional>
@@ -70,6 +71,8 @@ namespace app {
 		virtual void present() = 0;
 
 		virtual void setVsync(bool enabled) = 0;
+		// Whether present waits for the display now: the WindowConfig's, or setVsync's since.
+		virtual bool vsync() const = 0;
 
 		// Fullscreen on the connected monitor at `monitor` at its current video mode, or windowed at the
 		// size and place the window had before it went fullscreen. A monitor is its position in the window
@@ -94,6 +97,10 @@ namespace app {
 		// The system clipboard's text; empty when it holds none.
 		virtual std::string clipboardText() const = 0;
 		virtual void		setClipboardText(const std::string& text) = 0;
+
+		// The window's cursor, one of the window system's standard shapes; nothing where there's no
+		// window.
+		virtual void setCursor(ui::Cursor /*cursor*/) {}
 	};
 
 	// A window with a GL 3.3 core context current on the calling thread; null, logged, when the window

@@ -89,13 +89,15 @@ namespace app {
 
 		class GlfwPlatform final : public Platform {
 		  public:
-			// `fullscreenOn` is the monitor the window was made fullscreen on, and `windowedRect` where it
-			// goes when it leaves fullscreen until it has been windowed itself.
-			GlfwPlatform(GLFWwindow* glfwWindow, std::optional<int> fullscreenOn, WindowRect windowedRect)
+			// `fullscreenOn` is the monitor the window was made fullscreen on, `windowedRect` where it
+			// goes when it leaves fullscreen until it has been windowed itself, and `vsync` the swap
+			// interval the context was given.
+			GlfwPlatform(GLFWwindow* glfwWindow, std::optional<int> fullscreenOn, WindowRect windowedRect, bool vsync)
 				: window(glfwWindow),
 				  hasFocus(glfwGetWindowAttrib(glfwWindow, GLFW_FOCUSED) == GLFW_TRUE),
 				  fullscreenIndex(fullscreenOn),
-				  windowed(windowedRect) {
+				  windowed(windowedRect),
+				  swapInterval(vsync) {
 				g_glfwPlatform = this;
 				glfwSetWindowUserPointer(window, this);
 				glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
@@ -122,6 +124,11 @@ namespace app {
 
 			~GlfwPlatform() override {
 				glfwSetJoystickCallback(nullptr);
+				for (GLFWcursor* made : cursors) {
+					if (made != nullptr) {
+						glfwDestroyCursor(made);
+					}
+				}
 				glfwDestroyWindow(window);
 				glfwTerminate();
 				g_glfwPlatform = nullptr;
@@ -164,7 +171,11 @@ namespace app {
 			bool focused() const override { return hasFocus; }
 			bool closeRequested() const override { return glfwWindowShouldClose(window) == GLFW_TRUE; }
 			void present() override { glfwSwapBuffers(window); }
-			void setVsync(bool enabled) override { glfwSwapInterval(enabled ? 1 : 0); }
+			void setVsync(bool enabled) override {
+				glfwSwapInterval(enabled ? 1 : 0);
+				swapInterval = enabled;
+			}
+			bool vsync() const override { return swapInterval; }
 
 			// glfwSetWindowMonitor resizes the window inside the call on Windows and macOS, outside any
 			// poll, so the framebuffer callback's resize is held by the relay, in order, for the next one.
@@ -242,8 +253,37 @@ namespace app {
 
 			void setClipboardText(const std::string& text) override { glfwSetClipboardString(window, text.c_str()); }
 
+			// Each shape made the first time it's asked for; the default is GLFW's own arrow.
+			void setCursor(ui::Cursor cursor) override {
+				const auto index = static_cast<std::size_t>(cursor);
+				if (cursor != ui::Cursor::Default && cursors.at(index) == nullptr) {
+					cursors.at(index) = glfwCreateStandardCursor(shapeOf(cursor));
+				}
+				glfwSetCursor(window, cursors.at(index));
+			}
+
 		  private:
 			static GlfwPlatform& from(GLFWwindow* window) { return *static_cast<GlfwPlatform*>(glfwGetWindowUserPointer(window)); }
+
+			static int shapeOf(ui::Cursor cursor) {
+				switch (cursor) {
+					case ui::Cursor::Pointer:
+						return GLFW_POINTING_HAND_CURSOR;
+					case ui::Cursor::Text:
+						return GLFW_IBEAM_CURSOR;
+					case ui::Cursor::Crosshair:
+						return GLFW_CROSSHAIR_CURSOR;
+					case ui::Cursor::ResizeHorizontal:
+						return GLFW_RESIZE_EW_CURSOR;
+					case ui::Cursor::ResizeVertical:
+						return GLFW_RESIZE_NS_CURSOR;
+					case ui::Cursor::NotAllowed:
+						return GLFW_NOT_ALLOWED_CURSOR;
+					case ui::Cursor::Default:
+						break;
+				}
+				return GLFW_ARROW_CURSOR;
+			}
 
 			// A minimized window reports 0x0, which the App ignores; GL keeps the viewport it had.
 			// A resize can move the content under a still cursor, so its cached position is read again.
@@ -357,15 +397,17 @@ namespace app {
 				);
 			}
 
-			GLFWwindow*													 window;
-			GlfwClock													 glfwClock;
-			bool														 hasFocus;
-			std::optional<int>											 fullscreenIndex;
-			WindowRect													 windowed;
-			glm::vec2													 cursor{};
-			EventRelay													 relay;
-			GamepadTracker												 gamepads;
-			std::array<glfw::TriggersSeen, foundation::kMaxRealGamepads> triggersSeen{};
+			GLFWwindow*																	  window;
+			std::array<GLFWcursor*, static_cast<std::size_t>(ui::Cursor::NotAllowed) + 1> cursors{}; // made as asked for
+			GlfwClock																	  glfwClock;
+			bool																		  hasFocus;
+			std::optional<int>															  fullscreenIndex;
+			WindowRect																	  windowed;
+			bool																		  swapInterval;
+			glm::vec2																	  cursor{};
+			EventRelay																	  relay;
+			GamepadTracker																  gamepads;
+			std::array<glfw::TriggersSeen, foundation::kMaxRealGamepads>				  triggersSeen{};
 		};
 
 		// sizePercent of the primary monitor's work area, centred in it. Null, logged, with no monitor or
@@ -399,7 +441,8 @@ namespace app {
 		}
 
 		struct CreatedWindow {
-			GLFWwindow*		   window = nullptr;
+			GLFWwindow* window = nullptr;
+
 			std::optional<int> fullscreenOn;
 			WindowRect		   windowed;
 		};
@@ -459,7 +502,7 @@ namespace app {
 		}
 		glfwMakeContextCurrent(created.window);
 		glfwSwapInterval(config.vsync ? 1 : 0);
-		return std::make_unique<GlfwPlatform>(created.window, created.fullscreenOn, created.windowed);
+		return std::make_unique<GlfwPlatform>(created.window, created.fullscreenOn, created.windowed, config.vsync);
 	}
 
 } // namespace app

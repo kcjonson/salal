@@ -84,6 +84,7 @@ namespace app::testing {
 			bool					   closeRequested() const override { return false; }
 			void					   present() override {}
 			void					   setVsync(bool /*enabled*/) override {}
+			bool					   vsync() const override { return true; }
 			void					   setFullscreen(std::optional<int> /*monitor*/) override {}
 			std::optional<int>		   fullscreenMonitor() const override { return std::nullopt; }
 			void					   setWindowSize(int /*width*/, int /*height*/) override {}

@@ -83,8 +83,10 @@ namespace foundation {
 			//   DP2  = 1.5893254712295857e-8   (next ~27 bits)
 			//   DP3  = 6.12323399573676604e-17 (remaining ~30 bits)
 			inline int argReduce(double x, double& reduced) {
-				constexpr double kTwoPiRecip = 0.6366197723675813; // 2/pi, sufficient for rounding
-				double			 n_d = x * kTwoPiRecip;
+				// 2/pi, one ULP under detail::kTwoPiRecip. It only picks n, and stays as it
+				// was so no result moves.
+				constexpr double kQuadrantScale = 0.6366197723675813;
+				double			 n_d = x * kQuadrantScale;
 				double			 bias = (n_d >= 0.0) ? 0.5 : -0.5;
 				auto			 n = static_cast<int64_t>(n_d + bias);
 				double			 nd = static_cast<double>(n);

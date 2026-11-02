@@ -141,7 +141,7 @@ namespace app::testing {
 
 	TEST_F(AppSettingsTest, SetFullscreenTakesTheNewSizeAtOnceAndScenesHearOfItAtTheNextPoll) {
 		start(withFiles(), twoMonitors);
-		app->addOverlay(std::make_unique<RecordingOverlay>("O"));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("O"));
 		app->scenes().push<SceneA>();
 		frame();
 		hooks()["A"].update = [](App& owner, const FrameContext& /*frame*/) {

@@ -22,8 +22,9 @@ namespace app::detail {
 	enum class DevKind : std::uint8_t { Route, Control, State };
 
 	// The control actions and the state the server answers itself.
-	inline constexpr std::array<std::string_view, 7> kBuiltInControls{"exit", "scene", "pause", "resume", "reload", "vsync", "step"};
-	inline constexpr std::string_view				 kSceneState = "scene";
+	inline constexpr std::array<std::string_view, 8>
+									  kBuiltInControls{"exit", "scene", "pause", "resume", "reload", "vsync", "step", "capture"};
+	inline constexpr std::string_view kSceneState = "scene";
 	// State with a default answer when nothing is registered for it.
 	inline constexpr std::string_view kUiTree = "ui.tree";
 	inline constexpr std::string_view kUiLint = "ui.lint";

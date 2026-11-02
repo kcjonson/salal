@@ -147,7 +147,8 @@ namespace Renderer {
 
 	TEST_F(PrimitivesDrawTest, ImageSamplesPremultipliedTexelsUnderItsTint) {
 		const std::array<uint8_t, 16> texels = {100, 50, 0, 200, 100, 50, 0, 200, 100, 50, 0, 200, 100, 50, 0, 200};
-		const TextureHandle			  texture = Primitives::createTexture({.width = 2, .height = 2, .pixels = texels.data()});
+		const Texture				  owner = Primitives::createTexture({.width = 2, .height = 2, .pixels = texels.data()});
+		const TextureHandle			  texture = owner.handle();
 		ASSERT_TRUE(texture.isValid());
 		const Foundation::Rect bounds{0.0F, 0.0F, static_cast<float>(kSize), static_cast<float>(kSize)};
 
@@ -158,7 +159,139 @@ namespace Renderer {
 			Primitives::drawImage({.texture = texture, .bounds = bounds, .tint = {1.0F, 1.0F, 1.0F, 0.5F}});
 		});
 		expectNear(pixel(16, 16), {50, 25, 0, 100});
-		Primitives::destroyTexture(texture);
+	}
+
+	TEST_F(PrimitivesDrawTest, AGradientInterpolatesItsCornersPremultiplied) {
+		// Red to transparent blue, left to right: midway it is half red, not half purple.
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [] {
+			Primitives::drawRect(
+				{.bounds = {0.0F, 0.0F, static_cast<float>(kSize), static_cast<float>(kSize)},
+				 .style = {
+					 .gradient =
+						 Foundation::LinearGradient{.from = {1.0F, 0.0F, 0.0F, 1.0F}, .to = {0.0F, 0.0F, 1.0F, 0.0F}, .horizontal = true}
+				 }}
+			);
+		});
+		const std::array<int, 4> middle = pixel(16, 16);
+		EXPECT_NEAR(middle[0], 123, 3);
+		EXPECT_LE(middle[2], 1);
+		EXPECT_NEAR(middle[3], 123, 3);
+	}
+
+	TEST_F(PrimitivesDrawTest, ACornerRadiusCutsItsCorner) {
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [] {
+			Primitives::drawRect(
+				{.bounds = {0.0F, 0.0F, static_cast<float>(kSize), static_cast<float>(kSize)},
+				 .style = {.fill = Foundation::Color::white(), .border = Foundation::BorderStyle{.width = 0.0F, .cornerRadius = 10.0F}}}
+			);
+		});
+		expectNear(pixel(0, 0), {0, 0, 0, 0});
+		expectNear(pixel(31, 31), {0, 0, 0, 0});
+		expectNear(pixel(16, 16), {255, 255, 255, 255});
+		expectNear(pixel(16, 1), {255, 255, 255, 255});
+	}
+
+	TEST_F(PrimitivesDrawTest, AShadowFadesAcrossItsBlurCentredOnTheEdge) {
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [] {
+			Primitives::drawRect(
+				{.bounds = {8.0F, 8.0F, 16.0F, 16.0F},
+				 .style = {
+					 .fill = {1.0F, 1.0F, 1.0F, 0.0F}, .boxShadow = Foundation::BoxShadow{.color = Foundation::Color::white(), .blur = 4.0F}
+				 }}
+			);
+		});
+		expectNear(pixel(16, 16), {255, 255, 255, 255});
+		expectNear(pixel(1, 1), {0, 0, 0, 0});
+		const int edge = pixel(8, 16)[3];
+		EXPECT_GT(edge, 100);
+		EXPECT_LT(edge, 200);
+		EXPECT_LT(pixel(5, 16)[3], edge);
+	}
+
+	TEST_F(PrimitivesDrawTest, TextCoversWhereItsAtlasIsInside) {
+		// A one-texel atlas, every channel at 1 (inside) or 0 (outside), stretched over a glyph's quad.
+		const std::array<uint8_t, 3> inside = {255, 255, 255};
+		const std::array<uint8_t, 3> outside = {0, 0, 0};
+		const Texture				 insideAtlas =
+			Primitives::createTexture({.width = 1, .height = 1, .format = TextureFormat::Rgb8, .pixels = inside.data()});
+		const Texture outsideAtlas =
+			Primitives::createTexture({.width = 1, .height = 1, .format = TextureFormat::Rgb8, .pixels = outside.data()});
+		const auto glyph = [](TextureHandle atlas, float x) {
+			const FontRenderer::GlyphQuad quad{
+				.position = {x, 0.0F},
+				.size = {16.0F, 32.0F},
+				.uvMin = {0.0F, 0.0F},
+				.uvMax = {1.0F, 1.0F},
+				.color = {0.0F, 1.0F, 0.0F, 0.5F},
+				.runOrigin = {x, 32.0F},
+				.atlas = atlas,
+				.pixelRange = 4.0F
+			};
+			Primitives::drawGlyphs(&quad, 1);
+		};
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			glyph(insideAtlas.handle(), 0.0F);
+			glyph(outsideAtlas.handle(), 16.0F);
+		});
+		expectNear(pixel(8, 16), {0, 128, 0, 128});
+		expectNear(pixel(24, 16), {0, 0, 0, 0});
+	}
+
+	TEST_F(PrimitivesDrawTest, NineTexturesDrawInTwoCallsEachQuadSamplingItsOwn) {
+		// Nine one-texel images, each its own grey, in columns three pixels wide: the first
+		// eight share a draw, the ninth starts another, and each column shows its own texel.
+		std::vector<Texture> images;
+		for (int i = 0; i < 9; ++i) {
+			const uint8_t				 level = static_cast<uint8_t>(20 * (i + 1));
+			const std::array<uint8_t, 4> texel = {level, level, level, 255};
+			images.push_back(Primitives::createTexture({.width = 1, .height = 1, .pixels = texel.data()}));
+		}
+		render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+			for (int i = 0; i < 9; ++i) {
+				Primitives::drawImage({.texture = images[i].handle(), .bounds = {static_cast<float>(3 * i), 0.0F, 3.0F, 32.0F}});
+			}
+		});
+		EXPECT_EQ(Primitives::getStats().drawCalls, 2U);
+		for (int i = 0; i < 9; ++i) {
+			const int level = 20 * (i + 1);
+			expectNear(pixel((3 * i) + 1, 16), {level, level, level, 255});
+		}
+	}
+
+	TEST_F(PrimitivesDrawTest, AFreedTextureDrawsNothingAfterTheDrawsBeforeItsFree) {
+		const std::array<uint8_t, 4> white = {255, 255, 255, 255};
+		Texture						 texture = Primitives::createTexture({.width = 1, .height = 1, .pixels = white.data()});
+		const TextureHandle			 handle = texture.handle();
+		const Foundation::Color		 transparent(0.0F, 0.0F, 0.0F, 0.0F);
+		const Foundation::Rect		 left{0.0F, 0.0F, 16.0F, 32.0F};
+		const Foundation::Rect		 right{16.0F, 0.0F, 16.0F, 32.0F};
+
+		// Freed mid-frame: the draw before the free still samples it, the one after draws nothing.
+		render(transparent, [&] {
+			Primitives::drawImage({.texture = handle, .bounds = left});
+			texture = {};
+			Primitives::drawImage({.texture = handle, .bounds = right});
+		});
+		expectNear(pixel(8, 16), {255, 255, 255, 255});
+		expectNear(pixel(24, 16), {0, 0, 0, 0});
+
+		// Gone: an image and glyphs with it as their atlas draw nothing, where unbound it sampled black.
+		render(transparent, [&] {
+			Primitives::drawImage({.texture = handle, .bounds = left});
+			const FontRenderer::GlyphQuad quad{
+				.position = {16.0F, 0.0F},
+				.size = {16.0F, 32.0F},
+				.uvMin = {0.0F, 0.0F},
+				.uvMax = {1.0F, 1.0F},
+				.color = {1.0F, 1.0F, 1.0F, 1.0F},
+				.runOrigin = {16.0F, 32.0F},
+				.atlas = handle,
+				.pixelRange = 4.0F
+			};
+			Primitives::drawGlyphs(&quad, 1);
+		});
+		expectNear(pixel(8, 16), {0, 0, 0, 0});
+		expectNear(pixel(24, 16), {0, 0, 0, 0});
 	}
 
 	TEST_F(PrimitivesDrawTest, ArcCoversItsBandAndSweepOnly) {
@@ -606,6 +739,45 @@ namespace Renderer {
 			}
 		}
 		EXPECT_GT(denser, 8);
+	}
+
+	TEST_F(PrimitivesDrawTest, AClipKeepsItsWidthInColumnsWhereverItsEdgesFall) {
+		// Half-open: a pixel survives when its centre is at or past the left and top edges
+		// and before the right and bottom ones, so a 10 by 8 clip keeps 10 columns and 8
+		// rows, even with its edges on pixel centres, where a closed test kept 11 by 9.
+		struct Case {
+			Foundation::Rect clip;
+			int				 left;
+			int				 top;
+		};
+		for (const Case& c : {Case{{4.0F, 6.0F, 10.0F, 8.0F}, 4, 6}, Case{{4.5F, 6.5F, 10.0F, 8.0F}, 4, 6}}) {
+			render(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F), [&] {
+				Primitives::pushClip(c.clip);
+				fill(Foundation::Color::red(), Primitives::BlendMode::Alpha);
+				Primitives::popClip();
+			});
+			int lit = 0;
+			int minX = kSize;
+			int maxX = -1;
+			int minY = kSize;
+			int maxY = -1;
+			for (int y = 0; y < kSize; ++y) {
+				for (int x = 0; x < kSize; ++x) {
+					if (pixel(x, y)[3] != 0) {
+						++lit;
+						minX = std::min(minX, x);
+						maxX = std::max(maxX, x);
+						minY = std::min(minY, y);
+						maxY = std::max(maxY, y);
+					}
+				}
+			}
+			EXPECT_EQ(lit, 80) << c.clip.x;
+			EXPECT_EQ(minX, c.left) << c.clip.x;
+			EXPECT_EQ(maxX, c.left + 9) << c.clip.x;
+			EXPECT_EQ(minY, c.top) << c.clip.x;
+			EXPECT_EQ(maxY, c.top + 7) << c.clip.x;
+		}
 	}
 
 	TEST_F(PrimitivesDrawTest, ClearStoresPremultipliedColour) {

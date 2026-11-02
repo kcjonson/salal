@@ -24,13 +24,20 @@ that slot's stacking contexts.
   layout never do), which is the part of CSS z-index that hurts. Every root
   is a context of its own: each of the scene's roots, each stack entry, and
   the tooltip and drag tiers. An ancestor's clip applies
-  whatever the `zIndex`; escaping a clip is what the popup stack is for.
-- **The popup stack.** Dialogs, menus, selects, context menus and toasts are
-  entries in one stack, ordered by when they opened, latest on top; a toast is
+  whatever the `zIndex`; escaping a clip is what the overlay stack is for.
+- **The overlay stack.** Dialogs, menus, selects, context menus, toasts and
+  tooltips are overlays, entries in one stack, ordered by when they opened, latest on top; a toast is
   brought to the front when it arrives. An entry stays logically owned by the
   component that opened it, for lifetime, dismissal and commands, and anything
-  opened from an entry lands above it. The popup service (R8.21) is this
+  opened from an entry lands above it. The overlay service (R8.21) is this
   stack.
+- **Anchored and absolute.** An overlay is placed one of two ways. Anchored,
+  it opens from an origin in its opener (its box, or a point in it, for a
+  context menu at the press), sits beside it, flipped and kept inside the
+  viewport (R12.30), and moves with it as it scrolls, moves or turns, under
+  its transform. Absolute, it sits at a point in screen coordinates, or over
+  the whole viewport for a dialog's scrim, and its opener's position and
+  transform play no part. Either way the opener owns it.
 - **Fixed tiers above the stack.** Tooltip, then drag, for the two things that
   must win however recently they opened. A screen transition is app's
   (`SceneStack`), not a ui tier.
@@ -41,9 +48,17 @@ that slot's stacking contexts.
   Painting, hit testing and pad focus navigation all read the same sorted list,
   so the hit winner at a point is always the topmost painted node, and a test
   holds that.
-- **Modality per focus context.** Modal input blocking and popup exclusivity
+- **Modality per focus context.** Modal input blocking and menu exclusivity
   belong to a focus context, not the screen, so one player's confirm dialog
   doesn't close or block the other's menu.
+- **Dismissal and focus.** A menu closes on a press outside it and when its
+  player's focus leaves it; cancel closes the innermost menu, dialog or
+  non-modal panel around the focus (R9.13, R9.14). Focus inside an overlay as
+  it closes goes back to where it was when the overlay opened, and a modal
+  dialog holds its player's focus in its subtree with a scope until then. An
+  event that bubbles out of an overlay into the control that opened it, a
+  click on a menu's padding or an activate the dialog's content didn't take,
+  doesn't activate that control.
 
 Renderer side, ui never forwards component z: the per-call key becomes an
 integer ui sets from its walk, and world passes keep their own integer keys in
@@ -146,9 +161,11 @@ Lines, glyphs, images and shadows are quads. Polygon triangles and feather
 rings go in as quads whose fourth corner repeats the third, so there is one
 path and one format. The transform stays baked on the CPU, as the ordering
 model assumes. Flat is a mode value. Instanced meshes (`InstancedMeshVertex`)
-are a separate path and don't change. The shader hooks run only on that path
+are a separate path and don't change. The vertex hooks run only on that path
 and keep their points and arguments; what changes is the batched attributes a
-hook can also see (1 and 3 to 5), which the instance's replace.
+hook can also see (1 and 3 to 5), which the instance's replace. A rect's fill
+hook (shader-hooks.md, "Fill hooks", built 2026-10-31) adds no field: its index
+is the texture-slot byte and its params corners 1 to 3 of the fill.
 
 Why: the per-vertex layout writes everything about a rect (colour, border,
 radius, clip, mode) into each of its four 80-byte vertices plus six indices,
@@ -196,13 +213,44 @@ the load; `dimension` in px (rem times a root size); `duration` in ms;
 game's `FontFamily` ids by name; `shadow` and `border` to the renderer's
 styles.
 
+A text transform (CSS's `text-transform`) has no type in the format, so it is
+salal's extension, in the place the format leaves for one: a style's group
+carries it under `salal` in `$extensions`, and a file that sets it stays valid
+for any other tool.
+
+```json
+{
+  "styles": {
+    "button": {
+      "$extensions": { "salal": { "textTransform": "uppercase" } }
+    }
+  }
+}
+```
+
+The values are `Foundation::TextTransform`'s, `none` and `uppercase`, and
+`none` takes off one a lower layer set. It is read on the style's own group,
+after `$extends`, and nothing inherits it down the groups; a later file's
+`$extensions` on a group replaces an earlier one's whole, as the merge does
+with every `$` property. An unknown value, anything else under `salal`, or the
+extension on a token is an error like a wrong `$type`, failing
+`salal_tokens()`'s build step and the load; on a group that isn't a style it
+is a warning. A control that draws its label in its own style (Button and
+DropdownButton, a tab, a segment, Select) passes the transform on with the
+colour, face, size and tracking, and a transform set in code wins over the
+theme's, as any field does. A label drawn in a text style (a list row's, a
+checkbox's, a menu item's) takes that style's. Badge, KeyCap, Divider, Stat's
+and ProgressBar's labels and Dialog's kicker set `uppercase` in code, so a
+theme doesn't change their case.
+
 What ui's tokens define, beyond palette roles (surfaces, text, lines, scrim,
 focus ring), spacing, radii and motion: font roles (display, body, mono), each
 naming a game family; a semantic tone set (default, accent, info, positive,
 warning, danger, plus `Auto`, picked by value); and `size` (sm, md, lg)
 setting font size and control height. State layers apply in R11.12's order
-(base, hover, pressed, open and active, disabled, focus ring), their washes
-coming from tokens. Worldsim's design language (elevation by tint, its line
+(base, hover, pressed, open and active, focus ring), their washes coming from
+tokens. A disabled control draws whole at the disabled opacity, fill, border,
+label and icon, so one with a clear fill still reads as disabled. Worldsim's design language (elevation by tint, its line
 alphas, two accents, its radius scale and control heights, Panel's kicker and
 bracket ticks) is worldsim's tokens and components, not engine rules.
 
@@ -313,11 +361,24 @@ The rules are R13.25's first six: `sibling-overlap`, `child-outside-parent`,
 in steps and a dense mouse HUD is small on purpose, so a minimum hit-target
 size is a design call per screen, not a lint.
 
+Decoration is exempt from the first two and from `zero-or-negative-size`
+(decided 2026-10-30). A component whose own `pointerEvents` is None, R8.29's
+decorative overlay, may overlap its siblings, leave its parent's box and be
+empty (a fill at 0). Examples: a caret's strokes, a checkbox tick, the
+hairline under a tab bar, a list row's selection bar, a slider's thumb, a
+progress fill under its label, a focus ring. R13.25.1 exempts only a
+differing zIndex or layer, and R3.18 rules out zIndex inside a composite
+widget, so without this every stock widget that layers decoration over its
+content would fail, and a stock component has to lint at 0 in any game. The
+pointer can't reach a decoration, so a None that hides a real overlap can't
+also hide a blocked control. Its children are judged by their own value, so a
+tooltip's content (the tooltip is None) is still checked.
+
 ## Services and input routing
 
 Decided 2026-10-30. Takes R1.6 and R8.14, scoped per scene.
 
-Every ui service (focus, the popup stack, the theme, input dispatch,
+Every ui service (focus, the overlay stack, the theme, input dispatch,
 viewport, clock and animator, placement, clipboard) reaches a component
 through the context of the scene it was mounted in. There are no singletons,
 and constructors touch no service. The draw API stays process-wide.
@@ -334,6 +395,17 @@ and constructors touch no service. The draw API stays process-wide.
 - **Modals make content below them inert,** for the player who opened them:
   no new events, focus trapped in the modal, and a cancel for anything
   mid-interaction. Inert content still updates and renders.
+- **A subtree can keep focus out.** `descendantsFocusable` false on a node
+  means nothing under it takes focus, by a press, Tab, a direction or code,
+  while the overlays opened from inside it are their own and take focus as
+  ever. A game's HUD sets it on its root: it's driven by the pointer and
+  hotkeys, so a click leaves no focus behind for Space or Enter to press
+  again, and a dialog that closes finds no HUD control to hand focus to. Its
+  hotkeys then read only the keys the ui didn't take, Godot's
+  `_unhandled_input`. Engines that let a click focus a HUD button all carry
+  this bug and the same per-widget fix (Unreal's `IsFocusable`, Godot's
+  `focus_mode`, Unity deselecting after a click); one flag on the HUD's root
+  covers every control in it, including ones added later.
 
 Why: one focus owner per user is the pattern everywhere (the web's
 `activeElement` with `inert` under a modal, Godot's focus owner per viewport,
@@ -398,7 +470,7 @@ root().removeChild(row);   // health.get() is null from here on
 - **Storage is a slot map the scene owns.** Each component is allocated once
   and filed in a slot; a `Ref` is a 64-bit (index, generation) pair. A lookup
   is an index and a compare, no hashing. Parent and children are stored as
-  ids, and so are focus, capture, hover, popup-stack entries and timers.
+  ids, and so are focus, capture, hover, overlay-stack entries and timers.
   `removeChild` unlinks at once and frees after the current dispatch through
   one path, which bumps the slot's generation and clears every reference to
   the component (focus falls back, capture gets a cancel, timers drop). Game
@@ -410,17 +482,23 @@ root().removeChild(row);   // health.get() is null from here on
     of layout, drawing, input and focus), `enabled`
   - geometry: `position`, `size` (px, percent or auto), `minSize`, `maxSize`,
     `margin`, `transform` (render and hit test only)
-  - layout: `layout`, with CSS names as taffy uses them: `display` (Block,
+  - layout: `layout`, with CSS names as taffy uses them: `display` (Free,
     Flex, Grid, None), `flexDirection`, `gap`, `padding`, `alignItems`,
     `justifyContent`, and as a child `flexGrow`, `flexShrink`, `alignSelf`,
-    `position` (Relative or Absolute) and `inset`. The top-level `position`
-    is the offset of an absolutely positioned component; flow children are
-    placed by their parent's layout
+    `position` (Relative or Absolute) and `inset`. `display: Free`, the
+    default, places each child at its own top-level `position`, its auto size
+    hugging their boxes; Flex (and Grid) flow theirs, and `position:
+    Absolute` takes a child out of a flowing parent to its `position` or
+    `inset`. The default isn't CSS's Block: in normal flow a child's
+    `position` means nothing and children stack, so every hand-placed screen
+    and every overlay inside a component (a bar's fill over its track) would
+    need `Absolute` on each child. Block keeps its CSS meaning and comes when
+    a game asks, since a Flex column already stacks
   - look: `style`, `overflow` (Visible, Clip or Scroll; scrolling is a
     property of any component, not a separate container)
   - ordering: `zIndex` and `isolation` (Ordering, above)
-  - input: `pointerEvents`, `focusable`, `tabIndex`, `cursor`, and the
-    callbacks (`onClick`, `onPointerDown`/`Up`/`Move`/`Enter`/`Leave`,
+  - input: `pointerEvents`, `focusable`, `descendantsFocusable`, `tabIndex`,
+    `cursor`, and the callbacks (`onClick`, `onPointerDown`/`Up`/`Move`/`Enter`/`Leave`,
     `onWheel`, `onKeyDown`/`Up`, `onFocus`, `onBlur`, `onLayout`), whose
     storage is allocated the first time one is set
 - **`style` is look only**, with CSS-like names (`backgroundColor`,
@@ -523,24 +601,31 @@ allocated once; nothing keeps a pointer into the array, only ids.
 
 ### Theme styles
 
-A game's tokens file defines its styles with the same names `Style` uses:
+A game's tokens file defines its styles under the top-level `styles` group,
+with the same names `Style` uses:
 
 ```json
 {
-  "pane": {
-    "backgroundColor": { "$type": "color", "$value": "{color.surface.raised}" },
-    "borderColor": { "$type": "color", "$value": "{color.line.edge}" },
-    "borderWidth": { "$type": "dimension", "$value": { "value": 1, "unit": "px" } },
-    "borderRadius": { "$type": "dimension", "$value": "{radius.md}" }
+  "styles": {
+    "pane": {
+      "backgroundColor": { "$type": "color", "$value": "{color.surface.raised}" },
+      "borderColor": { "$type": "color", "$value": "{color.line.edge}" },
+      "borderWidth": { "$type": "dimension", "$value": { "value": 1, "unit": "px" } },
+      "borderRadius": { "$type": "dimension", "$value": "{radius.md}" }
+    }
   }
 }
 ```
 
+A style's text transform, which the format has no type for, is salal's
+extension on its group (Theme, above).
+
 `salal_tokens(my_game tokens/)` generates a typed constant per style at build
 time, an index into the loaded theme, so code names `ui::styles::pane` and a
-typo is a compile error. A style missing from a mode the resolver loads fails
-the load in a dev build, naming the style and the file; a release build falls
-back to the base set.
+typo is a compile error. The build loads the folder in every mode its resolver
+has and fails on a token some modes lack. A style a game's table names that a
+loaded file lacks fails the load in a dev build, naming the style and the file;
+a release build warns and the style's fields fall back to the type's defaults.
 
 ### In Rust
 
@@ -566,7 +651,10 @@ Decided 2026-10-30, closing the review of the spec.
   component (R12.5), no nine-slice (R2.12, R5.19) and no art residency,
   decoding or context-loss handling (R5.31 to R5.33). Textures are MSDF
   atlases (fonts, icons) and render targets; `drawImage` stays only to
-  composite a render target.
+  composite a render target. Surface texture that would have been raster art
+  is a game's fill hook instead, computed in the base shader per rect ([shader-hooks.md](shader-hooks.md), "Fill hooks",
+  2026-10-31), and the rest of a game's art is vector through
+  `renderer/vector`.
 - **Rounded clip (R4.14):** deferred until a game needs one. Until then,
   inset content by the radius. The instance format already has a byte for a
   rounded-clip entry.
@@ -585,9 +673,10 @@ Decided 2026-10-30, closing the review of the spec.
 - **Activate and cancel (R9.27):** ui reads activate, cancel and the
   navigation directions as actions from foundation's `ActionMap`, rebindable
   per device, never from hard-coded keys.
-- **Names:** ui's stack of dialogs, menus, selects, context menus and toasts
-  is the popup stack, run by the popup service. "Overlay" stays app's word
-  for its diagnostic layers (`app::Overlay`), so the two don't collide.
+- **Names:** each of ui's dialogs, menus, selects, context menus, toasts and
+  tooltips is an overlay, an entry in the overlay stack, which the overlay
+  service runs; the spec's "popup" is not used. app's layers above every scene
+  (dev menus, debug HUDs) are `app::DebugLayer`, so the two don't collide.
 - **Screen transitions (R8.22, R12.38):** app's `SceneStack` owns them; ui
   mounts a scene's roots in `onEnter` and unmounts them in `onExit`.
 - **The lint's required rules** are R13.25's first six; the spec's chapter 13

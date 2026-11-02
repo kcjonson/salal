@@ -5,10 +5,29 @@ add_executable(salal_sandbox
     Picker.cpp
     scenes/ArcScene.cpp
     scenes/BlendScene.cpp
+    scenes/FillHookScene.cpp
     scenes/InputTestScene.cpp
+    scenes/PerfQuadsScene.cpp
+    scenes/PerfTextScene.cpp
+    scenes/PerfUiScene.cpp
+    scenes/PerfWorldScene.cpp
     scenes/PolygonScene.cpp
     scenes/PolylineScene.cpp
     scenes/SdfMinimalScene.cpp
+    scenes/UiClipScene.cpp
+    scenes/UiControlsScene.cpp
+    scenes/UiDisplayScene.cpp
+    scenes/UiFocusScene.cpp
+    scenes/UiInputScene.cpp
+    scenes/UiMotionScene.cpp
+    scenes/UiOverlayComponentsScene.cpp
+    scenes/UiOverlaysScene.cpp
+    scenes/UiLayoutScene.cpp
+    scenes/UiOrderScene.cpp
+    scenes/UiScrollScene.cpp
+    scenes/UiTextScene.cpp
+    scenes/UiIconsScene.cpp
+    scenes/UiThemeScene.cpp
 )
 
 target_include_directories(salal_sandbox PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -20,8 +39,15 @@ target_link_libraries(salal_sandbox
         nlohmann_json::nlohmann_json
 )
 
-# The base shader with no hooks, as a game with none gets it.
-salal_base_shader(salal_sandbox)
+# The base shader with one fill hook, the renderer tests' stripes, which fill_hook draws with; every
+# other scene's rects name none, as a game's plain rects do.
+salal_base_shader(salal_sandbox HOOKS ${PROJECT_SOURCE_DIR}/libs/renderer/tests/fill_hooks)
+
+# The sandbox's theme, ui's tokens with a light mode over them, which ui_theme switches between.
+salal_tokens(salal_sandbox tokens NAMESPACE sandbox_theme HEADER sandbox_theme/Tokens.h)
+
+# The sandbox's icons, which ui_icons draws.
+salal_icons(salal_sandbox icons NAMESPACE sandbox_icons HEADER sandbox_icons/Icons.h)
 
 set_target_properties(salal_sandbox PROPERTIES OUTPUT_NAME sandbox FOLDER salal)
 

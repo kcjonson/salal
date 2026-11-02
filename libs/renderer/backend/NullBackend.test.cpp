@@ -74,10 +74,10 @@ namespace Renderer::backend {
 		NullBackend		   gpu;
 		const BufferHandle vertices = gpu.createBuffer(BufferUsage::Static, 16, nullptr);
 		const BufferHandle indices = gpu.createBuffer(BufferUsage::Static, 6, nullptr);
-		EXPECT_TRUE(gpu.createGeometry({.layout = VertexLayout::Batched, .vertices = vertices, .indices = indices}).isValid());
+		EXPECT_TRUE(gpu.createGeometry({.layout = VertexLayout::Batched, .vertices = vertices}).isValid()); // its instances alone
 		EXPECT_FALSE(gpu.createGeometry({.layout = VertexLayout::InstancedMesh, .vertices = vertices, .indices = indices}).isValid());
-		gpu.destroyBuffer(indices);
-		EXPECT_FALSE(gpu.createGeometry({.layout = VertexLayout::Batched, .vertices = vertices, .indices = indices}).isValid());
+		gpu.destroyBuffer(vertices);
+		EXPECT_FALSE(gpu.createGeometry({.layout = VertexLayout::Batched, .vertices = vertices}).isValid());
 	}
 
 	TEST(NullBackendTest, DrawsRecordTheirCallAndTheUniformsInEffect) {

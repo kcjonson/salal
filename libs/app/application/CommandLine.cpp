@@ -14,6 +14,7 @@ namespace app {
 		constexpr std::string_view kHttpPort = "--http-port";
 		constexpr std::string_view kHttpPortEquals = "--http-port=";
 		constexpr std::string_view kHelp = "--help";
+		constexpr std::string_view kNoVsync = "--no-vsync";
 
 		std::optional<int> parsePort(std::string_view text) {
 			int port = 0;
@@ -50,6 +51,8 @@ namespace app {
 				}
 			} else if (arg == kHelp) {
 				commandLine.help = true;
+			} else if (arg == kNoVsync) {
+				commandLine.vsync = false;
 			}
 		}
 		return commandLine;

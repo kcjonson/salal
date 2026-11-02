@@ -4,11 +4,13 @@ The renderer draws everything with one program, the base shader
 (`libs/renderer/shaders/base.vert` and `base.frag` with their two includes). A
 game that needs its own vertex math in that program, worldsim's grass parting
 around the cursor for one, writes it as a hook: a GLSL file in the game's repo
-that the game's build splices into the base shader's vertex stage. The GPU still
-sees one program (dual-deck-builder's R5.1), the game's code stays in the game's
-repo, and nothing about the shader is read or compiled from files at run time.
+that the game's build splices into the base shader's vertex stage. A game that
+needs its own surface, worn paper for one, writes a fill hook, spliced into the
+fragment stage and picked per rect ("Fill hooks", below). The GPU still sees one
+program, the game's code stays in the game's repo, and nothing about the shader is read or compiled from files
+at run time.
 
-Added 2026-10-26, for `v0.6.0`.
+Added 2026-10-26, for `v0.6.0`. Fill hooks designed and built 2026-10-31.
 
 ## The CMake function
 
@@ -18,14 +20,16 @@ salal_base_shader(<target> [HOOKS <dir>] [NAMESPACE <name>] [HEADER <file>])
 
 `cmake/SalalBaseShader.cmake`, included by salal's top-level `CMakeLists.txt`,
 so a consumer has it after `FetchContent_MakeAvailable(salal)`. At build time it
-assembles `base.vert` and `base.frag` with every include resolved and the hooks
-in `<dir>` spliced into the vertex stage, checks the two stages compiled and
+assembles `base.vert` and `base.frag` with every include resolved, the vertex
+hooks in `<dir>` spliced into the vertex stage and its fill hooks into the
+fragment stage, checks the two stages compiled and
 linked as one program with `glslangValidator`, and compiles the result into
 `<target>` as a generated source. The header, `HEADER` (default
 `BaseShader.h`; a relative path, folders allowed, `worldsim/BaseShader.h`
 say), goes on `<target>`'s include path as PUBLIC, and declares everything in
 namespace `NAMESPACE` (default `base_shader`, a plain C++ identifier). Without
-`HOOKS` the hook chain is empty and the base shader is what salal ships. A
+`HOOKS` the hook chain is empty, no rect can name a fill hook, and the base
+shader is what salal ships. A
 keyword given without a value fails at configure.
 
 Call it once per set of hooks, on the library the executables share: worldsim
@@ -53,16 +57,19 @@ recompiles nothing that includes it.
 
 ## Hook files
 
-A hooks folder holds hooks and nothing else. Each is `<name>.vert.glsl`, where
-`<name>` is a GLSL identifier (letters, digits and underscores, not starting
-with a digit) that makes no reserved name of `<name>_<point>`: not `gl`, no
-`gl_` prefix, no trailing or double underscore. Only vertex hooks exist.
-Anything else in the folder, a folder included, fails the build. Entries whose
+A hooks folder holds hooks and nothing else. Each is `<name>.vert.glsl`, a
+vertex hook, or `<name>.frag.glsl`, a fill hook, where `<name>` is a GLSL
+identifier (letters, digits and underscores, not starting with a digit) that
+makes no reserved name of `<name>_<point>`: not `gl`, no `gl_` prefix, no
+trailing or double underscore. A name is one hook, so `sway.vert.glsl` beside
+`sway.frag.glsl` fails the build. Anything else in the folder, a folder
+included, fails the build. Entries whose
 names start with a dot (`.DS_Store`, an editor's lock file or swap folder) are
 left out before anything reads them, and a leading UTF-8 byte-order mark is
 dropped.
 
-A hook is spliced into the middle of a `#version 330 core` vertex stage, so it
+A hook is spliced into the middle of a `#version 330 core` stage, a vertex hook
+into the vertex stage and a fill hook into the fragment stage, so it
 brings no `#version` or `#extension` of its own (desktop GLSL wants an
 extension directive before any code, which a hook never is), and no `binding`
 layout qualifier: the build gives its block a point. All three fail the build.
@@ -70,9 +77,12 @@ layout qualifier: the build gives its block a point. All three fail the build.
 `<name>` is the hook's prefix. Its hook-point functions are `<name>_<point>`,
 and every other global it declares should carry the prefix too
 (`sway_gust`, say); two hooks declaring the same name fail in
-`glslangValidator`, as does a hook reusing one of the base shader's. A hook sees
-the base shader's batched attributes (0 to 5) and its `DrawUniforms` block, but
-not the instance attributes `a_instanceData1` and `a_instanceData2`, which
+`glslangValidator`, as does a hook reusing one of the base shader's. A vertex hook sees
+the base shader's attributes and its `DrawUniforms` block. On the instanced-mesh
+path, where hooks run, only `a_position` and `a_color` (0 and 2) carry data; the
+batched quad's per-instance attributes (1, 3 to 5 and 8 to 12) read GL's
+defaults there. It doesn't see the mesh's instance attributes `a_instanceData1`
+and `a_instanceData2`, which
 `includes/instancing.glsl` declares after the hooks; it should rely only on its
 arguments and its own block. A `#define` in a hook stays live for the rest of the
 vertex stage, `instancing.glsl` and `main` included (`#define scale 2.0` breaks
@@ -81,7 +91,7 @@ the instance transform; `#define u_cameraZoom 2.0` changes it quietly), so
 
 ## Hook points
 
-Two, both on the instanced path (`Primitives::drawInstanced`, an
+The vertex stage has two, both on the instanced path (`Primitives::drawInstanced`, an
 `InstancedMesh` geometry): every instanced vertex runs both, in this order.
 Batched shapes, text, images and the baked pass run neither.
 
@@ -99,7 +109,9 @@ either point or both, and one that defines neither fails the build.
 
 The build generates the functions `base.vert` calls, through
 `#include "hooks.glsl"` (which no file in the source tree answers: the build
-does) and `includes/instancing.glsl`:
+does) and `includes/instancing.glsl`. `base.frag` includes `hooks.glsl` too,
+after `uniforms.glsl`, and there the build answers with the fill hooks and
+`applyFillHook` ("Picking a hook", below); each stage must include it once.
 
 ```glsl
 vec2 applyInstanceLocalHooks(vec2 position, vec2 instancePosition) {
@@ -114,7 +126,7 @@ vec2 applyInstanceWorldHooks(vec2 position, vec2 localPosition, vec2 instancePos
 ```
 
 Each point calls every hook that defines it, in file-name order (byte order of
-the names), each taking the previous one's result. With no hooks both return
+the names), each taking the previous one's result. With no vertex hooks both return
 `position`. The chain runs every hook for every instanced vertex, so a hook
 switches itself off from its own uniforms, and a draw that is not its concern
 (worldsim's trees, under its grass hook) passes through untouched.
@@ -135,7 +147,7 @@ layout(std140) uniform SwayUniforms {
 ```
 
 The build gives the blocks binding points from 1 up, in file-name order, to the
-hooks that have one; 0 is `DrawUniforms`. GL 3.3 core promises 12 uniform blocks
+hooks that have one, vertex and fill hooks alike; 0 is `DrawUniforms`. GL 3.3 core promises 12 uniform blocks
 a stage, so at most 11 hooks may have one. GL 3.3 core has no
 `layout(binding = N)` either, so the GL backend binds each block's index to its
 point after link (`glUniformBlockBinding`), and `createPipeline` fails, logged,
@@ -191,9 +203,11 @@ A hook's constant is `k` and its name in PascalCase (`wind_sway` is
 16 bytes. Each member's constant adds the member's name in PascalCase
 (`kSwayWind`), with its name as GL names it, its GLSL type, its std140 offset,
 and its size in bytes, an array's elements at their std140 stride (`float[2]`
-is 32); `k<Name>Members` lists them in offset order. Two constants that come
+is 32); `k<Name>Members` lists them in offset order. A fill hook's
+`k<Name>Fill` ("Fill hooks", below) is one more. Two constants that come
 out the same fail the build, as does a member type outside the scalars,
-vectors and square matrices.
+vectors and square matrices; so `paper.frag.glsl` can't have a block member
+called `fill`, whose constant would be `kPaperFill` too.
 
 ## The C++ side
 
@@ -203,7 +217,7 @@ Renderer::Primitives::init(std::move(backend), base_shader::source());
 
 `Primitives::init` takes the assembled source with the backend; the text needs
 to outlive only the call. `Backend::createPipeline` takes source text, and
-`ShaderSource` carries the hook blocks with it.
+`ShaderSource` carries the hook blocks and the fill hooks with it.
 
 A game fills a hook's block with
 
@@ -235,7 +249,12 @@ Renderer::Primitives::setHookUniforms(base_shader::kSway, std::as_bytes(std::spa
 
 The instanced draws issued after the call read the new values, and a draw
 issued before keeps the ones it was given, the order `setUniforms` keeps for
-`DrawUniforms`. A hook the base shader `init()` was given has no block for, a
+`DrawUniforms`. A fill hook's rects keep that order too, though they are
+batched: a call for a fill hook's block while the batch holds a rect naming
+that hook flushes the batch first. That is one more draw call, and the key sort
+doesn't reach across it, so a rect drawn after the call lands over one drawn
+before, whatever their keys; a game that sets the block before it draws what
+reads it, once a frame say, pays nothing. A hook the base shader `init()` was given has no block for, a
 constant from another assembled shader, or the wrong size is logged and
 ignored.
 
@@ -249,6 +268,154 @@ of them calls it first. The null backend records each write
 (`hookUniformWrites()`) and the values each draw read
 (`RecordedDraw::hookBlock(binding)`).
 
+## Fill hooks
+
+Designed and built 2026-10-31. A fill hook is a game's surface: a function of the pixel's
+place in a rect that gives the rect's colour there. Worn paper is the case it
+was designed for: grime at the edges and corners over a flat reading window,
+seeded per surface, which would otherwise be baked into nine-sliced raster art
+that salal doesn't draw (ui-design.md, "Remaining rules"). Noise computed where it is
+drawn is what an SVG filter such as `feTurbulence` does, without the offscreen
+pass a filter needs, so a hooked rect is one more quad in the batch, with no
+texture and no split, and is sharp at any pixel ratio.
+
+### The hook point
+
+`<name>.frag.glsl` defines one function,
+
+```glsl
+vec4 <name>_fill(vec4 color, vec2 local, vec2 halfSize, uvec3 params, float pixelSize);
+```
+
+and returns the rect's premultiplied colour at the pixel. `color` is the rect's
+fill, premultiplied; `local` is the pixel from the rect's centre in its local
+units, y down, the point the rect's distance is measured from; `halfSize` is
+the rect's half size in the same units; `params` is the draw's twelve bytes;
+`pixelSize` is one screen pixel in local units, for a hook that softens its own
+edges. A hook that defines no `<name>_fill`, or defines it with other
+parameters or another return type, fails the build.
+
+What the hook returns stands where the rect's flat fill stood: the rect mode
+still covers the box by its signed distance, rounds its corners, lays its
+border over it and applies the clip. A hook changes the colour of the surface,
+never its shape; a pixel it wants empty returns alpha 0.
+
+### Picking a hook
+
+Vertex hooks chain, every hook running for every vertex. A fill hook is picked:
+a rect names one, or none, and only that one runs. The build gives the fill
+hooks indexes from 1 up, in file-name order, and generates the function
+`base.frag`'s rect mode calls:
+
+```glsl
+vec4 applyFillHook(uint fill, vec4 color, vec2 local, vec2 halfSize, uvec3 params, float pixelSize) {
+	switch (fill) {
+		case 1u: return paper_fill(color, local, halfSize, params, pixelSize);
+	}
+	return color;
+}
+```
+
+With no fill hooks it returns `color`, and a plain rect, index 0, pays one
+comparison a pixel. At most 255 fill hooks.
+
+### Where the index and the params ride
+
+In the 104-byte instance (ui-design.md, "Per-draw data"), with no field added:
+
+- The index is the texture-slot byte, which the rect mode doesn't read. The
+  batch's plan writes a slot only for a quad that samples a texture, so a rect
+  keeps its index, and a stroke piece, which the fragment stage shades in the
+  rect mode, carries 0.
+- The params are corners 1 to 3 of the premultiplied fill. A hooked rect has one
+  fill colour, corner 0's, which the vertex stage hands every vertex; it hands
+  the other three corners to the fragment stage untouched, as a flat `uvec3`
+  varying, `v_fillParams`. That is one more flat varying for every mode, 32 of
+  GL 3.3's 64 vertex output components in use after it.
+
+A rect's linear gradient is the four corner colours, so a hooked rect can't
+have one; the batcher logs a gradient on a hooked rect once per `id` (a
+warning, which Release compiles out as it does every warning) and draws the
+hook over the style's `fill`.
+
+### Rules the fragment stage adds
+
+A fill hook follows the vertex hooks' rules (no `#version`, `#extension` or
+`binding`, its globals carrying its prefix, a `#define` live for the rest of the
+stage, so `#undef` it), plus three for where it runs:
+
+- **No derivatives.** It runs inside the rect mode's branch, after the clip's
+  `discard`, where `dFdx`, `dFdy` and `fwidth` are undefined. A hook that names
+  any of them fails the build; `pixelSize` is taken before the branch for it.
+- **No textures.** It can't name `u_textures`, the build fails if it does, and a
+  sampler can't be declared outside a uniform block, which already fails.
+- **One uniform block, under the vertex hooks' rules.** Its block is in the
+  fragment stage, and fill and vertex hooks share the binding points 1 to 11 and
+  the limit of 11 hooks with a block, in file-name order across both. The C++
+  side fills it as any hook's block, `Primitives::setHookUniforms`, and a
+  hooked rect drawn after the call reads the new values while one drawn
+  before keeps its own, by the flush "The C++ side" (above) describes.
+
+A fill hook runs per pixel in floats, and two GPUs can differ in its last bits.
+A game holds a surface steady by seeding it, never by expecting a bit pattern;
+there are no stored images to compare it to (testing/README.md).
+
+### The C++ side
+
+The generated header has a constant for each fill hook, the hook's name in
+PascalCase with `Fill` after it:
+
+```cpp
+// paper.frag.glsl, fill index 1.
+inline constexpr Renderer::backend::FillHook kPaperFill{.hook = "paper", .index = 1};
+```
+
+`ShaderSource` carries the fill hooks beside the hook blocks, and `RectArgs`
+takes one, in a field after `style`:
+
+```cpp
+struct Fill {
+	const backend::FillHook* hook = nullptr; // none: the style's flat fill
+	std::array<uint32_t, 3>	 params{};		 // the hook's, packed as it reads them
+};
+
+Renderer::Primitives::drawRect({
+	.bounds = sheet,
+	.style = {.fill = paperColour, .border = inkRule},
+	.fill = {.hook = &base_shader::kPaperFill, .params = packPaper(seed, wear)},
+});
+```
+
+A hook from another assembled shader, a name and index the base shader
+`init()` was given has no fill hook for, is logged once per `id` and drawn as a
+plain rect, its gradient kept, as `setHookUniforms` treats a constant it wasn't
+given. The null backend records each hooked rect a draw carried, its instance,
+index and params (`RecordedDraw::fills`), so a game's test checks what it asked
+for without a GPU.
+
+ui grows nothing for it. A game's own component draws a hooked rect through
+`Primitives::drawRect` in its render, as any component draws.
+
+### Building it
+
+One PR, for the next minor version:
+
+- the assembler: `.frag.glsl` files, the `fill` point, `applyFillHook`, the
+  three rules above and the failures below, and `FillHook` constants in the
+  header;
+- `base.vert` and `base.frag`: the index and `v_fillParams`, and the call in
+  the rect mode;
+- `RectArgs::fill`, the batcher's packing, and the null backend's record;
+- a sandbox scene, `fill_hook`, with a test hook that stripes a rect from its
+  params (`libs/renderer/tests/fill_hooks/stripes.frag.glsl`, which the
+  renderer tests draw too), on rects with borders, rounded corners and a clip,
+  at 0 on the lint;
+- tests: the assembler's rules and the generated chain, a GL readback of the
+  test hook against the value its params give, the null backend's record;
+- the perf suite against `main` (`node scripts/perf.mjs compare`), since it
+  changes the shader and the batcher: plain rects pay a comparison and a
+  varying, and must hold the gate.
+
 ## What fails the build
 
 At configure time: `HOOKS` that is not a folder, a keyword without a value, a
@@ -256,10 +423,14 @@ At configure time: `HOOKS` that is not a folder, a keyword without a value, a
 folder, a second call on a target with the same `HEADER` or `NAMESPACE`, and no
 `glslangValidator`. At build time, with the message on the build log:
 
-- an entry in the hooks folder that is not `<name>.vert.glsl`, folders included
-  (dot entries aside);
-- a `<name>` that is not a GLSL identifier, or makes a reserved name;
-- a hook that defines no hook point;
+- an entry in the hooks folder that is not `<name>.vert.glsl` or
+  `<name>.frag.glsl`, folders included (dot entries aside);
+- a `<name>` that is not a GLSL identifier, or makes a reserved name, or is
+  both a vertex and a fill hook;
+- a vertex hook that defines no hook point, or a fill hook that defines no
+  `<name>_fill`;
+- a fill hook that names `dFdx`, `dFdy`, `fwidth` or `u_textures`, or more than
+  255 fill hooks;
 - `#version`, `#extension` or a `binding` qualifier in a hook;
 - a uniform outside a block, a second block, a block that is not std140, an
   array of blocks, or a block name the base shader or another hook already has;
@@ -273,6 +444,8 @@ folder, a second call on a target with the same `HEADER` or `NAMESPACE`, and no
 
 ## Not covered
 
-Fragment-stage hooks, any order but file names, SPIR-V and Vulkan. A game's own
+Fragment hooks other than a rect's fill (on text, images, arcs or polygons, or
+a hook that changes coverage), a gradient under a fill hook, any order but file
+names, SPIR-V and Vulkan. A game's own
 passes (worldsim's tile shader, its planet renderer) still load their GLSL at
 run time through `Shader` and `ShaderLoader`, and stage their own files.
