@@ -65,7 +65,7 @@ namespace {
 			}
 			std::error_code statError;
 			if (entry.is_directory(statError)) {
-				error = name + " is a folder; a hooks folder holds <name>.vert.glsl files only";
+				error = name + " is a folder; a hooks folder holds <name>.vert.glsl and <name>.frag.glsl files only";
 				return false;
 			}
 			const std::optional<std::string> text = readFile(entry.path());
@@ -92,11 +92,11 @@ namespace {
 		if (!hooks.error.empty()) {
 			return fail(hooks.error);
 		}
-		const Assembled vertex = assemble(shaders / "base.vert", readFile, hookChain(hooks.hooks));
+		const Assembled vertex = assemble(shaders / "base.vert", readFile, vertexStageHooks(hooks.hooks));
 		if (!vertex.error.empty()) {
 			return fail(vertex.error);
 		}
-		const Assembled fragment = assemble(shaders / "base.frag", readFile, std::nullopt);
+		const Assembled fragment = assemble(shaders / "base.frag", readFile, fragmentStageHooks(hooks.hooks));
 		if (!fragment.error.empty()) {
 			return fail(fragment.error);
 		}

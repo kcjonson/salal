@@ -49,9 +49,9 @@ repo's `specboard.md`.
   backend-boundary design: the GL leaks the public surface had, the target
   handles and declarations, the backend seam, and the PR sequence that lands it.
 - **[docs/shader-hooks.md](docs/shader-hooks.md)** is the base shader's hook
-  contract: how a game adds vertex code to the one program at build time
-  (`salal_base_shader()`), the hook points, uniform blocks, and what fails the
-  build.
+  contract: how a game adds vertex code, and fill hooks that colour a rect per
+  pixel, to the one program at build time (`salal_base_shader()`), the hook
+  points, uniform blocks, and what fails the build.
 - **[docs/app-api.md](docs/app-api.md)** is the phase 2 design of `app`: the
   frame, input and the per-tick snapshot, scenes, settings and saves, the dev
   server, and the seven PRs that land it.
@@ -103,7 +103,9 @@ is tagged, and worldsim consumes this repo. The renderer boundary PRs are under
 way, sequenced in [docs/renderer-boundary.md](docs/renderer-boundary.md): PRs 1
 to 4 are in (`v0.2.0` to `v0.5.0`), and after them the base shader takes hooks
 assembled at build time ([docs/shader-hooks.md](docs/shader-hooks.md)), which took
-worldsim's grass deform out of the renderer and into a worldsim hook.
+worldsim's grass deform out of the renderer and into a worldsim hook. Fill hooks,
+a game's surface computed per pixel of the rects that name one, followed
+(2026-10-31).
 `foundation/random/Rng.h` is the engine's game PRNG, dual-deck-builder's `Rng`
 ported bit for bit (decision A).
 
@@ -223,7 +225,8 @@ removing legacy code. One way to do each thing.
 There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
 renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
-`blend` and `input_test`), ui's (`ui_order`, `ui_text`, `ui_theme`,
+`blend` and `input_test`), `fill_hook` (the renderer tests' fill hook, which the
+sandbox's base shader is assembled with), ui's (`ui_order`, `ui_text`, `ui_theme`,
 `ui_layout`, `ui_clip`, `ui_scroll`, `ui_input`, `ui_focus`, `ui_icons`, `ui_motion`, `ui_display`,
 `ui_controls`, `ui_overlays` and `ui_overlay_components`) and the perf suite's (`perf_quads`, `perf_text`,
 `perf_world` and `perf_ui`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
@@ -288,7 +291,7 @@ worldsim follow-up. Blame and history for imported code live in worldsim;
 
 The renderer's base shader is assembled and compiled into each consumer at build
 time by `salal_base_shader()` ([docs/shader-hooks.md](docs/shader-hooks.md)),
-with the consumer's hooks, so no shader files sit beside an executable; it ships
+with the consumer's vertex and fill hooks, so no shader files sit beside an executable; it ships
 no fonts: a game hands `FontRenderer::Initialize` its atlases, each a PNG and
 JSON path under a `FontFamily` id the game defines, and names its default
 family; a bad set comes back as `false`, never a process exit, and a glyph

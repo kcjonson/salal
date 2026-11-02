@@ -5,6 +5,7 @@ add_executable(salal_sandbox
     Picker.cpp
     scenes/ArcScene.cpp
     scenes/BlendScene.cpp
+    scenes/FillHookScene.cpp
     scenes/InputTestScene.cpp
     scenes/PerfQuadsScene.cpp
     scenes/PerfTextScene.cpp
@@ -38,8 +39,9 @@ target_link_libraries(salal_sandbox
         nlohmann_json::nlohmann_json
 )
 
-# The base shader with no hooks, as a game with none gets it.
-salal_base_shader(salal_sandbox)
+# The base shader with one fill hook, the renderer tests' stripes, which fill_hook draws with; every
+# other scene's rects name none, as a game's plain rects do.
+salal_base_shader(salal_sandbox HOOKS ${PROJECT_SOURCE_DIR}/libs/renderer/tests/fill_hooks)
 
 # The sandbox's theme, ui's tokens with a light mode over them, which ui_theme switches between.
 salal_tokens(salal_sandbox tokens NAMESPACE sandbox_theme HEADER sandbox_theme/Tokens.h)

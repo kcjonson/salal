@@ -1,11 +1,12 @@
 # salal_base_shader(<target> [HOOKS <dir>] [NAMESPACE <name>] [HEADER <file>])
 #
 # The renderer's base shader for <target>, assembled at build time (docs/shader-hooks.md):
-# base.vert and base.frag with their includes resolved and every hook in <dir> (<name>.vert.glsl)
-# spliced into the vertex stage, both stages checked and linked by glslangValidator, and compiled
-# into <target> as a generated source. Its header, HEADER (default BaseShader.h, a relative path,
-# folders allowed) on <target>'s include path, declares <name>::source() (default base_shader), what
-# Primitives::init takes, and HookUniformBlock and HookUniformMember constants for each hook's
+# base.vert and base.frag with their includes resolved, every vertex hook in <dir> (<name>.vert.glsl)
+# spliced into the vertex stage and every fill hook (<name>.frag.glsl) into the fragment stage, both
+# stages checked and linked by glslangValidator, and compiled into <target> as a generated source.
+# Its header, HEADER (default BaseShader.h, a relative path, folders allowed) on <target>'s include
+# path, declares <name>::source() (default base_shader), what Primitives::init takes, a FillHook
+# constant for each fill hook, and HookUniformBlock and HookUniformMember constants for each hook's
 # uniform block. With no HOOKS the hook chain is empty. A shader error or warning, a hook that
 # breaks the contract, or anything in <dir> that is not a hook fails the build; entries whose names
 # start with a dot are left out. <target> links salal::renderer, whose backend/Backend.h the header

@@ -161,9 +161,11 @@ Lines, glyphs, images and shadows are quads. Polygon triangles and feather
 rings go in as quads whose fourth corner repeats the third, so there is one
 path and one format. The transform stays baked on the CPU, as the ordering
 model assumes. Flat is a mode value. Instanced meshes (`InstancedMeshVertex`)
-are a separate path and don't change. The shader hooks run only on that path
+are a separate path and don't change. The vertex hooks run only on that path
 and keep their points and arguments; what changes is the batched attributes a
-hook can also see (1 and 3 to 5), which the instance's replace.
+hook can also see (1 and 3 to 5), which the instance's replace. A rect's fill
+hook (shader-hooks.md, "Fill hooks", built 2026-10-31) adds no field: its index
+is the texture-slot byte and its params corners 1 to 3 of the fill.
 
 Why: the per-vertex layout writes everything about a rect (colour, border,
 radius, clip, mode) into each of its four 80-byte vertices plus six indices,

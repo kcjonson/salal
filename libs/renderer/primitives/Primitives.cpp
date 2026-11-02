@@ -374,8 +374,10 @@ namespace Renderer::Primitives {
 		}
 
 		// Single AddQuad call handles fill, border, rounded corners, and an optional
-		// gradient (per-corner vertex colors) via the GPU.
-		g_batchRenderer->addQuad(args.bounds, args.style.fill, args.style.border, cornerRadius, args.style.gradient, args.key, args.blend);
+		// gradient (per-corner vertex colors) or fill hook via the GPU.
+		g_batchRenderer->addQuad(
+			args.bounds, args.style.fill, args.style.border, cornerRadius, args.style.gradient, args.key, args.blend, args.fill, args.id
+		);
 	}
 
 	void drawLine(const LineArgs& args) {
@@ -699,8 +701,11 @@ namespace Renderer::Primitives {
 			);
 			return;
 		}
-		// Straight to the backend: only instanced draws run the hooks, and they are not
-		// batched, so every draw issued after this reads it and none before.
+		// Instanced draws aren't batched, so every one issued after this reads it and none
+		// before. A fill hook's rects are: the pending ones that name it go first.
+		if (g_batchRenderer->holdsFill(hook)) {
+			g_batchRenderer->flush();
+		}
 		g_backend->setHookUniforms(entry->binding, bytes);
 	}
 

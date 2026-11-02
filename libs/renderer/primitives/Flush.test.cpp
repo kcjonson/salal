@@ -5,6 +5,7 @@
 #include "BaseShader.h"
 #include "backend/NullBackend.h"
 #include "generated/OffsetHookShader.h"
+#include "generated/StripesShader.h"
 #include "primitives/BatchRenderer.h"
 #include "primitives/Primitives.h"
 #include "vector/Types.h"
@@ -23,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -1082,6 +1084,122 @@ namespace Renderer {
 		Primitives::init(std::move(owned), base_shader::source());
 		Primitives::setHookUniforms(offset_hook_shader::kOffset, all); // a base shader without the hook
 		EXPECT_TRUE(other->hookUniformWrites().empty());
+	}
+
+	// The same through the base shader with the test fill hook, tests/fill_hooks/stripes.frag.glsl.
+	class FlushFillHookTest : public ::testing::Test {
+	  protected:
+		static constexpr std::array<uint32_t, 3> kParams = {0x11223344U, 0x55667788U, 0x99AABBCCU};
+
+		void SetUp() override {
+			auto owned = std::make_unique<backend::NullBackend>();
+			gpu = owned.get();
+			Primitives::init(std::move(owned), stripes_shader::source());
+			Primitives::setCoordinateSystem(nullptr);
+			Primitives::setViewport(32, 32);
+			gpu->clearRecord();
+		}
+
+		void TearDown() override { Primitives::shutdown(); }
+
+		static void rect(
+			float											 x,
+			const Primitives::Fill&							 fill,
+			const std::optional<Foundation::LinearGradient>& gradient = std::nullopt,
+			const char*										 id = nullptr
+		) {
+			Primitives::drawRect(
+				{.bounds = {x, 0.0F, 4.0F, 4.0F}, .style = {.fill = Foundation::Color::red(), .gradient = gradient}, .fill = fill, .id = id}
+			);
+		}
+
+		static void shift(float by) {
+			const std::array<float, 4> values = {by, 0.0F, 0.0F, 0.0F};
+			Primitives::setHookUniforms(stripes_shader::kStripes, std::as_bytes(std::span(values)));
+		}
+
+		std::vector<BatchInstance> quads(const backend::NullBackend::RecordedDraw& draw) const {
+			const std::span<const uint8_t> bytes = gpu->bufferContents(gpu->geometry(draw.call.geometry)->vertices);
+			std::vector<BatchInstance>	   out(bytes.size() / sizeof(BatchInstance));
+			std::memcpy(out.data(), bytes.data(), out.size() * sizeof(BatchInstance));
+			return out;
+		}
+
+		backend::NullBackend* gpu = nullptr;
+	};
+
+	TEST_F(FlushFillHookTest, AHookedRectCarriesItsIndexAndParamsWhichTheRecordReadsBack) {
+		const Texture					 first = Primitives::createTexture({.width = 1, .height = 1});
+		const Texture					 second = Primitives::createTexture({.width = 1, .height = 1});
+		const std::array<uint32_t, 3>	 other = {1U, 2U, 3U};
+		const Foundation::LinearGradient fade{.from = Foundation::Color::white(), .to = Foundation::Color::blue()};
+		rect(0.0F, {.hook = &stripes_shader::kStripesFill, .params = kParams});
+		rect(4.0F, {});
+		Primitives::drawImage({.texture = first.handle(), .bounds = {8.0F, 0.0F, 4.0F, 4.0F}});
+		Primitives::drawImage({.texture = second.handle(), .bounds = {12.0F, 0.0F, 4.0F, 4.0F}}); // slot 1, not a fill hook
+		rect(16.0F, {.hook = &stripes_shader::kStripesFill, .params = other}, fade);			  // one fill: the gradient goes
+		Primitives::flush();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		const std::vector<backend::NullBackend::RecordedFill>& fills = gpu->draws()[0].fills;
+		ASSERT_EQ(fills.size(), 2U);
+		EXPECT_EQ(fills[0].instance, 0U);
+		EXPECT_EQ(fills[0].index, stripes_shader::kStripesFill.index);
+		EXPECT_EQ(fills[0].params, kParams);
+		EXPECT_EQ(fills[1].instance, 4U);
+		EXPECT_EQ(fills[1].params, other);
+
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 5U);
+		const uint32_t red = glm::packUnorm4x8(Foundation::Vec4(1.0F, 0.0F, 0.0F, 1.0F));
+		EXPECT_EQ(uploaded[0].slot, 1U);
+		EXPECT_EQ(uploaded[0].fills[0], red);
+		EXPECT_EQ(uploaded[0].fills[3], kParams[2]);
+		EXPECT_EQ(uploaded[1].slot, 0U);
+		EXPECT_EQ(uploaded[3].slot, 1U);
+		EXPECT_EQ(uploaded[4].fills[0], red); // style.fill, not the gradient's first stop
+	}
+
+	TEST_F(FlushFillHookTest, AHookFromAnotherShaderDrawsAsAPlainRect) {
+		const backend::FillHook			 foreign{.hook = "paper", .index = 1};
+		const backend::FillHook			 renumbered{.hook = "stripes", .index = 2};
+		const Foundation::LinearGradient fade{.from = Foundation::Color::white(), .to = Foundation::Color::blue()};
+		rect(0.0F, {.hook = &foreign, .params = kParams}, fade, "sheet");
+		rect(4.0F, {.hook = &renumbered, .params = kParams}, std::nullopt, "sheet");
+		Primitives::flush();
+
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_TRUE(gpu->draws()[0].fills.empty());
+		const std::vector<BatchInstance> uploaded = quads(gpu->draws()[0]);
+		ASSERT_EQ(uploaded.size(), 2U);
+		EXPECT_EQ(uploaded[0].slot, 0U);
+		EXPECT_EQ(uploaded[0].fills[0], glm::packUnorm4x8(Foundation::Vec4(1.0F))); // its gradient, kept
+		EXPECT_EQ(uploaded[1].fills[1], glm::packUnorm4x8(Foundation::Vec4(1.0F, 0.0F, 0.0F, 1.0F)));
+	}
+
+	TEST_F(FlushFillHookTest, ItsBlockFlushesFirstOnlyWhenAPendingRectNamesIt) {
+		const auto bytes = [](float by) {
+			const std::array<float, 4>		 values = {by, 0.0F, 0.0F, 0.0F};
+			const std::span<const std::byte> raw = std::as_bytes(std::span(values));
+			return std::vector<std::byte>(raw.begin(), raw.end());
+		};
+		const auto read = [](std::span<const std::byte> block) {
+			return std::vector<std::byte>(block.begin(), block.end());
+		};
+		rect(0.0F, {});
+		shift(2.0F); // nothing pending names the hook: no flush
+		EXPECT_TRUE(gpu->draws().empty());
+
+		rect(4.0F, {.hook = &stripes_shader::kStripesFill, .params = kParams});
+		shift(4.0F); // the two rects go first, with the block they were drawn under
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 2U);
+		rect(8.0F, {.hook = &stripes_shader::kStripesFill, .params = kParams});
+		Primitives::flush();
+
+		ASSERT_EQ(gpu->draws().size(), 2U);
+		EXPECT_EQ(read(gpu->draws()[0].hookBlock(stripes_shader::kStripes.binding)), bytes(2.0F));
+		EXPECT_EQ(read(gpu->draws()[1].hookBlock(stripes_shader::kStripes.binding)), bytes(4.0F));
 	}
 
 	TEST(FlushNoBackendTest, InitWithoutABackendLeavesTheRendererOff) {

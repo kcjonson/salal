@@ -109,10 +109,37 @@ namespace Renderer::backend {
 		hookHistory.push_back(std::move(write));
 	}
 
+	std::vector<NullBackend::RecordedFill> NullBackend::fillsOf(const DrawCall& call) const {
+		// The rect mode, as BatchRenderer.h has it, whose texture-slot byte is its fill hook's index.
+		constexpr uint8_t		  kRectMode = 1;
+		std::vector<RecordedFill> fills;
+		const GeometryDesc*		  geometry = geometryTable.find(call.geometry);
+		const BufferRecord*		  buffer = geometry != nullptr ? bufferTable.find(geometry->vertices) : nullptr;
+		if (geometry == nullptr || geometry->layout != VertexLayout::Batched || buffer == nullptr) {
+			return fills;
+		}
+		for (uint32_t i = 0; i < call.instanceCount; ++i) {
+			const size_t offset = (static_cast<size_t>(call.firstInstance) + i) * sizeof(BatchInstance);
+			if (offset + sizeof(BatchInstance) > buffer->bytes.size()) {
+				break;
+			}
+			BatchInstance quad;
+			std::memcpy(&quad, buffer->bytes.data() + offset, sizeof(BatchInstance));
+			if (quad.mode == kRectMode && quad.slot != 0) {
+				fills.push_back({.instance = i, .index = quad.slot, .params = {quad.fills[1], quad.fills[2], quad.fills[3]}});
+			}
+		}
+		return fills;
+	}
+
 	void NullBackend::draw(std::span<const DrawCall> calls) {
 		for (const DrawCall& call : calls) {
 			recordedDraws.push_back(
-				{.call = call, .uniforms = currentUniforms, .hookUniforms = currentHooks, .submission = submissionCount}
+				{.call = call,
+				 .uniforms = currentUniforms,
+				 .hookUniforms = currentHooks,
+				 .fills = fillsOf(call),
+				 .submission = submissionCount}
 			);
 		}
 		++submissionCount;
