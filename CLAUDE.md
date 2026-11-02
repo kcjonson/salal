@@ -346,6 +346,16 @@ features, also a host dependency, which `salal_icons(<target> <dir>)`
 (`cmake/SalalIcons.cmake`) builds its icon tool on: every SVG in the folder
 checked against ui-design.md's icon rules, one MSDF atlas, its JSON and a name
 table embedded in the target (a game that builds no icons needn't have it).
+A game's vector art embeds the same way, with no dependency of its own:
+`salal_art(<target> <dir>)` (`cmake/SalalArt.cmake`) runs `salal_art_tool`,
+built with the renderer, which checks every SVG in the folder against what
+`renderer::loadSVG` reads through nanosvg (no filters, masks, clip paths, text,
+images, patterns, markers, `<use>` or `<style>`, failing the build naming the
+file, line and element) and embeds it, so `<ns>::art(name)` hands loadSVG's
+byte-span overload a file's bytes and nothing is staged beside the exe. A game
+that loads SVG from disk instead resolves the path itself
+(`Foundation::findResource`); `SVGLoader` takes no asset root. The art check
+and ui's icon check share one scanner of SVG markup (`renderer/vector/SvgMarkup.h`).
 Worldsim's `pugixml`, `lua` and `sol2` serve its `assets` target and stay behind.
 An audio library is proposed and not decided
 (worldsim has none; `miniaudio` is the recommendation).

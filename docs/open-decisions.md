@@ -407,6 +407,14 @@ is no atlas: surface texture is a fill hook ([shader-hooks.md](shader-hooks.md),
 read. What is left of H is worldsim's path conventions and whether `SVGLoader`
 takes a game's asset root, decided when a game first loads its own SVG.
 
+Narrowed 2026-11-02, when a game first loaded its own SVG: `SVGLoader` takes no
+asset root. A game that loads from disk resolves the path with
+`Foundation::findResource`, which already searches its resource roots and the
+executable's folder; one that would rather not stage files embeds a folder with
+`salal_art()`, checked at build time against what nanosvg reads, and hands
+`loadSVG`'s byte-span overload the bytes. What is left of H is worldsim's own
+path conventions, which are worldsim's.
+
 Needed by. Phase 1 at the latest for what moves; the convention question can
 wait until Job B's presentation phase.
 

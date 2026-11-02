@@ -89,6 +89,7 @@ include(cmake/SalalTesting.cmake)
 include(cmake/SalalBaseShader.cmake)
 include(cmake/SalalIcons.cmake)
 include(cmake/SalalTokens.cmake)
+include(cmake/SalalArt.cmake)
 
 add_subdirectory(libs/foundation)
 add_subdirectory(libs/renderer)
