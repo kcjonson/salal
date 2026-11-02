@@ -550,8 +550,12 @@ root().removeChild(row);   // health.get() is null from here on
     default, places each child at its own top-level `position`, its auto size
     hugging their boxes; Flex (and Grid) flow theirs, and `position:
     Absolute` takes a child out of a flowing parent to its `position` or
-    `inset`. The default isn't CSS's Block: in normal flow a child's
-    `position` means nothing and children stack, so every hand-placed screen
+    `inset`, whose edges are px or a percentage of the parent's whole box
+    (CSS's padding box, whatever the parent's padding), resolved in the same
+    layout pass as everything else, so a plate's hotspots placed by fraction
+    follow it through a resize in the frame it happens. The default isn't
+    CSS's Block: in normal flow a child's `position` means nothing and
+    children stack, so every hand-placed screen
     and every overlay inside a component (a bar's fill over its track) would
     need `Absolute` on each child. Block keeps its CSS meaning and comes when
     a game asks, since a Flex column already stacks

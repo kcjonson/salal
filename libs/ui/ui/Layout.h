@@ -115,14 +115,17 @@ namespace ui {
 		bool									 operator==(const Edges&) const = default;
 	};
 
-	// An absolutely positioned child's offsets from its parent's edges, px, each optional. Left and
-	// right both set stretch an auto width between them; right alone anchors to the right edge. On a
-	// relatively positioned flex or grid child they nudge it from where the flow put it.
+	// An absolutely positioned child's offsets from its parent's edges: px, a percentage of the parent's
+	// box (left and right of its width, top and bottom of its height), or auto, which leaves that edge
+	// unset. The box is the parent's whole box, its padding included (CSS's padding box). Left and right
+	// both set stretch an auto width between them; right alone anchors to the right edge. On a
+	// relatively positioned flex or grid child they nudge it from where the flow put it, a percentage
+	// being of the flex container's content box or the grid area.
 	struct Inset {
-		std::optional<float> top;
-		std::optional<float> right;
-		std::optional<float> bottom;
-		std::optional<float> left;
+		Length top;
+		Length right;
+		Length bottom;
+		Length left;
 
 		bool operator==(const Inset&) const = default;
 	};

@@ -64,10 +64,12 @@ namespace ui::detail {
 			return 0.0F;
 		}
 
-		// A relatively positioned child's inset nudges it from where the flow put it.
-		Foundation::Vec2 nudged(Foundation::Vec2 at, const Inset& inset) {
-			at.x += inset.left ? *inset.left : (inset.right ? -*inset.right : 0.0F);
-			at.y += inset.top ? *inset.top : (inset.bottom ? -*inset.bottom : 0.0F);
+		// A relatively positioned child's inset nudges it from where the flow put it, a percentage of `box`.
+		Foundation::Vec2 nudged(Foundation::Vec2 at, const Inset& inset, Foundation::Vec2 box) {
+			const std::optional<float> left = inset.left.resolve(box.x);
+			const std::optional<float> top = inset.top.resolve(box.y);
+			at.x += left ? *left : -inset.right.resolve(box.x).value_or(0.0F);
+			at.y += top ? *top : -inset.bottom.resolve(box.y).value_or(0.0F);
 			return at;
 		}
 	} // namespace
@@ -472,7 +474,7 @@ namespace ui::detail {
 			const Foundation::Vec2 at = padding.topLeft() + (row ? Foundation::Vec2{cursor, crossAt} : Foundation::Vec2{crossAt, cursor});
 			place(
 				child,
-				nudged(at, child.layout.inset),
+				nudged(at, child.layout.inset, {contentWidth, contentHeight}),
 				row ? Foundation::Vec2{item.main, item.cross} : Foundation::Vec2{item.cross, item.main}
 			);
 			cursor += item.main + item.marginMain + gap + between;
@@ -506,7 +508,7 @@ namespace ui::detail {
 				padding.left + columnStarts[item.area.column.start] + alignedIn(areaWidth, childSize.x + margins.x, justify),
 				padding.top + rowStarts[item.area.row.start] + alignedIn(areaHeight, childSize.y + margins.y, align),
 			};
-			place(child, nudged(at, child.layout.inset), childSize);
+			place(child, nudged(at, child.layout.inset, {areaWidth, areaHeight}), childSize);
 		}
 		placeAbsoluteChildren(node);
 	}
@@ -520,25 +522,30 @@ namespace ui::detail {
 		}
 	}
 
-	// Against the parent's whole box: an inset edge anchors that side, both a pair stretch an auto
-	// size between them, and none falls back to `position`. An overlay entry goes on screen where its
-	// placement puts it, not in its opener's box, so only its own maxSize bounds the width it fills.
+	// Against the parent's whole box, its padding included: an inset edge anchors that side, both of a
+	// pair stretch an auto size between them, and none falls back to `position`; a percentage is of the
+	// box's width or height. An overlay entry goes on screen where its placement puts it, not in its
+	// opener's box, so only its own maxSize bounds the width it fills.
 	void LayoutEngine::placeAbsolute(Component& child, Foundation::Vec2 box) {
-		const Inset&		 inset = child.layout.inset;
-		std::optional<float> width;
-		std::optional<float> height;
-		if (child.sizeSpec.width.isAuto() && inset.left && inset.right) {
-			width = std::max(box.x - *inset.left - *inset.right - child.margin.horizontal(), 0.0F);
+		const Inset&			   inset = child.layout.inset;
+		const std::optional<float> top = inset.top.resolve(box.y);
+		const std::optional<float> right = inset.right.resolve(box.x);
+		const std::optional<float> bottom = inset.bottom.resolve(box.y);
+		const std::optional<float> left = inset.left.resolve(box.x);
+		std::optional<float>	   width;
+		std::optional<float>	   height;
+		if (child.sizeSpec.width.isAuto() && left && right) {
+			width = std::max(box.x - *left - *right - child.margin.horizontal(), 0.0F);
 		}
-		if (child.sizeSpec.height.isAuto() && inset.top && inset.bottom) {
-			height = std::max(box.y - *inset.top - *inset.bottom - child.margin.vertical(), 0.0F);
+		if (child.sizeSpec.height.isAuto() && top && bottom) {
+			height = std::max(box.y - *top - *bottom - child.margin.vertical(), 0.0F);
 		}
-		const float			   left = inset.left.value_or(inset.right ? 0.0F : child.position.x);
-		const float			   available = child.isOverlay() ? kUnbounded : std::max(box.x - left, 0.0F);
+		const float			   from = left.value_or(right ? 0.0F : child.position.x);
+		const float			   available = child.isOverlay() ? kUnbounded : std::max(box.x - from, 0.0F);
 		const Foundation::Vec2 childSize = measure(child, width, height, box, available);
 		const Foundation::Vec2 margins = child.margin.total();
-		const float x = inset.left ? *inset.left : (inset.right ? box.x - *inset.right - childSize.x - margins.x : child.position.x);
-		const float y = inset.top ? *inset.top : (inset.bottom ? box.y - *inset.bottom - childSize.y - margins.y : child.position.y);
+		const float			   x = left ? *left : (right ? box.x - *right - childSize.x - margins.x : child.position.x);
+		const float			   y = top ? *top : (bottom ? box.y - *bottom - childSize.y - margins.y : child.position.y);
 		place(child, {x, y}, childSize);
 	}
 
