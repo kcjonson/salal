@@ -1,6 +1,7 @@
 #include "ui/theme/Theme.h"
 
 #include "ui/Context.h"
+#include "ui/components/Button.h"
 #include "ui/shapes/Rectangle.h"
 #include "ui/shapes/Text.h"
 #include "ui/theme/Tokens.h"
@@ -70,7 +71,16 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	const ui::ThemeLoad light = ui::Theme::load({.tokens = &theme_test::tokenTable(), .inputs = {{"theme", "light"}}});
 	ASSERT_TRUE(dark.ok()) << describe(dark.diagnostics);
 	ASSERT_TRUE(light.ok()) << describe(light.diagnostics);
-	EXPECT_TRUE(dark.diagnostics.empty()) << describe(dark.diagnostics);
+	// Nothing wrong, and an info for each of ui's styles the game redefines, here its capitals on four;
+	// its own styles, under healthBar, aren't ui's.
+	std::vector<std::string> redefined;
+	for (const ui::dtcg::Diagnostic& d : dark.diagnostics) {
+		EXPECT_EQ(d.severity, ui::dtcg::Diagnostic::Severity::Info) << d.text();
+		EXPECT_NE(d.message.find("(textTransform)"), std::string::npos) << d.text();
+		redefined.push_back(d.path);
+	}
+	EXPECT_EQ(redefined, (std::vector<std::string>{"styles.button", "styles.segment", "styles.select", "styles.tab"}))
+		<< describe(dark.diagnostics);
 
 	// ui's pane, its background aliased by the game to its own palette, which the mode swaps.
 	expectColor(*dark.theme.style(ui::styles::pane.theme).backgroundColor, 0.1F, 0.12F, 0.16F);
@@ -82,12 +92,45 @@ TEST(Theme, AGameThemeOverridesUiAndSwitchesModes) {
 	expectColor(*fill.backgroundColor, 230.0F / 255.0F, 102.0F / 255.0F, 26.0F / 255.0F);
 	EXPECT_FLOAT_EQ(fill.borderRadius.value_or(-1.0F), 2.0F);
 	EXPECT_TRUE(dark.theme.style(theme_test::styles::healthBar::track.theme).backgroundColor.has_value());
+	// A halo: a text shadow with no offset, its spread and blur from the token, its colour through the mode.
+	const std::optional<Foundation::BoxShadow> halo = light.theme.style(theme_test::styles::mapLabel.theme).textShadow;
+	ASSERT_TRUE(halo.has_value());
+	expectColor(halo->color, 0.08F, 0.09F, 0.11F);
+	EXPECT_FLOAT_EQ(halo->spread, 2.0F);
+	EXPECT_FLOAT_EQ(halo->blur, 1.0F);
+	EXPECT_EQ(halo->offset, Foundation::Vec2(0.0F, 0.0F));
+	// A tab's border on three sides, from salal's extension on its group, dashed by its strokeStyle.
+	const ui::Style& tab = dark.theme.style(theme_test::styles::sectionTab.theme);
+	ASSERT_TRUE(tab.borderSides.has_value());
+	EXPECT_TRUE(tab.borderSides->top && tab.borderSides->left && tab.borderSides->right && !tab.borderSides->bottom);
+	EXPECT_FALSE(dark.theme.style(ui::styles::pane.theme).borderSides.has_value());
+	ASSERT_TRUE(tab.borderStyle.has_value());
+	const std::optional<Foundation::DashPattern> dashes = tab.borderStyle->dash(2.0F);
+	ASSERT_TRUE(dashes.has_value());
+	EXPECT_EQ(dashes->dash, 6.0F);
+	EXPECT_EQ(dashes->gap, 3.0F);
+	EXPECT_EQ(dashes->cap, Foundation::DashCap::Round);
+	// CSS's keywords, sized by the stroke's width.
+	EXPECT_EQ(ui::StrokeStyle{.kind = ui::StrokeStyle::Kind::Dashed}.dash(2.0F)->gap, 6.0F);
+	const std::optional<Foundation::DashPattern> dots = ui::StrokeStyle{.kind = ui::StrokeStyle::Kind::Dotted}.dash(2.0F);
+	EXPECT_TRUE(dots->dash == 0.0F && dots->gap == 4.0F && dots->cap == Foundation::DashCap::Round);
+	EXPECT_FALSE(ui::StrokeStyle{}.dash(2.0F).has_value());
 	expectColor(light.theme.get(theme_test::tokens::palette::slate::_900), 0.96F, 0.97F, 0.98F);
 	// The game's capitals on ui's button, from salal's extension on the style's group; ui sets none.
 	EXPECT_EQ(dark.theme.style(ui::styles::button.theme).textTransform, Foundation::TextTransform::Uppercase);
 	EXPECT_EQ(light.theme.style(ui::styles::button.theme).textTransform, Foundation::TextTransform::Uppercase);
 	EXPECT_FALSE(dark.theme.style(ui::styles::pane.theme).textTransform.has_value());
 	EXPECT_FALSE(ui::Theme::load({}).theme.style(ui::styles::button.theme).textTransform.has_value());
+
+	// A game style that takes ui's name merges into it: reported with the fields and the file.
+	const HandTable		collidingTab(R"({ "styles": { "tab": { "color": { "$type": "color", "$value": "{base.color.white}" } } } })", {});
+	const ui::ThemeLoad collided = ui::Theme::load({.tokens = &collidingTab.table});
+	ASSERT_EQ(collided.diagnostics.size(), 1U) << describe(collided.diagnostics);
+	EXPECT_EQ(
+		collided.diagnostics[0].text(),
+		"info: hand/hand.tokens.json: styles.tab: redefines ui's style (color); a game's own "
+		"styles belong under a group of their own"
+	);
 }
 
 TEST(Theme, FontRolesMapToTheGamesFamilies) {
@@ -100,6 +143,51 @@ TEST(Theme, FontRolesMapToTheGamesFamilies) {
 	// display and mono name families the game didn't register: the default family, and a warning.
 	EXPECT_EQ(load.theme.get(ui::tokens::font::family::display), Renderer::FontFamily::Default);
 	EXPECT_FALSE(load.diagnostics.empty());
+}
+
+// CSS Fonts 4's matching: from 400 to 500 up to 500 first, then lighter, then heavier; under 400
+// lighter first; over 500 heavier first.
+TEST(Theme, AWeightPicksTheNearestFaceOfItsRole) {
+	const float threeWeights[] = {300.0F, 500.0F, 700.0F};
+	const float twoWeights[] = {300.0F, 600.0F};
+	EXPECT_EQ(ui::matchWeight(threeWeights, 400.0F), 1U);
+	EXPECT_EQ(ui::matchWeight(threeWeights, 600.0F), 2U);
+	EXPECT_EQ(ui::matchWeight(threeWeights, 200.0F), 0U);
+	EXPECT_EQ(ui::matchWeight(threeWeights, 900.0F), 2U);
+	EXPECT_EQ(ui::matchWeight(threeWeights, 700.0F), 2U);
+	EXPECT_EQ(ui::matchWeight(twoWeights, 450.0F), 0U);
+	EXPECT_EQ(ui::matchWeight(twoWeights, 350.0F), 0U);
+
+	// A display role with a semibold and a bold face: title asks 600, display 700.
+	constexpr Renderer::FontFamily kBody{3};
+	constexpr Renderer::FontFamily kSemibold{4};
+	constexpr Renderer::FontFamily kBold{5};
+	const ui::FontFamilyName	   names[] = {
+		  {.name = "body", .family = kBody},
+		  {.name = "display", .family = kSemibold, .weight = 600.0F},
+		  {.name = "display", .family = kBold, .weight = 700.0F},
+	  };
+	ui::ThemeLoad load = ui::Theme::load({.fontFamilies = names});
+	EXPECT_EQ(load.theme.style(ui::styles::text::title.theme).fontFamily, kSemibold);
+	EXPECT_EQ(load.theme.style(ui::styles::text::display.theme).fontFamily, kBold);
+	EXPECT_EQ(load.theme.get(ui::tokens::typography::display).family, kBold);
+	EXPECT_EQ(load.theme.face(kBody, 700.0F), kBody); // body has one face
+
+	// Mounted, the weight a component sets picks the face, and a control's label takes its weight.
+	ui::Context context({800.0F, 600.0F});
+	context.setTheme(std::move(load.theme));
+	const auto lighter = context.root().addChild<ui::Text>({.style = ui::styles::text::display.extend({.fontWeight = 400.0F})});
+	EXPECT_EQ(lighter.get()->getStyle().fontFamily, kSemibold);
+	const auto button = context.root().addChild<ui::Button>({.style = {.fontFamily = kSemibold, .fontWeight = 700.0F}, .label = "Go"});
+	EXPECT_EQ(button.get()->getStyle().fontFamily, kBold);
+	const ui::Component* label = nullptr;
+	for (const ui::ComponentId id : button.get()->getChildren()) {
+		if (const ui::Component* child = context.find(id); child != nullptr && std::string_view(child->typeName()) == "Text") {
+			label = child;
+		}
+	}
+	ASSERT_NE(label, nullptr);
+	EXPECT_EQ(label->getStyle().fontFamily, kBold);
 }
 
 TEST(Theme, AnUnknownPathWarns) {
@@ -118,6 +206,15 @@ TEST(Theme, AnUnknownPathWarns) {
 	ASSERT_EQ(aboveLoad.diagnostics.size(), 1U) << describe(aboveLoad.diagnostics);
 	EXPECT_EQ(aboveLoad.diagnostics[0].path, "styles.text");
 	EXPECT_FALSE(aboveLoad.theme.style(ui::styles::text::body.theme).textTransform.has_value());
+
+	// A stroke style the renderer can't draw draws solid, and says so, after the info that ui's pane is restyled.
+	const HandTable		doubled(R"({ "styles": { "pane": { "borderStyle": { "$type": "strokeStyle", "$value": "double" } } } })", {});
+	const ui::ThemeLoad doubledLoad = ui::Theme::load({.tokens = &doubled.table});
+	EXPECT_TRUE(doubledLoad.ok()) << describe(doubledLoad.diagnostics);
+	ASSERT_EQ(doubledLoad.diagnostics.size(), 2U) << describe(doubledLoad.diagnostics);
+	EXPECT_EQ(doubledLoad.diagnostics[0].severity, ui::dtcg::Diagnostic::Severity::Info);
+	EXPECT_EQ(doubledLoad.diagnostics[1].path, "styles.pane.borderStyle");
+	EXPECT_EQ(doubledLoad.theme.style(ui::styles::pane.theme).borderStyle->kind, ui::StrokeStyle::Kind::Solid);
 }
 
 TEST(Theme, AMissingPathIsAnErrorWhenStrictAndADefaultEitherWay) {

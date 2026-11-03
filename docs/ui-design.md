@@ -167,6 +167,27 @@ hook can also see (1 and 3 to 5), which the instance's replace. A rect's fill
 hook (shader-hooks.md, "Fill hooks", built 2026-10-31) adds no field: its index
 is the texture-slot byte and its params corners 1 to 3 of the fill.
 
+The drawing added since fits the same 104 bytes, each in fields its mode didn't
+read (BatchRenderer.h has the table). A text shadow or halo
+(`Primitives::drawGlyphShadow`, built 2026-11-02) is its glyphs' quads again in
+the text mode, its spread and blur in the halves a rect keeps its border width
+and outset in, which text never read; the shader widens the coverage ramp by
+them, so a plain glyph pays a max, a min and a divide a pixel. A circle's shadow
+is a rect's shadow quad with the radius at every corner, and a polygon's is its
+fill's flat quads again with the feather ring widened to the blur; neither adds
+a field or a line of shader. A rect's border on some sides takes four of the
+flags byte's five free bits, its bare sides, leaving one; the corners beside a
+bare side ride in the radii as 0. A rect whose border is on every side pays an
+integer test a pixel for it, and only one with a bare side measures the second
+and third rounded boxes its band then lies between. A dash pattern takes no
+field and no flag: a rect's border carries its dash, its gap (negative for
+round caps) and its offset in the three shape halves a rect left at 0, and a
+stroke piece carries them in fill corners 1 and 2, its colour in corner 0's.
+`base.frag` measures a border round its centre line and a stroke along its
+piece's axis, so a dashed border is still one quad and a dashed line as many as
+a solid one. Every rect and stroke pixel pays one float compare for it; only a
+dashed one walks the outline (a dashed border, an `atan` on its corners).
+
 Why: the per-vertex layout writes everything about a rect (colour, border,
 radius, clip, mode) into each of its four 80-byte vertices plus six indices,
 344 bytes a rect against 104. On desktop the bus doesn't notice either, but
@@ -193,6 +214,12 @@ A theme is design tokens in the
 - **A game's tokens file overrides any tier.** Aliases are the mapping: a game
   keeps its own base names and points ui's semantic tokens at them, or
   overrides a component token directly. There is no separate mapping format.
+  Files layer by path, so a game style that takes a name ui's styles already
+  use (`styles.tab`) merges into ui's and restyles every tab. That is how a
+  game restyles ui's components on purpose, so it isn't an error, but the
+  load reports each ui style a game's layer redefines as an info naming the
+  fields, and a game's own styles go under a group of their own
+  (`styles.hud.tab`, not `styles.tab`).
 - **Modes through the Resolver module.** Light and dark, per-screen themes and
   high contrast are contexts of a resolver file.
 - **Only the root has a theme.** A scene's root carries the resolved theme.
@@ -211,7 +238,23 @@ is (R5.24), with another colour space taking its `hex` fallback or failing
 the load; `dimension` in px (rem times a root size); `duration` in ms;
 `cubicBezier` for the animator; `fontFamily` and `typography` resolving to the
 game's `FontFamily` ids by name; `shadow` and `border` to the renderer's
-styles.
+styles. A style's `boxShadow` and `textShadow` each take the first outer layer
+of their shadow token; `textShadow` is CSS's with the token's spread kept, which
+is a halo's width. A style's `borderStyle`, a `strokeStyle` token, dashes a
+Rectangle's border and a Line's stroke: `dashed` is three widths on and three
+off, `dotted` round dots a width across and a width apart, and a `dashArray`
+draws its first dash and gap (one length is both) with its `lineCap`. `double`,
+`groove`, `ridge`, `outset` and `inset`, and a `dashArray` of more than two
+lengths, load with a warning and draw solid or with their first two.
+
+A font is one weight, so a role with several (a display face in semibold and
+bold) is several families under one name: the game registers each with its
+weight (`ThemeArgs::fontFamilies`), and a style's `fontWeight` picks the face,
+the nearest by CSS's matching rule ([CSS Fonts 4, 5.2](https://www.w3.org/TR/css-fonts-4/#font-style-matching)),
+when the theme resolves the style. So `title` at 600 draws the semibold, a
+style extended to 700 the bold, and a control passes its weight to its label
+with its family. A family registered under two names picks among the first
+one's faces.
 
 A text transform (CSS's `text-transform`) has no type in the format, so it is
 salal's extension, in the place the format leaves for one: a style's group
@@ -243,14 +286,30 @@ checkbox's, a menu item's) takes that style's. Badge, KeyCap, Divider, Stat's
 and ProgressBar's labels and Dialog's kicker set `uppercase` in code, so a
 theme doesn't change their case.
 
+The sides a box's border is drawn on have no type either (a `border` token is
+a colour, a width and a stroke style, all four sides), so they are salal's
+extension too, `"borderSides": ["left", "top", "right"]` beside or instead of
+`textTransform`, with the same rules: on the style's own group, a later file's
+replacing an earlier one's whole, and anything but a list of `top`, `right`,
+`bottom` and `left`, each once, an error. It sets `Style::borderSides`, which a
+Rectangle (and every control drawn as one) hands the renderer's `BorderSides`.
+A side left out has no border, and with a border width the corners beside it
+are square, so one `borderRadius` gives a tab round top corners and a square
+foot.
+
 What ui's tokens define, beyond palette roles (surfaces, text, lines, scrim,
 focus ring), spacing, radii and motion: font roles (display, body, mono), each
-naming a game family; a semantic tone set (default, accent, info, positive,
+naming a game family, its faces picked by weight; a semantic tone set (default, accent, info, positive,
 warning, danger, plus `Auto`, picked by value); and `size` (sm, md, lg)
 setting font size and control height. State layers apply in R11.12's order
 (base, hover, pressed, open and active, focus ring), their washes coming from
 tokens. A disabled control draws whole at the disabled opacity, fill, border,
-label and icon, so one with a clear fill still reads as disabled. Worldsim's design language (elevation by tint, its line
+label and icon, so one with a clear fill still reads as disabled. A key or pad
+activation has no release to end a press, so it shows the pressed layer for
+`state.pressed.hold`, and a press looks the same however it comes. A control's
+state (hovered, pressed, active, focused, focus-visible) is readable to its
+subclasses, which hear it change as it happens (`Control::onInteractionChanged`),
+for a look the layers don't draw, a lift on hover. Worldsim's design language (elevation by tint, its line
 alphas, two accents, its radius scale and control heights, Panel's kicker and
 bracket ticks) is worldsim's tokens and components, not engine rules.
 
@@ -483,16 +542,20 @@ root().removeChild(row);   // health.get() is null from here on
   - geometry: `position`, `size` (px, percent or auto), `minSize`, `maxSize`,
     `margin`, `transform` (render and hit test only)
   - layout: `layout`, with CSS names as taffy uses them: `display` (Free,
-    Flex, Grid, None), `flexDirection`, `gap`, `padding`, `alignItems`,
-    `justifyItems`, `justifyContent`, `gridTemplateColumns`,
-    `gridTemplateRows`, and as a child `flexGrow`, `flexShrink`, `alignSelf`,
-    `justifySelf`, `gridColumn`, `gridRow`, `position` (Relative or Absolute)
-    and `inset`. `display: Free`, the
+    Flex, Grid, None), `flexDirection`, `flexWrap`, `gap`, `padding`,
+    `boxSizing`, `alignItems`, `justifyItems`, `justifyContent`,
+    `gridTemplateColumns`, `gridTemplateRows`, and as a child `flexGrow`,
+    `flexShrink`, `alignSelf`, `justifySelf`, `gridColumn`, `gridRow`,
+    `position` (Relative or Absolute) and `inset`. `display: Free`, the
     default, places each child at its own top-level `position`, its auto size
     hugging their boxes; Flex (and Grid) flow theirs, and `position:
     Absolute` takes a child out of a flowing parent to its `position` or
-    `inset`. The default isn't CSS's Block: in normal flow a child's
-    `position` means nothing and children stack, so every hand-placed screen
+    `inset`, whose edges are px or a percentage of the parent's whole box
+    (CSS's padding box, whatever the parent's padding), resolved in the same
+    layout pass as everything else, so a plate's hotspots placed by fraction
+    follow it through a resize in the frame it happens. The default isn't
+    CSS's Block: in normal flow a child's `position` means nothing and
+    children stack, so every hand-placed screen
     and every overlay inside a component (a bar's fill over its track) would
     need `Absolute` on each child. Block keeps its CSS meaning and comes when
     a game asks, since a Flex column already stacks
@@ -540,6 +603,28 @@ root().removeChild(row);   // health.get() is null from here on
   subgrid, baselines, and `justifyContent` and `alignContent` on a grid (its
   tracks start at its content box's start, and auto tracks stretch into free
   space).
+- **Flex wraps as CSS's `flex-wrap`** (decided 2026-11-02, for a game's
+  resource strip that wraps when the window narrows): `flexWrap: Wrap` starts
+  a new line where the next child's margin box, at its clamped basis, would
+  pass the main size, and a row with an auto width breaks at the room there
+  is and hugs its widest line, as a text wraps and an auto-width grid sizes
+  its columns. Each line grows and shrinks its own children and is as big
+  across as its biggest, a stretched child fills its line, and the lines are
+  `gap` apart, the one gap for both axes Grid settled. Where wrap follows
+  salal over CSS: the lines pack from the start, each its tallest child's
+  height, where CSS's initial `align-content` stretches them into a fixed
+  container's free space. Not built until a game asks: `wrap-reverse` and
+  `alignContent`.
+- **Box sizing is CSS's `box-sizing`** (decided 2026-11-02), border-box by
+  default, which is what every node did before it: a px or percentage
+  `size`, `minSize` and `maxSize` are the whole box, padding in. `boxSizing:
+  ContentBox` makes them the content box with the padding added outside,
+  which is CSS's initial value; salal keeps border-box as its default, as
+  most stylesheets reset it. An auto size is the content and the padding
+  either way. Layout has no border, so the padding is all the difference. An
+  absolutely placed child places against its parent's whole box, CSS's
+  padding box, whatever the parent's box sizing, and a flowing child's
+  percentage is of the parent's content box either way.
 
 Why the slot map over a parent-owned tree: worldsim's three ownership fixes
 (a pointer taken before arena placement, a focus registration gone stale on a

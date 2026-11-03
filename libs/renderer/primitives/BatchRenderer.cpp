@@ -31,7 +31,7 @@ namespace Renderer {
 
 		constexpr float kTwoPi = 2.0F * std::numbers::pi_v<float>;
 
-		// How far a feather ring's outer edge may run out at a sharp corner, in pixels.
+		// How far a feather ring's outer edge may run out at a sharp corner, in ring widths.
 		constexpr float kFeatherMiterLimit = 4.0F;
 
 		// The stream buffer's first size; the backend grows it as a flush needs.
@@ -155,7 +155,7 @@ namespace Renderer {
 		const Foundation::Rect&							 bounds,
 		const Foundation::Color&						 fillColor,
 		const std::optional<Foundation::BorderStyle>&	 border,
-		float											 cornerRadius,
+		const CornerRadii&								 radii,
 		const std::optional<Foundation::LinearGradient>& gradient,
 		int32_t											 key,
 		Primitives::BlendMode							 blend,
@@ -200,16 +200,17 @@ namespace Renderer {
 			}
 		}
 
-		// The border: its colour, width and position, centred when there is none
+		// The border: its colour, width, position, centred when there is none, and bare sides
 		uint32_t borderColor = 0;
 		float	 borderWidth = 0.0F;
 		uint8_t	 borderPosition = 1;
+		uint8_t	 bare = 0;
 		if (border.has_value()) {
 			borderColor = premultiplied(border->color.toVec4());
 			borderWidth = border->width;
-			if (border->cornerRadius > 0.0F) {
-				cornerRadius = border->cornerRadius;
-			}
+			const Foundation::BorderSides& sides = border->sides;
+			bare =
+				static_cast<uint8_t>((sides.top ? 0U : 1U) | (sides.right ? 0U : 2U) | (sides.bottom ? 0U : 4U) | (sides.left ? 0U : 8U));
 			switch (border->position) {
 				case Foundation::BorderPosition::Inside:
 					borderPosition = 0;
@@ -244,8 +245,8 @@ namespace Renderer {
 
 		BatchInstance& quad = pushQuad(QuadMode::Rect, corners, blend);
 		quad.geometry = {halfW, halfH, extentW, extentH};
-		quad.radii[0] = halves(cornerRadius, cornerRadius);
-		quad.radii[1] = quad.radii[0];
+		quad.radii[0] = halves(radii[0], radii[1]);
+		quad.radii[1] = halves(radii[2], radii[3]);
 		for (int i = 0; i < 4; ++i) {
 			quad.fills[i] = premultiplied(colors[i]);
 		}
@@ -256,9 +257,74 @@ namespace Renderer {
 		}
 		quad.border = borderColor;
 		quad.shape[0] = halves(borderWidth, 0.0F);
-		quad.flags |= static_cast<uint8_t>(borderPosition << kQuadBorderShift);
+		// A dash runs round the border's centre line, a whole number of periods, one centred on
+		// the top-left corner's middle, where the shader starts measuring.
+		if (border.has_value() && border->dash.has_value() && borderWidth > 0.0F) {
+			const float		   centre = borderPosition == 0 ? -borderWidth * 0.5F : (borderPosition == 2 ? borderWidth * 0.5F : 0.0F);
+			const ResolvedDash dash = resolveDash(*border->dash, borderWidth, rectOutlineLength({halfW, halfH}, radii, centre), true);
+			if (dash.gap > 0.0F) {
+				quad.shape[0] = halves(borderWidth, dash.dash);
+				quad.shape[1] =
+					halves(dash.round ? -dash.gap : dash.gap, std::fmod(dash.offset + (dash.dash * 0.5F), dash.dash + dash.gap));
+			}
+		}
+		quad.flags |= static_cast<uint8_t>((borderPosition << kQuadBorderShift) | (bare << kQuadBareShift));
 
 		recordGroup(groupStart, key, blend);
+	}
+
+	ResolvedDash resolveDash(const Foundation::DashPattern& pattern, float width, float length, bool closed) {
+		float dash = pattern.dash;
+		float gap = pattern.gap;
+		float phase = pattern.phase;
+		if (pattern.cap == Foundation::DashCap::Square) {
+			dash += width;
+			gap -= width;
+			phase += width * 0.5F;
+		}
+		if (!(dash >= 0.0F) || !(gap > 0.0F) || !std::isfinite(dash + gap + phase)) {
+			return {};
+		}
+		float period = dash + gap;
+		if (closed && length > 0.0F && std::isfinite(length)) {
+			const float scale = length / (std::max(std::round(length / period), 1.0F) * period);
+			dash *= scale;
+			gap *= scale;
+			phase *= scale;
+			period *= scale;
+		}
+		float offset = std::fmod(phase, period);
+		if (offset < 0.0F) {
+			offset += period;
+		}
+		return {.dash = dash, .gap = gap, .offset = offset, .round = pattern.cap == Foundation::DashCap::Round};
+	}
+
+	float rectOutlineLength(Foundation::Vec2 halfSize, const CornerRadii& radii, float centre) {
+		const Foundation::Vec2 half = halfSize + centre;
+		if (!(half.x > 0.0F) || !(half.y > 0.0F)) {
+			return 0.0F;
+		}
+		// Four straight runs and four quarter arcs: each corner's radius takes 2r off the runs and
+		// gives back a quarter of its circle, as base.frag's outlineLength walks them.
+		float radiusSum = 0.0F;
+		for (const float radius : radii) {
+			radiusSum += std::clamp(radius + centre, 0.0F, std::min(half.x, half.y));
+		}
+		return (4.0F * (half.x + half.y)) + (((std::numbers::pi_v<float> * 0.5F) - 2.0F) * radiusSum);
+	}
+
+	CornerRadii rectCornerRadii(float radius, const std::optional<Foundation::BorderStyle>& border) {
+		if (!border.has_value() || !(border->width > 0.0F)) {
+			return {radius, radius, radius, radius};
+		}
+		const Foundation::BorderSides& sides = border->sides;
+		return {
+			sides.top && sides.left ? radius : 0.0F,
+			sides.top && sides.right ? radius : 0.0F,
+			sides.bottom && sides.right ? radius : 0.0F,
+			sides.bottom && sides.left ? radius : 0.0F,
+		};
 	}
 
 	uint8_t BatchRenderer::fillIndex(const backend::FillHook& hook, const char* id) {
@@ -290,7 +356,7 @@ namespace Renderer {
 	void BatchRenderer::addShadowQuad(
 		const Foundation::Rect&		 bounds,
 		const Foundation::BoxShadow& shadow,
-		float						 cornerRadius,
+		const CornerRadii&			 radii,
 		int32_t						 key,
 		Primitives::BlendMode		 blend
 	) {
@@ -303,7 +369,6 @@ namespace Renderer {
 			return;
 		}
 		const float			   blur = shadow.blur > 0.0F ? shadow.blur : 0.5F;
-		const float			   radius = cornerRadius + shadow.spread;
 		const float			   cx = bounds.x + (bounds.width * 0.5F) + shadow.offset.x;
 		const float			   cy = bounds.y + (bounds.height * 0.5F) + shadow.offset.y;
 		const float			   extentW = halfW + blur;
@@ -314,8 +379,8 @@ namespace Renderer {
 
 		BatchInstance& quad = pushQuad(QuadMode::Shadow, corners, blend);
 		quad.geometry = {halfW, halfH, extentW, extentH};
-		quad.radii[0] = halves(radius, radius);
-		quad.radii[1] = quad.radii[0];
+		quad.radii[0] = halves(radii[0] + shadow.spread, radii[1] + shadow.spread);
+		quad.radii[1] = halves(radii[2] + shadow.spread, radii[3] + shadow.spread);
 		const uint32_t color = premultiplied(shadow.color.toVec4());
 		std::fill(std::begin(quad.fills), std::end(quad.fills), color);
 		quad.shape[1] = halves(blur, 0.0F);
@@ -333,7 +398,7 @@ namespace Renderer {
 		meshPositions.resize(mesh.vertices.size());
 		meshColors.resize(mesh.vertices.size());
 		for (size_t i = 0; i < mesh.vertices.size(); ++i) {
-			meshPositions[i] = TransformPosition(mesh.vertices[i], currentTransform, isIdentity);
+			meshPositions[i] = TransformPosition(mesh.vertices[i] + mesh.offset, currentTransform, isIdentity);
 			meshColors[i] = mesh.colors != nullptr ? premultiplied(mesh.colors[i].toVec4()) : uniformColor;
 		}
 
@@ -351,14 +416,16 @@ namespace Renderer {
 		}
 
 		if (mesh.feather != nullptr && !mesh.feather->empty()) {
-			addFeather(*mesh.feather, mesh.blend);
+			// A local width reaches its area scale's worth of logical pixels on screen.
+			const float width = mesh.featherWidth > 0.0F ? mesh.featherWidth / pixelPadding
+														 : 1.0F / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
+			addFeather(*mesh.feather, width, mesh.blend);
 		}
 
 		recordGroup(groupStart, mesh.key, mesh.blend);
 	}
 
-	void BatchRenderer::addFeather(const BoundaryLoops& loops, Primitives::BlendMode blend) {
-		const float pixel = 1.0F / (coordinateSystem != nullptr ? coordinateSystem->getPixelRatio() : 1.0F);
+	void BatchRenderer::addFeather(const BoundaryLoops& loops, float width, Primitives::BlendMode blend) {
 		// The loops keep the mesh on their left; a mirroring transform turns it to the right.
 		const float determinant = (currentTransform[0][0] * currentTransform[1][1]) - (currentTransform[0][1] * currentTransform[1][0]);
 		const float side = determinant < 0.0F ? -1.0F : 1.0F;
@@ -384,12 +451,12 @@ namespace Renderer {
 				} else if (normalOut == Foundation::Vec2(0.0F, 0.0F)) {
 					normalOut = normalIn;
 				}
-				// The miter is 1 / cos(half the turn), 2 / |sum|, pixels long; a spike back on
-				// itself has no miter and goes a pixel along its last edge's normal.
+				// The miter is 1 / cos(half the turn), 2 / |sum|, widths long; a spike back on
+				// itself has no miter and goes a width along its last edge's normal.
 				const Foundation::Vec2 sum = normalIn + normalOut;
 				const float			   sumLength = glm::length(sum);
-				featherOuter[v] = here + (sumLength > 1e-6F ? sum * (pixel * std::min(kFeatherMiterLimit, 2.0F / sumLength) / sumLength)
-															: normalOut * pixel);
+				featherOuter[v] = here + (sumLength > 1e-6F ? sum * (width * std::min(kFeatherMiterLimit, 2.0F / sumLength) / sumLength)
+															: normalOut * width);
 			}
 			// A quad an edge, its inner side the fill's colour fading to transparent outside
 			for (uint32_t v = 0; v < size; ++v) {
@@ -408,13 +475,16 @@ namespace Renderer {
 		std::span<const StrokePiece> pieces,
 		const Foundation::Color&	 color,
 		int32_t						 key,
-		Primitives::BlendMode		 blend
+		Primitives::BlendMode		 blend,
+		const ResolvedDash&			 dash
 	) {
 		if (clipEmpty || !invertible) {
 			return;
 		}
 		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
 		const uint32_t fill = premultiplied(color.toVec4());
+		const float	   period = dash.dash + dash.gap;
+		const uint32_t dashWord = dash.gap > 0.0F ? halves(dash.dash, dash.round ? -dash.gap : dash.gap) : 0U;
 		const bool	   isIdentity = transformClass == TransformClass::kIdentity;
 		for (const StrokePiece& piece : pieces) {
 			Foundation::Vec2 onScreen[StrokePiece::kMaxCorners];
@@ -433,8 +503,14 @@ namespace Renderer {
 				const uint8_t		   last = std::min<uint8_t>(k + 2, piece.cornerCount - 1);
 				const Foundation::Vec2 corners[4] = {onScreen[0], onScreen[k], onScreen[k + 1], onScreen[last]};
 				BatchInstance&		   quad = pushScreenQuad(flat ? QuadMode::Flat : QuadMode::Stroke, corners, blend);
-				std::fill(std::begin(quad.fills), std::end(quad.fills), fill);
-				if (!flat) {
+				if (flat) {
+					std::fill(std::begin(quad.fills), std::end(quad.fills), fill);
+				} else {
+					quad.fills[0] = fill;
+					if (dashWord != 0U) {
+						quad.fills[1] = dashWord;
+						quad.fills[2] = std::bit_cast<uint32_t>(std::fmod(piece.along + dash.offset, period));
+					}
 					quad.geometry = {alongAxis.x, alongAxis.y, alongNormal.x, alongNormal.y};
 					quad.radii[0] = std::bit_cast<uint32_t>(center.x);
 					quad.radii[1] = std::bit_cast<uint32_t>(center.y);
@@ -504,7 +580,8 @@ namespace Renderer {
 		TextureHandle			 atlas,
 		float					 pixelRange,
 		int32_t					 key,
-		Primitives::BlendMode	 blend
+		Primitives::BlendMode	 blend,
+		const TextEdge&			 edge
 	) {
 		if (clipEmpty) {
 			return;
@@ -561,6 +638,7 @@ namespace Renderer {
 		BatchInstance& quad = pushScreenQuad(QuadMode::Text, corners, blend, resolvedAtlas);
 		quad.geometry = {uvMin.x, uvMax.y, uvMax.x, uvMin.y};
 		std::fill(std::begin(quad.fills), std::end(quad.fills), premultiplied(color.toVec4()));
+		quad.shape[0] = halves(edge.spread, edge.blur);
 		quad.shape[1] = halves(resolvedPixelRange, 0.0F);
 
 		recordGroup(groupStart, key, blend);

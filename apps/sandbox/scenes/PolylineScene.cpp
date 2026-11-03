@@ -1,5 +1,7 @@
 // polyline: Primitives::drawPolyline. The three caps, round and mitered joins, closed outlines,
-// hairlines, a dense curve, and translucent and additive strokes, which cover each pixel once.
+// hairlines, a dense curve, translucent and additive strokes, which cover each pixel once, and
+// dashes: round-capped along a zigzag, dots round a closed outline, a dashed drawLine and a
+// polygon's dashed border.
 
 #include "DesignCanvas.h"
 #include "Scenes.h"
@@ -20,7 +22,7 @@ namespace {
 	constexpr const char* kSceneName = "polyline";
 	constexpr float		  kPi = std::numbers::pi_v<float>;
 	constexpr float		  kCanvasWidth = 3000.0F;
-	constexpr float		  kCanvasHeight = 1460.0F;
+	constexpr float		  kCanvasHeight = 1900.0F;
 
 	const Foundation::Color kBackground(0.08F, 0.08F, 0.11F, 1.0F);
 	const Foundation::Color kLabel(0.75F, 0.75F, 0.8F, 1.0F);
@@ -148,6 +150,45 @@ namespace {
 				 .blend = P::BlendMode::Additive}
 			);
 			label("additive, miter", 2150.0F, 1380.0F);
+
+			// Row 4: dashes, measured along each line and cut per pixel.
+			using Foundation::DashCap;
+			P::drawPolyline(
+				{.points = dashedZigzag,
+				 .width = 14.0F,
+				 .color = {0.95F, 0.85F, 0.4F, 1.0F},
+				 .dash = Foundation::DashPattern{.dash = 30.0F, .gap = 20.0F, .cap = DashCap::Round}}
+			);
+			P::drawPolyline({.points = dashedZigzag, .width = 2.0F, .color = kGuide});
+			label("round-capped dashes", 450.0F, 1820.0F);
+			P::drawPolyline(
+				{.points = dottedHexagon,
+				 .width = 12.0F,
+				 .color = {0.4F, 0.9F, 0.5F, 1.0F},
+				 .closed = true,
+				 .dash = Foundation::DashPattern{.dash = 0.0F, .gap = 26.0F, .cap = DashCap::Round}}
+			);
+			label("dots, closed", 1150.0F, 1820.0F);
+			P::drawLine(
+				{.start = {1450.0F, 1560.0F},
+				 .end = {1850.0F, 1740.0F},
+				 .style = {
+					 .color = {0.3F, 0.85F, 0.95F, 1.0F},
+					 .width = 10.0F,
+					 .dash = Foundation::DashPattern{.dash = 20.0F, .gap = 24.0F, .cap = DashCap::Square}
+				 }}
+			);
+			label("drawLine, square caps", 1650.0F, 1820.0F);
+			P::drawPolygon(
+				{.vertices = dashedStar,
+				 .style = {
+					 .fill = {0.2F, 0.2F, 0.25F, 1.0F},
+					 .border = Foundation::LineStyle{
+						 .color = {1.0F, 0.55F, 0.2F, 1.0F}, .width = 8.0F, .dash = Foundation::DashPattern{.dash = 18.0F, .gap = 12.0F}
+					 }
+				 }}
+			);
+			label("polygon border", 2350.0F, 1820.0F);
 			P::PopTransform();
 		}
 
@@ -161,6 +202,9 @@ namespace {
 		std::array<std::vector<Foundation::Vec2>, 3> hairlines;
 		std::vector<Foundation::Vec2>				 translucent = zigzag(1050.0F, 1330.0F, 6, 110.0F, 180.0F);
 		std::vector<Foundation::Vec2>				 additive = zigzag(1850.0F, 1330.0F, 5, 150.0F, 100.0F);
+		std::vector<Foundation::Vec2>				 dashedZigzag = zigzag(150.0F, 1760.0F, 6, 120.0F, 180.0F);
+		std::vector<Foundation::Vec2>				 dottedHexagon = regular(1150.0F, 1660.0F, 6, 120.0F, 120.0F);
+		std::vector<Foundation::Vec2>				 dashedStar = regular(2350.0F, 1660.0F, 10, 130.0F, 60.0F);
 	};
 
 } // namespace

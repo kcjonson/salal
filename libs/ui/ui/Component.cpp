@@ -26,9 +26,12 @@ namespace ui {
 		minSpec = args.minSize;
 		maxSpec = args.maxSize;
 		margin = args.margin;
+		// Its px size until the first layout, the padding outside it for a content box.
+		const Foundation::Vec2 outside =
+			args.layout.boxSizing == BoxSizing::ContentBox ? args.layout.padding.total() : Foundation::Vec2{0.0F, 0.0F};
 		size = {
-			sizeSpec.width.unit == Length::Unit::Px ? sizeSpec.width.value : 0.0F,
-			sizeSpec.height.unit == Length::Unit::Px ? sizeSpec.height.value : 0.0F,
+			sizeSpec.width.unit == Length::Unit::Px ? sizeSpec.width.value + outside.x : 0.0F,
+			sizeSpec.height.unit == Length::Unit::Px ? sizeSpec.height.value + outside.y : 0.0F,
 		};
 		transform = args.transform;
 		layout = args.layout;

@@ -246,6 +246,102 @@ namespace ui {
 		EXPECT_EQ(boundsOf(second)[0], 80.0F);
 	}
 
+	// --- Wrapping ---
+
+	TEST_F(UiLayoutTest, AWrappingRowBreaksWhereTheNextChildWontFitAndEachLineIsItsTallest) {
+		Layout layout = row(10.0F, 5.0F);
+		layout.flexWrap = FlexWrap::Wrap;
+		Ref<Component> strip = context.root().addChild<Component>({.size = {210.0F, kAuto}, .layout = layout});
+		Ref<Component> first = strip.addChild<Component>({.size = {80.0F, 20.0F}, .layout = {.alignSelf = AlignItems::Center}});
+		Ref<Component> tall = strip.addChild<Component>(box(80.0F, 30.0F));
+		Ref<Component> third = strip.addChild<Component>(box(80.0F, 20.0F));
+		Ref<Component> stretched = strip.addChild<Component>({.size = {50.0F, kAuto}});
+		Ref<Component> grower = strip.addChild<Component>({.size = {150.0F, 10.0F}, .layout = {.flexGrow = 1.0F}});
+		context.layout();
+		// 200 inside the padding: 80, 10, 80 fit and the third doesn't; 80, 10, 50 do and 150 doesn't.
+		EXPECT_EQ(boundsOf(first), (Box{5.0F, 10.0F, 80.0F, 20.0F})); // centred in its line, 30 tall
+		EXPECT_EQ(boundsOf(tall), (Box{95.0F, 5.0F, 80.0F, 30.0F}));
+		EXPECT_EQ(boundsOf(third), (Box{5.0F, 45.0F, 80.0F, 20.0F}));
+		EXPECT_EQ(boundsOf(stretched), (Box{95.0F, 45.0F, 50.0F, 20.0F})); // its line's height
+		EXPECT_EQ(boundsOf(grower), (Box{5.0F, 75.0F, 200.0F, 10.0F}));	   // its line's whole leftover
+		// Three lines and two gaps between them, in the padding.
+		EXPECT_EQ(strip.get()->getSize(), Foundation::Vec2(210.0F, 5.0F + 30.0F + 10.0F + 20.0F + 10.0F + 10.0F + 5.0F));
+		EXPECT_TRUE(lint(context, kViewport).clean());
+	}
+
+	TEST_F(UiLayoutTest, WrapBreaksAHuggingRowAtTheRoomThereIsAndAColumnAtItsHeight) {
+		Layout hug = row();
+		hug.flexWrap = FlexWrap::Wrap;
+		Ref<Component> parent = context.root().addChild<Component>(
+			{.size = {150.0F, kAuto},
+			 .layout = {.display = Display::Flex, .flexDirection = FlexDirection::Column, .alignItems = AlignItems::Start}}
+		);
+		Ref<Component> strip = parent.addChild<Component>({.layout = hug});
+		strip.addChild<Component>(box(60.0F, 20.0F));
+		strip.addChild<Component>(box(60.0F, 20.0F));
+		Ref<Component> last = strip.addChild<Component>(box(60.0F, 20.0F));
+		context.layout();
+		EXPECT_EQ(strip.get()->getSize(), Foundation::Vec2(120.0F, 40.0F)); // its widest line
+		EXPECT_EQ(boundsOf(last), (Box{0.0F, 20.0F, 60.0F, 20.0F}));
+
+		Layout down = column(0.0F);
+		down.flexWrap = FlexWrap::Wrap;
+		Ref<Component> stack = context.root().addChild<Component>({.position = {300.0F, 0.0F}, .size = {kAuto, 100.0F}, .layout = down});
+		stack.addChild<Component>(box(40.0F, 40.0F));
+		stack.addChild<Component>(box(40.0F, 40.0F));
+		Ref<Component> over = stack.addChild<Component>(box(30.0F, 40.0F));
+		context.layout();
+		EXPECT_EQ(boundsOf(over), (Box{40.0F, 0.0F, 30.0F, 40.0F}));
+		EXPECT_EQ(stack.get()->getSize(), Foundation::Vec2(70.0F, 100.0F));
+	}
+
+	// --- Box sizing ---
+
+	// A content box's declared size, min and max are inside its padding, in Free, Flex and Grid alike;
+	// border-box, the default, takes the padding in.
+	TEST_F(UiLayoutTest, ContentBoxPutsThePaddingOutsideADeclaredSizeAndItsMinAndMax) {
+		Ref<Component> borderBox = context.root().addChild<Component>({.size = {100.0F, 50.0F}, .layout = {.padding = 10.0F}});
+		Ref<Component> contentBox = context.root().addChild<Component>(
+			{.position = {0.0F, 100.0F},
+			 .size = {100.0F, 50.0F},
+			 .maxSize = {kAuto, 40.0F},
+			 .layout = {.padding = 10.0F, .boxSizing = BoxSizing::ContentBox}}
+		);
+
+		Layout flexBox = row(0.0F, 10.0F);
+		flexBox.boxSizing = BoxSizing::ContentBox;
+		Ref<Component> strip = context.root().addChild<Component>({.position = {200.0F, 0.0F}, .size = {200.0F, kAuto}, .layout = flexBox});
+		Ref<Component> fixed = strip.addChild<Component>(box(50.0F, 30.0F));
+		Ref<Component> grower = strip.addChild<Component>({
+			.size = {0.0F, 20.0F},
+			.maxSize = {60.0F, kAuto},
+			.layout = {.padding = 5.0F, .boxSizing = BoxSizing::ContentBox, .flexGrow = 1.0F},
+		});
+
+		Ref<Component> grid = context.root().addChild<Component>({
+			.position = {200.0F, 100.0F},
+			.size = {200.0F, 40.0F},
+			.layout = {
+				.display = Display::Grid, .padding = 10.0F, .boxSizing = BoxSizing::ContentBox, .gridTemplateColumns = {fr(1), fr(1)}
+			},
+		});
+		Ref<Component> cell = grid.addChild<Component>({});
+		grid.addChild<Component>({});
+		Ref<Component> badge = grid.addChild<Component>(
+			{.size = {10.0F, 10.0F}, .layout = {.position = Position::Absolute, .inset = {.right = 0.0F, .bottom = 0.0F}}}
+		);
+		context.layout();
+
+		EXPECT_EQ(borderBox.get()->getSize(), Foundation::Vec2(100.0F, 50.0F));
+		EXPECT_EQ(contentBox.get()->getSize(), Foundation::Vec2(120.0F, 60.0F)); // 50 held to 40, then the padding
+		EXPECT_EQ(strip.get()->getSize(), Foundation::Vec2(220.0F, 50.0F));
+		EXPECT_EQ(boundsOf(fixed), (Box{10.0F, 10.0F, 50.0F, 30.0F}));
+		EXPECT_EQ(boundsOf(grower), (Box{60.0F, 10.0F, 70.0F, 30.0F})); // grown to its 60 and its padding
+		EXPECT_EQ(grid.get()->getSize(), Foundation::Vec2(220.0F, 60.0F));
+		EXPECT_EQ(boundsOf(cell), (Box{10.0F, 10.0F, 100.0F, 40.0F}));	// half the 200 inside
+		EXPECT_EQ(boundsOf(badge), (Box{210.0F, 50.0F, 10.0F, 10.0F})); // in the whole box, as ever
+	}
+
 	// --- Free, None and absolute children ---
 
 	TEST_F(UiLayoutTest, FreePlacesChildrenWhereTheySayAndHugsTheirBoxes) {
@@ -260,11 +356,13 @@ namespace ui {
 		EXPECT_EQ(half.get()->getSize(), Foundation::Vec2(65.0F, 60.0F)); // out of the hug, a share of it
 	}
 
+	// Against the card's whole box, its padding ignored, in px or a share of it, so a resize moves the
+	// placed children in the same pass, where the hit test and the lint find them.
 	TEST_F(UiLayoutTest, AnInsetAnchorsAnAbsoluteChildToTheCornerWhateverTheParentsSize) {
 		for (const float width : {200.0F, 500.0F}) {
 			Context		   fresh(kViewport);
-			Ref<Component> card = fresh.root().addChild<Component>({.size = {width, 100.0F}, .layout = row()});
-			card.addChild<Component>(box(40.0F, 40.0F));
+			Ref<Component> card = fresh.root().addChild<Component>({.size = {width, 100.0F}, .layout = row(0.0F, 10.0F)});
+			Ref<Component> nudged = card.addChild<Component>({.size = {40.0F, 40.0F}, .layout = {.inset = {.top = percent(25.0F)}}});
 			Ref<Component> badge = card.addChild<Component>(
 				{.size = {20.0F, 20.0F}, .layout = {.position = Position::Absolute, .inset = {.top = 4.0F, .right = 4.0F}}}
 			);
@@ -272,9 +370,28 @@ namespace ui {
 				{.size = {kAuto, 10.0F},
 				 .layout = {.position = Position::Absolute, .inset = {.right = 10.0F, .bottom = 0.0F, .left = 10.0F}}}
 			);
+			Ref<Component> plot = card.addChild<Component>({
+				.size = {percent(20.0F), percent(30.0F)},
+				.layout = {.position = Position::Absolute, .inset = {.top = percent(10.0F), .left = percent(25.0F)}},
+				.pointerEvents = PointerEvents::Auto,
+			});
+			Ref<Component> strip = card.addChild<Component>(
+				{.size = {kAuto, 10.0F},
+				 .layout = {
+					 .position = Position::Absolute, .inset = {.right = percent(10.0F), .bottom = percent(50.0F), .left = percent(60.0F)}
+				 }}
+			);
 			fresh.layout();
+			EXPECT_EQ(boundsOf(nudged), (Box{10.0F, 10.0F + 20.0F, 40.0F, 40.0F})); // a quarter of the 80 inside the padding
 			EXPECT_EQ(boundsOf(badge), (Box{width - 24.0F, 4.0F, 20.0F, 20.0F}));
 			EXPECT_EQ(boundsOf(band), (Box{10.0F, 90.0F, width - 20.0F, 10.0F}));
+			const auto share = [&](float percentage) {
+				return width * percentage / 100.0F;
+			}; // as a Length resolves it
+			EXPECT_EQ(boundsOf(plot), (Box{share(25.0F), 10.0F, share(20.0F), 30.0F}));
+			EXPECT_EQ(boundsOf(strip), (Box{share(60.0F), 40.0F, width - share(60.0F) - share(10.0F), 10.0F}));
+			EXPECT_EQ(fresh.hitTest({share(25.0F) + 1.0F, 11.0F}), plot.componentId());
+			EXPECT_TRUE(lint(fresh, kViewport).clean());
 		}
 	}
 

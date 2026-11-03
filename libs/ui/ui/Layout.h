@@ -7,7 +7,8 @@
 //   Free  the default. Each child sits at its own `position` in the parent's box; an auto size hugs
 //         the children's boxes. This is the free placement every screen had before layout.
 //   Flex  children flow along flexDirection, spaced by gap inside padding, sized by flexGrow and
-//         flexShrink on the main axis and alignItems or alignSelf on the cross one. A child with
+//         flexShrink on the main axis and alignItems or alignSelf on the cross one. With flexWrap
+//         they break onto new lines across it instead of shrinking past the main size. A child with
 //         `position: Absolute` leaves the flow and is placed as under Free, or by `inset`.
 //   Grid  children sit in the cells of gridTemplateColumns and gridTemplateRows, inside padding with
 //         gap between tracks both ways: each where its gridColumn and gridRow put it, or flowed row by
@@ -20,8 +21,9 @@
 //
 // Sizes are px, a percentage of the parent's box (inside its padding, for a flex or grid child), or
 // auto: a text's or a container's content, a stretched or grown flex child's share, a stretched grid
-// child's area. An assigned size never changes the declared one, so an auto axis is measured again
-// whenever its content changes.
+// child's area. A declared size, minSize and maxSize are the whole box, padding in, unless boxSizing
+// says they're the content box. An assigned size never changes the declared one, so an auto axis is
+// measured again whenever its content changes.
 
 #include <math/Types.h>
 
@@ -115,20 +117,29 @@ namespace ui {
 		bool									 operator==(const Edges&) const = default;
 	};
 
-	// An absolutely positioned child's offsets from its parent's edges, px, each optional. Left and
-	// right both set stretch an auto width between them; right alone anchors to the right edge. On a
-	// relatively positioned flex or grid child they nudge it from where the flow put it.
+	// An absolutely positioned child's offsets from its parent's edges: px, a percentage of the parent's
+	// box (left and right of its width, top and bottom of its height), or auto, which leaves that edge
+	// unset. The box is the parent's whole box, its padding included (CSS's padding box). Left and right
+	// both set stretch an auto width between them; right alone anchors to the right edge. On a
+	// relatively positioned flex or grid child they nudge it from where the flow put it, a percentage
+	// being of the flex container's content box or the grid area.
 	struct Inset {
-		std::optional<float> top;
-		std::optional<float> right;
-		std::optional<float> bottom;
-		std::optional<float> left;
+		Length top;
+		Length right;
+		Length bottom;
+		Length left;
 
 		bool operator==(const Inset&) const = default;
 	};
 
 	enum class Display : std::uint8_t { Free, Flex, Grid, None };
 	enum class FlexDirection : std::uint8_t { Row, Column };
+	// A flex container's lines (CSS flex-wrap). NoWrap keeps every child on one line, shrunk by
+	// flexShrink to fit. Wrap starts a new line where the next child's margin box would pass the main
+	// size, or, for an auto width, the room there is, as a text wraps. Each line grows and shrinks its
+	// own children and is as tall (or wide) as its biggest; the lines pack from the start, gap apart,
+	// and alignItems and alignSelf align a child in its line.
+	enum class FlexWrap : std::uint8_t { NoWrap, Wrap };
 	// alignItems on a flex container, alignSelf on one child: the cross axis. On a grid container
 	// alignItems and justifyItems, alignSelf and justifySelf on one child: down and across its area.
 	// Stretch fills the axis for a child whose size on it is auto and starts one whose isn't; the others
@@ -137,6 +148,12 @@ namespace ui {
 	// A flex container's only: a grid's tracks start at its content box's start.
 	enum class JustifyContent : std::uint8_t { Start, Center, End, SpaceBetween, SpaceAround, SpaceEvenly };
 	enum class Position : std::uint8_t { Relative, Absolute };
+	// What a component's declared size measures (CSS box-sizing). BorderBox, the default: a px or
+	// percentage width or height, and minSize and maxSize, are the whole box, its padding inside them
+	// (layout has no border). ContentBox: they're the content box, and the padding goes outside them.
+	// An auto size is the content and the padding either way, and absolutely placed children place
+	// against the whole box either way.
+	enum class BoxSizing : std::uint8_t { BorderBox, ContentBox };
 	// Clip cuts the children at the box; Scroll cuts them too and scrolls them, by the wheel and a
 	// thumb, over their union plus the padding (R4.13).
 	enum class Overflow : std::uint8_t { Visible, Clip, Scroll };
@@ -257,10 +274,12 @@ namespace ui {
 		// As a container.
 		Display		  display = Display::Free;
 		FlexDirection flexDirection = FlexDirection::Row;
-		// px between flex children, negative overlapping them; between a grid's columns and between its
-		// rows, where a negative one is 0, as CSS has it.
+		FlexWrap	  flexWrap = FlexWrap::NoWrap;
+		// px between flex children, negative overlapping them; between a wrapping flex container's lines
+		// and between a grid's columns and its rows, where a negative one is 0, as CSS has it.
 		float		   gap = 0.0F;
 		Edges		   padding;
+		BoxSizing	   boxSizing = BoxSizing::BorderBox; // whether a declared size takes the padding in or out
 		AlignItems	   alignItems = AlignItems::Stretch;
 		AlignItems	   justifyItems = AlignItems::Stretch; // a grid's only
 		JustifyContent justifyContent = JustifyContent::Start;

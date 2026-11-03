@@ -5,6 +5,8 @@
 // no gradients, masks, clip paths, filters, text, images or references. A problem names the file,
 // the line and the element.
 
+#include <vector/SvgMarkup.h>
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -13,14 +15,7 @@
 
 namespace ui::iconbuild {
 
-	struct Problem {
-		std::string file;
-		int			line = 0; // 0 when the problem is the file's as a whole
-		std::string element;
-		std::string message;
-
-		std::string text() const;
-	};
+	using renderer::svg::Problem;
 
 	enum class FillRule : std::uint8_t { NonZero, EvenOdd };
 

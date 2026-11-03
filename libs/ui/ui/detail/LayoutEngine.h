@@ -10,11 +10,13 @@
 //   arrange  a component whose size is decided places its children and decides theirs, then
 //            arranges each child that changed or holds a change.
 //
-// Flex is single-line: basis from the child's size or content, the leftover grown by flexGrow or
-// the overflow taken by flexShrink weighted by basis, min and max clamped, then the distribution run
-// once more with the clamped children fixed (R10.4). A text's automatic minimum in a row is its
-// longest word, or its whole width when it doesn't wrap. A scroller's flex children don't shrink: it
-// scrolls them instead.
+// Flex: basis from the child's size or content, the leftover grown by flexGrow or the overflow taken
+// by flexShrink weighted by basis, min and max clamped, then the distribution run once more with the
+// clamped children fixed (R10.4). A text's automatic minimum in a row is its longest word, or its
+// whole width when it doesn't wrap. A scroller's flex children don't shrink: it scrolls them instead.
+// With flexWrap the children break into lines first, at the main size or, for an auto width, the
+// room there is, each line distributed on its own; a line is as tall as its tallest child, a
+// stretched child is stretched to its line, and the lines stack from the start.
 //
 // Grid places its children (ui/detail/Grid.h), sizes the columns from their widths, measures each
 // at its columns' width for its height, then sizes the rows. A child's max-content width is its
@@ -28,6 +30,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace ui::detail {
@@ -59,6 +62,13 @@ namespace ui::detail {
 			bool				 frozen;
 		};
 
+		// A run of `items` on one line, and the line's size across the main axis: its biggest margin box.
+		struct FlexLine {
+			std::size_t begin;
+			std::size_t end;
+			float		cross;
+		};
+
 		// A grid child, its area, and the box it takes there: a definite or stretched width or none,
 		// which it wraps to its area's width.
 		struct GridItem {
@@ -76,9 +86,11 @@ namespace ui::detail {
 
 		Foundation::Vec2 contentSize(Component& node, std::optional<float> width, std::optional<float> height, float availableWidth);
 		Foundation::Vec2 freeContent(Component& node, std::optional<float> width, std::optional<float> height);
-		// Each flowing child's main and cross size inside a content box whose known axes are given,
-		// left in `items`.
+		// Each flowing child's main and cross size inside a content box whose known axes are given, and
+		// the lines they're on, left in `items` and `lines`.
 		void flex(Component& node, std::optional<float> contentWidth, std::optional<float> contentHeight, float availableWidth);
+		// Grows or shrinks one line's children into `contentMain`.
+		static void distribute(std::span<FlexItem> line, float contentMain, float gap, bool shrinks);
 		// The grid's tracks and each flowing child's area inside a content box whose known axes are
 		// given, left in `grid`.
 		void layoutGrid(Component& node, std::optional<float> contentWidth, std::optional<float> contentHeight, float availableWidth);
@@ -94,6 +106,7 @@ namespace ui::detail {
 		std::uint32_t			  pass;
 		std::vector<ComponentId>& moved;
 		std::vector<FlexItem>	  items;
+		std::vector<FlexLine>	  lines;
 		GridResult				  grid;
 	};
 

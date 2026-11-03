@@ -11,15 +11,32 @@ namespace ui {
 		}
 	} // namespace
 
+	std::optional<Foundation::DashPattern> StrokeStyle::dash(float width) const {
+		switch (kind) {
+			case Kind::Dashed:
+				return Foundation::DashPattern{.dash = 3.0F * width, .gap = 3.0F * width};
+			case Kind::Dotted:
+				return Foundation::DashPattern{.dash = 0.0F, .gap = 2.0F * width, .cap = Foundation::DashCap::Round};
+			case Kind::Pattern:
+				return pattern;
+			case Kind::Solid:
+				break;
+		}
+		return std::nullopt;
+	}
+
 	Style Style::extend(const Style& overrides) const {
 		Style out = *this;
 		over(out.backgroundColor, overrides.backgroundColor);
 		over(out.borderColor, overrides.borderColor);
 		over(out.borderWidth, overrides.borderWidth);
+		over(out.borderStyle, overrides.borderStyle);
+		over(out.borderSides, overrides.borderSides);
 		over(out.borderRadius, overrides.borderRadius);
 		over(out.boxShadow, overrides.boxShadow);
 		over(out.opacity, overrides.opacity);
 		over(out.color, overrides.color);
+		over(out.textShadow, overrides.textShadow);
 		over(out.fontFamily, overrides.fontFamily);
 		over(out.fontSize, overrides.fontSize);
 		over(out.textAlign, overrides.textAlign);

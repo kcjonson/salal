@@ -25,5 +25,11 @@
   "state": {
     "hover": { "wash": { "$type": "color", "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.05 } } },
     "pressed": { "wash": { "$type": "color", "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.1 } } }
+  },
+  "styles": {
+    "button": {
+      "$description": "ui's button restyled on purpose, which the load reports as an info.",
+      "borderRadius": { "$type": "dimension", "$value": "{radius.lg}" }
+    }
   }
 }

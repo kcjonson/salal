@@ -117,10 +117,10 @@ namespace ui::dtcg {
 		GradientValue,
 		TypographyValue>;
 
-	// Where a load went wrong. `file` is the tokens or resolver file as the load named it, `path`
-	// the token's dot path; either may be empty.
+	// Where a load went wrong, or for an Info, what it did that a reader may not have meant. `file` is
+	// the tokens or resolver file as the load named it, `path` the token's dot path; either may be empty.
 	struct Diagnostic {
-		enum class Severity : std::uint8_t { Warning, Error };
+		enum class Severity : std::uint8_t { Info, Warning, Error };
 
 		Severity	severity = Severity::Error;
 		std::string file;
@@ -146,10 +146,12 @@ namespace ui::dtcg {
 		StyleField{.name = "backgroundColor", .type = TokenType::Color},
 		StyleField{.name = "borderColor", .type = TokenType::Color},
 		StyleField{.name = "borderWidth", .type = TokenType::Dimension},
+		StyleField{.name = "borderStyle", .type = TokenType::StrokeStyle},
 		StyleField{.name = "borderRadius", .type = TokenType::Dimension},
 		StyleField{.name = "boxShadow", .type = TokenType::Shadow},
 		StyleField{.name = "opacity", .type = TokenType::Number},
 		StyleField{.name = "color", .type = TokenType::Color},
+		StyleField{.name = "textShadow", .type = TokenType::Shadow},
 		StyleField{.name = "font", .type = TokenType::Typography},
 		StyleField{.name = "fontFamily", .type = TokenType::FontFamily},
 		StyleField{.name = "fontSize", .type = TokenType::Dimension},
@@ -175,5 +177,17 @@ namespace ui::dtcg {
 		TextTransformName{.name = "none", .value = TextTransform::None},
 		TextTransformName{.name = "uppercase", .value = TextTransform::Uppercase},
 	};
+
+	// The sides of a box its border is drawn on, which the format has no type for either: salal's
+	// extension on a style's group lists them, `"borderSides": ["top", "left", "right"]`, by these
+	// names, and a side it leaves out has no border.
+	struct BorderSides {
+		bool top = true;
+		bool right = true;
+		bool bottom = true;
+		bool left = true;
+	};
+
+	inline constexpr std::array<std::string_view, 4> kBorderSideNames{"top", "right", "bottom", "left"};
 
 } // namespace ui::dtcg

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+  <defs>
+    <!-- a blur, which nanosvg would drop -->
+    <filter id="soft"><feGaussianBlur stdDeviation="1"/></filter>
+  </defs>
+  <rect width="10" height="10" fill="#c33" filter="url(#soft)"/>
+</svg>

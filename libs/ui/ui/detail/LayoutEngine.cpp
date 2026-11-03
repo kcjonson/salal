@@ -13,20 +13,34 @@ namespace ui::detail {
 			return a.has_value() == b.has_value() && (!a || *a == *b);
 		}
 
-		float clampAxis(float value, const Length& minimum, const Length& maximum, float base) {
-			const float low = std::max(minimum.resolve(base).value_or(0.0F), 0.0F);
-			const float high = maximum.resolve(base).value_or(kUnbounded);
+		// The padding a component's declared sizes leave out, on each axis: all of it for a content box,
+		// none for a border box.
+		Foundation::Vec2 outsidePadding(const Component& node) {
+			const Layout& layout = node.getLayout();
+			return layout.boxSizing == BoxSizing::ContentBox ? layout.padding.total() : Foundation::Vec2{0.0F, 0.0F};
+		}
+
+		// A declared size, minSize or maxSize as the whole box it sets, `outside` the padding a content
+		// box adds; none for auto.
+		std::optional<float> boxSize(const Length& length, float base, float outside) {
+			const std::optional<float> value = length.resolve(base);
+			return value ? std::optional(*value + outside) : std::nullopt;
+		}
+
+		float clampAxis(float value, const Length& minimum, const Length& maximum, float base, float outside) {
+			const float low = std::max(boxSize(minimum, base, outside).value_or(0.0F), 0.0F);
+			const float high = boxSize(maximum, base, outside).value_or(kUnbounded);
 			return std::max(std::min(value, high), low);
 		}
 
 		// A grid child's minimum contribution on one axis, margins in, where it isn't CSS's automatic
 		// minimum: its size when that's definite, or its minSize.
-		std::optional<float> gridMinimum(bool definite, float size, const Length& minimum, float base, float margins) {
+		std::optional<float> gridMinimum(bool definite, float size, const Length& minimum, float base, float outside, float margins) {
 			if (definite) {
 				return size + margins;
 			}
 			if (!minimum.isAuto()) {
-				return std::max(minimum.resolve(base).value_or(0.0F), 0.0F) + margins;
+				return std::max(boxSize(minimum, base, outside).value_or(0.0F), 0.0F) + margins;
 			}
 			return std::nullopt;
 		}
@@ -64,10 +78,12 @@ namespace ui::detail {
 			return 0.0F;
 		}
 
-		// A relatively positioned child's inset nudges it from where the flow put it.
-		Foundation::Vec2 nudged(Foundation::Vec2 at, const Inset& inset) {
-			at.x += inset.left ? *inset.left : (inset.right ? -*inset.right : 0.0F);
-			at.y += inset.top ? *inset.top : (inset.bottom ? -*inset.bottom : 0.0F);
+		// A relatively positioned child's inset nudges it from where the flow put it, a percentage of `box`.
+		Foundation::Vec2 nudged(Foundation::Vec2 at, const Inset& inset, Foundation::Vec2 box) {
+			const std::optional<float> left = inset.left.resolve(box.x);
+			const std::optional<float> top = inset.top.resolve(box.y);
+			at.x += left ? *left : -inset.right.resolve(box.x).value_or(0.0F);
+			at.y += top ? *top : -inset.bottom.resolve(box.y).value_or(0.0F);
 			return at;
 		}
 	} // namespace
@@ -96,14 +112,16 @@ namespace ui::detail {
 			}
 		}
 
+		const Foundation::Vec2 outside = outsidePadding(node); // what a content box adds to its declared sizes
+
 		const auto clampWidth = [&](float value) {
-			return clampAxis(value, node.minSpec.width, node.maxSpec.width, parentBox.x);
+			return clampAxis(value, node.minSpec.width, node.maxSpec.width, parentBox.x, outside.x);
 		};
 		const auto clampHeight = [&](float value) {
-			return clampAxis(value, node.minSpec.height, node.maxSpec.height, parentBox.y);
+			return clampAxis(value, node.minSpec.height, node.maxSpec.height, parentBox.y, outside.y);
 		};
-		std::optional<float> resolvedWidth = width ? width : node.sizeSpec.width.resolve(parentBox.x);
-		std::optional<float> resolvedHeight = height ? height : node.sizeSpec.height.resolve(parentBox.y);
+		std::optional<float> resolvedWidth = width ? width : boxSize(node.sizeSpec.width, parentBox.x, outside.x);
+		std::optional<float> resolvedHeight = height ? height : boxSize(node.sizeSpec.height, parentBox.y, outside.y);
 		if (resolvedWidth) {
 			resolvedWidth = clampWidth(*resolvedWidth);
 		}
@@ -114,7 +132,7 @@ namespace ui::detail {
 			const float		 room = resolvedWidth ? *resolvedWidth
 												  : std::min(
 													std::max(availableWidth - node.margin.horizontal(), 0.0F),
-													node.maxSpec.width.resolve(parentBox.x).value_or(kUnbounded)
+													boxSize(node.maxSpec.width, parentBox.x, outside.x).value_or(kUnbounded)
 												);
 			Foundation::Vec2 content = contentSize(node, resolvedWidth, resolvedHeight, room);
 			if (!resolvedWidth) {
@@ -162,16 +180,21 @@ namespace ui::detail {
 			return {gridExtent(grid.columns, gap) + padding.horizontal(), gridExtent(grid.rows, gap) + padding.vertical()};
 		}
 		flex(node, contentWidth, contentHeight, room);
+		// The longest line along, the lines across, a gap between each.
 		float main = 0.0F;
 		float cross = 0.0F;
-		for (const FlexItem& item : items) {
-			main += item.main + item.marginMain;
-			cross = std::max(cross, item.cross + item.marginCross);
+		for (const FlexLine& line : lines) {
+			float along = 0.0F;
+			for (std::size_t i = line.begin; i < line.end; ++i) {
+				along += items[i].main + items[i].marginMain;
+			}
+			along += node.layout.gap * static_cast<float>(line.end - line.begin - 1);
+			main = std::max(main, along);
+			cross += line.cross;
 		}
-		if (items.size() > 1) {
-			main += node.layout.gap * static_cast<float>(items.size() - 1);
+		if (lines.size() > 1) {
+			cross += std::max(node.layout.gap, 0.0F) * static_cast<float>(lines.size() - 1);
 		}
-		main = std::max(main, 0.0F);
 		const bool row = node.layout.flexDirection == FlexDirection::Row;
 		return row ? Foundation::Vec2{main + padding.horizontal(), cross + padding.vertical()}
 				   : Foundation::Vec2{cross + padding.horizontal(), main + padding.vertical()};
@@ -193,14 +216,21 @@ namespace ui::detail {
 		return extent;
 	}
 
-	// Leaves `items` holding each flowing child's sizes. A nested measure runs flex() too, so this
-	// works on a local list and swaps it in only at the end.
+	// Leaves `items` holding each flowing child's sizes and `lines` the runs of them on each line. A
+	// nested measure runs flex() too, so this works on local lists and swaps them in only at the end.
 	void LayoutEngine::flex(Component& node, std::optional<float> contentWidth, std::optional<float> contentHeight, float availableWidth) {
 		const bool			   row = node.layout.flexDirection == FlexDirection::Row;
+		const bool			   wraps = node.layout.flexWrap == FlexWrap::Wrap;
 		std::optional<float>   contentMain = row ? contentWidth : contentHeight;
 		std::optional<float>   contentCross = row ? contentHeight : contentWidth;
 		const Foundation::Vec2 box{contentWidth.value_or(-1.0F), contentHeight.value_or(-1.0F)};
 		const float			   mainBase = row ? box.x : box.y;
+		const float			   gap = node.layout.gap;
+		// A row measures its children unbounded (their max-content basis); a column bounds them by its width.
+		const float room = row ? kUnbounded : (contentCross ? *contentCross : availableWidth);
+		const auto	measureAt = [&](Component& child, std::optional<float> main, std::optional<float> cross) {
+			 return row ? measure(child, main, cross, box, room) : measure(child, cross, main, box, room);
+		};
 
 		std::vector<FlexItem> flowing;
 		for (const ComponentId childId : node.children) {
@@ -213,17 +243,16 @@ namespace ui::detail {
 			const float			 marginMain = row ? child->margin.horizontal() : child->margin.vertical();
 			const float			 marginCross = row ? child->margin.vertical() : child->margin.horizontal();
 			std::optional<float> stretched;
-			if (align == AlignItems::Stretch && crossSpec.isAuto() && contentCross) {
+			// One line is as big across as the container; a wrapping child stretches to its own line, below.
+			if (!wraps && align == AlignItems::Stretch && crossSpec.isAuto() && contentCross) {
 				stretched = std::max(*contentCross - marginCross, 0.0F);
 			}
-			// A row measures its children unbounded (their max-content basis); a column bounds them by its width.
-			const float			   room = row ? kUnbounded : (contentCross ? *contentCross : availableWidth);
-			const Foundation::Vec2 measured =
-				row ? measure(*child, std::nullopt, stretched, box, room) : measure(*child, stretched, std::nullopt, box, room);
-			const float	  basis = row ? measured.x : measured.y;
-			const Length& minSpec = row ? child->minSpec.width : child->minSpec.height;
-			const Length& maxSpec = row ? child->maxSpec.width : child->maxSpec.height;
-			const float	  automaticMin = row ? std::min(child->minContentWidth(), basis) : 0.0F;
+			const Foundation::Vec2 measured = measureAt(*child, std::nullopt, stretched);
+			const float			   basis = row ? measured.x : measured.y;
+			const Length&		   minSpec = row ? child->minSpec.width : child->minSpec.height;
+			const Length&		   maxSpec = row ? child->maxSpec.width : child->maxSpec.height;
+			const float			   automaticMin = row ? std::min(child->minContentWidth(), basis) : 0.0F;
+			const float			   outsideMain = row ? outsidePadding(*child).x : outsidePadding(*child).y;
 			flowing.push_back({
 				.component = child,
 				.basis = basis,
@@ -231,63 +260,100 @@ namespace ui::detail {
 				.cross = row ? measured.y : measured.x,
 				.marginMain = marginMain,
 				.marginCross = marginCross,
-				.minMain = minSpec.isAuto() ? automaticMin : minSpec.resolve(mainBase).value_or(0.0F),
-				.maxMain = maxSpec.resolve(mainBase).value_or(kUnbounded),
+				.minMain = minSpec.isAuto() ? automaticMin : boxSize(minSpec, mainBase, outsideMain).value_or(0.0F),
+				.maxMain = boxSize(maxSpec, mainBase, outsideMain).value_or(kUnbounded),
 				.stretchedCross = stretched,
 				.frozen = false,
 			});
 		}
 
-		if (contentMain) {
-			const float gaps = flowing.size() > 1 ? node.layout.gap * static_cast<float>(flowing.size() - 1) : 0.0F;
-			// Once, then again with whatever a min or max clamped held fixed (CSS's frozen items).
-			for (int round = 0; round < 2; ++round) {
-				float used = gaps;
-				float grow = 0.0F;
-				float shrink = 0.0F;
-				for (const FlexItem& item : flowing) {
-					used += (item.frozen ? item.main : item.basis) + item.marginMain;
-					if (!item.frozen) {
-						grow += std::max(item.component->layout.flexGrow, 0.0F);
-						shrink += std::max(item.component->layout.flexShrink, 0.0F) * item.basis;
-					}
-				}
-				const float free = *contentMain - used;
-				bool		clamped = false;
-				for (FlexItem& item : flowing) {
-					if (item.frozen) {
-						continue;
-					}
-					float main = item.basis;
-					if (free > 0.0F && grow > 0.0F) {
-						main += free * std::max(item.component->layout.flexGrow, 0.0F) / grow;
-					} else if (free < 0.0F && shrink > 0.0F && node.overflow != Overflow::Scroll) {
-						main += free * std::max(item.component->layout.flexShrink, 0.0F) * item.basis / shrink;
-					}
-					const float held = std::max(std::min(main, item.maxMain), item.minMain);
-					if (held != main) {
-						clamped = true;
-						item.frozen = round == 0;
-					}
-					item.main = std::max(held, 0.0F);
-				}
-				if (!clamped) {
-					break;
-				}
+		// The lines: one, or a new one where the next margin box, at its clamped basis, would pass the
+		// main size, or for an auto width the room there is, as a text wraps.
+		std::optional<float> limit = contentMain;
+		if (!limit && row && std::isfinite(availableWidth)) {
+			limit = availableWidth;
+		}
+		std::vector<FlexLine> broken;
+		float				  used = 0.0F;
+		for (std::size_t i = 0; i < flowing.size(); ++i) {
+			const FlexItem& item = flowing[i];
+			const float		outer = std::max(std::min(item.basis, item.maxMain), item.minMain) + item.marginMain;
+			if (broken.empty() || (wraps && limit && used + gap + outer > *limit)) {
+				broken.push_back({.begin = i, .end = i, .cross = 0.0F});
+				used = outer;
+			} else {
+				used += gap + outer;
 			}
+			broken.back().end = i + 1;
 		}
 
-		// A child whose main size moved is measured again across it: a text that wraps grows taller.
-		for (FlexItem& item : flowing) {
-			if (item.main == item.basis || item.stretchedCross) {
+		for (FlexLine& line : broken) {
+			const std::span<FlexItem> run(flowing.data() + line.begin, line.end - line.begin);
+			if (contentMain) {
+				distribute(run, *contentMain, gap, node.overflow != Overflow::Scroll);
+			}
+			// A child whose main size moved is measured again across it: a text that wraps grows taller.
+			for (FlexItem& item : run) {
+				if (item.main != item.basis && !item.stretchedCross) {
+					const Foundation::Vec2 measured = measureAt(*item.component, item.main, std::nullopt);
+					item.cross = row ? measured.y : measured.x;
+				}
+				line.cross = std::max(line.cross, item.cross + item.marginCross);
+			}
+			if (!wraps) {
 				continue;
 			}
-			const float			   room = row ? kUnbounded : (contentCross ? *contentCross : availableWidth);
-			const Foundation::Vec2 measured = row ? measure(*item.component, item.main, std::nullopt, box, room)
-												  : measure(*item.component, std::nullopt, item.main, box, room);
-			item.cross = row ? measured.y : measured.x;
+			for (FlexItem& item : run) {
+				const Component& child = *item.component;
+				const AlignItems align = child.layout.alignSelf.value_or(node.layout.alignItems);
+				if (align == AlignItems::Stretch && (row ? child.sizeSpec.height : child.sizeSpec.width).isAuto()) {
+					item.stretchedCross = std::max(line.cross - item.marginCross, 0.0F);
+					const Foundation::Vec2 measured = measureAt(*item.component, item.main, item.stretchedCross);
+					item.cross = row ? measured.y : measured.x;
+				}
+			}
 		}
 		items = std::move(flowing);
+		lines = std::move(broken);
+	}
+
+	// Once, then again with whatever a min or max clamped held fixed (CSS's frozen items).
+	void LayoutEngine::distribute(std::span<FlexItem> line, float contentMain, float gap, bool shrinks) {
+		const float gaps = line.size() > 1 ? gap * static_cast<float>(line.size() - 1) : 0.0F;
+		for (int round = 0; round < 2; ++round) {
+			float used = gaps;
+			float grow = 0.0F;
+			float shrink = 0.0F;
+			for (const FlexItem& item : line) {
+				used += (item.frozen ? item.main : item.basis) + item.marginMain;
+				if (!item.frozen) {
+					grow += std::max(item.component->layout.flexGrow, 0.0F);
+					shrink += std::max(item.component->layout.flexShrink, 0.0F) * item.basis;
+				}
+			}
+			const float free = contentMain - used;
+			bool		clamped = false;
+			for (FlexItem& item : line) {
+				if (item.frozen) {
+					continue;
+				}
+				float main = item.basis;
+				if (free > 0.0F && grow > 0.0F) {
+					main += free * std::max(item.component->layout.flexGrow, 0.0F) / grow;
+				} else if (free < 0.0F && shrink > 0.0F && shrinks) {
+					main += free * std::max(item.component->layout.flexShrink, 0.0F) * item.basis / shrink;
+				}
+				const float held = std::max(std::min(main, item.maxMain), item.minMain);
+				if (held != main) {
+					clamped = true;
+					item.frozen = round == 0;
+				}
+				item.main = std::max(held, 0.0F);
+			}
+			if (!clamped) {
+				break;
+			}
+		}
 	}
 
 	// Leaves `grid` holding the tracks and each flowing child's area, decided width and measure. A
@@ -325,14 +391,16 @@ namespace ui::detail {
 			result.items[i].area = placed.areas[i];
 			const bool	definite = child.sizeSpec.width.resolve(box.x).has_value();
 			const float widest = measure(child, std::nullopt, std::nullopt, box, kUnbounded).x;
+			const float outside = outsidePadding(child).x;
 			const float narrowest =
-				definite ? widest : std::min(clampAxis(child.minContentWidth(), child.minSpec.width, child.maxSpec.width, box.x), widest);
+				definite ? widest
+						 : std::min(clampAxis(child.minContentWidth(), child.minSpec.width, child.maxSpec.width, box.x, outside), widest);
 			const float margins = child.margin.horizontal();
 			contributions[i] = {
 				.tracks = placed.areas[i].column,
 				.minContent = narrowest + margins,
 				.maxContent = widest + margins,
-				.minimum = gridMinimum(definite, widest, child.minSpec.width, box.x, margins),
+				.minimum = gridMinimum(definite, widest, child.minSpec.width, box.x, outside, margins),
 			};
 		}
 		sizeGridTracks({.tracks = tracks, .available = contentWidth, .gap = gap, .items = contributions}, result.columns);
@@ -358,7 +426,7 @@ namespace ui::detail {
 				.tracks = item.area.row,
 				.minContent = item.measured.y + margins,
 				.maxContent = item.measured.y + margins,
-				.minimum = gridMinimum(definite, item.measured.y, child.minSpec.height, box.y, margins),
+				.minimum = gridMinimum(definite, item.measured.y, child.minSpec.height, box.y, outsidePadding(child).y, margins),
 			};
 		}
 		sizeGridTracks({.tracks = tracks, .available = contentHeight, .gap = gap, .items = contributions}, result.rows);
@@ -420,62 +488,72 @@ namespace ui::detail {
 		const float	 contentHeight = std::max(node.size.y - padding.vertical(), 0.0F);
 		flex(node, contentWidth, contentHeight, contentWidth);
 		const std::vector<FlexItem> flowing = std::move(items);
+		const std::vector<FlexLine> laid = std::move(lines);
 
 		const bool	row = node.layout.flexDirection == FlexDirection::Row;
+		const bool	wraps = node.layout.flexWrap == FlexWrap::Wrap;
 		const float contentMain = row ? contentWidth : contentHeight;
 		const float contentCross = row ? contentHeight : contentWidth;
 		const float gap = node.layout.gap;
-		float		total = 0.0F;
-		for (const FlexItem& item : flowing) {
-			total += item.main + item.marginMain;
-		}
-		const auto	count = static_cast<float>(flowing.size());
-		const float gaps = flowing.size() > 1 ? gap * (count - 1.0F) : 0.0F;
-		const float leftover = std::max(contentMain - total - gaps, 0.0F);
-
-		// R10.9's distribution, on top of the gap.
-		float start = 0.0F;
-		float between = 0.0F;
-		switch (node.layout.justifyContent) {
-			case JustifyContent::Start:
-				break;
-			case JustifyContent::Center:
-				start = leftover * 0.5F;
-				break;
-			case JustifyContent::End:
-				start = leftover;
-				break;
-			case JustifyContent::SpaceBetween:
-				between = flowing.size() > 1 ? leftover / (count - 1.0F) : 0.0F;
-				break;
-			case JustifyContent::SpaceAround:
-				between = count > 0.0F ? leftover / count : 0.0F;
-				start = between * 0.5F;
-				break;
-			case JustifyContent::SpaceEvenly:
-				between = leftover / (count + 1.0F);
-				start = between;
-				break;
-		}
-
-		float cursor = start;
-		for (const FlexItem& item : flowing) {
-			Component&		 child = *item.component;
-			const AlignItems align = child.layout.alignSelf.value_or(node.layout.alignItems);
-			const float		 crossBox = item.cross + item.marginCross;
-			float			 crossAt = 0.0F;
-			if (align == AlignItems::Center) {
-				crossAt = std::max((contentCross - crossBox) * 0.5F, 0.0F);
-			} else if (align == AlignItems::End) {
-				crossAt = std::max(contentCross - crossBox, 0.0F);
+		float		lineAt = 0.0F;
+		for (const FlexLine& line : laid) {
+			const std::span<const FlexItem> run(flowing.data() + line.begin, line.end - line.begin);
+			// One line is the container's size across; a wrapped one is its biggest child's.
+			const float lineCross = wraps ? line.cross : contentCross;
+			float		total = 0.0F;
+			for (const FlexItem& item : run) {
+				total += item.main + item.marginMain;
 			}
-			const Foundation::Vec2 at = padding.topLeft() + (row ? Foundation::Vec2{cursor, crossAt} : Foundation::Vec2{crossAt, cursor});
-			place(
-				child,
-				nudged(at, child.layout.inset),
-				row ? Foundation::Vec2{item.main, item.cross} : Foundation::Vec2{item.cross, item.main}
-			);
-			cursor += item.main + item.marginMain + gap + between;
+			const auto	count = static_cast<float>(run.size());
+			const float gaps = run.size() > 1 ? gap * (count - 1.0F) : 0.0F;
+			const float leftover = std::max(contentMain - total - gaps, 0.0F);
+
+			// R10.9's distribution, on top of the gap.
+			float start = 0.0F;
+			float between = 0.0F;
+			switch (node.layout.justifyContent) {
+				case JustifyContent::Start:
+					break;
+				case JustifyContent::Center:
+					start = leftover * 0.5F;
+					break;
+				case JustifyContent::End:
+					start = leftover;
+					break;
+				case JustifyContent::SpaceBetween:
+					between = run.size() > 1 ? leftover / (count - 1.0F) : 0.0F;
+					break;
+				case JustifyContent::SpaceAround:
+					between = count > 0.0F ? leftover / count : 0.0F;
+					start = between * 0.5F;
+					break;
+				case JustifyContent::SpaceEvenly:
+					between = leftover / (count + 1.0F);
+					start = between;
+					break;
+			}
+
+			float cursor = start;
+			for (const FlexItem& item : run) {
+				Component&		 child = *item.component;
+				const AlignItems align = child.layout.alignSelf.value_or(node.layout.alignItems);
+				const float		 crossBox = item.cross + item.marginCross;
+				float			 crossAt = lineAt;
+				if (align == AlignItems::Center) {
+					crossAt += std::max((lineCross - crossBox) * 0.5F, 0.0F);
+				} else if (align == AlignItems::End) {
+					crossAt += std::max(lineCross - crossBox, 0.0F);
+				}
+				const Foundation::Vec2 at =
+					padding.topLeft() + (row ? Foundation::Vec2{cursor, crossAt} : Foundation::Vec2{crossAt, cursor});
+				place(
+					child,
+					nudged(at, child.layout.inset, {contentWidth, contentHeight}),
+					row ? Foundation::Vec2{item.main, item.cross} : Foundation::Vec2{item.cross, item.main}
+				);
+				cursor += item.main + item.marginMain + gap + between;
+			}
+			lineAt += line.cross + std::max(gap, 0.0F);
 		}
 		placeAbsoluteChildren(node);
 	}
@@ -506,7 +584,7 @@ namespace ui::detail {
 				padding.left + columnStarts[item.area.column.start] + alignedIn(areaWidth, childSize.x + margins.x, justify),
 				padding.top + rowStarts[item.area.row.start] + alignedIn(areaHeight, childSize.y + margins.y, align),
 			};
-			place(child, nudged(at, child.layout.inset), childSize);
+			place(child, nudged(at, child.layout.inset, {areaWidth, areaHeight}), childSize);
 		}
 		placeAbsoluteChildren(node);
 	}
@@ -520,25 +598,30 @@ namespace ui::detail {
 		}
 	}
 
-	// Against the parent's whole box: an inset edge anchors that side, both a pair stretch an auto
-	// size between them, and none falls back to `position`. An overlay entry goes on screen where its
-	// placement puts it, not in its opener's box, so only its own maxSize bounds the width it fills.
+	// Against the parent's whole box, its padding included: an inset edge anchors that side, both of a
+	// pair stretch an auto size between them, and none falls back to `position`; a percentage is of the
+	// box's width or height. An overlay entry goes on screen where its placement puts it, not in its
+	// opener's box, so only its own maxSize bounds the width it fills.
 	void LayoutEngine::placeAbsolute(Component& child, Foundation::Vec2 box) {
-		const Inset&		 inset = child.layout.inset;
-		std::optional<float> width;
-		std::optional<float> height;
-		if (child.sizeSpec.width.isAuto() && inset.left && inset.right) {
-			width = std::max(box.x - *inset.left - *inset.right - child.margin.horizontal(), 0.0F);
+		const Inset&			   inset = child.layout.inset;
+		const std::optional<float> top = inset.top.resolve(box.y);
+		const std::optional<float> right = inset.right.resolve(box.x);
+		const std::optional<float> bottom = inset.bottom.resolve(box.y);
+		const std::optional<float> left = inset.left.resolve(box.x);
+		std::optional<float>	   width;
+		std::optional<float>	   height;
+		if (child.sizeSpec.width.isAuto() && left && right) {
+			width = std::max(box.x - *left - *right - child.margin.horizontal(), 0.0F);
 		}
-		if (child.sizeSpec.height.isAuto() && inset.top && inset.bottom) {
-			height = std::max(box.y - *inset.top - *inset.bottom - child.margin.vertical(), 0.0F);
+		if (child.sizeSpec.height.isAuto() && top && bottom) {
+			height = std::max(box.y - *top - *bottom - child.margin.vertical(), 0.0F);
 		}
-		const float			   left = inset.left.value_or(inset.right ? 0.0F : child.position.x);
-		const float			   available = child.isOverlay() ? kUnbounded : std::max(box.x - left, 0.0F);
+		const float			   from = left.value_or(right ? 0.0F : child.position.x);
+		const float			   available = child.isOverlay() ? kUnbounded : std::max(box.x - from, 0.0F);
 		const Foundation::Vec2 childSize = measure(child, width, height, box, available);
 		const Foundation::Vec2 margins = child.margin.total();
-		const float x = inset.left ? *inset.left : (inset.right ? box.x - *inset.right - childSize.x - margins.x : child.position.x);
-		const float y = inset.top ? *inset.top : (inset.bottom ? box.y - *inset.bottom - childSize.y - margins.y : child.position.y);
+		const float			   x = left ? *left : (right ? box.x - *right - childSize.x - margins.x : child.position.x);
+		const float			   y = top ? *top : (bottom ? box.y - *bottom - childSize.y - margins.y : child.position.y);
 		place(child, {x, y}, childSize);
 	}
 

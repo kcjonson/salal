@@ -1,12 +1,15 @@
 // polygon: Primitives::drawPolygon. Convex, concave and self-crossing fills, borders that sit outside
-// the outline, one silhouette under several transforms (tessellated once, then cached), and additive
-// fills.
+// the outline, one silhouette under several transforms (tessellated once, then cached), additive
+// fills, and soft shadows under a silhouette and a circle.
 
 #include "DesignCanvas.h"
 #include "Scenes.h"
 
 #include <graphics/Color.h>
 #include <primitives/Primitives.h>
+#include <sandbox_art/Art.h>
+#include <vector/SVGLoader.h>
+#include <vector/Types.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -98,6 +101,18 @@ namespace {
 		Renderer::Primitives::PopTransform();
 	}
 
+	// sandbox_art's emblem, tessellated; empty, and drawing nothing, if it fails to load.
+	renderer::TessellatedMesh loadEmblem() {
+		std::vector<renderer::LoadedSVGShape> shapes;
+		renderer::TessellatedMesh			  mesh;
+		if (renderer::loadSVG(sandbox_art::art("emblem"), 0.5F, shapes, "emblem")) {
+			for (const renderer::LoadedSVGShape& shape : shapes) {
+				renderer::appendShapeMesh(shape, mesh);
+			}
+		}
+		return mesh;
+	}
+
 	class PolygonScene final : public app::Scene {
 	  public:
 		const char* name() const override { return kSceneName; }
@@ -161,6 +176,20 @@ namespace {
 			}
 			label("one silhouette, five PushTransforms", 1100.0F, 1040.0F);
 
+			// Art salal_art() embedded, loaded from memory once and tessellated with its gradient
+			// and stroke baked into the vertices.
+			P::PushTransform(placed(2480.0F, 650.0F, 0.0F, 2.6F));
+			P::drawTriangles(
+				{.vertices = emblem.vertices.data(),
+				 .indices = emblem.indices.data(),
+				 .vertexCount = emblem.vertices.size(),
+				 .indexCount = emblem.indices.size(),
+				 .colors = emblem.colors.data(),
+				 .antiAlias = true}
+			);
+			P::PopTransform();
+			label("embedded SVG", 2610.0F, 1040.0F);
+
 			// Row 3: alpha and additive fills overlapping.
 			const std::array<Foundation::Color, 3> primaries = {
 				Foundation::Color(1.0F, 0.2F, 0.2F, 0.8F),
@@ -183,6 +212,14 @@ namespace {
 				BlendMode::Additive
 			);
 			label("additive fill and border", 1700.0F, 1500.0F);
+
+			// Soft shadows on a pale plate: a silhouette's (its fill again, feathered over the
+			// blur) and a disk's (a rect's shadow rounded whole).
+			const Foundation::BoxShadow cast{.color = {0.1F, 0.08F, 0.05F, 0.5F}, .blur = 18.0F, .offset = {16.0F, 20.0F}};
+			P::drawRect({.bounds = {2060.0F, 1170.0F, 880.0F, 310.0F}, .style = {.fill = {0.86F, 0.82F, 0.72F, 1.0F}}});
+			draw(rock, {.fill = {0.45F, 0.5F, 0.35F, 1.0F}, .shadow = cast}, placed(2300.0F, 1320.0F, 0.4F, 0.9F));
+			P::drawCircle({.center = {2700.0F, 1320.0F}, .radius = 95.0F, .style = {.fill = {0.7F, 0.35F, 0.25F, 1.0F}, .shadow = cast}});
+			label("soft shadows", 2500.0F, 1500.0F);
 			P::PopTransform();
 		}
 
@@ -194,6 +231,7 @@ namespace {
 		const std::vector<Foundation::Vec2> square = ring(4, 110.0F, 110.0F);
 		const std::vector<Foundation::Vec2> triangle = ring(3, 120.0F, 120.0F);
 		const std::vector<Foundation::Vec2> notch = notched();
+		const renderer::TessellatedMesh		emblem = loadEmblem();
 	};
 
 } // namespace

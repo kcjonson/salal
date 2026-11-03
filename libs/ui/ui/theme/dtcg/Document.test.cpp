@@ -264,12 +264,13 @@ TEST(DesignTokens, GroupsExtendOtherGroups) {
 
 // The format has no type for a text transform, so a style's group carries one in salal's extension,
 // checked with the document's structure: a bad one leaves the file out, as an unknown $type does.
-TEST(DesignTokens, SalalsExtensionGivesAGroupItsTextTransform) {
+TEST(DesignTokens, SalalsExtensionGivesAGroupItsTextTransformAndBorderSides) {
 	const Loaded loaded = load(
 		{{"a.tokens.json", R"({ "styles": {
 			"button": { "$extensions": { "salal": { "textTransform": "uppercase" } }, "fontSize": { "$type": "dimension", "$value": { "value": 14, "unit": "px" } } },
 			"bigButton": { "$extends": "{styles.button}" },
-			"tab": { "$extensions": { "salal": { "textTransform": "uppercase" } } }
+			"tab": { "$extensions": { "salal": { "textTransform": "uppercase" } } },
+			"sectionTab": { "$extensions": { "salal": { "borderSides": ["left", "top", "right"] } } }
 		} })"},
 		 {"b.tokens.json", R"({ "styles": { "tab": { "$extensions": { "salal": { "textTransform": "none" } } } } })"}}
 	);
@@ -279,6 +280,10 @@ TEST(DesignTokens, SalalsExtensionGivesAGroupItsTextTransform) {
 	EXPECT_EQ(loaded.extensions.at("styles.tab").textTransform, TextTransform::None);			 // the later file's
 	EXPECT_EQ(loaded.extensions.at("styles.tab").file, "b.tokens.json");
 	EXPECT_FALSE(loaded.extensions.contains("styles")); // nothing inherits one down the groups
+	const std::optional<BorderSides> sides = loaded.extensions.at("styles.sectionTab").borderSides;
+	ASSERT_TRUE(sides.has_value());
+	EXPECT_TRUE(sides->top && sides->left && sides->right && !sides->bottom);
+	EXPECT_FALSE(loaded.extensions.at("styles.button").borderSides.has_value());
 
 	const auto rejected = [](const std::string& button) {
 		return load({{"a.tokens.json", R"({ "styles": { "button": )" + button + " } }"}});
@@ -286,6 +291,11 @@ TEST(DesignTokens, SalalsExtensionGivesAGroupItsTextTransform) {
 	const Loaded shouty = rejected(R"({ "$extensions": { "salal": { "textTransform": "shouty" } } })");
 	EXPECT_TRUE(shouty.hasError("styles.button", "$extensions.salal.textTransform \"shouty\" is not none or uppercase")) << shouty.all();
 	EXPECT_TRUE(shouty.extensions.empty()); // its file left out whole
+
+	for (const char* sides : {R"(["top", "top"])", R"(["up"])", R"("top")"}) {
+		const Loaded wrong = rejected(R"({ "$extensions": { "salal": { "borderSides": )" + std::string(sides) + " } } }");
+		EXPECT_TRUE(wrong.hasError("styles.button", "is not a list of top, right, bottom and left, each once")) << wrong.all();
+	}
 
 	const Loaded misspelt = rejected(R"({ "$extensions": { "salal": { "textTransfrom": "uppercase" } } })");
 	EXPECT_TRUE(misspelt.hasError("styles.button", "has no property \"textTransfrom\"")) << misspelt.all();

@@ -63,7 +63,8 @@
 //              style)
 //   enabled    reported by the snapshot; input reads it
 //   position   the margin box's top-left in the parent's box, under a Free parent or Absolute
-//   size       px, ui::percent() of the parent's box, or ui::kAuto (the default): its content
+//   size       px, ui::percent() of the parent's box, or ui::kAuto (the default): its content; a
+//              declared size takes the padding in, or out with layout.boxSizing ContentBox
 //   minSize    clamps a resolved size; auto is 0
 //   maxSize    clamps a resolved size; auto is none
 //   margin     space around the box, outside its size
@@ -434,6 +435,9 @@ namespace ui {
 		void					 finishReconcile(const std::vector<ComponentId>& kept);
 		// Its callback for an event type, if it has one.
 		[[nodiscard]] const std::function<void(PointerEvent&)>* callbackFor(PointerEvent::Type type) const;
+		// Its hover, press or a player's focus on it changed; the dispatcher and focus call it once the
+		// new state is set. Control turns it into onInteractionChanged.
+		virtual void interactionChanged() {}
 
 		void		setCommon(const Args& args);
 		void		registerOverlay(ComponentId entry, OverlayOptions options);

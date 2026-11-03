@@ -28,6 +28,26 @@
       "track": {
         "backgroundColor": { "$value": { "$ref": "#/color/surface/sunken/$value" } }
       }
+    },
+    "sectionTab": {
+      "$extensions": { "salal": { "borderSides": ["left", "top", "right"] } },
+      "borderWidth": { "$type": "dimension", "$value": { "value": 2, "unit": "px" } },
+      "borderStyle": {
+        "$type": "strokeStyle",
+        "$value": { "dashArray": [{ "value": 6, "unit": "px" }, { "value": 3, "unit": "px" }], "lineCap": "round" }
+      }
+    },
+    "mapLabel": {
+      "textShadow": {
+        "$type": "shadow",
+        "$value": {
+          "color": "{palette.slate.100}",
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 0, "unit": "px" },
+          "blur": { "value": 1, "unit": "px" },
+          "spread": { "value": 2, "unit": "px" }
+        }
+      }
     }
   }
 }

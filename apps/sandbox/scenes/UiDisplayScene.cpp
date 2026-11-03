@@ -1,8 +1,8 @@
 // ui_display: ui's display components, after worldsim's ui-sandbox Salvage scene (apps/ui-sandbox/
 // scenes/SalvageScene.cpp, a4226e17) less worldsim's own: badges in every tone, with and without a
 // dot; stats at each control size; key caps in a shortcut legend; dividers bare and labelled;
-// progress bars with a header, inline, and on Auto at a spread of values; and a panel with a title,
-// an action and a body.
+// boxes bordered on some sides and dashed; progress bars with a header, inline, and on Auto at a spread of
+// values; and a panel with a title, an action and a body.
 
 #include "Scenes.h"
 
@@ -14,6 +14,8 @@
 #include <ui/components/Panel.h>
 #include <ui/components/ProgressBar.h>
 #include <ui/components/Stat.h>
+#include <ui/shapes/Rectangle.h>
+#include <ui/shapes/Text.h>
 #include <ui/theme/Tokens.h>
 
 #include <array>
@@ -41,6 +43,7 @@ namespace {
 			badges(root().addChild<Component>({.id = "badges", .layout = flex(FlexDirection::Row, 8.0F)}));
 			stats(root().addChild<Component>({.id = "stats", .layout = flex(FlexDirection::Row, 32.0F)}));
 			keys(root().addChild<Component>({.id = "keys", .layout = flex(FlexDirection::Row, 6.0F)}));
+			boxes(root().addChild<Component>({.id = "boxes", .layout = flex(FlexDirection::Row, 16.0F)}));
 			Ref<Component> lower = root().addChild<Component>({.id = "lower", .layout = flex(FlexDirection::Row, 32.0F)});
 			bars(lower.addChild<Component>({.id = "bars", .size = {320.0F, kAuto}, .layout = flex(FlexDirection::Column, 14.0F)}));
 			panel(lower);
@@ -74,6 +77,25 @@ namespace {
 				row.addChild<KeyCap>({.label = key});
 			}
 			row.addChild<Text>({.style = styles::text::caption, .text = "move, run, menu"});
+		}
+
+		// Rectangles bordered on some sides and dashed, their style's borderSides and borderStyle: a
+		// tab, its top corners the pane's radius and its bottom square, an underline, a dashed box and
+		// a dotted one.
+		static void boxes(Ref<Component> row) {
+			const auto box = [&](const char* id, const char* label, const Foundation::BorderSides& sides, StrokeStyle::Kind stroke) {
+				Ref<Rectangle> shown = row.addChild<Rectangle>(
+					{.id = id,
+					 .size = {120.0F, 36.0F},
+					 .layout = {.display = Display::Flex, .alignItems = AlignItems::Center, .justifyContent = JustifyContent::Center},
+					 .style = styles::pane.extend({.borderWidth = 2.0F, .borderStyle = StrokeStyle{.kind = stroke}, .borderSides = sides})}
+				);
+				shown.addChild<Text>({.style = styles::text::body, .text = label});
+			};
+			box("tab", "Tab", {.bottom = false}, StrokeStyle::Kind::Solid);
+			box("underline", "Underline", {.top = false, .right = false, .left = false}, StrokeStyle::Kind::Solid);
+			box("dashed", "Dashed", {}, StrokeStyle::Kind::Dashed);
+			box("dotted", "Dotted", {}, StrokeStyle::Kind::Dotted);
 		}
 
 		static void bars(Ref<Component> column) {

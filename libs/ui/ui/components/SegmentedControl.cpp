@@ -39,6 +39,7 @@ namespace ui {
 						.fontSize = fontSize,
 						.letterSpacing = getStyle().letterSpacing,
 						.textTransform = getStyle().textTransform,
+						.fontWeight = getStyle().fontWeight,
 					});
 				}
 			}

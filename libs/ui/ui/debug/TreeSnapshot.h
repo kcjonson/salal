@@ -14,7 +14,8 @@
 //                 rest come with focus), value
 //   scroll        a scroller's offset and how far it goes, {x, y, maxX, maxY}; null on anything else,
 //                 as is contentOffset, the scroll as its children see it
-//   text          a Text's content, measured extent and line count, and overflow
+//   text          a Text's content, measured extent and line count, overflow, and the fontFamily
+//                 and fontWeight it resolved to
 //   style         the fill, text and border colours it resolves to
 //   inkBounds     where it may draw in the viewport, its ink extent included
 //   children      in tree order

@@ -1,8 +1,9 @@
 // ui_layout: Flex and Free placement, after worldsim's ui-sandbox layout scene (apps/ui-sandbox/scenes/
-// LayoutScene.cpp, a4226e17). Six columns, one per justifyContent; four per alignItems; a row of a
-// fixed box and two growing ones at 1x and 2x; a column whose body grows; a nested card; a wrapping
-// text in a column that hugs it; and absolutely placed badges in a card's corners. The stage is a
-// full-viewport column, so a resize lays it all out again.
+// LayoutScene.cpp, a4226e17). Six columns, one per justifyContent, then a padded frame in each box
+// sizing; four per alignItems, then a padded plate with children placed by a fraction of it and a
+// strip of chips that wraps; a row of a fixed box and two growing ones at 1x and 2x; a column whose
+// body grows; a nested card; a wrapping text in a column that hugs it; and absolutely placed badges
+// in a card's corners. The stage is a full-viewport column, so a resize lays it all out again.
 
 #include "Scenes.h"
 
@@ -57,8 +58,13 @@ namespace {
 			stage.alignItems = AlignItems::Start;
 			root().get()->setLayout(stage);
 			root().addChild<Text>({.id = "title", .style = {.color = Foundation::Color::white(), .fontSize = 20.0F}, .text = "Layout"});
-			distributions(root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)}));
-			alignments(root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)}));
+			Ref<Component> firstRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
+			distributions(firstRow);
+			boxSizings(firstRow);
+			Ref<Component> secondRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
+			alignments(secondRow);
+			fractions(secondRow);
+			wrappingStrip(secondRow);
 			Ref<Component> lastRow = root().addChild<Component>({.layout = flex(FlexDirection::Row, 16.0F)});
 			growRow(lastRow);
 			growColumn(lastRow);
@@ -90,6 +96,26 @@ namespace {
 			}
 		}
 
+		// The same declared 120 by 60 and 12 of padding in each box sizing: the content box is the padding
+		// bigger all round, and its fill is the declared size.
+		static void boxSizings(Ref<Component> row) {
+			struct Mode {
+				ui::BoxSizing sizing;
+				const char*	  caption;
+				const char*	  fill;
+			};
+			constexpr std::array<Mode, 2> kModes{{
+				{ui::BoxSizing::BorderBox, "border-box", "border_fill"},
+				{ui::BoxSizing::ContentBox, "content-box", "content_fill"},
+			}};
+			for (const Mode& mode : kModes) {
+				ui::Layout layout = flex(FlexDirection::Column, 0.0F, 12.0F);
+				layout.boxSizing = mode.sizing;
+				Ref<Rectangle> frame = captioned(row, mode.caption, {120.0F, 60.0F}, layout);
+				frame.addChild<Rectangle>({.id = mode.fill, .layout = {.flexGrow = 1.0F}, .style = {.backgroundColor = kSlate}});
+			}
+		}
+
 		static void alignments(Ref<Component> row) {
 			constexpr std::array<std::pair<AlignItems, const char*>, 4> kModes{{
 				{AlignItems::Start, "align start"},
@@ -110,6 +136,48 @@ namespace {
 						 .style = {.backgroundColor = colours[i]}}
 					);
 				}
+			}
+		}
+
+		// Placed by a share of the plate's whole box, its padding ignored, as hotspots on an illustration
+		// are, so they follow it through a resize in the same layout pass.
+		static void fractions(Ref<Component> row) {
+			Ref<Rectangle> plate = captioned(row, "inset by fraction", {200.0F, 100.0F}, {.padding = 10.0F});
+			const auto	   spot = [&](const char* id, ui::Size size, ui::Inset inset, const Foundation::Color& colour) {
+				plate.addChild<Rectangle>(
+					{.id = id,
+						 .size = size,
+						 .layout = {.position = ui::Position::Absolute, .inset = inset},
+						 .style = {.backgroundColor = colour}}
+				);
+			};
+			spot(
+				"fraction_left", {ui::percent(20.0F), ui::percent(40.0F)}, {.top = ui::percent(15.0F), .left = ui::percent(10.0F)}, kSlate
+			);
+			spot(
+				"fraction_right", {ui::percent(25.0F), ui::percent(25.0F)}, {.top = ui::percent(15.0F), .right = ui::percent(10.0F)}, kRust
+			);
+			spot(
+				"fraction_band",
+				{ui::kAuto, ui::percent(20.0F)},
+				{.right = ui::percent(40.0F), .bottom = ui::percent(10.0F), .left = ui::percent(40.0F)},
+				kMoss
+			);
+		}
+
+		// A strip of chips that breaks onto new lines, each line as tall as its tallest chip.
+		static void wrappingStrip(Ref<Component> row) {
+			ui::Layout layout = flex(FlexDirection::Row, 6.0F, 6.0F);
+			layout.flexWrap = ui::FlexWrap::Wrap;
+			Ref<Rectangle>						   strip = captioned(row, "wrapping strip", {240.0F, ui::kAuto}, layout);
+			const std::array<float, 7>			   widths{70.0F, 50.0F, 90.0F, 60.0F, 40.0F, 80.0F, 55.0F};
+			const std::array<Foundation::Color, 4> colours{kSlate, kRust, kMoss, kSand};
+			for (std::size_t i = 0; i < widths.size(); ++i) {
+				strip.addChild<Rectangle>({
+					.id = "chip_" + std::to_string(i),
+					.size = {widths[i], i == 1 ? 30.0F : 20.0F},
+					.style = {.backgroundColor = colours[i % colours.size()]},
+				});
 			}
 		}
 

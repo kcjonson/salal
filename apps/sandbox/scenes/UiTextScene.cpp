@@ -2,8 +2,10 @@
 // (apps/ui-sandbox/scenes/TextShapesScene.cpp and TextWrapScene.cpp, a4226e17). Sizes and colours
 // hugging their text; a 3 x 3 grid of the box alignments, each label the size of its box; word
 // wrapping at a given width with the height hugging, explicit newlines, per-line centring; letter
-// spacing and upper case. Worldsim's point-anchored alignment is gone: a Text's position is always
-// its box's top-left.
+// spacing and upper case; weights picking a face of the body role, registered as a regular and a
+// bold (the sandbox's one atlas loaded as two families, so they look alike and the tree's
+// text.fontFamily tells them apart); a halo and a drop shadow from textShadow over striped art.
+// Worldsim's point-anchored alignment is gone: a Text's position is always its box's top-left.
 
 #include "Scenes.h"
 
@@ -12,9 +14,11 @@
 #include <primitives/Primitives.h>
 #include <ui/shapes/Rectangle.h>
 #include <ui/shapes/Text.h>
+#include <ui/theme/Theme.h>
 
 #include <array>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -33,6 +37,14 @@ namespace {
 	using ui::Ref;
 	using ui::Text;
 
+	// Body's two faces, then the other roles on the regular one, so nothing falls back with a warning.
+	constexpr std::array<ui::FontFamilyName, 4> kFaces{{
+		{.name = "body", .family = sandbox::kMonoFont, .weight = 400.0F},
+		{.name = "body", .family = sandbox::kSecondFont, .weight = 700.0F},
+		{.name = "display", .family = sandbox::kMonoFont},
+		{.name = "mono", .family = sandbox::kMonoFont},
+	}};
+
 	void heading(Ref<Component> parent, const char* id, Foundation::Vec2 position, const char* text) {
 		parent.addChild<Text>({.id = id, .position = position, .style = {.color = kLabel, .fontSize = 18.0F}, .text = text});
 	}
@@ -42,12 +54,15 @@ namespace {
 		const char* name() const override { return kSceneName; }
 
 		void onEnter(app::App& /*app*/) override {
+			ui().setTheme(ui::Theme::load({.fontFamilies = kFaces}).theme);
 			Ref<Component> stage = root().addChild<Component>({.id = "stage", .position = {20.0F, 20.0F}, .size = {1000.0F, 660.0F}});
 			stage.addChild<Text>({.id = "title", .style = {.color = Color::white(), .fontSize = 28.0F}, .text = "Text"});
 			sizesAndColours(stage);
 			alignment(stage);
 			wrapping(stage);
 			spacing(stage);
+			weights(stage);
+			halo(stage);
 		}
 
 		void render(float /*alpha*/) override { Renderer::Primitives::clear(kBackground); }
@@ -150,6 +165,24 @@ namespace {
 			});
 		}
 
+		// 600 has no face of its own and takes the bold, CSS's nearest above 500.
+		static void weights(Ref<Component> stage) {
+			heading(stage, "weights_label", {250.0F, 220.0F}, "Weights");
+			const std::array<std::pair<const char*, float>, 3> weights{{
+				{"Regular 400", 400.0F},
+				{"Semi 600", 600.0F},
+				{"Bold 700", 700.0F},
+			}};
+			for (std::size_t i = 0; i < weights.size(); ++i) {
+				stage.addChild<Text>({
+					.id = std::string("weight_") + std::to_string(static_cast<int>(weights[i].second)),
+					.position = {250.0F, 252.0F + (static_cast<float>(i) * 26.0F)},
+					.style = {.color = Color::white(), .fontSize = 16.0F, .fontWeight = weights[i].second},
+					.text = weights[i].first,
+				});
+			}
+		}
+
 		static void spacing(Ref<Component> stage) {
 			stage.addChild<Text>({
 				.id = "spaced",
@@ -162,6 +195,43 @@ namespace {
 				.position = {320.0F, 600.0F},
 				.style = {.color = Color(1.0F, 0.75F, 0.5F), .fontSize = 16.0F, .textTransform = Foundation::TextTransform::Uppercase},
 				.text = "upper case at draw time",
+			});
+		}
+
+		// A label over busy art reads by its halo, a text shadow with no offset in the paper's colour.
+		// At 32 px the sandbox's atlas holds 2 px of it.
+		static void halo(Ref<Component> stage) {
+			const Color	   paper(0.93F, 0.89F, 0.78F);
+			const Color	   ink(0.15F, 0.12F, 0.1F);
+			Ref<Rectangle> art = stage.addChild<Rectangle>(
+				{.id = "halo_art",
+				 .position = {600.0F, 560.0F},
+				 .size = {360.0F, 90.0F},
+				 .style = {.backgroundColor = Color(0.3F, 0.45F, 0.3F)}}
+			);
+			for (int i = 0; i < 12; ++i) {
+				art.addChild<Rectangle>({
+					.position = {static_cast<float>(i) * 30.0F, 0.0F},
+					.size = {12.0F, 90.0F},
+					.style = {.backgroundColor = ink},
+					.pointerEvents = ui::PointerEvents::None,
+				});
+			}
+			art.addChild<Text>({
+				.id = "halo",
+				.position = {20.0F, 6.0F},
+				.style =
+					{.color = ink, .textShadow = Foundation::BoxShadow{.color = paper, .blur = 0.5F, .spread = 1.5F}, .fontSize = 32.0F},
+				.text = "Halo label",
+			});
+			art.addChild<Text>({
+				.id = "drop_shadow",
+				.position = {20.0F, 50.0F},
+				.style =
+					{.color = paper,
+					 .textShadow = Foundation::BoxShadow{.color = ink, .blur = 1.0F, .offset = {2.0F, 2.0F}},
+					 .fontSize = 24.0F},
+				.text = "Drop shadow",
 			});
 		}
 	};

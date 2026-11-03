@@ -227,7 +227,7 @@ namespace {
 
 TEST(StrokeTest, ARoundJointCutsAlongItsBisectorAndAButtCapSplitsItsSegment) {
 	std::vector<StrokePiece> pieces;
-	strokePolyline({.points = kElbow, .width = 2.0F, .cap = LineCap::Butt, .join = LineJoin::Round}, 1.0F, 0.0F, pieces);
+	EXPECT_EQ(strokePolyline({.points = kElbow, .width = 2.0F, .cap = LineCap::Butt, .join = LineJoin::Round}, 1.0F, 0.0F, pieces), 20.0F);
 	ASSERT_EQ(pieces.size(), 4U);
 	// The joint's cut runs from (8, 2) to (12, -2): where strips a pixel wider than the
 	// stroke (reach 2) cross the 45-degree bisector. Butt cap beside round joint: each
@@ -248,6 +248,11 @@ TEST(StrokeTest, ARoundJointCutsAlongItsBisectorAndAButtCapSplitsItsSegment) {
 	EXPECT_TRUE(sameBits(pieces[0].corners[0], pieces[1].corners[3]));
 	EXPECT_TRUE(sameBits(pieces[2].corners[0], pieces[3].corners[3]));
 	expectAllCut(pieces, false);
+	// How far down the line each centre lies, which a dash pattern is measured from.
+	EXPECT_NEAR(pieces[0].along, 3.25F, kTolerance);
+	EXPECT_NEAR(pieces[1].along, 6.25F, kTolerance);
+	EXPECT_NEAR(pieces[2].along, 13.75F, kTolerance);
+	EXPECT_NEAR(pieces[3].along, 16.75F, kTolerance);
 }
 
 TEST(StrokeTest, ACutMitersBoxRunsAPixelPastItsPiece) {
@@ -403,10 +408,14 @@ TEST(StrokeTest, CapsEndStraightAPixelPastTheirReach) {
 TEST(StrokeTest, AClosedLineCutsEveryJointAndIgnoresCaps) {
 	const std::vector<Foundation::Vec2> square = {{0.0F, 0.0F}, {10.0F, 0.0F}, {10.0F, 10.0F}, {0.0F, 10.0F}, {0.0F, 0.0F}};
 	std::vector<StrokePiece>			pieces;
-	strokePolyline({.points = square, .width = 2.0F, .cap = LineCap::Round, .join = LineJoin::Miter, .closed = true}, 1.0F, 0.0F, pieces);
+	const float							length = strokePolyline(
+		{.points = square, .width = 2.0F, .cap = LineCap::Round, .join = LineJoin::Miter, .closed = true}, 1.0F, 0.0F, pieces
+	);
 	// The repeated first point is dropped: four segments, each a box run on a pixel past
-	// both its cuts, every joint cut.
+	// both its cuts, every joint cut, the way round 40 long.
+	EXPECT_EQ(length, 40.0F);
 	ASSERT_EQ(pieces.size(), 4U);
+	EXPECT_NEAR(pieces[3].along, 35.0F, kTolerance);
 	expectCorners(pieces[0], {{12.0F, -2.0F}, {8.0F, 2.0F}, {2.0F, 2.0F}, {-2.0F, -2.0F}});
 	expectShape(pieces[0], {5.0F, 0.0F}, {1.0F, 0.0F}, 8.0F, 1.0F, 0.0F);
 	expectShape(pieces[3], {0.0F, 5.0F}, {0.0F, -1.0F}, 8.0F, 1.0F, 0.0F);
