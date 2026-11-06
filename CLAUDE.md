@@ -251,6 +251,12 @@ routes, control actions and state providers ([docs/app-api.md](docs/app-api.md),
 This is a native app rendering every frame, not a web page. Shut it down as soon
 as you are done with it.
 
+Every app with an `applicationName` writes its log to
+`<temp>/<applicationName>/logs/`, one file per run, and its crash reports, a
+minidump on Windows and the run's log beside each, to `crashes/`, pruned at each
+start ([docs/app-api.md](docs/app-api.md), "Logs and crash reports"). The
+sandbox's are under `%TEMP%\sandbox\`.
+
 ## Build
 
 Worldsim's arrangement: CMake 3.25+ with vcpkg (`VCPKG_ROOT` set), Ninja on

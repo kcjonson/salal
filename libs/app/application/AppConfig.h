@@ -39,6 +39,10 @@ namespace app {
 		Settings::Migrate	  migrateSettings;	   // brings a file older than settingsVersion up to it
 		std::filesystem::path savesDirectory;
 		SaveFormat			  saveFormat;
+		// The run's log file and crash reports (diagnostics/Diagnostics.h); empty is <temp>/<applicationName>, a
+		// relative path is under <temp>, and with no applicationName either there's no log file and no crash
+		// handler.
+		std::filesystem::path diagnosticsDirectory;
 		DevServerConfig		  devServer; // enabled, port, request timeout; a no-op where the server isn't compiled in
 		bool				  metrics = false;
 	};

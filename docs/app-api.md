@@ -867,6 +867,74 @@ time a copy may not keep.
   deterministic games save seeds and fork names and counters, never a PRNG's
   state mid-stream, which is content and so theirs.
 
+## Logs and crash reports
+
+Added after phase 2, when a world-sim crash left the console cut off with only
+an exit code. Every engine compared (Godot, Unity, Unreal) keeps the log with
+its crashes, so the two came together, in `app/diagnostics/` and
+`foundation/utils/LogFile`.
+
+The folder is `<temp>/<applicationName>/`, or `AppConfig::diagnosticsDirectory`
+(a relative one under `<temp>`). An app with neither gets no log file and no
+crash handler, which is the test harness. Every build and worktree of a game
+shares the folder, so its limits hold however many there are, and the system's
+own temp cleanup is a backstop. Unity's crashes go to `%TMP%` the same way.
+
+- **The log file.** One per run, `logs/<yyyyMMdd-HHmmss>-<pid>.log`, opened
+  first thing in `App::start` and closed last by `~App`. It gets what the
+  console shows, by the same per-category levels, without the colours: so
+  Release, which compiles out all but errors, logs little. Each line is written
+  as it's logged, unbuffered, so a crash loses nothing. Lines logged before the
+  file opens (the window, the GL context) are kept, up to 64 KB, and written
+  into it first. At 8 MB it rolls into one previous segment, `<run>.1.log`, so
+  a run keeps its last 8 to 16 MB, the part a crash needs; each segment starts
+  with the run's header (the game, the build, the pid, when it started).
+- **Pruning,** at each start before the run's log opens. `logs/` keeps the 20
+  newest runs and none older than 7 days; `crashes/` the 10 newest crashes and
+  none older than 30. Only files named as runs are touched, and never a run
+  whose log another process still has open: Windows refuses to delete an open
+  log, and on POSIX the log holds an `flock` the pruner checks. A crashed run's
+  log moves from `logs/` into `crashes/` beside its report, so it lasts as long
+  as the crash. Worst case is 20 runs of 16 MB a game; a normal run is far less.
+- **The crash handler** (`CrashHandler.h`), installed with the log and put back
+  by `~App`. A fault, an abort, a pure virtual call, a CRT invalid parameter or
+  `std::terminate` (with the exception's `what()`) writes a report, what
+  happened then the stack, to stderr, the log and `crashes/<run>.txt`. Then
+  the process ends as it would have: the exception's code on Windows (3 for the
+  rest), the signal's default action elsewhere. An attached debugger gets the
+  crash first.
+  - Windows: an unhandled-exception filter, SIGABRT with abort's fast fail
+    turned off, and the pure-call and invalid-parameter handlers, which would
+    otherwise fast-fail past the filter. A thread started at install writes
+    `crashes/<run>.dmp` (thread info and the memory the stacks point at, a few
+    MB) and walks the stack with DbgHelp while the crashed thread waits, so a
+    stack overflow is reported too. An uncaught C++ exception is dumped where it
+    was thrown, before anything unwinds, then handed back to the CRT, whose
+    terminate adds its `what()`.
+  - macOS and Linux: `sigaction` for SIGSEGV, SIGBUS, SIGILL, SIGFPE and
+    SIGABRT on an alternate signal stack, the backtrace written with
+    async-signal-safe calls (`backtrace` is primed at install). Frame names
+    where `dladdr` finds them, module and offset otherwise, for `addr2line` or
+    `atos`; macOS's own crash report still follows, since the signal is
+    re-raised.
+- **What it can't report.** A fast fail (a /GS cookie, `__fastfail`) ends the
+  process before any handler in it runs; only Windows Error Reporting, or an
+  out-of-process handler, sees one. Only the installing thread has the
+  alternate stack, so a stack overflow on a worker thread on POSIX ends
+  unreported. MSVC's Release has no PDBs, so its stacks and dumps have
+  addresses, not names.
+- **A crash reporter later** (Crashpad, through Sentry, Backtrace or BugSplat)
+  writes its dumps from a process of its own and replaces the minidump writer
+  and the DbgHelp walk. The rest stays: the CRT hooks, without which an abort
+  fast-fails past any handler, the terminate line, the folder and its pruning
+  (Crashpad takes a database path), and the tests.
+
+The tests check the log file, its roll and every prune rule headlessly, and
+crash a child process (gtest death tests) for an abort, an uncaught exception,
+a fault and a stack overflow, matching the report on stderr and in the file,
+and the dump on Windows. In Debug the sandbox crashes on purpose through
+`/api/dev/crash?kind=segv|abort|throw|overflow` (`app::crashOnPurpose`).
+
 ## Resources
 
 No byte-provider in phase 2. WebAssembly was its reason; worldsim's

@@ -242,6 +242,7 @@ namespace app::testing {
 		AppConfig			  relative = config();
 		relative.organization = "kcjonson";
 		relative.applicationName = "Sandbox";
+		relative.diagnosticsDirectory = temp / "diagnostics";
 		relative.settingsFile = "settings.json";
 		relative.savesDirectory = "saves";
 		start(relative);

@@ -171,6 +171,7 @@ namespace app {
 	}
 
 	bool App::start() {
+		openDiagnostics();
 		Foundation::setResourceRoots(config.resourceRoots);
 		openStorage();
 		applyWindowSettings();
@@ -211,6 +212,22 @@ namespace app {
 			window.framebufferHeight
 		);
 		return true;
+	}
+
+	// First, so the rest of the start is in the log file and under the crash handler. A relative folder is
+	// under the system's temp directory, as the default is; with no temp directory, there's none.
+	void App::openDiagnostics() {
+		std::filesystem::path root = diagnosticsDirectory(config.applicationName);
+		if (config.diagnosticsDirectory.is_absolute()) {
+			root = config.diagnosticsDirectory;
+		} else if (!config.diagnosticsDirectory.empty()) {
+			std::error_code				error;
+			const std::filesystem::path temp = std::filesystem::temp_directory_path(error);
+			root = error ? std::filesystem::path() : temp / config.diagnosticsDirectory;
+		}
+		if (!root.empty()) {
+			diagnostics = Diagnostics::start(root, config.applicationName);
+		}
 	}
 
 	void App::openStorage() {

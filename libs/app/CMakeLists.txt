@@ -17,6 +17,9 @@ add_library(salal_app STATIC
     application/CommandLine.cpp
     clipboard/Clipboard.cpp
     detail/SafeFile.cpp
+    diagnostics/CrashHandler.cpp
+    diagnostics/Diagnostics.cpp
+    $<IF:$<PLATFORM_ID:Windows>,diagnostics/CrashHandlerWindows.cpp,diagnostics/CrashHandlerPosix.cpp>
     input/ControlNames.cpp
     input/Input.cpp
     platform/EventRelay.cpp
@@ -44,7 +47,7 @@ target_include_directories(salal_app
 # hosts a ui context in every scene (scene/Scene.h). nlohmann-json is in
 # the settings' and saves' headers, so it's public, in every configuration. winmm for
 # timeBeginPeriod, which run()'s frame cap needs; shell32 and ole32 for the known folders the
-# per-user directories fall back to.
+# per-user directories fall back to; dbghelp for the crash handler's minidump and stack.
 target_link_libraries(salal_app
     PUBLIC
         salal::ui
@@ -58,7 +61,11 @@ target_link_libraries(salal_app
         $<$<PLATFORM_ID:Windows>:winmm>
         $<$<PLATFORM_ID:Windows>:shell32>
         $<$<PLATFORM_ID:Windows>:ole32>
+        $<$<PLATFORM_ID:Windows>:dbghelp>
 )
+
+# The build a log file's header names.
+target_compile_definitions(salal_app PRIVATE "SALAL_BUILD_CONFIG=\"$<CONFIG>\"")
 
 # The dev server, only in the configurations SALAL_DEV_SERVER_GENEX names. SALAL_DEV_SERVER is
 # PUBLIC so a game can #if on it; elsewhere DevServer.h declares the same API as inline no-ops, none

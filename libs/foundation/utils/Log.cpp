@@ -1,8 +1,12 @@
 #include "Log.h"
 
+#include "LogFile.h"
+
 #include <atomic>
+#include <cstddef>
 #include <cstdio>
 #include <ctime>
+#include <string_view>
 #include <thread>
 
 namespace foundation {
@@ -160,6 +164,31 @@ namespace foundation {
 
 		printf("\n");
 		fflush(stdout);
+
+		// The same line for the log file, without the colours.
+		char text[512];
+		int	 length =
+			 level >= LogLevel::Warning
+				 ? snprintf(
+					   text,
+					   sizeof(text),
+					   "[%s][%s][%s] %s (%s:%d)\n",
+					   timestamp,
+					   categoryToString(category),
+					   levelToString(level),
+					   message,
+					   file,
+					   line
+				   )
+				 : snprintf(text, sizeof(text), "[%s][%s][%s] %s\n", timestamp, categoryToString(category), levelToString(level), message);
+		if (length < 0) {
+			return;
+		}
+		if (static_cast<std::size_t>(length) >= sizeof(text)) {
+			length = static_cast<int>(sizeof(text)) - 1;
+			text[length - 1] = '\n';
+		}
+		detail::writeLogLine(std::string_view(text, static_cast<std::size_t>(length)));
 	}
 
 	const char* categoryToString(LogCategory cat) {

@@ -2,7 +2,9 @@
 // (Picker.h). --scene=<name> starts in that scene with the picker closed; without it the first scene
 // runs with the picker open. The dev server serves on 127.0.0.1:8090, or --http-port's port, in the
 // configurations it is compiled into; /api/control?action=scene&scene=<name> switches scene. Close the
-// window, or ask /api/control?action=exit, to quit. --no-vsync is for perf runs (scripts/perf.mjs).
+// window, or ask /api/control?action=exit, to quit. --no-vsync is for perf runs (scripts/perf.mjs). Its
+// log and crash reports are under <temp>/sandbox/; in Debug, /api/dev/crash?kind=segv|abort|throw|overflow
+// crashes it on purpose, to check them.
 
 #include "BaseShader.h"
 #include "Picker.h"
@@ -10,6 +12,7 @@
 
 #include <application/App.h>
 #include <application/CommandLine.h>
+#include <diagnostics/CrashHandler.h>
 #include <platform/Platform.h>
 #include <primitives/FontFamily.h>
 
@@ -120,6 +123,15 @@ int main(int argc, char** argv) {
 	app->addDebugLayer(
 		std::make_unique<sandbox::Picker>(*app, sandbox::Picker::Args{.scenes = std::move(names), .open = !commandLine.scene})
 	);
+#ifndef NDEBUG
+	const app::DevServer::Registration crashRoute = app->devServer().route("crash", [](const app::DevRequest& request) {
+		const auto kind = request.params.find("kind");
+		if (kind == request.params.end() || !app::crashOnPurpose(kind->second)) {
+			return app::DevResponse{.status = 400, .body = R"({"error":"kind is segv, abort, throw or overflow"})"};
+		}
+		return app::DevResponse{};
+	});
+#endif
 
 	app->run();
 	app->shutdown();

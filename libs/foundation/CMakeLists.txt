@@ -7,6 +7,7 @@ add_library(salal_foundation STATIC
     metrics/SystemResources.cpp
     threading/TaskPool.cpp
     utils/Log.cpp
+    utils/LogFile.cpp
     utils/ResourcePath.cpp
     utils/Utf8.cpp
 )
