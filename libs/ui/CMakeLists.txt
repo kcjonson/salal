@@ -81,6 +81,7 @@ add_library(salal_ui STATIC
     ui/debug/LayoutLint.cpp
     ui/debug/TreeSnapshot.cpp
     ui/detail/Dispatcher.cpp
+    ui/detail/DragService.cpp
     ui/detail/FocusManager.cpp
     ui/detail/Grid.cpp
     ui/detail/LayoutEngine.cpp

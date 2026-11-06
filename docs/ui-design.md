@@ -474,6 +474,113 @@ lets two players shop at once, and lets tests build fresh services.
 Worldsim's `FocusManager::Get()` singleton, registered from constructors,
 allowed none of that and threw when built too early.
 
+## Drag and drop
+
+Decided 2026-11-06, for a game's battle screen, which drags cards from a hand
+onto targets on a road. Takes R9.12, R9.12b's ghost, R9.12d and R9.12e;
+replaces R9.12a's start call and its threshold tokens, R9.12c's `accept()`, and
+the bubbling drag events of R9.1 and R8.2; adds a keyboard and pad path, which
+the spec doesn't have.
+
+A component becomes a drag source or a drop target by declaring it, as it
+declares a tooltip, and the context runs the whole gesture:
+
+```cpp
+card->setDragSource({
+	.kind = "card",
+	.value = cardId,
+	.onDragEnd = [](const ui::Drag& drag) { /* drag.dropped, drag.target */ },
+});
+lane->setDropTarget({
+	.accepts = [](const ui::Drag& drag) { return drag.kind == "card" && playable(std::any_cast<CardId>(drag.value)); },
+	.onDrop = [this](const ui::Drag& drag) { play(std::any_cast<CardId>(drag.value)); },
+});
+```
+
+- **Start.** A primary press on a source, or on anything under it, that no
+  handler captured stays a candidate click until it travels past 6 px, the
+  threshold that already stops a press clicking. Past it the drag starts: the
+  press target hears a Cancel, nothing clicks, and the source captures the
+  pointer. One number for both means a press is a click or a drag, never
+  neither. It isn't a token, since it's behaviour rather than look, and there is
+  no touch threshold because app has no touch input. A press consumed below the
+  source starts nothing, so a control inside a card that shouldn't drag the
+  card consumes its press.
+- **The ghost.** The source is its own ghost unless its `ghost` builds one
+  under it. Either way the ghost is lifted into the drag tier, the top of the
+  ordering model, above the tooltips: it paints in that slot, its ancestors'
+  clips stop cutting it, and the pointer never hits it, so a hit test during a
+  drag finds what's under the ghost. It moves by a translation in screen space,
+  the pointer's travel since the press, over its own transform, so a card turned
+  in a fanned hand stays turned while it follows. A lifted source keeps its box
+  in layout, so the hand doesn't close up behind it unless the game does that
+  in `onDragStart`. At the end the ghost is set down where it started, at once;
+  `onDragEnd` gets the last travel, for a game that tweens it home.
+- **Targets.** The drag is over the innermost target at or above the hit, and
+  that target decides. A refusal isn't passed up, so a card held over a vehicle
+  that refuses it doesn't fall through to the road the vehicle sits on.
+  Accepting is a predicate, `accepts`, asked whenever the context needs the
+  answer (arriving, each move, each key step, the tree), so it should be cheap
+  and change nothing; unset, a target takes anything. A disabled target
+  refuses. A source and its subtree are never targets of its own drag, and
+  nothing under a modal dialog of the drag's player is one.
+- **Events.** The source hears `onDragStart` and exactly one `onDragEnd`. A
+  target hears `onDragEnter`, `onDragOver` on each move (and once when a key
+  drag arrives), and then `onDragLeave`, or `onDrop` in its place, after which
+  the source's `onDragEnd` has `dropped` set; a target that goes mid-drag hears
+  nothing more. None bubbles: the target was already found by
+  walking up, so a bubble would only deliver the same answer twice. A source
+  being dragged is `dragging`, and a target with a drag it accepts over it is
+  `dropActive` (R11's state); a Control hears both in `onInteractionChanged`.
+  Over a target that refuses, the cursor is NotAllowed.
+- **Cancel.** The player's cancel action (Escape or a pad's B by default,
+  rebindable like every navigation action), a second button pressed during the
+  drag (a right click), the window losing focus, the scene being covered, and
+  the source going all end the drag not dropped. A pointer drag's press is
+  still held after a cancel, and its release clicks nothing.
+- **Keys and pads.** Activate on a focused source, or on a component under
+  one, picks it up when nothing on the way consumed the activate, so a source
+  that's also a button clicks instead, and a game wanting both reads the
+  activate itself. The drag then has that player's navigation actions before
+  the focused component hears them: a direction moves it to the nearest
+  accepting target that way, by the score directional focus uses; next and
+  previous step through the accepting targets in tree order; activate drops;
+  cancel puts it back. It starts on the accepting target nearest the source,
+  or on none when nothing accepts, and an activate then ends it as a release
+  over empty space does. Focus stays on the source and targets needn't be
+  focusable, since a road lane isn't a Tab stop. The ghost sits centred on its
+  target and follows it through layout. A pointer press during a key drag
+  cancels it.
+- **One drag at a time** in a scene. A second player's pick up while one is
+  under way falls through; per-player drags wait on multi-device focus, an
+  open decision.
+- **Tooltips** stay shut during a drag (R9.12e).
+- **Observability.** The tree document carries `drag`, null between drags:
+  how it's driven (`pointer` or `keys`), the player, the kind, the source,
+  ghost and target (each `{id, key}`, the target null over none), whether the
+  target accepts, the point and the travel. Every node has `dragSource` (the
+  kind it carries, null on anything else) and `dropTarget`, and its state has
+  `dragging`, `dropAccepts` and `dropActive`, each null where it doesn't apply.
+  `/api/input` drives a pointer drag with `down`, `move` and `up`, or one
+  `drag,x0,y0,x1,y1`: a move to the start, the press, four moves along the
+  line and the release. A key drag is `keydown` or `pad` events, as any
+  navigation is.
+
+Why declared: the keys have to know what can be picked up, and which targets
+accept, before the drag gets anywhere, and neither a start call made from a
+press handler nor an `accept()` made in a dragenter can tell them. Godot
+(`_get_drag_data`, `_can_drop_data`) and Flutter (`Draggable`, `DragTarget`'s
+`onWillAcceptWithDetails`) declare both sides the same way. The spec followed
+HTML's event model, which has no keyboard path at all. Card games played on a
+pad converge on the same shape for the keys: pick a card, move a cursor among
+the legal targets, confirm or back out. Why the innermost target decides:
+Godot passes a refusal up to the parent, and in a hand-over-road layout that
+plays a card on the road when the player aimed it at a vehicle.
+
+Not built until a game asks: touch, scrolling a scroller from its edge during
+a drag, copy and move effects, drags between scenes or windows, `parkOffset`
+(R8.30) and per-player drags.
+
 ## Component API
 
 Decided 2026-10-30. Names the node model's one base class, settles the

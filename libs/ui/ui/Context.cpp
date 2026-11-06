@@ -1,6 +1,7 @@
 #include "ui/Context.h"
 
 #include "ui/detail/Dispatcher.h"
+#include "ui/detail/DragService.h"
 #include "ui/detail/FocusManager.h"
 #include "ui/detail/LayoutEngine.h"
 #include "ui/theme/Tokens.h"
@@ -75,7 +76,8 @@ namespace ui {
 		  windowSize(viewportSize),
 		  viewport(viewportSize),
 		  dispatcher(std::make_unique<detail::Dispatcher>(*this)),
-		  focusManager(std::make_unique<detail::FocusManager>(*this)) {
+		  focusManager(std::make_unique<detail::FocusManager>(*this)),
+		  drags(std::make_unique<detail::DragService>(*this)) {
 		applyMotion();
 	}
 
@@ -265,6 +267,7 @@ namespace ui {
 		hoverStale = false;
 		if (changed) {
 			dispatcher->hoverAgain();
+			drags->afterLayout();
 		}
 	}
 
@@ -301,11 +304,14 @@ namespace ui {
 		}
 		const PointerEvents pointer = component.getPointerEvents();
 		const bool			childBlocked = blocked || pointer == PointerEvents::Unit || pointer == PointerEvents::None;
-		const Affine		childParent =
-			   component.scroll == Foundation::Vec2{0.0F, 0.0F} ? component.screen : component.screen * Affine::translation(-component.scroll);
+		const Affine		childParent = childSpace(component);
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
 				const bool entry = child->isOverlay();
+				if (child->lifted) {
+					updateScreen(*child, Affine::translation(drags->travel()) * childParent, std::nullopt, component.enabledInTree, true);
+					continue;
+				}
 				updateScreen(
 					*child,
 					child->detached ? Affine{} : childParent,
@@ -315,6 +321,22 @@ namespace ui {
 				);
 			}
 		}
+	}
+
+	Affine Context::childSpace(const Component& component) {
+		return component.scroll == Foundation::Vec2{0.0F, 0.0F} ? component.screen
+																: component.screen * Affine::translation(-component.scroll);
+	}
+
+	// A ghost moved by its travel in screen space, over its own transform and its ancestors'.
+	void Context::placeLifted() {
+		Component* ghost = drags->lifted();
+		if (ghost == nullptr) {
+			return;
+		}
+		const Component* parentNode = registry.find(ghost->parentId);
+		const Affine	 space = Affine::translation(drags->travel()) * (parentNode != nullptr ? childSpace(*parentNode) : Affine{});
+		updateScreen(*ghost, space, std::nullopt, parentNode == nullptr || parentNode->enabledInTree, true);
 	}
 
 	void Context::buildOrder() {
@@ -343,6 +365,10 @@ namespace ui {
 				paintingSlot = tooltips ? kTooltipSlot : std::min(++stackSlot, kMaxStackEntries);
 				paintContext(*component);
 			}
+		}
+		if (Component* ghost = drags->lifted(); ghost != nullptr && shownInTree(*ghost)) {
+			paintingSlot = kDragSlot;
+			paintContext(*ghost);
 		}
 		paintingSlot = 0;
 
@@ -383,8 +409,8 @@ namespace ui {
 		hitList.reserve(order.size() + bars.size());
 		std::size_t bar = 0;
 		for (const ComponentId id : order) {
-			if (registry.find(id)->slot == kTooltipSlot) {
-				continue;
+			if (const int slot = registry.find(id)->slot; slot == kTooltipSlot || slot == kDragSlot) {
+				continue; // the tiers the pointer never hits
 			}
 			hitList.push_back({.id = id, .scrollbar = false});
 			const std::int32_t key = registry.find(id)->key;
@@ -423,8 +449,8 @@ namespace ui {
 	void Context::collectContext(Component& parent, int inheritedZ) {
 		for (const ComponentId childId : parent.children) {
 			Component* child = registry.find(childId);
-			if (child == nullptr || !child->isShown() || child->isOverlay()) {
-				continue; // an entry paints in its own slot
+			if (child == nullptr || !child->isShown() || child->isOverlay() || child->lifted) {
+				continue; // an entry paints in its own slot, a ghost in the drag tier
 			}
 			const int z = child->zIndex.value_or(inheritedZ);
 			orderScratch.push_back({.component = child, .z = z});
@@ -503,8 +529,10 @@ namespace ui {
 		dispatcher->cancel();
 	}
 
-	// The subtree's tweens and timers go with it. Focus goes first, while the entries it reads are open.
+	// The subtree's tweens and timers go with it. A drag whose source goes ends first, releasing its
+	// capture; focus goes before the entries it reads close.
 	void Context::removing(ComponentId root) {
+		drags->removing(root);
 		dispatcher->removing(root);
 		focusManager->removing(root);
 		std::erase_if(overlayStack, [&](const OverlayEntry& entry) { return within(entry.id, root); });
@@ -686,11 +714,14 @@ namespace ui {
 	}
 
 	int Context::modalFloor() const {
-		const int pointerPlayer = focusManager->mousePlayer();
-		int		  floor = 0;
+		return modalFloor(focusManager->mousePlayer());
+	}
+
+	int Context::modalFloor(int player) const {
+		int floor = 0;
 		for (const OverlayEntry& open : overlayStack) {
 			const Component* entry = registry.find(open.id);
-			if (entry != nullptr && open.options.kind == OverlayKind::Dialog && open.options.player == pointerPlayer && entry->isShown()) {
+			if (entry != nullptr && open.options.kind == OverlayKind::Dialog && open.options.player == player && entry->isShown()) {
 				floor = std::max(floor, entry->slot);
 			}
 		}
@@ -743,8 +774,14 @@ namespace ui {
 		return restore;
 	}
 
-	// The innermost hovered component with a tooltip owns the tier's one hover tooltip.
+	// The innermost hovered component with a tooltip owns the tier's one hover tooltip. None opens during
+	// a drag (R9.12e).
 	void Context::updateTooltip() {
+		if (drags->underWay()) {
+			closeTooltip();
+			tipOwner = {};
+			return;
+		}
 		ComponentId owner;
 		for (const ComponentId id : dispatcher->hovered()) {
 			if (const Component* node = registry.find(id); node != nullptr && node->tooltip) {
@@ -835,8 +872,22 @@ namespace ui {
 		return focusManager->inputMode();
 	}
 
+	// A pointer drag's capture taken by another component, or released by its source, ends it not dropped.
 	void Context::capture(ComponentId captorId) {
+		if (const Drag* under = drags->current();
+			under != nullptr && under->via == DragVia::Pointer && captorId != under->source.componentId()) {
+			drags->cancel();
+		}
 		dispatcher->capture(captorId);
+	}
+
+	const Drag* Context::drag() const {
+		return drags->current();
+	}
+
+	bool Context::cancelDrag() {
+		const Registry::DispatchScope scope(registry);
+		return drags->cancel();
 	}
 
 	ComponentId Context::captor() const {
@@ -861,6 +912,16 @@ namespace ui {
 			if (Component* entry = registry.find(open.id); entry != nullptr && entry->detached && shownInTree(*entry)) {
 				renderComponent(*entry, 1.0F);
 			}
+		}
+		// A drag's ghost from the top too, in its parent's space moved by the travel, out of every clip.
+		if (Component* ghost = drags->lifted(); ghost != nullptr && shownInTree(*ghost)) {
+			const Component* parentNode = registry.find(ghost->parentId);
+			const Affine	 space = Affine::translation(drags->travel()) * (parentNode != nullptr ? childSpace(*parentNode) : Affine{});
+			Renderer::Primitives::pushClipReset();
+			Renderer::Primitives::PushTransform(space.toMat4());
+			renderComponent(*ghost, parentNode != nullptr ? parentNode->effectiveOpacity : 1.0F);
+			Renderer::Primitives::PopTransform();
+			Renderer::Primitives::popClip();
 		}
 		if (scale != 1.0F) {
 			Renderer::Primitives::PopTransform();
@@ -891,8 +952,8 @@ namespace ui {
 		}
 		for (const ComponentId childId : component.children) {
 			if (Component* child = registry.find(childId)) {
-				if (child->detached) {
-					continue; // drawn from the top, in screen space
+				if (child->detached || child->lifted) {
+					continue; // drawn from the top: in screen space, or as a drag's ghost
 				}
 				const bool entry = child->isOverlay();
 				if (entry) {

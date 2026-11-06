@@ -30,10 +30,12 @@
 //   };
 
 #include "ui/Animator.h"
+#include "ui/Drag.h"
 #include "ui/Focus.h"
 #include "ui/Input.h"
 #include "ui/Layout.h"
 #include "ui/Overlay.h"
+#include "ui/Ref.h"
 #include "ui/Registry.h"
 #include "ui/Style.h"
 #include "ui/Transform.h"
@@ -129,46 +131,10 @@ namespace ui {
 
 	namespace detail {
 		class Dispatcher;
+		class DragService;
 		class FocusManager;
 		class LayoutEngine;
 	} // namespace detail
-
-	template <typename T>
-	class Ref {
-	  public:
-		Ref() = default;
-		// A Ref to a derived type is a Ref to its base.
-		template <typename U>
-			requires std::derived_from<U, T>
-		Ref(const Ref<U>& other) // NOLINT(google-explicit-constructor)
-			: id(other.id),
-			  registry(other.registry) {}
-
-		// The component, for the current statement; null once it has been removed.
-		[[nodiscard]] T* get() const;
-		// Builds C under the component, as Component::addChild does; an empty Ref, logged, once it's gone.
-		template <typename C>
-		Ref<C> addChild(const typename C::Args& args) const;
-
-		[[nodiscard]] ComponentId componentId() const { return id; }
-		template <typename U>
-		bool operator==(const Ref<U>& other) const {
-			return id == other.id && registry == other.registry;
-		}
-
-	  private:
-		template <typename>
-		friend class Ref;
-		friend class Component;
-		friend class Context;
-
-		Ref(ComponentId componentId, Registry* owner)
-			: id(componentId),
-			  registry(owner) {}
-
-		ComponentId id;
-		Registry*	registry = nullptr;
-	};
 
 	class Component {
 	  public:
@@ -286,8 +252,9 @@ namespace ui {
 		void			   capturePointer();
 		void			   releasePointer();
 		[[nodiscard]] bool hasPointerCapture() const;
-		// It answers the pointer itself: a pointer callback, or a type that handles it (the snapshot's
-		// handlesPointer, which the lint's unreachable-interactive rule reads).
+		// It answers the pointer itself: a pointer callback, a drag source or a drop target, or a type
+		// that handles it (the snapshot's handlesPointer, which the lint's unreachable-interactive rule
+		// reads).
 		[[nodiscard]] virtual bool handlesPointer() const;
 
 		// --- Overlays (ui/Overlay.h) ---
@@ -310,6 +277,27 @@ namespace ui {
 		using TooltipOpener = std::function<Ref<Component>(Component& owner, Foundation::Vec2 at)>;
 		void			   setTooltip(TooltipOpener open) { tooltip = std::move(open); }
 		[[nodiscard]] bool hasTooltip() const { return static_cast<bool>(tooltip); }
+
+		// --- Drag and drop (ui/Drag.h) ---
+
+		// A press on it that travels past kDragThreshold, or a player's activate while it's focused,
+		// drags it. Cleared, it's no source, and its drag under way ends, not dropped.
+		void							setDragSource(DragSource value);
+		void							clearDragSource();
+		[[nodiscard]] const DragSource* getDragSource() const { return dragSource.get(); }
+		// It takes drops. Cleared, it's no target, and a drag over it moves off.
+		void							setDropTarget(DropTarget value);
+		void							clearDropTarget();
+		[[nodiscard]] const DropTarget* getDropTarget() const { return dropTarget.get(); }
+		// Its drag is under way.
+		[[nodiscard]] bool isDragging() const { return dragging; }
+		// A drag it accepts is over it.
+		[[nodiscard]] bool isDropActive() const { return dropActive; }
+		// It's a target that takes the drag under way, wherever the drag is: a target lights up for every
+		// drag it could take. False between drags.
+		[[nodiscard]] bool acceptsDrag() const;
+		// A drag's ghost, painted in the drag tier and never hit.
+		[[nodiscard]] bool isLifted() const { return lifted; }
 		// --- Focus ---
 
 		[[nodiscard]] bool							   isFocusable() const { return focusable; }
@@ -401,6 +389,7 @@ namespace ui {
 	  private:
 		friend class Context;
 		friend class detail::Dispatcher;
+		friend class detail::DragService;
 		friend class detail::FocusManager;
 		friend class detail::LayoutEngine;
 
@@ -536,6 +525,11 @@ namespace ui {
 		int								slot = 0;
 		bool							detached = false; // an Absolute overlay: in screen space, apart from its opener
 		TooltipOpener					tooltip;
+		std::unique_ptr<DragSource>		dragSource;
+		std::unique_ptr<DropTarget>		dropTarget;
+		bool							dragging = false;
+		bool							dropActive = false;
+		bool							lifted = false; // a drag's ghost: in the drag tier, moved by its travel
 		bool							focusable = false;
 		bool							descendantsFocusable = true;
 		std::uint8_t					focusedBy = 0; // a bit for each player whose focus is on it

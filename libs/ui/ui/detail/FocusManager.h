@@ -21,6 +21,12 @@ namespace ui {
 
 namespace ui::detail {
 
+	// The candidate that way from `origin` on screen with the lowest score: the gap along the direction,
+	// twice the offset across it, less the overlap across it. Directional focus, and a key drag's step
+	// between targets.
+	[[nodiscard]] Component*
+	nearestOnScreen(const Foundation::Rect& origin, Direction way, std::span<Component* const> candidates, const Component* skip);
+
 	class FocusManager {
 	  public:
 		explicit FocusManager(Context& owner);
@@ -78,6 +84,8 @@ namespace ui::detail {
 		bool keyDown(const foundation::InputEvent& event);
 		bool keyOther(const foundation::InputEvent& event);
 		bool padAction(const foundation::InputEvent& event, float previous);
+		// The action to a drag under way: true when the drag took it.
+		bool dragKey(int player, Action action);
 		// The action, its event delivered to the focused component first; a Navigate nobody consumed
 		// moves focus.
 		bool act(int player, Action action, const KeyEvent& base);
@@ -107,9 +115,6 @@ namespace ui::detail {
 		[[nodiscard]] Component* groupOf(const Component& component, int player) const;
 		// A step inside `group`, along its orientation; none at an end without wrap, or off its axis.
 		[[nodiscard]] Component* stepInGroup(Component& group, Component& from, Direction direction) const;
-		// Lowest score that way on screen: the gap along the direction, twice the offset across it, less
-		// the overlap across it.
-		[[nodiscard]] Component* nearest(const Component& from, Direction direction, std::span<Component* const> candidates) const;
 		// Entering a focus group from outside lands on its member focused last.
 		[[nodiscard]] Component* resolve(Component& candidate, const Component& from) const;
 		void					 scrollIntoView(Component& target);

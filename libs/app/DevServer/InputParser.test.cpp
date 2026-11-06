@@ -72,6 +72,21 @@ namespace app::detail {
 		expectPointer(parsed.events[2], Type::PointerUp, 7.0F, 8.0F);
 	}
 
+	TEST(InputParserTest, ADragIsAPressFourMovesAlongAndARelease) {
+		const ParsedInput parsed = parse({"drag,10,20,50,100"});
+		ASSERT_TRUE(parsed.error.empty()) << parsed.error;
+		ASSERT_EQ(parsed.events.size(), 7U);
+		expectPointer(parsed.events[0], Type::PointerMove, 10.0F, 20.0F);
+		expectPointer(parsed.events[1], Type::PointerDown, 10.0F, 20.0F);
+		expectPointer(parsed.events[2], Type::PointerMove, 20.0F, 40.0F);
+		expectPointer(parsed.events[3], Type::PointerMove, 30.0F, 60.0F);
+		expectPointer(parsed.events[4], Type::PointerMove, 40.0F, 80.0F);
+		expectPointer(parsed.events[5], Type::PointerMove, 50.0F, 100.0F);
+		expectPointer(parsed.events[6], Type::PointerUp, 50.0F, 100.0F);
+		EXPECT_EQ(errorOf("drag,1,2,3"), "expected drag,x0,y0,x1,y1");
+		EXPECT_EQ(errorOf("drag,1,2,3,y"), "non-numeric coordinates");
+	}
+
 	TEST(InputParserTest, KeysByLetterDigitFunctionOrName) {
 		const ParsedInput parsed =
 			parse({"keydown,r", "keyup,R", "keydown,7", "keydown,F1", "keydown,f12", "keyup,Escape", "keyup,esc", "keydown,PageDown"});
@@ -175,7 +190,9 @@ namespace app::detail {
 	TEST(InputParserTest, AllOrNothing) {
 		VirtualPads		  pads{};
 		const ParsedInput parsed = parse({"connect,vpad2", "keydown,A", "bogus"}, pads);
-		EXPECT_EQ(parsed.error, "unknown event type (expected move|down|up|click|scroll|keydown|keyup|char|pad|axis|connect|disconnect)");
+		EXPECT_EQ(
+			parsed.error, "unknown event type (expected move|down|up|click|drag|scroll|keydown|keyup|char|pad|axis|connect|disconnect)"
+		);
 		EXPECT_EQ(parsed.failed, "bogus");
 		EXPECT_TRUE(parsed.events.empty());
 		EXPECT_EQ(pads, VirtualPads{});

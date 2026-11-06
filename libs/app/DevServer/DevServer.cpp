@@ -360,6 +360,7 @@ namespace app {
 					*job,
 					{.body = dump(
 						 {{"viewport", {{"width", viewport.logicalWidth}, {"height", viewport.logicalHeight}}},
+						  {"drag", nullptr},
 						  {"roots", nlohmann::ordered_json::array()}}
 					 )}
 				);

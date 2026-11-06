@@ -23,7 +23,7 @@ namespace ui {
 	// at the top of what a key holds.
 	inline constexpr int kMaxStackEntries = 2045;
 	inline constexpr int kTooltipSlot = 2046;
-	inline constexpr int kDragSlot = 2047; // reserved for the drag service
+	inline constexpr int kDragSlot = 2047; // the drag tier: a drag's ghost (ui/Drag.h)
 
 	// How long the pointer rests on a component before its tooltip opens.
 	inline constexpr double kTooltipDelayMs = 500.0;

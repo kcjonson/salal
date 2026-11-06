@@ -1075,7 +1075,10 @@ What the first version of this design left open, as landed:
   stalled app reaches, a request is a 429 and queues nothing. Every `ev` is
   read from the raw query, in order, so identical ones all count: a double
   click is two `ev=click,x,y`, where worldsim's server kept one of a repeated
-  pair.
+  pair. `drag,x0,y0,x1,y1` is a whole left-button drag: a move to the start,
+  the press, four moves along the line and the release at the end, so ui's
+  drag starts on the way when the line is longer than its threshold
+  ([ui-design.md](ui-design.md), "Drag and drop").
 
 The log stream needs no singleton of its own: the logger's one sink slot
 (`foundation::Logger::setSink`, module-static as the logger is) holds the

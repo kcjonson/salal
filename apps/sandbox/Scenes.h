@@ -46,6 +46,7 @@ namespace sandbox {
 	extern const SceneInfo kUiFocusScene;
 	extern const SceneInfo kUiDisplayScene;
 	extern const SceneInfo kUiControlsScene;
+	extern const SceneInfo kUiDragScene;
 	extern const SceneInfo kPerfQuadsScene;
 	extern const SceneInfo kPerfTextScene;
 	extern const SceneInfo kPerfWorldScene;
