@@ -176,7 +176,9 @@ merged after 6). Then 11 follows 9, 12 follows 8 and 11, 13b follows 8, 10, 11
 and 13a, and 14 closes the salal side. Popover, NumberInput, the
 standalone Scrollbar, Counter, the drag service and the rounded clip are not in
 the sequence. None of worldsim's screens or asteroids' screen designs uses one;
-each comes when a game asks, dual-deck-builder's port most likely first.
+each comes when a game asks, dual-deck-builder's port most likely first. The
+drag service came first, for a game's battle screen ([ui-design.md](ui-design.md),
+"Drag and drop").
 
 ## Worldsim's conversion
 

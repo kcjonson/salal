@@ -37,6 +37,7 @@ namespace ui {
 
 	namespace detail {
 		class Dispatcher;
+		class DragService;
 		class FocusManager;
 	} // namespace detail
 
@@ -114,7 +115,7 @@ namespace ui {
 		// The cursor the hovered component, or the pointer's captor, asks for.
 		[[nodiscard]] Cursor cursor() const;
 		// Ends anything mid-interaction: a held press, a capture, a drag, the hover. The scene was
-		// covered, or the window lost focus.
+		// covered, or the window lost focus. A drag ends not dropped.
 		void cancelInteraction();
 
 		// --- The overlay stack (ui/Overlay.h) ---
@@ -134,6 +135,15 @@ namespace ui {
 		void bringToFront(Ref<Component> entry);
 		// The open entries in stack order, bottom to top.
 		[[nodiscard]] std::vector<ComponentId> overlays() const;
+
+		// --- Drag and drop (ui/Drag.h) ---
+
+		// The drag under way, for the statement: null between drags. A game reads it to draw what the
+		// ghost doesn't (a line from the source to the pointer).
+		[[nodiscard]] const Drag* drag() const;
+		// Ends the drag under way as a cancel does, not dropped; false when there's none.
+		bool cancelDrag();
+
 		// --- Focus (ui/Focus.h) ---
 
 		// One focus per player slot, 0 to kMaxPlayers - 1. focus is refused, false, for a component
@@ -167,6 +177,7 @@ namespace ui {
 	  private:
 		friend class Component;
 		friend class detail::Dispatcher;
+		friend class detail::DragService;
 		friend class detail::FocusManager;
 		friend Registry* detail::registryOf(const Context& context);
 
@@ -186,6 +197,10 @@ namespace ui {
 		void resizeRoots();
 		// Screen maps, clips and enabled flags again if anything moved; true when it ran.
 		bool refreshGeometry();
+		// The map a component's children are placed in: its box's, under its scroll.
+		[[nodiscard]] static Affine childSpace(const Component& component);
+		// A drag's ghost and its subtree at the drag's travel, now: out of every clip and never hit.
+		void placeLifted();
 		void pointerPressed(ComponentId hit);
 		void openOverlay(ComponentId entry, ComponentId opener, OverlayOptions options);
 		void dismiss(ComponentId entry);
@@ -204,6 +219,7 @@ namespace ui {
 		void					  closeTooltip();
 		// The slot of the pointer player's topmost dialog: what's in a lower slot is inert to the pointer.
 		[[nodiscard]] int  modalFloor() const;
+		[[nodiscard]] int  modalFloor(int player) const;
 		[[nodiscard]] bool pointerInert() const { return modalFloor() > 0; }
 		[[nodiscard]] bool within(ComponentId id, ComponentId root) const;
 		[[nodiscard]] bool shownInTree(const Component& component) const;
@@ -240,6 +256,7 @@ namespace ui {
 		std::vector<HitEntry>				  hitList;
 		std::unique_ptr<detail::Dispatcher>	  dispatcher;
 		std::unique_ptr<detail::FocusManager> focusManager;
+		std::unique_ptr<detail::DragService>  drags;
 		struct OverlayEntry {
 			ComponentId	   id;
 			ComponentId	   opener;

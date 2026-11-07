@@ -12,6 +12,10 @@
 //   visible, enabled, opacity (effective), clip (effective, null for none), contentOffset, transform
 //   focusable, pointerEvents (its own, resolved), handlesPointer, state (hovered and pressed; the
 //                 rest come with focus), value
+//   dragSource    the kind a drag source carries, null on anything else; dropTarget, a bool
+//   state.dragging    a source's drag is under way; dropAccepts, a target takes the drag under way
+//                 (null between drags); dropActive, a drag it takes is over it. Each null where it
+//                 doesn't apply.
 //   scroll        a scroller's offset and how far it goes, {x, y, maxX, maxY}; null on anything else,
 //                 as is contentOffset, the scroll as its children see it
 //   text          a Text's content, measured extent and line count, overflow, and the fontFamily
@@ -20,7 +24,9 @@
 //   inkBounds     where it may draw in the viewport, its ink extent included
 //   children      in tree order
 //
-// The document carries the scene's name (null for none) and the logical viewport, in whole pixels.
+// The document carries the scene's name (null for none), the logical viewport in whole pixels, and the
+// drag under way, null between drags: via (pointer or keys), player, kind, source, ghost and target
+// (each {id, key}, the target null over none), accepted (null over none), at and travel.
 // Serialising never throws on a non-UTF-8 id; it replaces the bad bytes, since it runs in the frame.
 
 #include <math/Types.h>

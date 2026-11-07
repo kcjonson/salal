@@ -26,6 +26,7 @@ namespace app::detail {
 
 		constexpr DeviceId kKeyboard{.kind = DeviceKind::Keyboard};
 		constexpr DeviceId kMouse{.kind = DeviceKind::Mouse};
+		constexpr int	   kDragSteps = 4; // a drag's moves between its press and its release
 
 		constexpr std::array<std::string_view, static_cast<std::size_t>(foundation::GamepadButton::Count)> kButtonNames{
 			"a",
@@ -188,6 +189,9 @@ namespace app::detail {
 				if (type == "move" || type == "down" || type == "up" || type == "click" || type == "scroll") {
 					return pointer(type, out);
 				}
+				if (type == "drag") {
+					return dragAlong(out);
+				}
 				if (type == "keydown" || type == "keyup") {
 					return key(type == "keydown" ? Type::KeyDown : Type::KeyUp, out);
 				}
@@ -203,7 +207,7 @@ namespace app::detail {
 				if (type == "connect" || type == "disconnect") {
 					return connection(type == "connect", out);
 				}
-				return fail("unknown event type (expected move|down|up|click|scroll|keydown|keyup|char|pad|axis|connect|disconnect)");
+				return fail("unknown event type (expected move|down|up|click|drag|scroll|keydown|keyup|char|pad|axis|connect|disconnect)");
 			}
 
 			std::string error;
@@ -270,6 +274,37 @@ namespace app::detail {
 				if (type == "up" || type == "click") {
 					out.push_back(make(Type::PointerUp));
 				}
+				return true;
+			}
+
+			// A whole primary-button drag: a move to the start, the press, kDragSteps moves along the line
+			// (the first past any threshold a few px wide), and the release at the end.
+			bool dragAlong(std::vector<InputEvent>& out) {
+				if (!fieldCount(5, 5, "drag,x0,y0,x1,y1")) {
+					return false;
+				}
+				std::array<float, 4> values{};
+				for (std::size_t i = 0; i < values.size(); ++i) {
+					const std::optional<float> value = parseFloat(fields[i + 1]);
+					if (!value) {
+						return fail("non-numeric coordinates");
+					}
+					values.at(i) = *value;
+				}
+				const glm::vec2 from{values[0], values[1]};
+				const glm::vec2 to{values[2], values[3]};
+				const auto		push = [&](Type eventType, glm::vec2 position) {
+					 InputEvent event{.device = kMouse, .position = position};
+					 event.type = eventType;
+					 event.mouseButton = foundation::MouseButton::Left;
+					 out.push_back(event);
+				};
+				push(Type::PointerMove, from);
+				push(Type::PointerDown, from);
+				for (int step = 1; step <= kDragSteps; ++step) {
+					push(Type::PointerMove, from + ((to - from) * (static_cast<float>(step) / static_cast<float>(kDragSteps))));
+				}
+				push(Type::PointerUp, to);
 				return true;
 			}
 

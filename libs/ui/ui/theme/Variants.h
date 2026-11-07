@@ -34,6 +34,8 @@ namespace ui {
 		bool active = false;	   // open or selected
 		bool focused = false;	   // some player's focus is on it
 		bool focusVisible = false; // and shows a ring (CSS :focus-visible)
+		bool dragging = false;	   // its drag is under way (ui/Drag.h)
+		bool dropActive = false;   // a drag it accepts is over it
 
 		bool operator==(const InteractionState&) const = default;
 	};

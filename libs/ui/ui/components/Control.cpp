@@ -46,6 +46,8 @@ namespace ui {
 			.active = active,
 			.focused = isFocused(),
 			.focusVisible = isFocusVisible(),
+			.dragging = isDragging(),
+			.dropActive = isDropActive(),
 		};
 	}
 

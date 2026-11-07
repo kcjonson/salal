@@ -19,3 +19,4 @@ Each scene started with `--scene=<name>`, `/api/ui/lint` read once it has drawn,
 15. `ui_display`'s screenshot: under the key caps, a "Tab" box with no bottom rule and square bottom corners, and an "Underline" box ruled only along its bottom, a "Dashed" box and a "Dotted" one; lint count still 0.
 16. `polyline`'s screenshot: along the bottom, yellow round-capped dashes bending round the zigzag's joints over its red guide, round green dots spaced evenly round the closed hexagon, a dashed blue drawLine with square ends, and a star whose orange border is dashed all the way round.
 17. `polygon`'s screenshot: right of the five rocks, a blue shield shaded light to dark, ringed in cream, with a cream star on it, labelled "embedded SVG".
+18. `ui_drag`: count 0, and still 0 after a drag dropped on a target and one cancelled.

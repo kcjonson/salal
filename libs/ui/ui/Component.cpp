@@ -1,6 +1,7 @@
 #include "ui/Component.h"
 
 #include "ui/Context.h"
+#include "ui/detail/DragService.h"
 
 #include <utils/Log.h>
 
@@ -322,8 +323,39 @@ namespace ui {
 	}
 
 	bool Component::handlesPointer() const {
-		return handlers && (handlers->onClick || handlers->onPointerDown || handlers->onPointerUp || handlers->onPointerMove ||
-							handlers->onPointerEnter || handlers->onPointerLeave || handlers->onWheel);
+		return dragSource != nullptr || dropTarget != nullptr ||
+			   (handlers && (handlers->onClick || handlers->onPointerDown || handlers->onPointerUp || handlers->onPointerMove ||
+							 handlers->onPointerEnter || handlers->onPointerLeave || handlers->onWheel));
+	}
+
+	void Component::setDragSource(DragSource value) {
+		dragSource = std::make_unique<DragSource>(std::move(value));
+	}
+
+	void Component::clearDragSource() {
+		if (dragging && context != nullptr) {
+			const Registry::DispatchScope scope(context->registry);
+			context->drags->cancel();
+		}
+		dragSource.reset();
+	}
+
+	bool Component::acceptsDrag() const {
+		return context != nullptr && context->drags->accepts(*this);
+	}
+
+	void Component::setDropTarget(DropTarget value) {
+		dropTarget = std::make_unique<DropTarget>(std::move(value));
+		if (context != nullptr) {
+			context->hoverStale = true; // a drag under way finds its target again
+		}
+	}
+
+	void Component::clearDropTarget() {
+		dropTarget.reset();
+		if (context != nullptr) {
+			context->hoverStale = true;
+		}
 	}
 
 	void Component::setOnKeyDown(std::function<void(KeyEvent&)> callback) {

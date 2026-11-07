@@ -831,7 +831,7 @@ namespace app::testing {
 		serve();
 		Reply reply = ask("/api/ui/tree");
 		EXPECT_EQ(reply.status, 200);
-		EXPECT_EQ(reply.body, R"({"roots":[],"scene":null,"viewport":{"height":600,"width":800}})");
+		EXPECT_EQ(reply.body, R"({"drag":null,"roots":[],"scene":null,"viewport":{"height":600,"width":800}})");
 		reply = ask("/api/ui/lint");
 		EXPECT_EQ(reply.status, 200);
 		EXPECT_EQ(reply.body, R"({"count":0,"violations":[]})");
@@ -855,7 +855,7 @@ namespace app::testing {
 		EXPECT_EQ(ask("/api/state?what=sim").body, R"({"tick":7})");
 
 		tree.reset();
-		EXPECT_EQ(ask("/api/ui/tree").body, R"({"roots":[],"scene":"Main","viewport":{"height":600,"width":800}})");
+		EXPECT_EQ(ask("/api/ui/tree").body, R"({"drag":null,"roots":[],"scene":"Main","viewport":{"height":600,"width":800}})");
 		sim.reset();
 		EXPECT_EQ(get("/api/state?what=sim").status, 404);
 	}
@@ -1088,7 +1088,7 @@ namespace app::testing {
 		EXPECT_EQ(reply.status, 400);
 		EXPECT_EQ(
 			reply.body,
-			R"json({"error":"unknown event type (expected move|down|up|click|scroll|keydown|keyup|char|pad|axis|connect|disconnect)","ev":"bogus"})json"
+			R"json({"error":"unknown event type (expected move|down|up|click|drag|scroll|keydown|keyup|char|pad|axis|connect|disconnect)","ev":"bogus"})json"
 		);
 		reply = get("/api/input?ev=pad,vpad0,a,down");
 		EXPECT_EQ(reply.status, 400);

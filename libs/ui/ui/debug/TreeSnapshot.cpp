@@ -90,6 +90,11 @@ namespace ui {
 			out["focusable"] = component.isFocusable();
 			out["pointerEvents"] = pointerEventsName(component.getPointerEvents());
 			out["handlesPointer"] = component.handlesPointer();
+			const DragSource* source = component.getDragSource();
+			const bool		  target = component.getDropTarget() != nullptr;
+			const bool		  dragging = context.drag() != nullptr;
+			out["dragSource"] = source != nullptr ? nlohmann::json(source->kind) : nlohmann::json(nullptr);
+			out["dropTarget"] = target;
 			out["state"] = {
 				{"hovered", component.isHovered()},
 				{"pressed", component.isPressed()},
@@ -98,7 +103,9 @@ namespace ui {
 				{"selected", nullptr},
 				{"open", nullptr},
 				{"active", nullptr},
-				{"dropActive", nullptr},
+				{"dragging", source != nullptr ? nlohmann::json(component.isDragging()) : nlohmann::json(nullptr)},
+				{"dropAccepts", target && dragging ? nlohmann::json(component.acceptsDrag()) : nlohmann::json(nullptr)},
+				{"dropActive", target ? nlohmann::json(component.isDropActive()) : nlohmann::json(nullptr)},
 			};
 			if (scrolls) {
 				const Foundation::Vec2 most = component.getScrollMax();
@@ -123,12 +130,42 @@ namespace ui {
 			return out;
 		}
 
+		nlohmann::json refJson(const Ref<Component>& ref) {
+			const Component* component = ref.get();
+			if (component == nullptr) {
+				return nullptr;
+			}
+			return {
+				{"id", component->getId().empty() ? nlohmann::json(nullptr) : nlohmann::json(component->getId())},
+				{"key", component->drawKey()},
+			};
+		}
+
+		nlohmann::json dragJson(const Context* context) {
+			const Drag* drag = context != nullptr ? context->drag() : nullptr;
+			if (drag == nullptr) {
+				return nullptr;
+			}
+			return {
+				{"via", drag->via == DragVia::Pointer ? "pointer" : "keys"},
+				{"player", drag->player},
+				{"kind", drag->kind},
+				{"source", refJson(drag->source)},
+				{"ghost", refJson(drag->ghost)},
+				{"target", refJson(drag->target)},
+				{"accepted", drag->target.get() != nullptr ? nlohmann::json(drag->accepted) : nlohmann::json(nullptr)},
+				{"at", {{"x", drag->at.x}, {"y", drag->at.y}}},
+				{"travel", {{"x", drag->travel.x}, {"y", drag->travel.y}}},
+			};
+		}
+
 	} // namespace
 
 	std::string treeJson(const Context* context, std::string_view scene, Foundation::Vec2 viewport) {
 		nlohmann::json out;
 		out["scene"] = scene.empty() ? nlohmann::json(nullptr) : nlohmann::json(std::string(scene));
 		out["viewport"] = {{"width", std::lround(viewport.x)}, {"height", std::lround(viewport.y)}};
+		out["drag"] = dragJson(context);
 		nlohmann::json roots = nlohmann::json::array();
 		if (context != nullptr) {
 			for (const ComponentId rootId : context->getRoots()) {

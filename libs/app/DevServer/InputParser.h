@@ -4,6 +4,7 @@
 // accumulator. Each `ev` value is comma-separated; positions are logical pixels, the space the
 // screenshot is in:
 //   move,x,y                 down,x,y[,button]    up,x,y[,button]    click,x,y[,button] (move, down, up)
+//   drag,x0,y0,x1,y1         (a move to x0,y0, the left button down, four moves along to x1,y1, up there)
 //   scroll,x,y,delta         keydown,<key>        keyup,<key>        char,<codepoint>
 //   pad,vpad<n>,<button>,down|up                  axis,vpad<n>,<axis>,<value>
 //   connect,vpad<n>          disconnect,vpad<n>

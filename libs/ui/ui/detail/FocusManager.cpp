@@ -1,6 +1,7 @@
 #include "ui/detail/FocusManager.h"
 
 #include "ui/Context.h"
+#include "ui/detail/DragService.h"
 
 #include <utils/Log.h>
 
@@ -174,6 +175,9 @@ namespace ui::detail {
 		if (action == Action::Next && (event.mods & foundation::ModShift) != 0) {
 			action = Action::Previous;
 		}
+		if (dragKey(player, action)) {
+			return true;
+		}
 		if (action == Action::Next || action == Action::Previous) {
 			return next(player, action == Action::Previous);
 		}
@@ -217,7 +221,44 @@ namespace ui::detail {
 		if (event.type == foundation::InputEvent::Type::ButtonDown || action != Action::None) {
 			mode = InputMode::Controller;
 		}
+		if (dragKey(player, action)) {
+			return true;
+		}
 		return act(player, action, KeyEvent{.mods = event.mods, .player = player});
+	}
+
+	// A drag under way has its player's navigation actions before anything else hears them.
+	bool FocusManager::dragKey(int player, Action action) {
+		DragKey key = DragKey::Drop;
+		switch (action) {
+			case Action::None:
+				return false;
+			case Action::Activate:
+				key = DragKey::Drop;
+				break;
+			case Action::Cancel:
+				key = DragKey::Cancel;
+				break;
+			case Action::Up:
+				key = DragKey::Up;
+				break;
+			case Action::Down:
+				key = DragKey::Down;
+				break;
+			case Action::Left:
+				key = DragKey::Left;
+				break;
+			case Action::Right:
+				key = DragKey::Right;
+				break;
+			case Action::Next:
+				key = DragKey::Next;
+				break;
+			case Action::Previous:
+				key = DragKey::Previous;
+				break;
+		}
+		return context.drags->key(player, key);
 	}
 
 	bool FocusManager::act(int player, Action action, const KeyEvent& base) {
@@ -246,6 +287,9 @@ namespace ui::detail {
 		}
 		if (deliver(players[player].focused, event)) {
 			return true;
+		}
+		if (event.type == KeyEvent::Type::Activate) {
+			return context.drags->pickUp(player, players[player].focused);
 		}
 		if (event.type == KeyEvent::Type::Cancel) {
 			return context.cancelOverlay(player);
@@ -533,7 +577,7 @@ namespace ui::detail {
 		if (group != nullptr) {
 			std::erase_if(candidates, [&](const Component* each) { return within(each->selfId, group->selfId); });
 		}
-		Component* best = nearest(*current, way, candidates);
+		Component* best = nearestOnScreen(current->screenBounds(), way, candidates, current);
 		if (best == nullptr) {
 			return false;
 		}
@@ -547,7 +591,7 @@ namespace ui::detail {
 		const FocusGroup& spec = *group.focusGroup;
 		const bool		  horizontal = way == Direction::Left || way == Direction::Right;
 		if (spec.orientation == FocusGroup::Orientation::Both) {
-			return nearest(from, way, members);
+			return nearestOnScreen(from.screenBounds(), way, members, &from);
 		}
 		if ((spec.orientation == FocusGroup::Orientation::Horizontal) != horizontal) {
 			return nullptr;
@@ -566,15 +610,15 @@ namespace ui::detail {
 		return spec.wrap && count > 1 ? members[static_cast<std::size_t>((stepped + count) % count)] : nullptr;
 	}
 
-	Component* FocusManager::nearest(const Component& from, Direction way, std::span<Component* const> candidates) const {
-		const int			   along = way == Direction::Left || way == Direction::Right ? 0 : 1;
-		const int			   across = 1 - along;
-		const bool			   forward = way == Direction::Right || way == Direction::Down;
-		const Foundation::Rect origin = from.screenBounds();
-		Component*			   best = nullptr;
-		float				   bestScore = std::numeric_limits<float>::infinity();
+	Component*
+	nearestOnScreen(const Foundation::Rect& origin, Direction way, std::span<Component* const> candidates, const Component* skip) {
+		const int  along = way == Direction::Left || way == Direction::Right ? 0 : 1;
+		const int  across = 1 - along;
+		const bool forward = way == Direction::Right || way == Direction::Down;
+		Component* best = nullptr;
+		float	   bestScore = std::numeric_limits<float>::infinity();
 		for (Component* candidate : candidates) {
-			if (candidate == &from) {
+			if (candidate == skip) {
 				continue;
 			}
 			const Foundation::Rect box = candidate->screenBounds();

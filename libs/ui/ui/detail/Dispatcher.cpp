@@ -1,6 +1,7 @@
 #include "ui/detail/Dispatcher.h"
 
 #include "ui/Context.h"
+#include "ui/detail/DragService.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,8 +10,7 @@
 namespace ui::detail {
 
 	namespace {
-		constexpr float	 kDragThreshold = 6.0F; // px a press may wander and still click
-		constexpr double kWheelLatch = 0.15;	// seconds a wheel sequence stays with its scroller (R9.32)
+		constexpr double kWheelLatch = 0.15; // seconds a wheel sequence stays with its scroller (R9.32)
 		// GLFW reports the wheel in notches; three lines of 16 px a notch (R9.3's line mode).
 		constexpr float kWheelNotch = 48.0F;
 		constexpr float kBarWidth = 6.0F;
@@ -167,6 +167,26 @@ namespace ui::detail {
 			dragThumb(*scroller, event.screen.y);
 			return true;
 		}
+		DragService& drags = *context.drags;
+		if (drags.byPointer()) {
+			drags.pointerMoved(event.screen);
+			return true;
+		}
+		if (pressing && !pressCancelled && drags.pendingPast(event.screen)) {
+			// The press becomes a drag: what it landed on hears it cancelled, nothing clicks, and nothing
+			// under the drag is hovered; targets hear enter and leave instead.
+			if (Component* pressed = find(pressTarget)) {
+				PointerEvent cancelled = event;
+				cancelled.type = PointerEvent::Type::Cancel;
+				deliverTo(*pressed, cancelled);
+			}
+			setPressed(pressTarget, false);
+			pressCancelled = true;
+			if (drags.startPointer(event.screen)) {
+				hoverTo({}, event);
+				return true;
+			}
+		}
 		Component* captor = find(captured);
 		if (captor != nullptr) {
 			// Boundaries go against the captor alone while it holds the pointer (R9.10).
@@ -193,10 +213,19 @@ namespace ui::detail {
 	bool Dispatcher::pointerDown(PointerEvent& event) {
 		pointer = event.screen;
 		pointerKnown = true;
+		DragService& drags = *context.drags;
 		if (pressing) {
+			if (drags.byPointer()) {
+				// A second button cancels the drag; the first is still held, and its release clicks nothing.
+				drags.cancel();
+				return true;
+			}
 			// A second button while one is held: a move with the button set (R9.30).
 			event.type = PointerEvent::Type::Move;
 			return pointerMove(event);
+		}
+		if (drags.byKeys()) {
+			drags.cancel(); // the pointer takes over from a key drag
 		}
 		bool			  onThumb = false;
 		const ComponentId hit = find(captured) != nullptr ? captured : context.hitTest(event.screen, &onThumb);
@@ -238,6 +267,9 @@ namespace ui::detail {
 		setPressed(hit, true);
 		deliver(*target, event);
 		context.pointerPressed(hit);
+		if (event.button == foundation::MouseButton::Left && find(captured) == nullptr && pressing && !pressCancelled) {
+			drags.press(hit, event.screen, event); // a candidate drag, if a source is at or above it
+		}
 		return true;
 	}
 
@@ -256,6 +288,16 @@ namespace ui::detail {
 			event.type = PointerEvent::Type::Move;
 			return pointerMove(event);
 		}
+		DragService& drags = *context.drags;
+		if (drags.byPointer()) {
+			// The drag drops where it's released, or doesn't; its press was spent when it started.
+			pressing = false;
+			pressTarget = {};
+			drags.release(event.screen);
+			hoverAgain();
+			return true;
+		}
+		drags.forgetPress();
 		const bool owned = pressOwned;
 		pressing = false;
 		thumbScroller = {};
@@ -351,6 +393,7 @@ namespace ui::detail {
 	}
 
 	void Dispatcher::cancel() {
+		context.drags->cancel();
 		const PointerEvent base{.type = PointerEvent::Type::Cancel, .screen = pointer};
 		if (Component* captor = find(captured)) {
 			deliverTo(*captor, base);
@@ -388,6 +431,9 @@ namespace ui::detail {
 	}
 
 	Cursor Dispatcher::cursor() const {
+		if (const std::optional<Cursor> refused = context.drags->cursor()) {
+			return *refused;
+		}
 		const std::vector<ComponentId> captorChain{captured};
 		for (const ComponentId id : find(captured) != nullptr ? captorChain : hoverChain) {
 			for (Component* node = find(id); node != nullptr; node = find(node->parentId)) {
