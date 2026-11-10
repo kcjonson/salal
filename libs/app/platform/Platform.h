@@ -30,12 +30,12 @@ namespace app {
 		float			   sizePercent = 0.8F; // of the primary monitor's work area
 		std::optional<int> fullscreenMonitor;  // an index into the connected monitors; windowed when unset or out of range
 		bool			   vsync = true;
+		GlVersion		   glVersion; // no window, logged with the version asked for, where the driver can't give it
 		// The smallest the window's content gets, in framebuffer pixels, so a ui scale that follows the
 		// resolution has a floor under it; 0 for none. It outranks sizePercent, a saved size and the work
 		// area: a window on a monitor smaller than this is this size anyway.
 		int minWidth = 0;
 		int minHeight = 0;
-		GlVersion		   glVersion; // no window, logged with the version asked for, where the driver can't give it
 	};
 
 	// What a platform reports while it polls. The App is the one listener, and the dev server feeds

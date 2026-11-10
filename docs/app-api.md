@@ -169,8 +169,8 @@ struct WindowConfig {
 	float sizePercent = 0.8F;          // of the primary monitor's work area
 	std::optional<int> fullscreenMonitor;
 	bool vsync = true;
-	int minWidth = 0, minHeight = 0;   // the smallest the content gets, in framebuffer pixels; 0 for none
 	GlVersion glVersion;               // no window, logged, where the driver can't give it
+	int minWidth = 0, minHeight = 0;   // the smallest the content gets, in framebuffer pixels; 0 for none
 };
 
 struct UiScaleConfig {                 // "UI scale", below
