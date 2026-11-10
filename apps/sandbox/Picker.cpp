@@ -31,7 +31,7 @@ namespace sandbox {
 		  scenes(std::move(args.scenes)),
 		  context(logicalSize(owningApp.viewport())),
 		  state(owningApp.devServer().stateProvider("picker", [this] { return stateJson(); })) {
-		context.setScale(owningApp.uiScale());
+		context.setScale(owningApp.uiLayoutScale());
 		ui::Ref<ui::Component> root = context.root();
 		root.get()->setLayout({
 			.display = ui::Display::Flex,
@@ -107,7 +107,7 @@ namespace sandbox {
 	}
 
 	void Picker::onResize(const Renderer::Viewport& viewport) {
-		context.setViewport(logicalSize(viewport));
+		context.setViewport(logicalSize(viewport), owner.uiLayoutScale());
 	}
 
 	void Picker::setOpen(bool value) {

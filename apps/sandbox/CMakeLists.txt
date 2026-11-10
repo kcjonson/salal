@@ -55,6 +55,9 @@ salal_icons(salal_sandbox icons NAMESPACE sandbox_icons HEADER sandbox_icons/Ico
 # The sandbox's vector art, embedded, which polygon loads from memory and draws.
 salal_art(salal_sandbox art NAMESPACE sandbox_art HEADER sandbox_art/Art.h)
 
+# Per-monitor DPI aware on Windows, as a game's executable is.
+salal_windows_manifest(salal_sandbox)
+
 set_target_properties(salal_sandbox PROPERTIES OUTPUT_NAME sandbox FOLDER salal)
 
 # The JetBrains Mono atlas the picker and the scenes draw text with, and the font's licence, copied

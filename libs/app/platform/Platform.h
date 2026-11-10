@@ -23,6 +23,11 @@ namespace app {
 		float			   sizePercent = 0.8F; // of the primary monitor's work area
 		std::optional<int> fullscreenMonitor;  // an index into the connected monitors; windowed when unset or out of range
 		bool			   vsync = true;
+		// The smallest the window's content gets, in framebuffer pixels, so a ui scale that follows the
+		// resolution has a floor under it; 0 for none. It outranks sizePercent, a saved size and the work
+		// area: a window on a monitor smaller than this is this size anyway.
+		int minWidth = 0;
+		int minHeight = 0;
 	};
 
 	// What a platform reports while it polls. The App is the one listener, and the dev server feeds
@@ -86,8 +91,9 @@ namespace app {
 		// Not updated when monitors come and go.
 		virtual std::optional<int> fullscreenMonitor() const = 0;
 		// The windowed size in logical pixels: applied now while windowed, the size fullscreen returns to
-		// otherwise. Sizes below 1 are refused, logged. The GLFW platform keeps the window on the work
-		// area of the monitor it's on, shrinking and moving it as it must.
+		// otherwise. Sizes below 1 are refused, logged, and one under the window's minimum is the minimum.
+		// The GLFW platform keeps the window on the work area of the monitor it's on, shrinking and moving
+		// it as it must, down to the minimum.
 		virtual void setWindowSize(int width, int height) = 0;
 
 		// What the keyboard layout prints on a key, for keys that print something; nullopt for the rest,

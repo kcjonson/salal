@@ -37,7 +37,7 @@ namespace app {
 		if (uiContext == nullptr) {
 			uiContext = std::make_unique<ui::Context>(stack != nullptr ? logicalSize(stack->app.viewport()) : Foundation::Vec2{0.0F, 0.0F});
 			if (stack != nullptr) {
-				uiContext->setScale(stack->app.uiScale());
+				uiContext->setScale(stack->app.uiLayoutScale());
 				uiContext->setReducedMotion(stack->app.reducedMotion());
 				App& app = stack->app;
 				uiContext->setClipboard({
@@ -180,7 +180,7 @@ namespace app {
 		for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
 			Scene& scene = *it->scene;
 			if (scene.uiContext != nullptr) {
-				scene.uiContext->setViewport(logicalSize(viewport));
+				scene.uiContext->setViewport(logicalSize(viewport), app.uiLayoutScale());
 			}
 			detail::guard(scene.name(), "onResize", [&] { scene.onResize(viewport); });
 		}
@@ -373,8 +373,7 @@ namespace app {
 		entered.stackId = nextId++;
 		entries.push_back({.scene = std::move(scene), .name = std::move(name), .onResult = std::move(onResult)});
 		if (entered.uiContext != nullptr) {
-			entered.uiContext->setViewport(logicalSize(app.viewport()));
-			entered.uiContext->setScale(app.uiScale());
+			entered.uiContext->setViewport(logicalSize(app.viewport()), app.uiLayoutScale());
 		}
 		LOG_INFO(Engine, "Entering scene: %s", entered.name());
 		detail::guard(entered.name(), "onEnter", [&] { entered.onEnter(app); });

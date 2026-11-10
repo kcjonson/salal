@@ -57,6 +57,11 @@ namespace app {
 			int height = 0;
 		};
 
+		struct Extent {
+			int width = 0;
+			int height = 0;
+		};
+
 		// The connected monitor at `index`, in glfwGetMonitors' order; null, logged, for one that isn't.
 		GLFWmonitor* monitorAt(int index) {
 			int					monitorCount = 0;
@@ -90,14 +95,15 @@ namespace app {
 		class GlfwPlatform final : public Platform {
 		  public:
 			// `fullscreenOn` is the monitor the window was made fullscreen on, `windowedRect` where it
-			// goes when it leaves fullscreen until it has been windowed itself, and `vsync` the swap
-			// interval the context was given.
-			GlfwPlatform(GLFWwindow* glfwWindow, std::optional<int> fullscreenOn, WindowRect windowedRect, bool vsync)
+			// goes when it leaves fullscreen until it has been windowed itself, `vsync` the swap
+			// interval the context was given, and `minimumPixels` the WindowConfig's minimum size.
+			GlfwPlatform(GLFWwindow* glfwWindow, std::optional<int> fullscreenOn, WindowRect windowedRect, bool vsync, Extent minimumPixels)
 				: window(glfwWindow),
 				  hasFocus(glfwGetWindowAttrib(glfwWindow, GLFW_FOCUSED) == GLFW_TRUE),
 				  fullscreenIndex(fullscreenOn),
 				  windowed(windowedRect),
-				  swapInterval(vsync) {
+				  swapInterval(vsync),
+				  minimum(minimumPixels) {
 				g_glfwPlatform = this;
 				glfwSetWindowUserPointer(window, this);
 				glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
@@ -110,6 +116,8 @@ namespace app {
 				glfwSetScrollCallback(window, scrollCallback);
 				glfwSetJoystickCallback(joystickCallback);
 
+				applyMinimum();
+				logWindow();
 				refreshCursor();
 				const bool hovered = glfwGetWindowAttrib(window, GLFW_HOVERED) == GLFW_TRUE;
 				for (const foundation::InputEvent& event : glfw::cursorAtOpen(hovered, cursor.x, cursor.y, glfwClock.now())) {
@@ -219,16 +227,13 @@ namespace app {
 					return;
 				}
 				if (fullscreenIndex) {
-					windowed = onWorkArea({.x = windowed.x, .y = windowed.y, .width = width, .height = height}, 0, 0, 0, 0);
+					windowed = onWorkArea({.x = windowed.x, .y = windowed.y, .width = width, .height = height}, {}, minimumOnScreen);
 					return;
 				}
-				int left = 0;
-				int top = 0;
-				int right = 0;
-				int bottom = 0;
-				glfwGetWindowFrameSize(window, &left, &top, &right, &bottom);
+				Frame frame;
+				glfwGetWindowFrameSize(window, &frame.left, &frame.top, &frame.right, &frame.bottom);
 				glfwGetWindowPos(window, &windowed.x, &windowed.y);
-				windowed = onWorkArea({.x = windowed.x, .y = windowed.y, .width = width, .height = height}, left, top, right, bottom);
+				windowed = onWorkArea({.x = windowed.x, .y = windowed.y, .width = width, .height = height}, frame, minimumOnScreen);
 				glfwSetWindowSize(window, windowed.width, windowed.height);
 				glfwSetWindowPos(window, windowed.x, windowed.y);
 			}
@@ -263,6 +268,14 @@ namespace app {
 			}
 
 		  private:
+			// The window's decoration, in screen coordinates.
+			struct Frame {
+				int left = 0;
+				int top = 0;
+				int right = 0;
+				int bottom = 0;
+			};
+
 			static GlfwPlatform& from(GLFWwindow* window) { return *static_cast<GlfwPlatform*>(glfwGetWindowUserPointer(window)); }
 
 			static int shapeOf(ui::Cursor cursor) {
@@ -292,6 +305,7 @@ namespace app {
 					glViewport(0, 0, width, height);
 				}
 				GlfwPlatform& platform = from(window);
+				platform.applyMinimum();
 				platform.refreshCursor();
 				platform.relay.framebufferResized(viewportOf(window));
 			}
@@ -355,18 +369,79 @@ namespace app {
 				}
 			}
 
-			// The rect, frame included, shrunk to fit the work area of the monitor its centre is on and moved
-			// onto it, so a size saved on a bigger monitor doesn't open half off screen.
-			static WindowRect onWorkArea(WindowRect rect, int left, int top, int right, int bottom) {
+			// The rect, frame included, shrunk to fit the work area of the monitor its centre is on, though
+			// never under `least`, and moved onto it, so a size saved on a bigger monitor doesn't open half
+			// off screen.
+			static WindowRect onWorkArea(WindowRect rect, Frame frame, Extent least) {
+				const int		 leastWidth = std::max(1, least.width);
+				const int		 leastHeight = std::max(1, least.height);
 				const WindowRect area = workAreaAt(rect.x + (rect.width / 2), rect.y + (rect.height / 2));
 				if (area.width <= 0 || area.height <= 0) {
+					rect.width = std::max(rect.width, leastWidth);
+					rect.height = std::max(rect.height, leastHeight);
 					return rect;
 				}
-				rect.width = std::clamp(rect.width, 1, std::max(1, area.width - left - right));
-				rect.height = std::clamp(rect.height, 1, std::max(1, area.height - top - bottom));
-				rect.x = std::clamp(rect.x, area.x + left, std::max(area.x + left, area.x + area.width - right - rect.width));
-				rect.y = std::clamp(rect.y, area.y + top, std::max(area.y + top, area.y + area.height - bottom - rect.height));
+				rect.width = std::clamp(rect.width, leastWidth, std::max(leastWidth, area.width - frame.left - frame.right));
+				rect.height = std::clamp(rect.height, leastHeight, std::max(leastHeight, area.height - frame.top - frame.bottom));
+				rect.x =
+					std::clamp(rect.x, area.x + frame.left, std::max(area.x + frame.left, area.x + area.width - frame.right - rect.width));
+				rect.y =
+					std::clamp(rect.y, area.y + frame.top, std::max(area.y + frame.top, area.y + area.height - frame.bottom - rect.height));
 				return rect;
+			}
+
+			// The minimum is in framebuffer pixels and GLFW's limits in screen coordinates, so it's converted
+			// at the window's pixel ratio, rounded up, and again whenever the ratio changes (a window moved
+			// between a Retina display and one that isn't). A window under it grows to it, and so does the
+			// size fullscreen returns to.
+			void applyMinimum() {
+				if (minimum.width <= 0 && minimum.height <= 0) {
+					return;
+				}
+				const Renderer::Viewport now = viewportOf(window);
+				if (now.logicalWidth <= 0 || now.logicalHeight <= 0 || now.framebufferWidth <= 0 || now.framebufferHeight <= 0) {
+					return; // minimized
+				}
+				const Extent onScreen{
+					.width = ((minimum.width * now.logicalWidth) + now.framebufferWidth - 1) / now.framebufferWidth,
+					.height = ((minimum.height * now.logicalHeight) + now.framebufferHeight - 1) / now.framebufferHeight,
+				};
+				if (onScreen.width == minimumOnScreen.width && onScreen.height == minimumOnScreen.height) {
+					return;
+				}
+				minimumOnScreen = onScreen;
+				glfwSetWindowSizeLimits(
+					window,
+					onScreen.width > 0 ? onScreen.width : GLFW_DONT_CARE,
+					onScreen.height > 0 ? onScreen.height : GLFW_DONT_CARE,
+					GLFW_DONT_CARE,
+					GLFW_DONT_CARE
+				);
+				if (fullscreenIndex) {
+					windowed.width = std::max(windowed.width, onScreen.width);
+					windowed.height = std::max(windowed.height, onScreen.height);
+				} else if (now.logicalWidth < onScreen.width || now.logicalHeight < onScreen.height) {
+					setWindowSize(std::max(now.logicalWidth, onScreen.width), std::max(now.logicalHeight, onScreen.height));
+				}
+			}
+
+			// The display scale is logged because nothing reads it: the ui's scale follows the framebuffer,
+			// which is the monitor's own pixels at any display scale (the process is per-monitor DPI aware
+			// on Windows, by GLFW at init and by the game's manifest, salal_windows_manifest).
+			void logWindow() const {
+				[[maybe_unused]] const Renderer::Viewport now = viewportOf(window);
+				[[maybe_unused]] float					  scaleX = 1.0F;
+				[[maybe_unused]] float					  scaleY = 1.0F;
+				glfwGetWindowContentScale(window, &scaleX, &scaleY);
+				LOG_INFO(
+					Engine,
+					"Window: %dx%d, framebuffer %dx%d, display scale %.0f%%",
+					now.logicalWidth,
+					now.logicalHeight,
+					now.framebufferWidth,
+					now.framebufferHeight,
+					static_cast<double>(scaleX) * 100.0
+				);
 			}
 
 			// Where the cursor is now, for button and scroll events until the next move reports it.
@@ -404,6 +479,8 @@ namespace app {
 			std::optional<int>															  fullscreenIndex;
 			WindowRect																	  windowed;
 			bool																		  swapInterval;
+			Extent																		  minimum;		   // framebuffer pixels; 0 for none
+			Extent																		  minimumOnScreen; // as GLFW's limits have it now
 			glm::vec2																	  cursor{};
 			EventRelay																	  relay;
 			GamepadTracker																  gamepads;
@@ -502,7 +579,13 @@ namespace app {
 		}
 		glfwMakeContextCurrent(created.window);
 		glfwSwapInterval(config.vsync ? 1 : 0);
-		return std::make_unique<GlfwPlatform>(created.window, created.fullscreenOn, created.windowed, config.vsync);
+		return std::make_unique<GlfwPlatform>(
+			created.window,
+			created.fullscreenOn,
+			created.windowed,
+			config.vsync,
+			Extent{.width = std::max(0, config.minWidth), .height = std::max(0, config.minHeight)}
+		);
 	}
 
 } // namespace app

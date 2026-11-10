@@ -3,6 +3,8 @@
 #include <backend/NullBackend.h>
 #include <utils/Log.h>
 
+#include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace app {
@@ -18,10 +20,47 @@ namespace app {
 	}
 
 	void HeadlessPlatform::resize(int width, int height) {
-		queued.push_back(
-			{.kind = Queued::Kind::Resize,
-			 .viewport = {.logicalWidth = width, .logicalHeight = height, .framebufferWidth = width, .framebufferHeight = height}}
-		);
+		const Size size = width > 0 && height > 0 ? atLeastMinimum({.width = width, .height = height}) : Size{};
+		queued.push_back({.kind = Queued::Kind::Resize, .viewport = viewportAt(size)});
+	}
+
+	void HeadlessPlatform::setPixelRatio(float ratio) {
+		if (!(ratio > 0.0F)) {
+			LOG_WARNING(Engine, "A pixel ratio of %g refused", static_cast<double>(ratio));
+			return;
+		}
+		if (ratio == pixelRatio) {
+			return;
+		}
+		pixelRatio = ratio;
+		const Size size = atLeastMinimum({.width = current.logicalWidth, .height = current.logicalHeight});
+		windowed = atLeastMinimum(windowed);
+		current = viewportAt(size);
+		queued.push_back({.kind = Queued::Kind::Resize, .viewport = current});
+	}
+
+	void HeadlessPlatform::setMinimumSize(int width, int height) {
+		minimum = {.width = std::max(0, width), .height = std::max(0, height)};
+		windowed = atLeastMinimum(windowed);
+		if (!fullscreen) {
+			resizeNow(windowed);
+		}
+	}
+
+	Renderer::Viewport HeadlessPlatform::viewportAt(Size size) const {
+		return {
+			.logicalWidth = size.width,
+			.logicalHeight = size.height,
+			.framebufferWidth = static_cast<int>(std::lround(static_cast<float>(size.width) * pixelRatio)),
+			.framebufferHeight = static_cast<int>(std::lround(static_cast<float>(size.height) * pixelRatio)),
+		};
+	}
+
+	HeadlessPlatform::Size HeadlessPlatform::atLeastMinimum(Size size) const {
+		return {
+			.width = std::max(size.width, static_cast<int>(std::ceil(static_cast<float>(minimum.width) / pixelRatio))),
+			.height = std::max(size.height, static_cast<int>(std::ceil(static_cast<float>(minimum.height) / pixelRatio))),
+		};
 	}
 
 	void HeadlessPlatform::setFocused(bool focused) {
@@ -76,7 +115,7 @@ namespace app {
 			LOG_WARNING(Engine, "A window size of %dx%d refused", width, height);
 			return;
 		}
-		windowed = {.width = width, .height = height};
+		windowed = atLeastMinimum({.width = width, .height = height});
 		if (!fullscreen) {
 			resizeNow(windowed);
 		}
@@ -86,9 +125,7 @@ namespace app {
 		if (size.width == current.logicalWidth && size.height == current.logicalHeight) {
 			return;
 		}
-		current = {
-			.logicalWidth = size.width, .logicalHeight = size.height, .framebufferWidth = size.width, .framebufferHeight = size.height
-		};
+		current = viewportAt(size);
 		queued.push_back({.kind = Queued::Kind::Resize, .viewport = current});
 	}
 

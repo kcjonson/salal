@@ -128,6 +128,30 @@ namespace app {
 			return root / path;
 		}
 
+		bool validUiScale(const UiScaleConfig& scale) {
+			const bool reference = scale.referenceWidth > 0 && scale.referenceHeight > 0;
+			if (!reference && (scale.referenceWidth != 0 || scale.referenceHeight != 0)) {
+				LOG_ERROR(
+					Engine,
+					"App::create: a ui scale reference of %dx%d; both are positive, or both 0 for none",
+					scale.referenceWidth,
+					scale.referenceHeight
+				);
+				return false;
+			}
+			if (!(scale.floor >= 0.0F) || !(scale.minFactor > 0.0F) || !(scale.maxFactor >= scale.minFactor)) {
+				LOG_ERROR(
+					Engine,
+					"App::create: a ui scale floor of %g with factors %g to %g; the floor is 0 or more and the factors positive, in order",
+					static_cast<double>(scale.floor),
+					static_cast<double>(scale.minFactor),
+					static_cast<double>(scale.maxFactor)
+				);
+				return false;
+			}
+			return true;
+		}
+
 		bool sameSize(const Renderer::Viewport& a, const Renderer::Viewport& b) {
 			return a.logicalWidth == b.logicalWidth && a.logicalHeight == b.logicalHeight && a.framebufferWidth == b.framebufferWidth &&
 				   a.framebufferHeight == b.framebufferHeight;
@@ -151,6 +175,9 @@ namespace app {
 			return nullptr;
 		}
 		if (!validFrame(config.frame)) {
+			return nullptr;
+		}
+		if (!validUiScale(config.uiScale)) {
 			return nullptr;
 		}
 		if (config.settingsVersion < 1) {
@@ -234,7 +261,7 @@ namespace app {
 		userSettings = Settings::load(
 			userPath(config.settingsFile, userConfigDir, config, "settings"), config.settingsVersion, config.migrateSettings
 		);
-		scaleOfUi = std::clamp(userSettings.get<float>(kUiScale, 1.0F), 0.25F, 4.0F);
+		scaleOfUi = std::clamp(userSettings.get<float>(kUiScale, 1.0F), config.uiScale.minFactor, config.uiScale.maxFactor);
 		motionReduced = userSettings.get<bool>(kReducedMotion, false);
 		saveStore = SaveStore(userPath(config.savesDirectory, userDataDir, config, "saves"), config.saveFormat);
 	}
@@ -746,9 +773,26 @@ namespace app {
 	}
 
 	void App::setUiScale(float scale) {
-		scaleOfUi = std::clamp(scale, 0.25F, 4.0F);
+		scaleOfUi = std::clamp(scale, config.uiScale.minFactor, config.uiScale.maxFactor);
 		userSettings.set(kUiScale, scaleOfUi);
-		sceneStack.scaleUi(scaleOfUi);
+		sceneStack.scaleUi(uiLayoutScale());
+	}
+
+	float App::uiPixelScale() const {
+		const UiScaleConfig&	  scale = config.uiScale;
+		const Renderer::Viewport& window = coordinates.viewport();
+		if (scale.referenceWidth <= 0 || window.framebufferWidth <= 0 || window.framebufferHeight <= 0) {
+			return scaleOfUi * window.pixelRatio();
+		}
+		const float fit = std::min(
+			static_cast<float>(window.framebufferWidth) / static_cast<float>(scale.referenceWidth),
+			static_cast<float>(window.framebufferHeight) / static_cast<float>(scale.referenceHeight)
+		);
+		return std::max(scale.floor, scaleOfUi * fit);
+	}
+
+	float App::uiLayoutScale() const {
+		return uiPixelScale() / coordinates.viewport().pixelRatio();
 	}
 
 	void App::setReducedMotion(bool reduced) {

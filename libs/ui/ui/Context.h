@@ -83,8 +83,12 @@ namespace ui {
 
 		// The window's logical size, which the ui's viewport is at its scale; resizes every root.
 		void setViewport(Foundation::Vec2 size);
+		// The window's logical size and the scale together, as a window resize that changes both brings
+		// them: the roots resize once, to the size the two give.
+		void setViewport(Foundation::Vec2 size, float scaleAtSize);
 		// The ui's one scale (R7.5): its viewport is the window's logical size over it, so layout and
-		// input work in the scaled space and nothing is zoomed as a bitmap. 0.25 to 4; 1 by default.
+		// input work in the scaled space and nothing is zoomed as a bitmap. 0.125 to 8; 1 by default. The
+		// App sets it from its ui scale, which it holds to the game's own range.
 		void						   setScale(float value);
 		[[nodiscard]] float			   getScale() const { return scale; }
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }

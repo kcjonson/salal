@@ -62,4 +62,19 @@ namespace app {
 #endif
 	}
 
+	// The minimum is framebuffer pixels whatever the display's pixel ratio, and outranks sizePercent.
+	TEST(GlfwPlatformTest, AWindowOpensAtItsMinimumSizeOrMoreAndASmallerSizeIsHeldToIt) {
+		std::unique_ptr<Platform> platform = createGlfwPlatform(
+			{.title = "salal minimum size test", .sizePercent = 0.05F, .vsync = false, .minWidth = 640, .minHeight = 360}
+		);
+		if (platform == nullptr) {
+			GTEST_SKIP() << "No window with a GL 3.3 core context here";
+		}
+		EXPECT_GE(platform->viewport().framebufferWidth, 640);
+		EXPECT_GE(platform->viewport().framebufferHeight, 360);
+		platform->setWindowSize(100, 100);
+		EXPECT_GE(platform->viewport().framebufferWidth, 640);
+		EXPECT_GE(platform->viewport().framebufferHeight, 360);
+	}
+
 } // namespace app

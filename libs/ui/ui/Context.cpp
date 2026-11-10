@@ -170,8 +170,18 @@ namespace ui {
 		resizeRoots();
 	}
 
+	void Context::setViewport(Foundation::Vec2 size, float scaleAtSize) {
+		const float clamped = std::clamp(scaleAtSize, 0.125F, 8.0F);
+		if (size == windowSize && clamped == scale) {
+			return;
+		}
+		windowSize = size;
+		scale = clamped;
+		resizeRoots();
+	}
+
 	void Context::setScale(float value) {
-		const float clamped = std::clamp(value, 0.25F, 4.0F);
+		const float clamped = std::clamp(value, 0.125F, 8.0F);
 		if (clamped == scale) {
 			return;
 		}
