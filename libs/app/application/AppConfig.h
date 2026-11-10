@@ -36,6 +36,11 @@ namespace app {
 		float floor = 0.0F;		 // the least scale with a reference, whatever the window and the factor
 		float minFactor = 0.25F; // what ui.scale and setUiScale are held to
 		float maxFactor = 4.0F;
+		// The frame a scene opts into (Scene::framed): the most its ui's content lays out at, in ui px,
+		// centred in the window, so an interface designed for a range of sizes isn't spread across a
+		// 32:9 monitor. Both 0 for none, and then a framed scene has the whole window like any other.
+		float frameWidth = 0.0F;
+		float frameHeight = 0.0F;
 	};
 
 	struct AppConfig {

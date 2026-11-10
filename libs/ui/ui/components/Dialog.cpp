@@ -71,7 +71,7 @@ namespace ui {
 			args,
 			{.kind = args.modal ? OverlayKind::Dialog : OverlayKind::Panel,
 			 .player = player,
-			 .placement = Absolute{.cover = true},
+			 .placement = Absolute{.cover = true, .coverWindow = true}, // the scrim past the frame; the box centres in both
 			 .onDismiss = args.onClose}
 		);
 		if (Dialog* shown = dialog.get()) {

@@ -33,9 +33,10 @@ Not in phase 2:
   state and saves"). Particles. Screen transitions
   (dual-deck-builder's fade with input blocked, `ScreenManager.ts:144-173`),
   which a game draws over the stack itself. A fixed-aspect virtual
-  resolution with letterboxing, which is the game's over `onResize` and the
-  renderer's viewport and render targets until a second game wants the same
-  one.
+  resolution with letterboxing as a render target: what a second game wanted
+  turned out to be layout, the scale from the window's resolution and the
+  frame ("UI scale", below, 2026-11-10), and a scaled-up render target stays
+  the game's over `onResize`.
 - WebAssembly, dropped 2026-10-26. The board's tick-split item still asks for
   an `emscripten_set_main_loop` path and its byte-provider item for MEMFS;
   neither survives (see "Resources"). Asteroids' `tech-stack.md` (`:141-144`,
@@ -174,6 +175,7 @@ struct UiScaleConfig {                 // "UI scale", below
 	int referenceWidth = 0, referenceHeight = 0; // the screen a ui px is one pixel on; both 0 for a fixed scale
 	float floor = 0.0F;                // the least scale with a reference
 	float minFactor = 0.25F, maxFactor = 4.0F; // what ui.scale is held to
+	float frameWidth = 0.0F, frameHeight = 0.0F; // the frame a scene opts into, in ui px; both 0 for none
 };
 
 struct FrameConfig {
@@ -782,6 +784,26 @@ Steam Deck.
   the work area: on a monitor smaller than the minimum the window is the
   minimum anyway. `HeadlessPlatform::setMinimumSize` does the same for tests,
   with `setPixelRatio` for a Retina framebuffer.
+
+### The frame
+
+Past a point more room doesn't help an interface, it pulls it apart. A scene
+whose `framed()` is true lays its ui out in a frame: the canvas capped at
+`AppConfig::uiScale`'s `frameWidth x frameHeight` ui px on each axis and
+centred. dual-deck-builder passes `2600 x 1440`, so every screen up to a
+3440 x 1440 ultrawide and 4:3 fills, and a 32:9 monitor shows 2600 px of
+content with the scene's background either side.
+
+- It's layout, not a render target. The frame is `ui::Context::setFrame`:
+  every root and every overlay lays out against it, `getViewport()` is its
+  size, and `ui().background()`, a root under the others, covers the whole
+  window for what a scene draws past its content. A scene's own `render`
+  draws to the window as ever. [ui-design.md](ui-design.md), "The frame", has
+  the rules.
+- A scene that doesn't opt in has the window, as does every scene of a game
+  that passes no frame; worldsim's play area takes whatever room there is.
+- `framed()` is read when the scene's ui is made and when the scene enters,
+  so it's a property of the scene, not a switch.
 
 ## Game state and saves
 

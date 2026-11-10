@@ -25,6 +25,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -200,6 +201,8 @@ namespace app {
 		bool dispatchTopUi(const foundation::InputEvent& event);
 		// The cursor the top scene's ui asks for.
 		ui::Cursor topUiCursor() const;
+		// The App's frame for a scene that opts in; none for one that doesn't, and with no frame configured.
+		std::optional<Foundation::Vec2> frameOf(const Scene& scene) const;
 		// Every stacked scene's ui at the App's ui scale.
 		void scaleUi(float scale);
 		void reduceMotionUi(bool reduced);

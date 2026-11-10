@@ -433,6 +433,34 @@ pointer can't reach a decoration, so a None that hides a real overlap can't
 also hide a blocked control. Its children are judged by their own value, so a
 tooltip's content (the tooltip is None) is still checked.
 
+## The frame
+
+Decided 2026-11-10, for dual-deck-builder's interface scaling. A context's
+viewport was the window; it's now the frame, which is the window unless a
+frame is set.
+
+- `Context::setFrame(maxSize)` caps the window, in ui px, on each axis and
+  centres what's left. `getViewport()` is the frame's size, `getFrame()` its
+  rect, and `getCanvas()` the whole window in ui px. With no frame all three
+  agree.
+- Bounds stay in the window's space: a framed root's box starts at the frame's
+  corner, so the tree snapshot, hit testing and injected input need no second
+  coordinate system, and the pointer reaches framed content with nothing
+  subtracted. The corner sits on a whole logical pixel of the window.
+- Every root lays out against the frame except `background()`, a root made on
+  first use that covers the window and paints under the others. A scene's art
+  that should run to the window's edges goes there.
+- Overlays lay out against the frame. An anchored entry flips and clamps inside
+  it, an `Absolute` one with a margin is kept inside it, and a cover is the
+  frame, so a toast stack's corner is the frame's. `Absolute::coverWindow`
+  makes a cover the whole window instead: a Dialog's, so its scrim dims the
+  background past the frame, its box centred in both.
+- The lint is held to the window, and a framed root's children to their root
+  by the child-outside-parent rule, so content that spills past the frame is a
+  violation though it's still on screen.
+- app sets it: a scene whose `framed()` is true gets `AppConfig::uiScale`'s
+  frame ([app-api.md](app-api.md), "The frame").
+
 ## Services and input routing
 
 Decided 2026-10-30. Takes R1.6 and R8.14, scoped per scene.
@@ -883,6 +911,8 @@ Decided 2026-10-30, closing the review of the spec.
   The App chooses it: the player's setting alone, or with a reference size
   the window's resolution times the setting ([app-api.md](app-api.md), "UI
   scale", 2026-11-10). A context takes 0.125 to 8.
+- **The frame:** a context's roots and overlays can lay out in less than
+  the window ("The frame", below, 2026-11-10).
 - **Ink extent (R8.8):** taken. A shadow or glow drawn past a component's
   box is ink, not overflow, so the lint doesn't flag it.
 - **Snapshot fields (R13.11):** the tree snapshot's field names are the same

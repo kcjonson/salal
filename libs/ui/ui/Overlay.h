@@ -47,7 +47,7 @@ namespace ui {
 
 	// From an origin, moving with it (R3.8): on `side` of the opener's box, or of `point` in the
 	// opener's space, `gap` px off it and aligned along it; flipped to the opposite side when that
-	// side overflows the viewport, then kept `margin` px inside it (R12.30). It follows the opener as
+	// side overflows the frame, then kept `margin` px inside it (R12.30). It follows the opener as
 	// that scrolls, moves or turns, under the opener's transform and opacity.
 	struct Anchored {
 		Side							side = Side::Below;
@@ -58,12 +58,13 @@ namespace ui {
 	};
 
 	// In screen px, whatever its opener does: its top-left at `at`, kept `margin` px inside the
-	// viewport when that is set, or over the whole viewport. The opener's position, transform and
-	// opacity play no part, though it still owns the overlay.
+	// frame (Context::setFrame; the window with none) when that is set, or over the whole frame. The
+	// opener's position, transform and opacity play no part, though it still owns the overlay.
 	struct Absolute {
 		Foundation::Vec2	 at{0.0F, 0.0F};
 		std::optional<float> margin;
-		bool				 cover = false; // a dialog's scrim
+		bool				 cover = false;		  // a toast stack: its corner is the frame's
+		bool				 coverWindow = false; // with cover: the whole window, past the frame (a dialog's scrim)
 	};
 
 	struct OverlayOptions {

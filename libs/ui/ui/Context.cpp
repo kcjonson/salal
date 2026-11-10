@@ -74,6 +74,7 @@ namespace ui {
 		: animator(std::make_unique<Animator>(clock)),
 		  theme(uiTheme()),
 		  windowSize(viewportSize),
+		  canvas(viewportSize),
 		  viewport(viewportSize),
 		  dispatcher(std::make_unique<detail::Dispatcher>(*this)),
 		  focusManager(std::make_unique<detail::FocusManager>(*this)),
@@ -119,6 +120,32 @@ namespace ui {
 		return {defaultRoot, &registry};
 	}
 
+	// First in the roots, so it paints under them as though it had been added first.
+	Ref<Component> Context::background() {
+		if (registry.find(backgroundRoot) == nullptr) {
+			backgroundRoot = addRoot<Component>({.id = "background"}).componentId();
+			if (Component* made = registry.find(backgroundRoot)) {
+				std::erase(roots, backgroundRoot);
+				roots.insert(roots.begin(), backgroundRoot);
+				placeRoot(*made);
+				made->layoutDirty = true;
+				orderDirty = true;
+				geometryDirty = true;
+			}
+		}
+		return {backgroundRoot, &registry};
+	}
+
+	void Context::placeRoot(Component& rootComponent) const {
+		const bool			   behind = rootComponent.selfId.valid() && rootComponent.selfId == backgroundRoot;
+		const Foundation::Vec2 at = behind ? Foundation::Vec2{0.0F, 0.0F} : frameOrigin;
+		const Foundation::Vec2 size = behind ? canvas : viewport;
+		rootComponent.position = at;
+		rootComponent.offset = at;
+		rootComponent.sizeSpec = Size(size);
+		rootComponent.size = size;
+	}
+
 	ComponentId Context::adoptRoot(std::unique_ptr<Component> component, const Component::Args& args) {
 		if (drawing) {
 			LOG_ERROR(UI, "addRoot while the ui draws; nothing added");
@@ -126,9 +153,7 @@ namespace ui {
 		}
 		Component& added = *component;
 		added.setCommon(args);
-		added.position = {0.0F, 0.0F};
-		added.sizeSpec = Size(viewport);
-		added.size = viewport;
+		placeRoot(added);
 		added.margin = {};
 		added.isolation = true;
 		const ComponentId rootId = registry.insert(std::move(component));
@@ -189,12 +214,32 @@ namespace ui {
 		resizeRoots();
 	}
 
+	void Context::setFrame(std::optional<Foundation::Vec2> maxSize) {
+		if (maxSize && !(maxSize->x > 0.0F && maxSize->y > 0.0F)) {
+			LOG_WARNING(UI, "A frame of %g x %g refused", static_cast<double>(maxSize->x), static_cast<double>(maxSize->y));
+			return;
+		}
+		if (maxSize == frameMax) {
+			return;
+		}
+		frameMax = maxSize;
+		resizeRoots();
+	}
+
 	void Context::resizeRoots() {
-		viewport = windowSize / scale;
+		canvas = windowSize / scale;
+		viewport = canvas;
+		frameOrigin = {0.0F, 0.0F};
+		if (frameMax) {
+			viewport = {std::min(canvas.x, frameMax->x), std::min(canvas.y, frameMax->y)};
+			// On a whole logical pixel of the window, so the frame's content draws as crisply as unframed.
+			frameOrigin = {
+				std::floor((canvas.x - viewport.x) * 0.5F * scale) / scale, std::floor((canvas.y - viewport.y) * 0.5F * scale) / scale
+			};
+		}
 		for (const ComponentId rootId : roots) {
 			if (Component* rootComponent = registry.find(rootId)) {
-				rootComponent->sizeSpec = Size(viewport);
-				rootComponent->size = viewport;
+				placeRoot(*rootComponent);
 				rootComponent->layoutDirty = true;
 				dirtyBoundaries.push_back(rootId);
 			}
@@ -202,7 +247,7 @@ namespace ui {
 		for (const OverlayEntry& open : overlayStack) {
 			const auto* absolute = std::get_if<Absolute>(&open.options.placement);
 			if (Component* entry = registry.find(open.id); entry != nullptr && absolute != nullptr && absolute->cover) {
-				entry->sizeSpec = Size(viewport);
+				entry->sizeSpec = Size(absolute->coverWindow ? canvas : viewport);
 				entry->layoutChanged(true);
 			}
 		}
@@ -251,8 +296,7 @@ namespace ui {
 					continue;
 				}
 				if (!boundary->parentId.valid()) {
-					boundary->size = viewport;
-					boundary->offset = {0.0F, 0.0F};
+					placeRoot(*boundary);
 				}
 				engine.arrange(*boundary);
 			}
@@ -593,7 +637,7 @@ namespace ui {
 		if (const auto* absolute = std::get_if<Absolute>(&options.placement)) {
 			entry->detached = true;
 			if (absolute->cover) {
-				entry->sizeSpec = Size(viewport);
+				entry->sizeSpec = Size(absolute->coverWindow ? canvas : viewport);
 			}
 		}
 		entry->layoutChanged(true);
@@ -666,9 +710,9 @@ namespace ui {
 
 	// After the layout: an anchored overlay where placement puts it against its origin on screen,
 	// converted to its opener's child space (inside its scroll); an absolute one at its screen point,
-	// which is its own space, or over the viewport.
+	// which is its own space, or over the frame. The frame is what anchored and margined ones keep inside.
 	void Context::placeOverlays() {
-		const Foundation::Rect screen{0.0F, 0.0F, viewport.x, viewport.y};
+		const Foundation::Rect screen = getFrame();
 		for (const OverlayEntry& open : overlayStack) {
 			Component* entry = registry.find(open.id);
 			Component* opener = registry.find(open.opener);
@@ -688,9 +732,13 @@ namespace ui {
 			} else if (const auto& absolute = std::get<Absolute>(open.options.placement); !absolute.cover) {
 				at = absolute.at;
 				if (absolute.margin) {
-					at.x = std::clamp(at.x, *absolute.margin, std::max(viewport.x - *absolute.margin - size.x, *absolute.margin));
-					at.y = std::clamp(at.y, *absolute.margin, std::max(viewport.y - *absolute.margin - size.y, *absolute.margin));
+					const float left = screen.x + *absolute.margin;
+					const float top = screen.y + *absolute.margin;
+					at.x = std::clamp(at.x, left, std::max(screen.right() - *absolute.margin - size.x, left));
+					at.y = std::clamp(at.y, top, std::max(screen.bottom() - *absolute.margin - size.y, top));
 				}
+			} else if (!absolute.coverWindow) {
+				at = frameOrigin;
 			}
 			if (at != entry->offset) {
 				entry->offset = at;
