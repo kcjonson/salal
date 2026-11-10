@@ -280,14 +280,19 @@ namespace app {
 		}
 	}
 
+	// A ui's bounds are in its own px, so it's held to its own viewport, the window over the ui's scale.
 	std::string SceneStack::uiTreeJson(const Renderer::Viewport& viewport) const {
-		const Scene* top = entries.empty() ? nullptr : entries.back().scene.get();
-		return ui::treeJson(top != nullptr ? top->uiContext.get() : nullptr, top != nullptr ? top->name() : "", logicalSize(viewport));
+		const Scene*	   top = entries.empty() ? nullptr : entries.back().scene.get();
+		const ui::Context* context = top != nullptr ? top->uiContext.get() : nullptr;
+		return ui::treeJson(
+			context, top != nullptr ? top->name() : "", context != nullptr ? context->getViewport() : logicalSize(viewport)
+		);
 	}
 
 	std::string SceneStack::uiLintJson(const Renderer::Viewport& viewport) const {
-		const Scene* top = entries.empty() ? nullptr : entries.back().scene.get();
-		return ui::lintJson(top != nullptr ? top->uiContext.get() : nullptr, logicalSize(viewport));
+		const Scene*	   top = entries.empty() ? nullptr : entries.back().scene.get();
+		const ui::Context* context = top != nullptr ? top->uiContext.get() : nullptr;
+		return ui::lintJson(context, context != nullptr ? context->getViewport() : logicalSize(viewport));
 	}
 
 	void SceneStack::pushBuilt(Change& change, float liveAlpha) {

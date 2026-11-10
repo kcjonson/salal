@@ -876,6 +876,23 @@ namespace app::testing {
 		EXPECT_EQ(lint["count"], 2); // past the root, and past the viewport
 	}
 
+	// At a ui scale of 2 the ui's viewport is 400 x 300, which is what its bounds are held to.
+	TEST_F(DevServerTest, TreeAndLintAreInTheUisPxAtAUiScale) {
+		serve();
+		app->setUiScale(2.0F);
+		hooks()["Main"].onEnter = [](App& running) {
+			ui::Ref<ui::Component> root = running.scenes().top()->root();
+			root.addChild<ui::Component>({.id = "inside", .position = {300.0F, 200.0F}, .size = {100.0F, 100.0F}});
+			root.addChild<ui::Component>({.id = "past", .position = {390.0F, 0.0F}, .size = {20.0F, 20.0F}});
+		};
+		app->scenes().push<MainScene>();
+		frame();
+		const nlohmann::json tree = nlohmann::json::parse(ask("/api/ui/tree").body);
+		EXPECT_EQ(tree["viewport"], nlohmann::json::parse(R"({"width": 400, "height": 300})"));
+		const nlohmann::json lint = nlohmann::json::parse(ask("/api/ui/lint").body);
+		EXPECT_EQ(lint["count"], 2); // "past", past the root and past the viewport
+	}
+
 	TEST_F(DevServerTest, ASceneWithNoNameIsServedWithAnEmptyOne) {
 		serve();
 		app->scenes().push<NamelessScene>();
