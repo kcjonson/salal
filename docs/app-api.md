@@ -160,11 +160,14 @@ public:
 };
 struct GamepadSample { std::array<bool, 15> buttons{}; std::array<float, 6> axes{}; }; // one poll of a pad, triggers 0 to 1
 
+struct GlVersion { int major = 3; int minor = 3; }; // core, forward compatible; the game asks for what its shaders declare
+
 struct WindowConfig {
 	std::string title;
 	float sizePercent = 0.8F;          // of the primary monitor's work area
 	std::optional<int> fullscreenMonitor;
 	bool vsync = true;
+	GlVersion glVersion;               // no window, logged, where the driver can't give it
 };
 
 struct FrameConfig {
