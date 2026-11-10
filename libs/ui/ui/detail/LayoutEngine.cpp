@@ -78,6 +78,12 @@ namespace ui::detail {
 			return 0.0F;
 		}
 
+		// A flex child with an aspect ratio and a declared main size takes its cross size from the ratio,
+		// so it isn't stretched across the line.
+		bool ratioSetsCross(const Component& child, bool row) {
+			return child.getLayout().aspectRatio > 0.0F && !(row ? child.getSizeSpec().width : child.getSizeSpec().height).isAuto();
+		}
+
 		// A relatively positioned child's inset nudges it from where the flow put it, a percentage of `box`.
 		Foundation::Vec2 nudged(Foundation::Vec2 at, const Inset& inset, Foundation::Vec2 box) {
 			const std::optional<float> left = inset.left.resolve(box.x);
@@ -127,6 +133,36 @@ namespace ui::detail {
 		}
 		if (resolvedHeight) {
 			resolvedHeight = clampHeight(*resolvedHeight);
+		}
+		// An aspect ratio gives the auto axis from the other, in the box boxSizing names; a clamp on
+		// the axis it gave wins over it. With both auto the width is the content's and the height
+		// follows, and a clamp on that height takes the width back with it.
+		const float ratio = node.layout.aspectRatio;
+		if (ratio > 0.0F) {
+			const auto heightFor = [&](float boxWidth) {
+				return (std::max(boxWidth - outside.x, 0.0F) / ratio) + outside.y;
+			};
+			const auto widthFor = [&](float boxHeight) {
+				return (std::max(boxHeight - outside.y, 0.0F) * ratio) + outside.x;
+			};
+			if (resolvedWidth && !resolvedHeight) {
+				resolvedHeight = clampHeight(heightFor(*resolvedWidth));
+			} else if (resolvedHeight && !resolvedWidth) {
+				resolvedWidth = clampWidth(widthFor(*resolvedHeight));
+			} else if (!resolvedWidth && !resolvedHeight) {
+				const float room = std::min(
+					std::max(availableWidth - node.margin.horizontal(), 0.0F),
+					boxSize(node.maxSpec.width, parentBox.x, outside.x).value_or(kUnbounded)
+				);
+				float		boxWidth = clampWidth(contentSize(node, std::nullopt, std::nullopt, room).x);
+				const float wanted = heightFor(boxWidth);
+				const float boxHeight = clampHeight(wanted);
+				if (boxHeight != wanted) {
+					boxWidth = clampWidth(widthFor(boxHeight));
+				}
+				resolvedWidth = boxWidth;
+				resolvedHeight = boxHeight;
+			}
 		}
 		if (!resolvedWidth || !resolvedHeight) {
 			const float		 room = resolvedWidth ? *resolvedWidth
@@ -244,7 +280,7 @@ namespace ui::detail {
 			const float			 marginCross = row ? child->margin.vertical() : child->margin.horizontal();
 			std::optional<float> stretched;
 			// One line is as big across as the container; a wrapping child stretches to its own line, below.
-			if (!wraps && align == AlignItems::Stretch && crossSpec.isAuto() && contentCross) {
+			if (!wraps && align == AlignItems::Stretch && crossSpec.isAuto() && contentCross && !ratioSetsCross(*child, row)) {
 				stretched = std::max(*contentCross - marginCross, 0.0F);
 			}
 			const Foundation::Vec2 measured = measureAt(*child, std::nullopt, stretched);
@@ -306,7 +342,8 @@ namespace ui::detail {
 			for (FlexItem& item : run) {
 				const Component& child = *item.component;
 				const AlignItems align = child.layout.alignSelf.value_or(node.layout.alignItems);
-				if (align == AlignItems::Stretch && (row ? child.sizeSpec.height : child.sizeSpec.width).isAuto()) {
+				if (align == AlignItems::Stretch && (row ? child.sizeSpec.height : child.sizeSpec.width).isAuto() &&
+					!ratioSetsCross(child, row)) {
 					item.stretchedCross = std::max(line.cross - item.marginCross, 0.0F);
 					const Foundation::Vec2 measured = measureAt(*item.component, item.main, item.stretchedCross);
 					item.cross = row ? measured.y : measured.x;
@@ -576,7 +613,8 @@ namespace ui::detail {
 			const AlignItems align = child.layout.alignSelf.value_or(node.layout.alignItems);
 			const AlignItems justify = child.layout.justifySelf.value_or(node.layout.justifyItems);
 			Foundation::Vec2 childSize = item.measured;
-			if (align == AlignItems::Stretch && child.sizeSpec.height.isAuto()) {
+			const bool		 ratioSetsHeight = child.layout.aspectRatio > 0.0F && (item.width || !child.sizeSpec.width.isAuto());
+			if (align == AlignItems::Stretch && child.sizeSpec.height.isAuto() && !ratioSetsHeight) {
 				childSize = measure(child, item.width, std::max(areaHeight - child.margin.vertical(), 0.0F), box, areaWidth);
 			}
 			const Foundation::Vec2 margins = child.margin.total();

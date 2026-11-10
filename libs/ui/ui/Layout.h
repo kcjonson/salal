@@ -296,6 +296,13 @@ namespace ui {
 		GridLines				  gridRow;
 		Position				  position = Position::Relative;
 		Inset					  inset;
+		// Width over height (CSS aspect-ratio), 0 for none: a box with one axis auto takes it from the
+		// other, whether that one is declared, stretched across a flex container or a grid area, or
+		// flexed along one; with both auto its width is its content's and its height follows. It's the
+		// box boxSizing names. minSize and maxSize win over it, and a box with both axes declared
+		// ignores it. Where CSS would stretch the auto axis of a flex or grid child whose other axis
+		// is declared, the ratio wins here: a 640 px wide cover in a stretching row keeps its shape.
+		float aspectRatio = 0.0F;
 
 		bool operator==(const Layout&) const = default;
 	};
