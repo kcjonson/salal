@@ -257,6 +257,12 @@ minidump on Windows and the run's log beside each, to `crashes/`, pruned at each
 start ([docs/app-api.md](docs/app-api.md), "Logs and crash reports"). The
 sandbox's are under `%TEMP%\sandbox\`.
 
+The reports are for agents; nobody reads them by hand. When told an app crashed,
+read the newest `crashes/<run>.txt` and the log beside it before asking what
+happened: the report names the crash and gives the file and line of each frame.
+The `.dmp` is for when the report isn't enough, and reading it takes a
+command-line debugger (`cdb`, from Debugging Tools for Windows).
+
 ## Build
 
 Worldsim's arrangement: CMake 3.25+ with vcpkg (`VCPKG_ROOT` set), Ninja on
