@@ -5,6 +5,8 @@
 
 #include <utils/Log.h>
 
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -36,6 +38,22 @@ namespace app {
 
 		first.reset();
 		EXPECT_NE(createGlfwPlatform({.title = "after", .sizePercent = 0.1F, .vsync = false}), nullptr);
+	}
+
+	// The context is at least the version the config asks for; 4.1 is the most any desktop is sure to
+	// give (macOS caps there).
+	TEST(GlfwPlatformTest, TheContextIsTheVersionAskedFor) {
+		std::unique_ptr<Platform> platform =
+			createGlfwPlatform({.title = "salal gl version test", .sizePercent = 0.1F, .vsync = false, .glVersion = {4, 1}});
+		if (platform == nullptr) {
+			GTEST_SKIP() << "No window with a GL 4.1 core context here";
+		}
+		GLFWwindow* const context = glfwGetCurrentContext();
+		ASSERT_NE(context, nullptr);
+		const int major = glfwGetWindowAttrib(context, GLFW_CONTEXT_VERSION_MAJOR);
+		const int minor = glfwGetWindowAttrib(context, GLFW_CONTEXT_VERSION_MINOR);
+		EXPECT_TRUE(major > 4 || (major == 4 && minor >= 1)) << major << "." << minor;
+		EXPECT_EQ(glfwGetWindowAttrib(context, GLFW_OPENGL_PROFILE), GLFW_OPENGL_CORE_PROFILE);
 	}
 
 	// The layout labels the keys that print, whatever the layout; Escape prints nothing, and Unknown
