@@ -99,6 +99,15 @@ namespace Renderer::backend::gl {
 			return value;
 		}
 
+		// The buffer's storage as GL holds it, in bytes.
+		[[nodiscard]] GLint bufferSize(BufferHandle handle) const {
+			GLint value = 0;
+			glBindBuffer(GL_COPY_READ_BUFFER, gpu->bufferName(handle));
+			glGetBufferParameteriv(GL_COPY_READ_BUFFER, GL_BUFFER_SIZE, &value);
+			glBindBuffer(GL_COPY_READ_BUFFER, 0);
+			return value;
+		}
+
 		GLFWwindow* window = nullptr;
 		GLBackend*	gpu = nullptr; // owned by Primitives
 	};
@@ -258,6 +267,19 @@ namespace Renderer::backend::gl {
 		updateTexture(handle, 0, 0, 3, 1, zeros.data());
 		EXPECT_EQ(readBack(handle, 2, 2, 4), std::vector<uint8_t>(initial.begin(), initial.end()));
 		destroyTexture(handle);
+	}
+
+	// One large flush must not leave every later flush allocating its size.
+	TEST_F(GLBackendTest, AStreamWriteSizesTheBufferToItselfRoundedToAPowerOfTwo) {
+		const BufferHandle		   stream = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
+		const std::vector<uint8_t> bytes(size_t{1} << 20, 7);
+		gpu->updateBuffer(stream, 0, bytes.size(), bytes.data());
+		EXPECT_EQ(bufferSize(stream), GLint{1} << 20);
+		gpu->updateBuffer(stream, 0, 100, bytes.data());
+		EXPECT_EQ(bufferSize(stream), 128);
+		gpu->updateBuffer(stream, 0, 1000, bytes.data());
+		EXPECT_EQ(bufferSize(stream), 1024);
+		gpu->destroyBuffer(stream);
 	}
 
 	TEST_F(GLBackendTest, TheUniformBlockMatchesDrawUniforms) {

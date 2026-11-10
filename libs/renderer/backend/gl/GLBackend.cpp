@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstring>
 #include <optional>
@@ -360,10 +361,10 @@ namespace Renderer::backend::gl {
 		slot->buffer.bind();
 		if (slot->usage == BufferUsage::Stream && offset == 0) {
 			// New storage rather than a write over the old: a draw still reading it keeps
-			// it, and nothing waits. Growth doubles, so the size settles.
-			if (bytes > slot->capacity) {
-				slot->capacity = std::max(bytes, slot->capacity * 2);
-			}
+			// it, and nothing waits. Sized to this write, never to the largest so far, or
+			// one huge flush makes every later one allocate that much. The power of two
+			// keeps a batch whose size wobbles asking the driver for the same size.
+			slot->capacity = std::bit_ceil(bytes);
 			glBufferData(kWriteTarget, static_cast<GLsizeiptr>(slot->capacity), nullptr, GL_STREAM_DRAW);
 		} else if (offset + bytes > slot->capacity) {
 			LOG_ERROR(Renderer, "updateBuffer: %zu bytes at %zu overrun the %zu-byte buffer", bytes, offset, slot->capacity);
@@ -463,6 +464,11 @@ namespace Renderer::backend::gl {
 	GLuint GLBackend::programName(PipelineHandle pipeline) const {
 		const Shader* shader = pipelines.find(pipeline);
 		return shader != nullptr ? shader->getProgram() : 0;
+	}
+
+	GLuint GLBackend::bufferName(BufferHandle buffer) const {
+		const BufferSlot* slot = buffers.find(buffer);
+		return slot != nullptr ? slot->buffer.handle() : 0;
 	}
 
 	GLBackend::UniformRing GLBackend::makeRing(GLuint binding, GLsizeiptr size) const {
