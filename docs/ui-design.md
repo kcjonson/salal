@@ -880,6 +880,9 @@ Decided 2026-10-30, closing the review of the spec.
   range is under a sixth of the em warns, and text stays at 11 px and up.
 - **UI scale (R7.5):** one scale for the whole UI, applied by redefining
   app's logical viewport, which also covers asteroids' text-scale setting.
+- **Scroll extent (R4.13):** content less than a px past a scroller's box is
+  layout rounding and counts as fitting: no bar, and the wheel and paging pass
+  the scroller by (2026-11-10).
 - **Ink extent (R8.8):** taken. A shadow or glow drawn past a component's
   box is ink, not overflow, so the lint doesn't flag it.
 - **Snapshot fields (R13.11):** the tree snapshot's field names are the same
