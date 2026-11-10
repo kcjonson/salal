@@ -1,6 +1,7 @@
 #include "ui/Component.h"
 
 #include "ui/Context.h"
+#include "ui/detail/Dispatcher.h"
 #include "ui/detail/DragService.h"
 
 #include <utils/Log.h>
@@ -529,6 +530,10 @@ namespace ui {
 		if (context != nullptr) {
 			context->orderDirty = true;
 		}
+	}
+
+	bool Component::showsScrollbar() const {
+		return overflow == Overflow::Scroll && detail::scrollbarOf(size, scroll, scrollMax).shown;
 	}
 
 } // namespace ui

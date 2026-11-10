@@ -32,6 +32,7 @@ add_library(salal_app STATIC
     settings/Bindings.cpp
     settings/Settings.cpp
     storage/UserDirectories.cpp
+    testing/HeadlessLayout.cpp
 )
 add_library(salal::app ALIAS salal_app)
 

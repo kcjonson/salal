@@ -805,6 +805,28 @@ content with the scene's background either side.
 - `framed()` is read when the scene's ui is made and when the scene enters,
   so it's a property of the scene, not a switch.
 
+### Checking a scene at a window size
+
+A game's tests check each scene at the sizes its players have, with no window
+and no pixels, through `testing/HeadlessLayout.h`:
+
+```cpp
+std::string lintAt(App&, HeadlessPlatform&, int width, int height); // framebuffer pixels; "" when clean
+std::vector<std::string> scrollbarsShown(App&);                     // the top scene's scrollers showing a bar
+```
+
+`lintAt` resizes the window, runs two frames so a scene that rebuilds in
+`onResize` has settled, and lints the top scene's ui against the window in ui
+px, through the App's scale and the scene's frame, so the test passes window
+sizes and nothing else. Each violation is a line,
+`<rule> <path> at <x>,<y> <w>x<h> against <other>`. A window the platform's
+minimum size wouldn't let be that size answers with a line saying what size it
+is, rather than linting another. A canvas smaller than the reference is
+reached the way a player reaches it, by `setUiScale` above 1 first.
+`scrollbarsShown` gives each scroller's path that draws a bar
+(`ui::Component::showsScrollbar`); the tree snapshot's `scroll.maxX` and
+`maxY` have the amounts.
+
 ## Game state and saves
 
 State that outlives a scene is the game's, in one object the game defines and

@@ -338,8 +338,10 @@ namespace ui {
 		[[nodiscard]] Foundation::Vec2 getScroll() const { return scroll; }
 		// How far it scrolls on each axis, from the last layout.
 		[[nodiscard]] Foundation::Vec2 getScrollMax() const { return scrollMax; }
-		void						   scrollTo(Foundation::Vec2 value);
-		void						   scrollBy(Foundation::Vec2 delta) { scrollTo(scroll + delta); }
+		// Whether it draws a scrollbar, as of the last layout: it scrolls, and its content runs past its box.
+		[[nodiscard]] bool showsScrollbar() const;
+		void			   scrollTo(Foundation::Vec2 value);
+		void			   scrollBy(Foundation::Vec2 delta) { scrollTo(scroll + delta); }
 
 		// The tree snapshot's and the lint's name for the type.
 		[[nodiscard]] virtual const char* typeName() const { return "Component"; }

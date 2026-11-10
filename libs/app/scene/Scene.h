@@ -85,6 +85,8 @@ namespace app {
 		// This scene's ui context, made on first use. From onEnter on; a scene's constructor runs before
 		// it is on the stack, so one made there is sized when the scene enters.
 		ui::Context& ui();
+		// Whether ui() has been asked for; a scene that never does has no ui to lay out, lint or draw.
+		[[nodiscard]] bool hasUi() const { return uiContext != nullptr; }
 		// ui().root(): the scene's first root.
 		ui::Ref<ui::Component> root();
 
