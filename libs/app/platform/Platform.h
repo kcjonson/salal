@@ -18,6 +18,13 @@
 
 namespace app {
 
+	// The OpenGL version a window's context is asked for, core profile and forward compatible. A game
+	// asks for what its own shaders declare; 4.1 is the most macOS gives.
+	struct GlVersion {
+		int major = 3;
+		int minor = 3;
+	};
+
 	struct WindowConfig {
 		std::string		   title;
 		float			   sizePercent = 0.8F; // of the primary monitor's work area
@@ -28,6 +35,7 @@ namespace app {
 		// area: a window on a monitor smaller than this is this size anyway.
 		int minWidth = 0;
 		int minHeight = 0;
+		GlVersion		   glVersion; // no window, logged with the version asked for, where the driver can't give it
 	};
 
 	// What a platform reports while it polls. The App is the one listener, and the dev server feeds

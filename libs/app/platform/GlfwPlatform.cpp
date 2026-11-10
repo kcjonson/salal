@@ -548,8 +548,8 @@ namespace app {
 				LOG_INFO(Engine, "Window: %dx%d (%.0f%% of the work area)", width, height, config.sizePercent * 100.0F);
 			}
 
-			glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+			glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, config.glVersion.major);
+			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, config.glVersion.minor);
 			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 			glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 			return {
@@ -573,10 +573,20 @@ namespace app {
 		}
 		const CreatedWindow created = createWindow(config);
 		if (created.window == nullptr) {
-			LOG_ERROR(Engine, "Failed to create GLFW window");
+			LOG_ERROR(
+				Engine, "Failed to create a GLFW window with a GL %d.%d core context", config.glVersion.major, config.glVersion.minor
+			);
 			glfwTerminate();
 			return nullptr;
 		}
+		LOG_INFO(
+			Engine,
+			"GL context %d.%d core (asked for %d.%d)",
+			glfwGetWindowAttrib(created.window, GLFW_CONTEXT_VERSION_MAJOR),
+			glfwGetWindowAttrib(created.window, GLFW_CONTEXT_VERSION_MINOR),
+			config.glVersion.major,
+			config.glVersion.minor
+		);
 		glfwMakeContextCurrent(created.window);
 		glfwSwapInterval(config.vsync ? 1 : 0);
 		return std::make_unique<GlfwPlatform>(
