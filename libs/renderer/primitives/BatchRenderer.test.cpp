@@ -248,6 +248,59 @@ TEST(BatchModeTest, AGlyphCarriesItsUvRectFlippedAndItsRange) {
 	expectNear(glyph.corners[2], {12.0F, 8.0F});
 }
 
+// A ui scale is an upright scale and a translation, which has a pixel grid: the run's origin lands on a
+// whole device pixel and every glyph keeps its scaled place from it.
+TEST(BatchModeTest, ATextRunSnapsToDevicePixelsUnderAScaleAndATranslation) {
+	backend::NullBackend gpu;
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
+	for (const float scale : {1.125F, 1.5F, 4.0F / 3.0F}) {
+		SCOPED_TRACE(scale);
+		BatchRenderer	 batch(gpu, base_shader::source());
+		Foundation::Mat4 transform = glm::translate(Foundation::Mat4(1.0F), Foundation::Vec3(0.3F, 0.7F, 0.0F));
+		transform = glm::scale(transform, Foundation::Vec3(scale, scale, 1.0F));
+		batch.setTransform(transform);
+		// Two glyphs of one run: origin (10.3, 20.6), the glyphs 1 and 9.5 px along it and 12 above.
+		const Foundation::Vec2 origin{10.3F, 20.6F};
+		batch.addTextQuad({11.3F, 8.6F}, {8.0F, 12.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), origin, kAtlasA, 4.0F);
+		batch.addTextQuad({19.8F, 8.6F}, {8.0F, 12.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), origin, kAtlasA, 4.0F);
+		const std::span<const BatchInstance> glyphs = batch.getPendingInstances();
+		ASSERT_EQ(glyphs.size(), 2U);
+
+		// Where the origin lands on screen, and that pixel.
+		const Foundation::Vec2 onScreen{(origin.x * scale) + 0.3F, (origin.y * scale) + 0.7F};
+		const Foundation::Vec2 snapped{std::round(onScreen.x), std::round(onScreen.y)};
+		EXPECT_NE(onScreen.x, snapped.x); // it was off the grid
+		// Each glyph is its scaled offset from the snapped origin, and its scaled size.
+		expectNear(glyphs[0].corners[0], {snapped.x + (1.0F * scale), snapped.y - (12.0F * scale)});
+		expectNear(glyphs[1].corners[0], {snapped.x + (9.5F * scale), snapped.y - (12.0F * scale)});
+		expectNear(glyphs[0].corners[2], {snapped.x + (9.0F * scale), snapped.y});
+	}
+}
+
+// At a pixel ratio of 2 the grid is half a logical px.
+TEST(BatchModeTest, ATextRunUnderAScaleSnapsToTheDeviceGridAtAPixelRatio) {
+	backend::NullBackend gpu;
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
+	BatchRenderer	 batch(gpu, base_shader::source());
+	CoordinateSystem coordinates;
+	coordinates.setViewport({.logicalWidth = 800, .logicalHeight = 600, .framebufferWidth = 1600, .framebufferHeight = 1200});
+	batch.setCoordinateSystem(&coordinates);
+	batch.setTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(1.5F, 1.5F, 1.0F)));
+	batch.addTextQuad({10.1F, 0.1F}, {8.0F, 12.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {10.1F, 12.1F}, kAtlasA, 4.0F);
+	// 10.1 x 1.5 = 15.15, which is 15 on a half-px grid; 12.1 x 1.5 = 18.15, which is 18.
+	expectNear(batch.getPendingInstances()[0].corners[3], {15.0F, 18.0F});
+}
+
+// A rotation has no pixel grid, and a flip isn't a ui scale: both go through the matrix as they are.
+TEST(BatchModeTest, ATextRunUnderARotationOrAFlipIsNotSnapped) {
+	backend::NullBackend gpu;
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
+	BatchRenderer batch(gpu, base_shader::source());
+	batch.setTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(-1.5F, 1.5F, 1.0F)));
+	batch.addTextQuad({10.1F, 0.1F}, {8.0F, 12.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {10.1F, 12.1F}, kAtlasA, 4.0F);
+	expectNear(batch.getPendingInstances()[0].corners[0], {-15.15F, 0.15F});
+}
+
 // ============================================================================
 // Draw plan: key sort and run splitting, headless
 // ============================================================================
