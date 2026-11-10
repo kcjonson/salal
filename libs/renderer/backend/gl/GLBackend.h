@@ -78,6 +78,7 @@ namespace Renderer::backend::gl {
 		// renderer texture to its own sampler, and for the GL tests.
 		[[nodiscard]] GLuint textureName(TextureHandle texture) const;
 		[[nodiscard]] GLuint programName(PipelineHandle pipeline) const;
+		[[nodiscard]] GLuint bufferName(BufferHandle buffer) const;
 
 		// The binding point the DrawUniforms block reads (the hooks' blocks read theirs,
 		// 1 up), and how many writes a binding point's ring holds before it is orphaned.

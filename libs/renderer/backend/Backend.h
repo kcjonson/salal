@@ -59,7 +59,7 @@ namespace Renderer::backend {
 	// write ordered after every draw already submitted, which still reads the old
 	// contents (drawInstanced rewrites one instance buffer between draws and relies on
 	// it). Stream: whole, once per submission; a Stream write at offset 0 starts the
-	// buffer over (what it held is discarded, never waited on) and grows it to fit.
+	// buffer over (what it held is discarded, never waited on) at the size of the write.
 	enum class BufferUsage : uint8_t { Static, Dynamic, Stream };
 
 	// The GPU blend state a draw runs in. One: premultiplied "over", (ONE,

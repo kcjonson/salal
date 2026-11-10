@@ -34,7 +34,7 @@ namespace Renderer {
 		// How far a feather ring's outer edge may run out at a sharp corner, in ring widths.
 		constexpr float kFeatherMiterLimit = 4.0F;
 
-		// The stream buffer's first size; the backend grows it as a flush needs.
+		// The stream buffer's first size; each flush's write resizes it to that flush.
 		constexpr size_t kInitialInstanceBytes = 2048 * sizeof(BatchInstance);
 
 		// A straight-alpha colour premultiplied, as rgba8.
