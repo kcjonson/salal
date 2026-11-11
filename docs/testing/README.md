@@ -39,7 +39,10 @@ layout invariants (overlapping siblings, children spilling out of parents,
 off-screen nodes, zero sizes, overflowing text, unreachable controls) and
 `/api/ui/tree` gives every element's bounds. Agents call them on demand while
 building and checking a game's screens, expecting a lint count of 0 before
-screenshotting. They never run in CI.
+screenshotting. They never run in CI. A game that wants the lint in its own
+headless tests, a scene at each window size its players have, calls
+`app::lintAt` (`testing/HeadlessLayout.h`; [app-api.md](../app-api.md),
+"Checking a scene at a window size"); that's the game's suite, not salal's.
 
 ## Sandbox scenes and scene diffs
 
