@@ -232,9 +232,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// color: text color with alpha
 		// runOrigin: pen origin of the text run at the baseline (same value for
 		//   every glyph of a run, i.e. FontRenderer::GlyphQuad::runOrigin). Under
-		//   identity/translate-only transforms the run origin is snapped to the
-		//   device pixel grid and every glyph shifted by the same delta, keeping
-		//   glyph edges stable without disturbing advances/kerning.
+		//   a transform that keeps the axes (identity, a translation, an upright
+		//   scale with one) the run origin is snapped to the device pixel grid
+		//   and every glyph shifted by the same delta, keeping glyph edges stable
+		//   without disturbing advances/kerning.
 		// atlas: MSDF atlas this glyph samples from. An invalid handle selects the
 		//   default atlas set via setFontAtlas(), the game's default family's. A
 		//   frame may mix atlases; plan() gives each glyph its atlas's texture slot in
@@ -516,15 +517,18 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		bool clipEmpty = false;
 
 		// Classification of currentTransform, cached once per setTransform() to
-		// avoid per-vertex checks. Text snapping runs for Identity/TranslateOnly
-		// (where "on the pixel grid" is well-defined); General falls back to the
-		// full matrix multiply with no snapping.
-		enum class TransformClass : uint8_t { kIdentity, kTranslateOnly, kGeneral };
+		// avoid per-vertex checks. Text snapping runs for Identity, TranslateOnly
+		// and ScaleTranslate (a positive scale on each axis and a translation, which
+		// is what a ui scale is), where "on the pixel grid" is well-defined; General
+		// (rotation, shear, a flip) falls back to the full matrix multiply with no
+		// snapping.
+		enum class TransformClass : uint8_t { kIdentity, kTranslateOnly, kScaleTranslate, kGeneral };
 
 		// Current transform matrix (baked into vertex positions at add-time)
 		Foundation::Mat4 currentTransform{1.0F}; // Identity
 		TransformClass	 transformClass = TransformClass::kIdentity;
-		Foundation::Vec2 transformTranslation{0.0F, 0.0F}; // Valid for kTranslateOnly (zero for kIdentity)
+		Foundation::Vec2 transformTranslation{0.0F, 0.0F}; // Valid for every class but kGeneral (zero for kIdentity)
+		Foundation::Vec2 transformScale{1.0F, 1.0F};	   // Valid for kScaleTranslate; 1 for kIdentity and kTranslateOnly
 
 		// The inverse of currentTransform's linear part, which takes a stroke's screen
 		// offsets back to its own units; a transform that flattens everything has none,
@@ -543,10 +547,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		float largestScale = 1.0F;
 
 		// Caches addTextQuad's run-origin snap: every glyph of a text run shares the
-		// same {pixelRatio, translation, runOrigin}, so the delta is computed once per
-		// run instead of per glyph. pixelRatio 0 marks the cache empty.
+		// same {pixelRatio, scale, translation, runOrigin}, so the delta is computed once
+		// per run instead of per glyph. pixelRatio 0 marks the cache empty.
 		struct TextSnapCache {
 			float			 pixelRatio = 0.0F;
+			Foundation::Vec2 scale{1.0F, 1.0F};
 			Foundation::Vec2 translation{0.0F, 0.0F};
 			Foundation::Vec2 runOrigin{0.0F, 0.0F};
 			Foundation::Vec2 delta{0.0F, 0.0F};
