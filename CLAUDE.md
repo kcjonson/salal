@@ -368,6 +368,10 @@ byte-span overload a file's bytes and nothing is staged beside the exe. A game
 that loads SVG from disk instead resolves the path itself
 (`Foundation::findResource`); `SVGLoader` takes no asset root. The art check
 and ui's icon check share one scanner of SVG markup (`renderer/vector/SvgMarkup.h`).
+`salal_windows_manifest(<target>)` (`cmake/SalalWindows.cmake`) declares a
+game's executable per-monitor DPI aware (V2) on Windows, which the ui's scale
+from the window's resolution rests on ([docs/app-api.md](docs/app-api.md), "UI
+scale"); it does nothing elsewhere.
 Worldsim's `pugixml`, `lua` and `sol2` serve its `assets` target and stay behind.
 An audio library is proposed and not decided
 (worldsim has none; `miniaudio` is the recommendation).

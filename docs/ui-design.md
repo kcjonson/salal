@@ -880,6 +880,9 @@ Decided 2026-10-30, closing the review of the spec.
   range is under a sixth of the em warns, and text stays at 11 px and up.
 - **UI scale (R7.5):** one scale for the whole UI, applied by redefining
   app's logical viewport, which also covers asteroids' text-scale setting.
+  The App chooses it: the player's setting alone, or with a reference size
+  the window's resolution times the setting ([app-api.md](app-api.md), "UI
+  scale", 2026-11-10). A context takes 0.125 to 8.
 - **Scroll extent (R4.13):** content less than a px past a scroller's box is
   layout rounding and counts as fitting: no bar, and the wheel and paging pass
   the scroller by (2026-11-10).

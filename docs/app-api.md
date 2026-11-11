@@ -149,7 +149,9 @@ public:
 	explicit HeadlessPlatform(int width, int height);
 	ManualClock& clock();
 	void push(const foundation::InputEvent&); // arrives in the next tick's poll, as a callback would
-	void resize(int width, int height);
+	void resize(int width, int height);                // logical pixels, held to the minimum size; 0 x 0 is minimized
+	void setPixelRatio(float);                         // framebuffer pixels per logical pixel, 1 until set
+	void setMinimumSize(int width, int height);        // framebuffer pixels, as WindowConfig's
 	void setFocused(bool);
 	void connectGamepad(const DeviceInfo&);            // pads are sampled once per poll and diffed, as GLFW's are, through the same GamepadTracker
 	void disconnectGamepad(std::uint8_t index);
@@ -168,6 +170,13 @@ struct WindowConfig {
 	std::optional<int> fullscreenMonitor;
 	bool vsync = true;
 	GlVersion glVersion;               // no window, logged, where the driver can't give it
+	int minWidth = 0, minHeight = 0;   // the smallest the content gets, in framebuffer pixels; 0 for none, either axis
+};
+
+struct UiScaleConfig {                 // "UI scale", below
+	int referenceWidth = 0, referenceHeight = 0; // the screen a ui px is one pixel on; both 0 for a fixed scale
+	float floor = 0.0F;                // the least scale with a reference
+	float minFactor = 0.25F, maxFactor = 4.0F; // what ui.scale is held to
 };
 
 struct FrameConfig {
@@ -181,6 +190,7 @@ struct FrameConfig {
 struct AppConfig {
 	std::string organization, applicationName; // name the per-user directories
 	FrameConfig frame;
+	UiScaleConfig uiScale;
 	Renderer::backend::ShaderSource baseShader;  // the game's base shader with its hooks (salal_base_shader)
 	std::span<const Renderer::FontAtlasSource> fontAtlases; // empty: no text, logged once, not a failure
 	Renderer::FontFamily defaultFont = Renderer::FontFamily::Default;
@@ -212,6 +222,10 @@ public:
 	void setDispatch(std::function<void(App&)>); // replaces step 5's default event dispatch (worldsim's bridge; salal's ui in phase 3)
 	void setVsync(bool);
 	void setFullscreen(std::optional<int> monitor);
+	void setUiScale(float);        // the player's setting, ui.scale: the factor with a reference, the scale with none
+	float uiScale() const;
+	float uiLayoutScale() const;   // what each scene's ui is scaled by, over logical pixels; held to what a ui context takes, 0.125 to 8
+	float uiPixelScale() const;    // the same in framebuffer pixels per ui px
 	SceneStack& scenes();
 	template <typename T> void setContext(T&); // the game's state, set once before the first scene
 	template <typename T> T& context();        // checked against the type given to setContext
@@ -669,9 +683,10 @@ void readBindings(const nlohmann::json& section, foundation::ActionMap&);
   with a dot in it is reached only through its parent's `find` or `section`.
   `find` reads without making anything, which is how to read a section
   (`if (const auto* input = settings.find("input")) readBindings(*input, map);`).
-- `app` reads its own keys at create, `video.vsync`, `video.fullscreenMonitor`
+- `app` reads its own keys at create, `ui.scale` ("UI scale", below),
+  `ui.reducedMotion`, `video.vsync`, `video.fullscreenMonitor`
   (null for windowed) and the windowed size as `video.windowWidth` and
-  `video.windowHeight`, and applies them through the platform, the monitor
+  `video.windowHeight`, and applies the window's through the platform, the monitor
   before the size; a key that isn't there, holds the wrong type, or names a
   monitor that isn't connected, and a size with only one half, leave the window
   as its `WindowConfig` made it. The settings load after the platform has made
@@ -722,6 +737,54 @@ void readBindings(const nlohmann::json& section, foundation::ActionMap&);
   stays cleared over the defaults.
 - `nlohmann::json` is in `app`'s public API, so `app` links it PUBLIC, in
   every configuration, where the renderer keeps it private.
+
+## UI scale
+
+A game's interface is designed on one screen and has to fit every other. With a
+reference in `AppConfig::uiScale`, a ui px is a pixel on a screen of that size,
+and the App scales every scene's ui by
+
+`s = max(floor, factor x min(W / referenceWidth, H / referenceHeight))`
+
+framebuffer pixels per ui px, `W x H` the framebuffer. The canvas a scene's ui
+lays out on is `W/s x H/s`: at factor 1 it's the reference or more, exactly
+the reference on one axis and the window's extra room on the other, the way
+Unity's Scale With Screen Size (Expand), Unreal's DPI curve and Godot's
+`canvas_items` with `expand` work. dual-deck-builder passes `1920 x 1080`, a
+floor of 2/3 and factors of 0.8 to 1.2, so its canvas is 1920 x 1080 at 1080p,
+1440p and 4K alike, 2580 x 1080 on a 3440 x 1440 ultrawide and 1920 x 1200 on a
+Steam Deck.
+
+- The scale is computed on the framebuffer, so the operating system's display
+  scale doesn't enter into it: a 4K monitor gives the same interface at 100%,
+  150% or 200%. `ui::Context`'s scale is over the window's logical pixels, so
+  the App hands each one `s` over the pixel ratio (`uiLayoutScale()`;
+  `uiPixelScale()` is `s`). On Windows that needs the framebuffer to be the
+  monitor's own pixels, which a per-monitor DPI aware process gets: GLFW 3.4
+  asks for Per-Monitor V2 at `glfwInit` (`win32_init.c`), and
+  `salal_windows_manifest(<target>)` (`cmake/SalalWindows.cmake`) declares it
+  in the executable's manifest as well, so it holds before anything can make a
+  window. The GLFW platform logs the window's size, framebuffer and display
+  scale at create; a 4K monitor at 150% reads `framebuffer 3840x2160`
+  fullscreen.
+- `factor` is the player's setting, kept as `ui.scale`, read at create and
+  held to `minFactor` and `maxFactor` there and in `setUiScale`.
+- The scale follows the window at once: `uiLayoutScale()` is computed from the
+  viewport the App has now. A scene's ui takes the new size and scale together,
+  in one step, before the scene's `onResize`, so nothing lays out at the new
+  size and the old scale.
+- With no reference the setting is the scale itself over logical pixels, as it
+  was before there was one, and the window's size doesn't change it. Worldsim
+  is there until it passes a reference of its own.
+- `floor` only holds if the window can't get smaller than the size it was
+  worked out for, which is `WindowConfig::minWidth` and `minHeight`: framebuffer
+  pixels, converted to the window system's units at the window's pixel ratio
+  (points on macOS) and again when the ratio changes, applied with
+  `glfwSetWindowSizeLimits`, kept through fullscreen and back, and held by
+  `setWindowSize`, so a saved size under it opens at it. The minimum outranks
+  the work area: on a monitor smaller than the minimum the window is the
+  minimum anyway. `HeadlessPlatform::setMinimumSize` does the same for tests,
+  with `setPixelRatio` for a Retina framebuffer.
 
 ## Game state and saves
 

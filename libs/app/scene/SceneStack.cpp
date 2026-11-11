@@ -37,7 +37,7 @@ namespace app {
 		if (uiContext == nullptr) {
 			uiContext = std::make_unique<ui::Context>(stack != nullptr ? logicalSize(stack->app.viewport()) : Foundation::Vec2{0.0F, 0.0F});
 			if (stack != nullptr) {
-				uiContext->setScale(stack->app.uiScale());
+				uiContext->setScale(stack->app.uiLayoutScale());
 				uiContext->setReducedMotion(stack->app.reducedMotion());
 				App& app = stack->app;
 				uiContext->setClipboard({
@@ -180,7 +180,7 @@ namespace app {
 		for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
 			Scene& scene = *it->scene;
 			if (scene.uiContext != nullptr) {
-				scene.uiContext->setViewport(logicalSize(viewport));
+				scene.uiContext->setViewport(logicalSize(viewport), app.uiLayoutScale());
 			}
 			detail::guard(scene.name(), "onResize", [&] { scene.onResize(viewport); });
 		}
@@ -280,14 +280,19 @@ namespace app {
 		}
 	}
 
+	// A ui's bounds are in its own px, so it's held to its own viewport, the window over the ui's scale.
 	std::string SceneStack::uiTreeJson(const Renderer::Viewport& viewport) const {
-		const Scene* top = entries.empty() ? nullptr : entries.back().scene.get();
-		return ui::treeJson(top != nullptr ? top->uiContext.get() : nullptr, top != nullptr ? top->name() : "", logicalSize(viewport));
+		const Scene*	   top = entries.empty() ? nullptr : entries.back().scene.get();
+		const ui::Context* context = top != nullptr ? top->uiContext.get() : nullptr;
+		return ui::treeJson(
+			context, top != nullptr ? top->name() : "", context != nullptr ? context->getViewport() : logicalSize(viewport)
+		);
 	}
 
 	std::string SceneStack::uiLintJson(const Renderer::Viewport& viewport) const {
-		const Scene* top = entries.empty() ? nullptr : entries.back().scene.get();
-		return ui::lintJson(top != nullptr ? top->uiContext.get() : nullptr, logicalSize(viewport));
+		const Scene*	   top = entries.empty() ? nullptr : entries.back().scene.get();
+		const ui::Context* context = top != nullptr ? top->uiContext.get() : nullptr;
+		return ui::lintJson(context, context != nullptr ? context->getViewport() : logicalSize(viewport));
 	}
 
 	void SceneStack::pushBuilt(Change& change, float liveAlpha) {
@@ -373,8 +378,7 @@ namespace app {
 		entered.stackId = nextId++;
 		entries.push_back({.scene = std::move(scene), .name = std::move(name), .onResult = std::move(onResult)});
 		if (entered.uiContext != nullptr) {
-			entered.uiContext->setViewport(logicalSize(app.viewport()));
-			entered.uiContext->setScale(app.uiScale());
+			entered.uiContext->setViewport(logicalSize(app.viewport()), app.uiLayoutScale());
 		}
 		LOG_INFO(Engine, "Entering scene: %s", entered.name());
 		detail::guard(entered.name(), "onEnter", [&] { entered.onEnter(app); });

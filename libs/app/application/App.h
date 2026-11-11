@@ -89,11 +89,18 @@ namespace app {
 		// video.fullscreenMonitor (null for windowed), which the App reads at create; the game saves them.
 		// The monitor is kept as asked, so one unplugged now is tried again at the next launch.
 		void setVsync(bool enabled);
-		// The ui's one scale (R7.5), 0.25 to 4, kept in settings() as ui.scale, which the App reads at
-		// create: every scene's ui lays out in the window's logical size over it and draws scaled, so a
-		// handheld gets larger ui with no second layout.
+		// The player's ui scale (R7.5), held to AppConfig::uiScale's factors and kept in settings() as
+		// ui.scale, which the App reads at create. With a reference in AppConfig::uiScale it's the factor
+		// on the scale the window's resolution gives; with none it's the scale itself, over the window's
+		// logical pixels.
 		void				setUiScale(float scale);
 		[[nodiscard]] float uiScale() const { return scaleOfUi; }
+		// What every scene's ui is scaled by now, over the window's logical pixels: it lays out on the
+		// window's logical size over this and draws scaled. Follows the window's size, at once, and
+		// setUiScale; a scene's ui has it before the scene's onResize.
+		[[nodiscard]] float uiLayoutScale() const;
+		// The same in the framebuffer's pixels per ui px: uiLayoutScale by the window's pixel ratio.
+		[[nodiscard]] float uiPixelScale() const;
 		// Reduced motion (R11.13), kept in settings() as ui.reducedMotion: every scene's ui completes its
 		// tweens on their first tick. A game sets it from its options or the system's preference.
 		void			   setReducedMotion(bool reduced);

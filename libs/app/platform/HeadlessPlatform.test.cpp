@@ -240,4 +240,63 @@ namespace app {
 		EXPECT_FALSE(platform.vsync());
 	}
 
+	TEST(HeadlessPlatformTest, APixelRatioScalesTheFramebufferAndArrivesAsAResize) {
+		HeadlessPlatform platform(800, 600);
+		platform.setPixelRatio(2.0F);
+		EXPECT_EQ(platform.viewport().logicalWidth, 800);
+		EXPECT_EQ(platform.viewport().framebufferWidth, 1600);
+		EXPECT_EQ(platform.viewport().framebufferHeight, 1200);
+		EXPECT_FLOAT_EQ(platform.viewport().pixelRatio(), 2.0F);
+		PlatformLog log;
+		platform.pollEvents(log);
+		ASSERT_EQ(log.resizes.size(), 1U);
+		EXPECT_EQ(log.resizes[0].framebufferWidth, 1600);
+
+		platform.resize(1000, 500);
+		platform.setPixelRatio(0.0F); // refused
+		PlatformLog resized;
+		platform.pollEvents(resized);
+		ASSERT_EQ(resized.resizes.size(), 1U);
+		EXPECT_EQ(resized.resizes[0].logicalWidth, 1000);
+		EXPECT_EQ(resized.resizes[0].framebufferHeight, 1000);
+	}
+
+	// The minimum is framebuffer pixels, so half as many logical ones at a pixel ratio of 2.
+	TEST(HeadlessPlatformTest, TheWindowKeepsToItsMinimumSizeThroughResizesAndFullscreen) {
+		HeadlessPlatform platform(800, 600);
+		platform.setMinimumSize(1280, 720);
+		EXPECT_EQ(platform.viewport().logicalWidth, 1280); // grown at once
+		EXPECT_EQ(platform.viewport().logicalHeight, 720);
+		PlatformLog grown;
+		platform.pollEvents(grown);
+		ASSERT_EQ(grown.resizes.size(), 1U);
+
+		platform.resize(640, 1000); // a drag stops at the minimum
+		platform.resize(0, 0);		// minimized, as it was
+		PlatformLog dragged;
+		platform.pollEvents(dragged);
+		ASSERT_EQ(dragged.resizes.size(), 2U);
+		EXPECT_EQ(dragged.resizes[0].logicalWidth, 1280);
+		EXPECT_EQ(dragged.resizes[0].logicalHeight, 1000);
+		EXPECT_EQ(dragged.resizes[1].logicalWidth, 0);
+
+		platform.setWindowSize(100, 100);
+		EXPECT_EQ(platform.viewport().logicalWidth, 1280);
+		EXPECT_EQ(platform.viewport().logicalHeight, 720);
+
+		// A size set while fullscreen is held to it too, for the return.
+		platform.addMonitor(1920, 1080);
+		platform.setFullscreen(0);
+		platform.setWindowSize(320, 240);
+		platform.setFullscreen(std::nullopt);
+		EXPECT_EQ(platform.viewport().logicalWidth, 1280);
+		EXPECT_EQ(platform.viewport().logicalHeight, 720);
+
+		platform.setPixelRatio(2.0F);
+		platform.setWindowSize(100, 100);
+		EXPECT_EQ(platform.viewport().logicalWidth, 640);
+		EXPECT_EQ(platform.viewport().framebufferWidth, 1280);
+		EXPECT_EQ(platform.viewport().framebufferHeight, 720);
+	}
+
 } // namespace app

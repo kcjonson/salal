@@ -6,6 +6,8 @@
 // connected pad's state is sampled once per poll, after the queue, and diffed into events by the
 // same GamepadTracker the GLFW platform runs. The clipboard is a string. The window goes fullscreen on
 // monitors a test adds, resizing at once as Windows and macOS do, with the resize event in the next poll.
+// Sizes are logical pixels, each setPixelRatio framebuffer pixels (1 until it's set), and the window keeps
+// to setMinimumSize as a GLFW window keeps to its WindowConfig's minimum.
 
 #include "input/DeviceInfo.h"
 #include "platform/Clock.h"
@@ -31,8 +33,15 @@ namespace app {
 
 		// An input event, stamped with the clock's time now.
 		void push(const foundation::InputEvent& event);
-		// A framebuffer resize to width x height, logical and framebuffer alike.
+		// A resize to width x height logical pixels, as a drag of the window's edge: held to the minimum
+		// size, except 0 x 0, which is the window minimized.
 		void resize(int width, int height);
+		// Framebuffer pixels per logical pixel from now on, as on a Retina display; the window keeps its
+		// logical size, and the change arrives as a resize in the next poll.
+		void setPixelRatio(float ratio);
+		// The smallest the window gets, in framebuffer pixels as WindowConfig's is; 0 for none. A window
+		// under it grows at once, its resize in the next poll.
+		void setMinimumSize(int width, int height);
 		// Focus changes, with the FocusLost or FocusGained event a window system sends; no change, no event.
 		void setFocused(bool focused);
 
@@ -85,6 +94,10 @@ namespace app {
 
 		// The window resized by a call on it: at once, with its event queued for the next poll.
 		void resizeNow(Size size);
+		// The viewport of a window of `size` logical pixels at the pixel ratio.
+		Renderer::Viewport viewportAt(Size size) const;
+		// `size` or the minimum, whichever is larger on each axis.
+		Size atLeastMinimum(Size size) const;
 
 		ManualClock												manualClock;
 		Renderer::Viewport										current;
@@ -100,6 +113,8 @@ namespace app {
 		std::vector<Size>										monitors;
 		std::optional<int>										fullscreen;
 		Size													windowed;
+		float													pixelRatio = 1.0F;
+		Size													minimum; // framebuffer pixels
 	};
 
 } // namespace app

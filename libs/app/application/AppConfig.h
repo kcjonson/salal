@@ -24,9 +24,24 @@ namespace app {
 		bool   freezeTicksOnFocusLoss = true;
 	};
 
+	// The ui's scale from the window's resolution (docs/app-api.md, "UI scale"). With a reference, a ui px
+	// is a pixel on a screen of that size: the scale is max(floor, factor x min(W / referenceWidth,
+	// H / referenceHeight)) device pixels per ui px, W x H the framebuffer, so the ui's canvas is the
+	// reference or more at factor 1 and grows on the axis with room; the operating system's display scale
+	// doesn't enter into it. With none, the factor alone is the scale over the window's logical pixels.
+	// The factor is the player's setting, ui.scale.
+	struct UiScaleConfig {
+		int	  referenceWidth = 0; // device pixels; both 0 for no reference
+		int	  referenceHeight = 0;
+		float floor = 0.0F;		 // the least scale with a reference, whatever the window and the factor
+		float minFactor = 0.25F; // what ui.scale and setUiScale are held to
+		float maxFactor = 4.0F;
+	};
+
 	struct AppConfig {
 		std::string								   organization, applicationName; // name the per-user directories
 		FrameConfig								   frame;
+		UiScaleConfig							   uiScale;
 		Renderer::backend::ShaderSource			   baseShader;	// the game's base shader with its hooks (salal_base_shader)
 		std::span<const Renderer::FontAtlasSource> fontAtlases; // resource paths; empty: no text, logged once, not a failure
 		Renderer::FontFamily					   defaultFont = Renderer::FontFamily::Default;

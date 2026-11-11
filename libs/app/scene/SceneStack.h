@@ -208,7 +208,8 @@ namespace app {
 		// The stack from its topmost opaque scene up, the top at liveAlpha and each covered scene at the
 		// alpha it had when covered, each scene's ui after it.
 		void render(float liveAlpha);
-		// /api/ui/tree and /api/ui/lint for the top scene's ui, at the window's logical size.
+		// /api/ui/tree and /api/ui/lint for the top scene's ui, against its viewport: the window's logical
+		// size over the ui's scale, and that size itself for a scene with no ui.
 		std::string uiTreeJson(const Renderer::Viewport& viewport) const;
 		std::string uiLintJson(const Renderer::Viewport& viewport) const;
 		// App::shutdown: every scene exits, top down, and nothing queued applies.
