@@ -17,7 +17,8 @@ namespace app {
 	// scene's ui linted against the window: a line per violation, "<rule> <path> at <x>,<y> <w>x<h>" and
 	// " against <other>" where the rule has one, in ui px. Empty when the layout is clean, and for a
 	// scene with no ui. A window that can't be that size (the platform's minimum size) is one line saying
-	// what it is instead. The window keeps the size.
+	// what it is instead. The window keeps the size. The App's settings file holds ui.scale and takes the
+	// window's size, so a test's AppConfig names its own or none, never the game's.
 	[[nodiscard]] std::string lintAt(App& app, HeadlessPlatform& platform, int width, int height);
 
 	// The top scene's scrollers that show a scrollbar now, as of its last layout: each one's path, as the

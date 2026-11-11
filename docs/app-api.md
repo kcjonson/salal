@@ -824,7 +824,12 @@ px, through the App's scale and the scene's frame, so the test passes window
 sizes and nothing else. Each violation is a line,
 `<rule> <path> at <x>,<y> <w>x<h> against <other>`. A window the platform's
 minimum size wouldn't let be that size answers with a line saying what size it
-is, rather than linting another. A canvas smaller than the reference is
+is, rather than linting another, and so does a size the pixel ratio can't
+land on. The App reads `ui.scale` from its settings file and writes the
+window's size to it, so the test's `AppConfig` names a settings file of its
+own, or none, never the game's: a player's saved interface size would move
+every canvas. Motion isn't run on, so a size transition is linted where it
+starts. A canvas smaller than the reference is
 reached the way a player reaches it, by `setUiScale` above 1 first.
 `scrollbarsShown` gives each scroller's path that draws a bar
 (`ui::Component::showsScrollbar`); the tree snapshot's `scroll.maxX` and
