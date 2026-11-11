@@ -687,7 +687,7 @@ root().removeChild(row);   // health.get() is null from here on
     `boxSizing`, `alignItems`, `justifyItems`, `justifyContent`,
     `gridTemplateColumns`, `gridTemplateRows`, and as a child `flexGrow`,
     `flexShrink`, `alignSelf`, `justifySelf`, `gridColumn`, `gridRow`,
-    `position` (Relative or Absolute) and `inset`. `display: Free`, the
+    `position` (Relative or Absolute), `inset` and `aspectRatio`. `display: Free`, the
     default, places each child at its own top-level `position`, its auto size
     hugging their boxes; Flex (and Grid) flow theirs, and `position:
     Absolute` takes a child out of a flowing parent to its `position` or
@@ -756,6 +756,25 @@ root().removeChild(row);   // health.get() is null from here on
   height, where CSS's initial `align-content` stretches them into a fixed
   container's free space. Not built until a game asks: `wrap-reverse` and
   `alignContent`.
+- **`aspectRatio` is CSS's `aspect-ratio`** (decided 2026-11-10, for boxes
+  that hold art with a shape): width over height, and a box with one axis
+  auto takes it from the other, whether that one is declared, stretched
+  across a flex container or a grid area, or flexed along one. With both
+  auto the width is the content's and the height follows. It's the box
+  `boxSizing` names, `minSize` and `maxSize` win over it, and a box with
+  both axes declared ignores it. One departure: CSS stretches the auto cross
+  axis of a flex or grid child even when its other axis is declared, which
+  breaks the shape the ratio was set for, so here a declared (or, in a grid,
+  stretched) width keeps the height the ratio's. A child with both axes auto
+  still stretches across a single-line flex container, and its main size
+  follows; once it has grown, shrunk or wrapped onto a line, both its axes
+  are given and the ratio is spent, as in CSS. Two cases to keep out of: a
+  both-auto ratio child in a container whose cross size is its content's is
+  measured unstretched and arranged stretched, so the container is sized for
+  the smaller box, and a grid child that isn't stretched across its column
+  takes its width from the stretched height after the columns were sized.
+  Give the box one declared axis and neither happens. A ratio that isn't
+  finite is none.
 - **Box sizing is CSS's `box-sizing`** (decided 2026-11-02), border-box by
   default, which is what every node did before it: a px or percentage
   `size`, `minSize` and `maxSize` are the whole box, padding in. `boxSizing:
