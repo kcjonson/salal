@@ -115,6 +115,31 @@ namespace app::testing {
 		EXPECT_FLOAT_EQ(app->uiScale(), 0.25F);
 	}
 
+	// Over a fractional pixel ratio and back isn't exact, so with no reference the ratio stays out of it.
+	TEST_F(AppUiScaleTest, WithNoReferenceTheLayoutScaleIsTheSettingExactlyAtAFractionalPixelRatio) {
+		start(config(), window(1707, 960, 2560.0F / 1707.0F));
+		app->scenes().push<CanvasScene>();
+		frame(0.0);
+		for (const float factor : {0.9F, 1.15F, 3.15F}) {
+			app->setUiScale(factor);
+			EXPECT_EQ(app->uiLayoutScale(), factor);
+		}
+	}
+
+	// A ui context takes 0.125 to 8, and the App reports the scale the ui is drawn at.
+	TEST_F(AppUiScaleTest, TheScaleTheAppReportsIsTheOneTheUiHas) {
+		AppConfig wide = config();
+		wide.uiScale = {.referenceWidth = 1280, .referenceHeight = 720};
+		start(wide, window(3840, 2160));
+		app->scenes().push<CanvasScene>();
+		frame(0.0);
+		app->setUiScale(4.0F); // 12 by the formula
+		EXPECT_EQ(app->uiLayoutScale(), 8.0F);
+		EXPECT_EQ(app->uiPixelScale(), 8.0F);
+		EXPECT_EQ(app->scenes().top()->ui().getScale(), 8.0F);
+		EXPECT_EQ(canvas(), Foundation::Vec2(480.0F, 270.0F));
+	}
+
 	TEST_F(AppUiScaleTest, WithAReferenceTheScaleFollowsTheFramebufferAndTheCanvasIsTheReferenceOrMore) {
 		const std::vector<Case> cases = {
 			{.width = 1920,
