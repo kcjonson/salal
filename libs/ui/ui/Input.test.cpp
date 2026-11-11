@@ -298,6 +298,36 @@ namespace ui {
 		EXPECT_FLOAT_EQ(list.get()->getScroll().y, 84.0F); // a page: the view less 16
 	}
 
+	// Layout rounding: padding and margins that sum to a fraction of a px more than the box.
+	TEST_F(UiInputTest, ContentLessThanAPxPastAScrollerDoesNotScrollIt) {
+		Ref<Component> outer = context.root().addChild<Component>({.id = "outer", .size = {200.0F, 200.0F}, .overflow = Overflow::Scroll});
+		Ref<Component> list = outer.addChild<Component>({.id = "list", .size = {150.0F, 100.0F}, .overflow = Overflow::Scroll});
+		Ref<Rectangle> rows = list.addChild<Rectangle>(box("rows", 0.0F, 0.0F, 150.0F, 100.6F));
+		outer.addChild<Rectangle>(box("more", 0.0F, 100.0F, 200.0F, 400.0F));
+		context.layout();
+		EXPECT_EQ(list.get()->getScrollMax(), Foundation::Vec2(0.0F, 0.0F));
+
+		// No bar to hit: the press at the bar's place lands on the scroller's content.
+		bool onScrollbar = false;
+		context.hitTest({145.0F, 50.0F}, &onScrollbar);
+		EXPECT_FALSE(onScrollbar);
+		// The wheel passes it by for the scroller outside it.
+		context.dispatch(pointerAt(InputEvent::Type::PointerMove, {50.0F, 50.0F}));
+		context.dispatch(wheelBy(1.0F, 1.0));
+		EXPECT_EQ(list.get()->getScroll().y, 0.0F);
+		EXPECT_EQ(outer.get()->getScroll().y, 48.0F);
+		list.get()->scrollBy({0.0F, 10.0F});
+		EXPECT_EQ(list.get()->getScroll().y, 0.0F);
+
+		// A whole px past it scrolls.
+		outer.get()->scrollTo({0.0F, 0.0F});
+		rows.get()->setSize({150.0F, 101.0F});
+		context.layout();
+		EXPECT_EQ(list.get()->getScrollMax(), Foundation::Vec2(0.0F, 1.0F));
+		context.hitTest({145.0F, 50.0F}, &onScrollbar);
+		EXPECT_TRUE(onScrollbar);
+	}
+
 	TEST_F(UiInputTest, TheUiScaleScalesTheViewportAndThePointer) {
 		context.setScale(2.0F);
 		context.root().addChild<Rectangle>(box("button", 40.0F, 40.0F, 20.0F, 20.0F));

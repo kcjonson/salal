@@ -919,6 +919,9 @@ Decided 2026-10-30, closing the review of the spec.
   scale", 2026-11-10). A context takes 0.125 to 8.
 - **The frame:** a context's roots and overlays can lay out in less than
   the window ("The frame", below, 2026-11-10).
+- **Scroll extent (R4.13):** content less than a px past a scroller's box is
+  layout rounding and counts as fitting: no bar, and the wheel and paging pass
+  the scroller by (2026-11-10).
 - **Ink extent (R8.8):** taken. A shadow or glow drawn past a component's
   box is ink, not overflow, so the lint doesn't flag it.
 - **Snapshot fields (R13.11):** the tree snapshot's field names are the same
