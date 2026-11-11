@@ -94,6 +94,8 @@ namespace ui {
 		// App sets it from its ui scale, which it holds to the game's own range.
 		void				setScale(float value);
 		[[nodiscard]] float getScale() const { return scale; }
+		static constexpr float kMinScale = 0.125F;
+		static constexpr float kMaxScale = 8.0F;
 		// The size the roots lay out at: the frame's, which is the window's with no frame set.
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }
 		// The frame (docs/ui-design.md, "The frame"): the window in the ui's px, capped at `maxSize` on each

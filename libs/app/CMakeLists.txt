@@ -87,6 +87,10 @@ endif()
 set_target_properties(salal_app PROPERTIES FOLDER salal)
 
 salal_add_tests(app)
+# The platform test reads the context's version from GLFW.
+if(TARGET salal_app_tests)
+    target_link_libraries(salal_app_tests PRIVATE glfw)
+endif()
 # The route tests talk to the server over loopback with cpp-httplib's client; they compile to
 # nothing without the server.
 if(TARGET salal_app_tests AND SALAL_WITH_DEV_SERVER)

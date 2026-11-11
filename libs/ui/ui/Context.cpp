@@ -196,7 +196,7 @@ namespace ui {
 	}
 
 	void Context::setViewport(Foundation::Vec2 size, float scaleAtSize) {
-		const float clamped = std::clamp(scaleAtSize, 0.125F, 8.0F);
+		const float clamped = std::clamp(scaleAtSize, kMinScale, kMaxScale);
 		if (size == windowSize && clamped == scale) {
 			return;
 		}
@@ -206,7 +206,7 @@ namespace ui {
 	}
 
 	void Context::setScale(float value) {
-		const float clamped = std::clamp(value, 0.125F, 8.0F);
+		const float clamped = std::clamp(value, kMinScale, kMaxScale);
 		if (clamped == scale) {
 			return;
 		}

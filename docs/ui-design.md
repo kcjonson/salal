@@ -455,6 +455,12 @@ frame is set.
   frame, so a toast stack's corner is the frame's. `Absolute::coverWindow`
   makes a cover the whole window instead: a Dialog's, so its scrim dims the
   background past the frame, its box centred in both.
+- Outside the frame the pointer is over nothing unless the scene made
+  `background()`: a press beside the content isn't the ui's, and goes on to
+  the scene. `background()` sits under every other root, so a handler on it
+  is reached only where no root covers it, which with no frame is nowhere.
+  It's for art. An overlay opened from something in it is still placed in
+  the frame.
 - The lint is held to the window, and a framed root's children to their root
   by the child-outside-parent rule, so content that spills past the frame is a
   violation though it's still on screen.
