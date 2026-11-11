@@ -291,14 +291,53 @@ TEST(BatchModeTest, ATextRunUnderAScaleSnapsToTheDeviceGridAtAPixelRatio) {
 	expectNear(batch.getPendingInstances()[0].corners[3], {15.0F, 18.0F});
 }
 
-// A rotation has no pixel grid, and a flip isn't a ui scale: both go through the matrix as they are.
-TEST(BatchModeTest, ATextRunUnderARotationOrAFlipIsNotSnapped) {
+// A flip isn't a ui scale, and a rotation, below, has no pixel grid: both go through the matrix as they are.
+TEST(BatchModeTest, ATextRunUnderAFlipIsNotSnapped) {
 	backend::NullBackend gpu;
 	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
 	BatchRenderer batch(gpu, base_shader::source());
 	batch.setTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(-1.5F, 1.5F, 1.0F)));
 	batch.addTextQuad({10.1F, 0.1F}, {8.0F, 12.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {10.1F, 12.1F}, kAtlasA, 4.0F);
 	expectNear(batch.getPendingInstances()[0].corners[0], {-15.15F, 0.15F});
+}
+
+// The same origin under a new scale is a new place on screen, so the snap is worked out again.
+TEST(BatchModeTest, ATextRunIsSnappedAgainWhenTheScaleChanges) {
+	backend::NullBackend gpu;
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
+	BatchRenderer		   batch(gpu, base_shader::source());
+	const Foundation::Vec2 origin{10.3F, 20.6F};
+	for (const float scale : {1.5F, 1.25F}) {
+		batch.setTransform(glm::scale(Foundation::Mat4(1.0F), Foundation::Vec3(scale, scale, 1.0F)));
+		batch.addTextQuad({10.3F, 8.6F}, {8.0F, 12.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), origin, kAtlasA, 4.0F);
+	}
+	const std::span<const BatchInstance> glyphs = batch.getPendingInstances();
+	ASSERT_EQ(glyphs.size(), 2U);
+	expectNear(glyphs[0].corners[3], {15.0F, 31.0F}); // 15.45 and 30.9
+	expectNear(glyphs[1].corners[3], {13.0F, 26.0F}); // 12.875 and 25.75
+}
+
+// What a translation alone has always done: the origin on a whole pixel, the glyph its own size.
+TEST(BatchModeTest, ATextRunUnderATranslationSnapsAtItsOwnSize) {
+	backend::NullBackend gpu;
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
+	BatchRenderer batch(gpu, base_shader::source());
+	batch.setTransform(glm::translate(Foundation::Mat4(1.0F), Foundation::Vec3(0.3F, 0.7F, 0.0F)));
+	batch.addTextQuad({10.3F, 8.6F}, {8.0F, 12.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {10.3F, 20.6F}, kAtlasA, 4.0F);
+	const BatchInstance& glyph = batch.getPendingInstances()[0];
+	expectNear(glyph.corners[3], {11.0F, 21.0F}); // 10.6 and 21.3
+	expectNear(glyph.corners[1], {19.0F, 9.0F});
+}
+
+TEST(BatchModeTest, ATextRunUnderARotationIsNotSnapped) {
+	backend::NullBackend gpu;
+	const auto [kAtlasA, kAtlasB, kImage] = textures(gpu);
+	BatchRenderer		   batch(gpu, base_shader::source());
+	const Foundation::Mat4 transform = glm::rotate(Foundation::Mat4(1.0F), 0.3F, Foundation::Vec3(0.0F, 0.0F, 1.0F));
+	batch.setTransform(transform);
+	batch.addTextQuad({10.1F, 0.1F}, {8.0F, 12.0F}, {0.0F, 0.0F}, {0.1F, 0.1F}, Foundation::Color::white(), {10.1F, 12.1F}, kAtlasA, 4.0F);
+	const Foundation::Vec4 corner = transform * Foundation::Vec4(10.1F, 0.1F, 0.0F, 1.0F);
+	expectNear(batch.getPendingInstances()[0].corners[0], {corner.x, corner.y});
 }
 
 // ============================================================================
