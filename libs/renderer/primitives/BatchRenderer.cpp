@@ -596,13 +596,14 @@ namespace Renderer {
 			return;
 		}
 
-		// Under identity/translate-only transforms, snap the RUN origin (not the
-		// glyph) to the device pixel grid: every glyph of a run computes the same
-		// delta from the same runOrigin, so inter-glyph spacing stays exactly as
-		// authored by the atlas metrics while the whole run lands on whole device
-		// pixels (fractional origins otherwise blur the MSDF edge AA). A general
-		// transform (rotation/scale) has no meaningful pixel grid; positions pass
-		// through the matrix unsnapped.
+		// Under a transform that keeps the axes (identity, a translation, an upright
+		// scale with one), snap the RUN origin (not the glyph) to the device pixel
+		// grid: every glyph of a run computes the same delta from the same runOrigin,
+		// so inter-glyph spacing stays exactly as authored by the atlas metrics,
+		// scaled, while the whole run lands on whole device pixels (fractional
+		// origins otherwise blur the MSDF edge AA). The delta is taken on screen,
+		// after the scale. A general transform (rotation, shear, a flip) has no
+		// meaningful pixel grid; positions pass through the matrix unsnapped.
 		const bool		 useMatrix = (transformClass == TransformClass::kGeneral);
 		Foundation::Vec2 snappedPosition = position;
 		if (!useMatrix) {
@@ -610,24 +611,25 @@ namespace Renderer {
 			if (coordinateSystem != nullptr) {
 				pixelRatio = coordinateSystem->getPixelRatio();
 			}
-			if (pixelRatio != textSnapCache.pixelRatio || transformTranslation != textSnapCache.translation ||
-				runOrigin != textSnapCache.runOrigin) {
-				const Foundation::Vec2 origin = runOrigin + transformTranslation;
+			if (pixelRatio != textSnapCache.pixelRatio || transformScale != textSnapCache.scale ||
+				transformTranslation != textSnapCache.translation || runOrigin != textSnapCache.runOrigin) {
+				const Foundation::Vec2 origin = (runOrigin * transformScale) + transformTranslation;
 				textSnapCache.pixelRatio = pixelRatio;
+				textSnapCache.scale = transformScale;
 				textSnapCache.translation = transformTranslation;
 				textSnapCache.runOrigin = runOrigin;
 				textSnapCache.delta = Foundation::Vec2(
 					std::round(origin.x * pixelRatio) / pixelRatio - origin.x, std::round(origin.y * pixelRatio) / pixelRatio - origin.y
 				);
 			}
-			snappedPosition = position + transformTranslation + textSnapCache.delta;
+			snappedPosition = (position * transformScale) + transformTranslation + textSnapCache.delta;
 		}
 
 		const auto cornerPosition = [&](float dx, float dy) {
 			if (useMatrix) {
 				return TransformPosition(Foundation::Vec2(position.x + dx, position.y + dy), currentTransform, false);
 			}
-			return Foundation::Vec2(snappedPosition.x + dx, snappedPosition.y + dy);
+			return Foundation::Vec2(snappedPosition.x + (dx * transformScale.x), snappedPosition.y + (dy * transformScale.y));
 		};
 		const Foundation::Vec2 corners[4] = {
 			cornerPosition(0.0F, 0.0F), cornerPosition(size.x, 0.0F), cornerPosition(size.x, size.y), cornerPosition(0.0F, size.y)
@@ -939,19 +941,23 @@ namespace Renderer {
 		// Classify once per transform change (expensive to do per-vertex).
 		// GLM uses column-major storage: column 3 is the translation, the rest
 		// is the linear (rotation/scale/shear) part.
-		const bool linearIsIdentity = transform[0][0] == 1.0F && transform[1][1] == 1.0F && transform[2][2] == 1.0F &&
-									  transform[3][3] == 1.0F && transform[0][1] == 0.0F && transform[0][2] == 0.0F &&
-									  transform[0][3] == 0.0F && transform[1][0] == 0.0F && transform[1][2] == 0.0F &&
-									  transform[1][3] == 0.0F && transform[2][0] == 0.0F && transform[2][1] == 0.0F &&
-									  transform[2][3] == 0.0F;
+		const bool linearIsDiagonal = transform[2][2] == 1.0F && transform[3][3] == 1.0F && transform[0][1] == 0.0F &&
+									  transform[0][2] == 0.0F && transform[0][3] == 0.0F && transform[1][0] == 0.0F &&
+									  transform[1][2] == 0.0F && transform[1][3] == 0.0F && transform[2][0] == 0.0F &&
+									  transform[2][1] == 0.0F && transform[2][3] == 0.0F;
+		const bool linearIsIdentity = linearIsDiagonal && transform[0][0] == 1.0F && transform[1][1] == 1.0F;
+		const bool upright = linearIsDiagonal && transform[0][0] > 0.0F && transform[1][1] > 0.0F && transform[3][2] == 0.0F;
 		transformTranslation = Foundation::Vec2(transform[3][0], transform[3][1]);
+		transformScale = upright ? Foundation::Vec2(transform[0][0], transform[1][1]) : Foundation::Vec2(1.0F, 1.0F);
 		const float areaScale = std::sqrt(std::abs((transform[0][0] * transform[1][1]) - (transform[0][1] * transform[1][0])));
 		pixelPadding = 1.0F / std::max(areaScale, 1e-3F);
 		const float squares = (transform[0][0] * transform[0][0]) + (transform[0][1] * transform[0][1]) +
 							  (transform[1][0] * transform[1][0]) + (transform[1][1] * transform[1][1]);
 		const float determinant = areaScale * areaScale;
 		largestScale = std::sqrt(0.5F * (squares + std::sqrt(std::max((squares * squares) - (4.0F * determinant * determinant), 0.0F))));
-		if (!linearIsIdentity || transform[3][2] != 0.0F) {
+		if (upright && !linearIsIdentity) {
+			transformClass = TransformClass::kScaleTranslate;
+		} else if (!linearIsIdentity || transform[3][2] != 0.0F) {
 			transformClass = TransformClass::kGeneral;
 		} else if (transform[3][0] == 0.0F && transform[3][1] == 0.0F) {
 			transformClass = TransformClass::kIdentity;

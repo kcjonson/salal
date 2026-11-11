@@ -336,7 +336,7 @@ namespace ui {
 		// --- Scrolling, for Overflow::Scroll ---
 
 		[[nodiscard]] Foundation::Vec2 getScroll() const { return scroll; }
-		// How far it scrolls on each axis, from the last layout.
+		// How far it scrolls on each axis, from the last layout; 0 for content less than a px past the box.
 		[[nodiscard]] Foundation::Vec2 getScrollMax() const { return scrollMax; }
 		void						   scrollTo(Foundation::Vec2 value);
 		void						   scrollBy(Foundation::Vec2 delta) { scrollTo(scroll + delta); }
