@@ -101,6 +101,8 @@ namespace app {
 		[[nodiscard]] float uiLayoutScale() const;
 		// The same in the framebuffer's pixels per ui px: uiLayoutScale by the window's pixel ratio.
 		[[nodiscard]] float uiPixelScale() const;
+		// AppConfig::uiScale's frame, in ui px; 0 x 0 for none.
+		[[nodiscard]] Foundation::Vec2 uiFrame() const { return {config.uiScale.frameWidth, config.uiScale.frameHeight}; }
 		// Reduced motion (R11.13), kept in settings() as ui.reducedMotion: every scene's ui completes its
 		// tweens on their first tick. A game sets it from its options or the system's preference.
 		void			   setReducedMotion(bool reduced);

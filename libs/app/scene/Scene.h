@@ -76,7 +76,10 @@ namespace app {
 		virtual void		update(const FrameContext& /*frame*/) {}
 		virtual void		render(float alpha) = 0; // alpha into the current fixed step, 0 to 1
 		virtual void		onResize(const Renderer::Viewport& /*viewport*/) {}
-		virtual bool		opaque() const { return true; }	   // false: the scenes below keep rendering (a pause menu over the arena)
+		virtual bool		opaque() const { return true; } // false: the scenes below keep rendering (a pause menu over the arena)
+		// True: this scene's ui lays out in AppConfig::uiScale's frame, its roots and overlays against the
+		// frame and ui().background() against the window. Read when the ui is made and when the scene enters.
+		virtual bool		framed() const { return false; }
 		virtual std::string exportState() const { return {}; } // JSON for /api/state?what=scene; only the dev server calls it
 
 		// This scene's ui context, made on first use. From onEnter on; a scene's constructor runs before

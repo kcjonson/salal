@@ -139,6 +139,16 @@ namespace app {
 				);
 				return false;
 			}
+			const bool frame = scale.frameWidth > 0.0F && scale.frameHeight > 0.0F;
+			if (!frame && (scale.frameWidth != 0.0F || scale.frameHeight != 0.0F)) {
+				LOG_ERROR(
+					Engine,
+					"App::create: a ui frame of %g x %g; both are positive, or both 0 for none",
+					static_cast<double>(scale.frameWidth),
+					static_cast<double>(scale.frameHeight)
+				);
+				return false;
+			}
 			if (!(scale.floor >= 0.0F) || !(scale.minFactor > 0.0F) || !(scale.maxFactor >= scale.minFactor)) {
 				LOG_ERROR(
 					Engine,

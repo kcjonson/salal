@@ -58,7 +58,10 @@ namespace ui {
 
 		// The first root, made on first use with the id "root".
 		Ref<Component> root();
-		// Another root: a stacking context of its own at (0, 0), the viewport's size, whatever `args` say.
+		// The root under every other, made on first use with the id "background": it covers the whole
+		// window whatever the frame, for what a scene draws past its content (the table under the sheets).
+		Ref<Component> background();
+		// Another root: a stacking context of its own over the frame, whatever `args` say.
 		template <typename T>
 		Ref<T>										  addRoot(const typename T::Args& args = {});
 		void										  removeRoot(Ref<Component> rootRef);
@@ -89,11 +92,22 @@ namespace ui {
 		// The ui's one scale (R7.5): its viewport is the window's logical size over it, so layout and
 		// input work in the scaled space and nothing is zoomed as a bitmap. 0.125 to 8; 1 by default. The
 		// App sets it from its ui scale, which it holds to the game's own range.
-		void						   setScale(float value);
-		[[nodiscard]] float			   getScale() const { return scale; }
-		static constexpr float		   kMinScale = 0.125F;
-		static constexpr float		   kMaxScale = 8.0F;
+		void				setScale(float value);
+		[[nodiscard]] float getScale() const { return scale; }
+		// What a scale is held to.
+		static constexpr float kMinScale = 0.125F;
+		static constexpr float kMaxScale = 8.0F;
+		// The size the roots lay out at: the frame's, which is the window's with no frame set.
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }
+		// The frame (docs/ui-design.md, "The frame"): the window in the ui's px, capped at `maxSize` on each
+		// axis and centred. Every root but background() and every overlay lays out against it, so content
+		// designed for a range of sizes never sees a larger one; nullopt, the default, is the whole window.
+		// Bounds stay in the window's space, the frame's corner on a whole logical pixel.
+		void										  setFrame(std::optional<Foundation::Vec2> maxSize);
+		[[nodiscard]] Foundation::Rect				  getFrame() const { return {frameOrigin.x, frameOrigin.y, viewport.x, viewport.y}; }
+		[[nodiscard]] std::optional<Foundation::Vec2> getFrameMax() const { return frameMax; }
+		// The whole window in the ui's px: its logical size over the scale.
+		[[nodiscard]] Foundation::Vec2 getCanvas() const { return canvas; }
 
 		// The update phase (R8.16): the clock advances by `dt` seconds, clamped to a quarter of a second
 		// (R13.9), due timers fire, tweens advance, and each component that asked for an update gets it,
@@ -201,6 +215,8 @@ namespace ui {
 				   bool									  blocked
 			   );
 		void resizeRoots();
+		// A root's box: the frame, or the whole window for background().
+		void placeRoot(Component& rootComponent) const;
 		// Screen maps, clips and enabled flags again if anything moved; true when it ran.
 		bool refreshGeometry();
 		// The map a component's children are placed in: its box's, under its scroll.
@@ -241,18 +257,22 @@ namespace ui {
 		void			   restyle(Component& component);
 
 		// Ahead of the registry, so the tweens components hold are released into a live animator.
-		Clock					  clock;
-		std::unique_ptr<Animator> animator;
-		mutable Registry		  registry;
-		Theme					  theme;
-		IconService				  iconService;
-		Clipboard				  clipboardAccess;
-		std::vector<ComponentId>  roots;
-		ComponentId				  defaultRoot;
-		Foundation::Vec2		  windowSize;
-		Foundation::Vec2		  viewport;
-		float					  scale = 1.0F;
-		std::vector<ComponentId>  order;
+		Clock							clock;
+		std::unique_ptr<Animator>		animator;
+		mutable Registry				registry;
+		Theme							theme;
+		IconService						iconService;
+		Clipboard						clipboardAccess;
+		std::vector<ComponentId>		roots;
+		ComponentId						defaultRoot;
+		ComponentId						backgroundRoot;
+		Foundation::Vec2				windowSize;
+		Foundation::Vec2				canvas;	  // the window in ui px
+		Foundation::Vec2				viewport; // the frame's size
+		Foundation::Vec2				frameOrigin{0.0F, 0.0F};
+		std::optional<Foundation::Vec2> frameMax;
+		float							scale = 1.0F;
+		std::vector<ComponentId>		order;
 		// The paint order as the pointer meets it: each component, and each scroller's bar after the
 		// last of its subtree, where it paints.
 		struct HitEntry {

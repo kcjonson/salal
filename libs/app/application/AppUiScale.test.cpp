@@ -34,6 +34,15 @@ namespace app::testing {
 			std::vector<Foundation::Vec2> heard;
 		};
 
+		// The same, opted into the frame.
+		class FramedScene final : public TypedScene<> {
+		  public:
+			const char* name() const override { return "Framed"; }
+			void		onEnter(App& /*app*/) override { ui(); }
+			void		render(float /*alpha*/) override {}
+			bool		framed() const override { return true; }
+		};
+
 		struct Case {
 			int	  width; // the window, logical
 			int	  height;
@@ -52,6 +61,14 @@ namespace app::testing {
 				scaled.uiScale = {
 					.referenceWidth = 1920, .referenceHeight = 1080, .floor = 2.0F / 3.0F, .minFactor = 0.8F, .maxFactor = 1.2F
 				};
+				return scaled;
+			}
+
+			// With dual-deck-builder's frame.
+			static AppConfig framedConfig() {
+				AppConfig scaled = referenced();
+				scaled.uiScale.frameWidth = 2600.0F;
+				scaled.uiScale.frameHeight = 1440.0F;
 				return scaled;
 			}
 
@@ -297,6 +314,43 @@ namespace app::testing {
 			refused.uiScale = each;
 			EXPECT_EQ(App::create(std::move(refused), std::make_unique<HeadlessPlatform>(800, 600)), nullptr);
 		}
+	}
+
+	// 5120 x 1440 is a 3840 x 1080 canvas, past the frame's 2600 in width.
+	TEST_F(AppUiScaleTest, ASceneThatOptsInLaysOutInTheFrameAndOneThatDoesNotHasTheWindow) {
+		start(framedConfig(), window(5120, 1440));
+		app->scenes().push<FramedScene>();
+		frame(0.0);
+		ui::Context& framed = top<FramedScene>().ui();
+		EXPECT_NEAR(framed.getCanvas().x, 3840.0F, 1e-2F);
+		EXPECT_FLOAT_EQ(framed.getViewport().x, 2600.0F);
+		EXPECT_NEAR(framed.getViewport().y, 1080.0F, 1e-2F);
+		EXPECT_NEAR(framed.getFrame().x, 620.0F, 1.0F);
+		EXPECT_EQ(framed.background().get()->getSize(), framed.getCanvas());
+
+		// A resize under the cap: the frame is the window.
+		platform->resize(2560, 1440);
+		frame(0.0);
+		EXPECT_NEAR(framed.getViewport().x, 1920.0F, 1e-2F);
+		EXPECT_FLOAT_EQ(framed.getFrame().x, 0.0F);
+
+		platform->resize(5120, 1440);
+		app->scenes().push<CanvasScene>();
+		frame(0.0);
+		EXPECT_NEAR(canvas().x, 3840.0F, 1e-2F);
+		EXPECT_EQ(top<CanvasScene>().ui().getFrameMax(), std::nullopt);
+	}
+
+	TEST_F(AppUiScaleTest, WithNoFrameConfiguredAFramedSceneHasTheWindow) {
+		start(referenced(), window(5120, 1440));
+		app->scenes().push<FramedScene>();
+		frame(0.0);
+		EXPECT_NEAR(canvas().x, 3840.0F, 1e-2F);
+
+		AppConfig half = referenced();
+		half.uiScale.frameWidth = 2600.0F;
+		app.reset();
+		EXPECT_EQ(App::create(std::move(half), std::make_unique<HeadlessPlatform>(800, 600)), nullptr);
 	}
 
 	TEST_F(AppUiScaleTest, ASavedWindowSizeUnderTheMinimumOpensAtTheMinimum) {
