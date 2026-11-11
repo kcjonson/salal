@@ -7,7 +7,6 @@
 #include "ui/debug/LayoutLint.h"
 #include "ui/debug/TreeSnapshot.h"
 
-#include <limits>
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
@@ -15,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace ui {
