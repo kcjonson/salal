@@ -453,6 +453,8 @@ namespace ui::detail {
 	}
 
 	// How far a scroller scrolls: its children's margin boxes and its padding past its box (R4.13).
+	// Content less than a px past the box is rounding in the layout, not something to scroll to: it
+	// counts as fitting, so there's no bar, and the wheel and paging pass the scroller by.
 	void LayoutEngine::scrollExtent(Component& node) {
 		Foundation::Vec2 content{0.0F, 0.0F};
 		for (const ComponentId childId : node.children) {
@@ -462,7 +464,8 @@ namespace ui::detail {
 			}
 		}
 		content += Foundation::Vec2{node.layout.padding.right, node.layout.padding.bottom};
-		node.scrollMax = glm::max(content - node.size, Foundation::Vec2{0.0F, 0.0F});
+		const Foundation::Vec2 past = content - node.size;
+		node.scrollMax = {past.x < 1.0F ? 0.0F : past.x, past.y < 1.0F ? 0.0F : past.y};
 		node.scroll = glm::clamp(node.scroll, Foundation::Vec2{0.0F, 0.0F}, node.scrollMax);
 	}
 
