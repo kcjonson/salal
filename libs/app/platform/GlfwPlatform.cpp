@@ -410,10 +410,12 @@ namespace app {
 					return;
 				}
 				minimumOnScreen = onScreen;
+				// GLFW holds a minimum only when it has both axes, so the one not asked for is 1.
+				const bool any = onScreen.width > 0 || onScreen.height > 0;
 				glfwSetWindowSizeLimits(
 					window,
-					onScreen.width > 0 ? onScreen.width : GLFW_DONT_CARE,
-					onScreen.height > 0 ? onScreen.height : GLFW_DONT_CARE,
+					any ? std::max(onScreen.width, 1) : GLFW_DONT_CARE,
+					any ? std::max(onScreen.height, 1) : GLFW_DONT_CARE,
 					GLFW_DONT_CARE,
 					GLFW_DONT_CARE
 				);

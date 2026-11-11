@@ -782,17 +782,24 @@ namespace app {
 		const UiScaleConfig&	  scale = config.uiScale;
 		const Renderer::Viewport& window = coordinates.viewport();
 		if (scale.referenceWidth <= 0 || window.framebufferWidth <= 0 || window.framebufferHeight <= 0) {
-			return scaleOfUi * window.pixelRatio();
+			return std::clamp(scaleOfUi, ui::Context::kMinScale, ui::Context::kMaxScale) * window.pixelRatio();
 		}
 		const float fit = std::min(
 			static_cast<float>(window.framebufferWidth) / static_cast<float>(scale.referenceWidth),
 			static_cast<float>(window.framebufferHeight) / static_cast<float>(scale.referenceHeight)
 		);
-		return std::max(scale.floor, scaleOfUi * fit);
+		// Held to what a ui context takes, so the scale the App reports is the one the ui is drawn at.
+		const float ratio = window.pixelRatio();
+		return std::clamp(std::max(scale.floor, scaleOfUi * fit), ui::Context::kMinScale * ratio, ui::Context::kMaxScale * ratio);
 	}
 
 	float App::uiLayoutScale() const {
-		return uiPixelScale() / coordinates.viewport().pixelRatio();
+		// With no reference it's the setting itself: over the pixel ratio and back isn't exact in floats.
+		if (config.uiScale.referenceWidth <= 0) {
+			return std::clamp(scaleOfUi, ui::Context::kMinScale, ui::Context::kMaxScale);
+		}
+		const float ratio = coordinates.viewport().pixelRatio();
+		return std::clamp(uiPixelScale() / ratio, ui::Context::kMinScale, ui::Context::kMaxScale);
 	}
 
 	void App::setReducedMotion(bool reduced) {

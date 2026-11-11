@@ -170,7 +170,7 @@ struct WindowConfig {
 	std::optional<int> fullscreenMonitor;
 	bool vsync = true;
 	GlVersion glVersion;               // no window, logged, where the driver can't give it
-	int minWidth = 0, minHeight = 0;   // the smallest the content gets, in framebuffer pixels; 0 for none
+	int minWidth = 0, minHeight = 0;   // the smallest the content gets, in framebuffer pixels; 0 for none, either axis
 };
 
 struct UiScaleConfig {                 // "UI scale", below
@@ -224,7 +224,7 @@ public:
 	void setFullscreen(std::optional<int> monitor);
 	void setUiScale(float);        // the player's setting, ui.scale: the factor with a reference, the scale with none
 	float uiScale() const;
-	float uiLayoutScale() const;   // what each scene's ui is scaled by, over logical pixels
+	float uiLayoutScale() const;   // what each scene's ui is scaled by, over logical pixels; held to what a ui context takes, 0.125 to 8
 	float uiPixelScale() const;    // the same in framebuffer pixels per ui px
 	SceneStack& scenes();
 	template <typename T> void setContext(T&); // the game's state, set once before the first scene

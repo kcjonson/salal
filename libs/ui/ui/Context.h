@@ -91,6 +91,8 @@ namespace ui {
 		// App sets it from its ui scale, which it holds to the game's own range.
 		void						   setScale(float value);
 		[[nodiscard]] float			   getScale() const { return scale; }
+		static constexpr float		   kMinScale = 0.125F;
+		static constexpr float		   kMaxScale = 8.0F;
 		[[nodiscard]] Foundation::Vec2 getViewport() const { return viewport; }
 
 		// The update phase (R8.16): the clock advances by `dt` seconds, clamped to a quarter of a second
