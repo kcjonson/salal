@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace ui {
@@ -552,6 +553,142 @@ namespace ui {
 		// 120 and 0 of content, and the 180 left shared between the two auto columns.
 		EXPECT_EQ(boundsOf(held), (Box{0.0F, 0.0F, 210.0F, 20.0F}));
 		EXPECT_EQ(boundsOf(capped), (Box{210.0F, 0.0F, 50.0F, 20.0F}));
+	}
+
+	// --- Aspect ratio ---
+
+	// A 640 x 840 cover: 16 to 21.
+	constexpr float kCover = 640.0F / 840.0F;
+
+	TEST_F(UiLayoutTest, AnAspectRatioGivesTheAutoAxisFromTheDeclaredOne) {
+		Ref<Component> fromWidth = context.root().addChild<Component>({.size = {320.0F, kAuto}, .layout = {.aspectRatio = kCover}});
+		Ref<Component> fromHeight =
+			context.root().addChild<Component>({.position = {400.0F, 0.0F}, .size = {kAuto, 420.0F}, .layout = {.aspectRatio = kCover}});
+		Ref<Component> both = context.root().addChild<Component>({.size = {100.0F, 100.0F}, .layout = {.aspectRatio = kCover}});
+		context.layout();
+		EXPECT_EQ(fromWidth.get()->getSize(), Foundation::Vec2(320.0F, 420.0F));
+		EXPECT_EQ(fromHeight.get()->getSize(), Foundation::Vec2(320.0F, 420.0F));
+		EXPECT_EQ(both.get()->getSize(), Foundation::Vec2(100.0F, 100.0F)); // both declared: ignored
+	}
+
+	// The menu cover's case: the sheet's height is the row's, and the cover's width comes from it.
+	TEST_F(UiLayoutTest, AStretchedCrossAxisGivesAFlexChildsMainAxisThroughItsRatio) {
+		Ref<Component> sheet = context.root().addChild<Component>({.size = {700.0F, 420.0F}, .layout = row()});
+		Ref<Component> cover = sheet.addChild<Component>({.layout = {.aspectRatio = kCover}});
+		Ref<Component> rest = sheet.addChild<Component>({.layout = {.flexGrow = 1.0F}});
+		context.layout();
+		EXPECT_EQ(boundsOf(cover), (Box{0.0F, 0.0F, 320.0F, 420.0F}));
+		EXPECT_EQ(boundsOf(rest), (Box{320.0F, 0.0F, 380.0F, 420.0F}));
+		EXPECT_TRUE(lint(context, kViewport).clean()); // the lint sees the box the ratio gave
+
+		// A column: the width is the column's, and the height follows.
+		Ref<Component> stack = context.root().addChild<Component>({.size = {320.0F, 900.0F}, .layout = column()});
+		Ref<Component> plate = stack.addChild<Component>({.layout = {.aspectRatio = kCover}});
+		context.layout();
+		EXPECT_EQ(plate.get()->getSize(), Foundation::Vec2(320.0F, 420.0F));
+	}
+
+	// Where CSS would stretch it, the ratio holds: the box keeps its shape beside a taller sibling.
+	TEST_F(UiLayoutTest, AFlexChildWithADeclaredMainSizeKeepsItsRatioRatherThanStretching) {
+		Ref<Component> strip = context.root().addChild<Component>({.size = {1000.0F, 600.0F}, .layout = row()});
+		Ref<Component> cover = strip.addChild<Component>({.size = {320.0F, kAuto}, .layout = {.aspectRatio = kCover}});
+		Ref<Component> plain = strip.addChild<Component>({.size = {100.0F, kAuto}});
+		context.layout();
+		EXPECT_EQ(cover.get()->getSize(), Foundation::Vec2(320.0F, 420.0F));
+		EXPECT_EQ(plain.get()->getSize(), Foundation::Vec2(100.0F, 600.0F)); // no ratio: stretched
+
+		// And in a wrapping row, whose lines are as tall as their tallest child.
+		Layout wrapping = row();
+		wrapping.flexWrap = FlexWrap::Wrap;
+		Ref<Component> lines = context.root().addChild<Component>({.size = {1000.0F, kAuto}, .layout = wrapping});
+		Ref<Component> small = lines.addChild<Component>({.size = {160.0F, kAuto}, .layout = {.aspectRatio = kCover}});
+		lines.addChild<Component>(box(100.0F, 500.0F));
+		context.layout();
+		EXPECT_EQ(small.get()->getSize(), Foundation::Vec2(160.0F, 210.0F));
+	}
+
+	// A child that grows along the row is measured again across it, at its ratio.
+	TEST_F(UiLayoutTest, AFlexedMainSizeGivesTheCrossAxisThroughTheRatio) {
+		Layout top = row();
+		top.alignItems = AlignItems::Start;
+		Ref<Component> strip = context.root().addChild<Component>({.size = {640.0F, 900.0F}, .layout = top});
+		Ref<Component> grown = strip.addChild<Component>({.layout = {.flexGrow = 1.0F, .aspectRatio = 2.0F}});
+		context.layout();
+		EXPECT_EQ(grown.get()->getSize(), Foundation::Vec2(640.0F, 320.0F));
+	}
+
+	TEST_F(UiLayoutTest, MinAndMaxSizesWinOverTheRatio) {
+		Ref<Component> capped =
+			context.root().addChild<Component>({.size = {320.0F, kAuto}, .maxSize = {kAuto, 300.0F}, .layout = {.aspectRatio = kCover}});
+		Ref<Component> floored = context.root().addChild<Component>(
+			{.position = {400.0F, 0.0F}, .size = {kAuto, 100.0F}, .minSize = {200.0F, kAuto}, .layout = {.aspectRatio = 1.0F}}
+		);
+		context.layout();
+		EXPECT_EQ(capped.get()->getSize(), Foundation::Vec2(320.0F, 300.0F));
+		EXPECT_EQ(floored.get()->getSize(), Foundation::Vec2(200.0F, 100.0F));
+	}
+
+	// With both axes auto the width is the content's and the height follows; a cap on that height takes
+	// the width back with it, so the shape holds.
+	TEST_F(UiLayoutTest, WithBothAxesAutoTheWidthIsTheContentsAndAClampedHeightTakesItBack) {
+		Ref<Component> hug = context.root().addChild<Component>({.layout = {.aspectRatio = 2.0F}});
+		hug.addChild<Component>(box(300.0F, 10.0F));
+		Ref<Component> capped =
+			context.root().addChild<Component>({.position = {0.0F, 300.0F}, .maxSize = {kAuto, 100.0F}, .layout = {.aspectRatio = 2.0F}});
+		capped.addChild<Component>(box(300.0F, 10.0F));
+		context.layout();
+		EXPECT_EQ(hug.get()->getSize(), Foundation::Vec2(300.0F, 150.0F));
+		EXPECT_EQ(capped.get()->getSize(), Foundation::Vec2(200.0F, 100.0F));
+	}
+
+	TEST_F(UiLayoutTest, TheRatioIsOfTheBoxThatBoxSizingNames) {
+		const Edges	   padding{10.0F, 20.0F};
+		Ref<Component> border =
+			context.root().addChild<Component>({.size = {200.0F, kAuto}, .layout = {.padding = padding, .aspectRatio = 2.0F}});
+		Ref<Component> content = context.root().addChild<Component>(
+			{.position = {0.0F, 300.0F},
+			 .size = {200.0F, kAuto},
+			 .layout = {.padding = padding, .boxSizing = BoxSizing::ContentBox, .aspectRatio = 2.0F}}
+		);
+		context.layout();
+		EXPECT_EQ(border.get()->getSize(), Foundation::Vec2(200.0F, 100.0F));
+		// A 200 x 100 content box, with the padding outside it.
+		EXPECT_EQ(content.get()->getSize(), Foundation::Vec2(200.0F + padding.horizontal(), 100.0F + padding.vertical()));
+	}
+
+	TEST_F(UiLayoutTest, AGridChildAndAnAbsoluteOneTakeTheirHeightFromTheirWidthThroughTheRatio) {
+		Ref<Component> grid = context.root().addChild<Component>(
+			{.size = {400.0F, 600.0F},
+			 .layout = {.display = Display::Grid, .gridTemplateColumns = {fr(1), fr(1)}, .gridTemplateRows = {fr(1)}}}
+		);
+		Ref<Component> cell = grid.addChild<Component>({.layout = {.aspectRatio = 2.0F}});
+		Ref<Component> plain = grid.addChild<Component>({});
+		Ref<Component> pinned = grid.addChild<Component>(
+			{.layout = {.position = Position::Absolute, .inset = {.top = 0.0F, .right = 50.0F, .left = 50.0F}, .aspectRatio = 3.0F}}
+		);
+		context.layout();
+		EXPECT_EQ(cell.get()->getSize(), Foundation::Vec2(200.0F, 100.0F)); // its column's width, not its row's height
+		EXPECT_EQ(plain.get()->getSize(), Foundation::Vec2(200.0F, 600.0F));
+		EXPECT_EQ(pinned.get()->getSize(), Foundation::Vec2(300.0F, 100.0F));
+	}
+
+	TEST_F(UiLayoutTest, ChangingTheRatioLaysOutAgain) {
+		Ref<Component> box = context.root().addChild<Component>({.size = {200.0F, kAuto}, .layout = {.aspectRatio = 2.0F}});
+		context.layout();
+		EXPECT_EQ(box.get()->getSize(), Foundation::Vec2(200.0F, 100.0F));
+		Layout square = box.get()->getLayout();
+		square.aspectRatio = 1.0F;
+		box.get()->setLayout(square);
+		context.layout();
+		EXPECT_EQ(box.get()->getSize(), Foundation::Vec2(200.0F, 200.0F));
+	}
+
+	TEST_F(UiLayoutTest, AnAspectRatioThatIsNotFiniteIsNone) {
+		Ref<Component> cover = context.root().addChild<Component>(
+			{.size = {200.0F, kAuto}, .layout = {.aspectRatio = std::numeric_limits<float>::infinity()}}
+		);
+		context.layout();
+		EXPECT_EQ(cover.get()->getSize(), Foundation::Vec2(200.0F, 0.0F));
 	}
 
 } // namespace ui
