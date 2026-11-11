@@ -732,7 +732,15 @@ root().removeChild(row);   // health.get() is null from here on
   axis of a flex or grid child even when its other axis is declared, which
   breaks the shape the ratio was set for, so here a declared (or, in a grid,
   stretched) width keeps the height the ratio's. A child with both axes auto
-  still stretches across a flex container, and its main size follows.
+  still stretches across a single-line flex container, and its main size
+  follows; once it has grown, shrunk or wrapped onto a line, both its axes
+  are given and the ratio is spent, as in CSS. Two cases to keep out of: a
+  both-auto ratio child in a container whose cross size is its content's is
+  measured unstretched and arranged stretched, so the container is sized for
+  the smaller box, and a grid child that isn't stretched across its column
+  takes its width from the stretched height after the columns were sized.
+  Give the box one declared axis and neither happens. A ratio that isn't
+  finite is none.
 - **Box sizing is CSS's `box-sizing`** (decided 2026-11-02), border-box by
   default, which is what every node did before it: a px or percentage
   `size`, `minSize` and `maxSize` are the whole box, padding in. `boxSizing:

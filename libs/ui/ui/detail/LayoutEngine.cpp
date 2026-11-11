@@ -138,7 +138,7 @@ namespace ui::detail {
 		// the axis it gave wins over it. With both auto the width is the content's and the height
 		// follows, and a clamp on that height takes the width back with it.
 		const float ratio = node.layout.aspectRatio;
-		if (ratio > 0.0F) {
+		if (ratio > 0.0F && std::isfinite(ratio)) {
 			const auto heightFor = [&](float boxWidth) {
 				return (std::max(boxWidth - outside.x, 0.0F) / ratio) + outside.y;
 			};

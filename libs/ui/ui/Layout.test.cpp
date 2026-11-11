@@ -7,6 +7,7 @@
 #include "ui/debug/LayoutLint.h"
 #include "ui/debug/TreeSnapshot.h"
 
+#include <limits>
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
@@ -680,6 +681,14 @@ namespace ui {
 		box.get()->setLayout(square);
 		context.layout();
 		EXPECT_EQ(box.get()->getSize(), Foundation::Vec2(200.0F, 200.0F));
+	}
+
+	TEST_F(UiLayoutTest, AnAspectRatioThatIsNotFiniteIsNone) {
+		Ref<Component> cover = context.root().addChild<Component>(
+			{.size = {200.0F, kAuto}, .layout = {.aspectRatio = std::numeric_limits<float>::infinity()}}
+		);
+		context.layout();
+		EXPECT_EQ(cover.get()->getSize(), Foundation::Vec2(200.0F, 0.0F));
 	}
 
 } // namespace ui
