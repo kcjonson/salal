@@ -1194,6 +1194,17 @@ What the first version of this design left open, as landed:
   the press, four moves along the line and the release at the end, so ui's
   drag starts on the way when the line is longer than its threshold
   ([ui-design.md](ui-design.md), "Drag and drop").
+- An injected pointer is over the window wherever the real cursor is. Each
+  pointer event (`move`, `down`, `up`, `click`, `drag`, `scroll`) is led by a
+  `PointerEnter`, so `pointerInWindow` is true from it on, and hover-driven
+  game code that reads the flag follows an injected move. The position holds
+  until the real cursor's next move, button or scroll, and the flag until its
+  next enter or leave; GLFW sends a cursor that moves into the window both, an
+  enter then a move, and the flag follows the real cursor from then on. A real `PointerLeave` while an
+  injected position holds takes the pointer out of the window (the real cursor
+  has spoken) and leaves the position where it was injected; the next injected
+  pointer event puts it back in. Keys, characters and pads don't touch the
+  flag.
 
 The log stream needs no singleton of its own: the logger's one sink slot
 (`foundation::Logger::setSink`, module-static as the logger is) holds the

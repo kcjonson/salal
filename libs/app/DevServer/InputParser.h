@@ -14,6 +14,10 @@
 // foundation's GamepadButton and GamepadAxis names without case (a, leftbumper, dpadup; leftx,
 // righttrigger), an axis value is in [-1, 1], and vpad0 to vpad3 are pads[16..19]. A virtual pad
 // takes input only between its connect and its disconnect.
+// Each pointer event (move, down, up, click, drag, scroll) is led by a PointerEnter, so the pointer
+// it puts at x,y is in the window (InputSnapshot::pointerInWindow) until the real cursor's next enter
+// or leave. The position holds until the real cursor's next move, button or scroll; a real leave
+// meanwhile takes the pointer out of the window and leaves the position where it was injected.
 
 #include <input/InputTypes.h>
 

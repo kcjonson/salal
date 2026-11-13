@@ -249,7 +249,10 @@ app is torn down and the port is free.
 
 `/api/ui/screenshot`, `/api/ui/tree` for element bounds, `/api/ui/lint` for
 layout invariant violations (expect `"count":0` before screenshotting
-anything), `/api/input` for synthetic input, `/api/control` for scene
+anything), `/api/input` for synthetic input (an injected pointer event puts the
+pointer at x,y and in the window: the position holds until the real cursor's
+next move, button or scroll, and `pointerInWindow` until its next enter or
+leave), `/api/control` for scene
 switching, pause, `step&ticks=<n>` and shutdown. Those five are the contract
 every app exposes; an app with no ui answers tree and lint empty. The rest are
 health, metrics, `/api/state?what=` (`scene` is every app's), the game's

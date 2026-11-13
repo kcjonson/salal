@@ -992,6 +992,7 @@ namespace app::testing {
 			InputEvent::Type::DeviceConnected,
 			InputEvent::Type::ButtonDown,
 			InputEvent::Type::Axis,
+			InputEvent::Type::PointerEnter,
 			InputEvent::Type::PointerMove,
 			InputEvent::Type::PointerDown,
 			InputEvent::Type::PointerUp,
@@ -1015,6 +1016,7 @@ namespace app::testing {
 		EXPECT_TRUE(left.pressed());
 		EXPECT_TRUE(left.released());
 		EXPECT_EQ(tick.pointer, glm::vec2(12.0F, 34.0F));
+		EXPECT_TRUE(tick.pointerInWindow); // a click with no move before it
 
 		EXPECT_EQ(get("/api/input?ev=disconnect,vpad1").status, 200);
 		frame();
@@ -1097,6 +1099,76 @@ namespace app::testing {
 		EXPECT_TRUE(keyIn(scene.ticks.back(), Key::A).pressed());
 	}
 
+	// An injected pointer is in the window for as long as its position holds, with no real cursor over it.
+	TEST_F(DevServerTest, AnInjectedMoveIsInTheWindowAcrossFrames) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		ASSERT_FALSE(app->input().frame().pointerInWindow); // a headless window has no cursor over it
+
+		EXPECT_EQ(get("/api/input?ev=move,200,150").status, 200);
+		for (int i = 0; i < 4; ++i) {
+			frame();
+			const foundation::InputSnapshot& tick = top<MainScene>().ticks.back();
+			EXPECT_TRUE(tick.pointerInWindow) << i;
+			EXPECT_EQ(tick.pointer, glm::vec2(200.0F, 150.0F)) << i;
+			EXPECT_TRUE(app->input().frame().pointerInWindow) << i;
+		}
+	}
+
+	// The real cursor's events take the pointer back, and its enter and leave set the flag from then on.
+	TEST_F(DevServerTest, TheRealCursorTakesTheInjectedPointerBack) {
+		constexpr foundation::DeviceId kMouse{.kind = DeviceKind::Mouse};
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		EXPECT_EQ(get("/api/input?ev=move,200,150").status, 200);
+		frame();
+
+		platform->push({.type = InputEvent::Type::PointerEnter, .device = kMouse});
+		platform->push({.type = InputEvent::Type::PointerMove, .device = kMouse, .position = {10.0F, 20.0F}});
+		frame();
+		EXPECT_TRUE(top<MainScene>().ticks.back().pointerInWindow);
+		EXPECT_EQ(top<MainScene>().ticks.back().pointer, glm::vec2(10.0F, 20.0F));
+
+		platform->push({.type = InputEvent::Type::PointerLeave, .device = kMouse});
+		frame();
+		EXPECT_FALSE(top<MainScene>().ticks.back().pointerInWindow);
+		platform->push({.type = InputEvent::Type::PointerEnter, .device = kMouse});
+		frame();
+		EXPECT_TRUE(top<MainScene>().ticks.back().pointerInWindow);
+	}
+
+	// A real leave while the injected position holds takes the pointer out of the window and leaves the
+	// position where it was injected; the next injected pointer event puts it back in.
+	TEST_F(DevServerTest, ARealLeaveTakesAnInjectedPointerOutOfTheWindow) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		EXPECT_EQ(get("/api/input?ev=move,200,150").status, 200);
+		frame();
+
+		platform->push({.type = InputEvent::Type::PointerLeave, .device = {.kind = DeviceKind::Mouse}});
+		frame();
+		EXPECT_FALSE(top<MainScene>().ticks.back().pointerInWindow);
+		EXPECT_EQ(top<MainScene>().ticks.back().pointer, glm::vec2(200.0F, 150.0F));
+
+		EXPECT_EQ(get("/api/input?ev=move,210,160").status, 200);
+		frame();
+		EXPECT_TRUE(top<MainScene>().ticks.back().pointerInWindow);
+	}
+
+	TEST_F(DevServerTest, InjectedKeysLeaveThePointerOutOfTheWindow) {
+		serve();
+		app->scenes().push<MainScene>();
+		frame();
+		EXPECT_EQ(get("/api/input?ev=keydown,A&ev=char,65&ev=keyup,A").status, 200);
+		frame();
+		const MainScene& scene = top<MainScene>();
+		EXPECT_FALSE(scene.ticks.back().pointerInWindow);
+		EXPECT_EQ(typesOf(scene.events), (std::vector{InputEvent::Type::KeyDown, InputEvent::Type::Char, InputEvent::Type::KeyUp}));
+	}
+
 	TEST_F(DevServerTest, BadInputIsA400AndQueuesNothing) {
 		serve();
 		app->scenes().push<MainScene>();
@@ -1132,13 +1204,15 @@ namespace app::testing {
 
 		const MainScene&					scene = top<MainScene>();
 		const std::vector<InputEvent::Type> click{
-			InputEvent::Type::PointerMove, InputEvent::Type::PointerDown, InputEvent::Type::PointerUp
+			InputEvent::Type::PointerEnter, InputEvent::Type::PointerMove, InputEvent::Type::PointerDown, InputEvent::Type::PointerUp
 		};
 		std::vector<InputEvent::Type> expected = click;
 		expected.insert(expected.end(), click.begin(), click.end());
 		EXPECT_EQ(typesOf(scene.events), expected);
 		for (const InputEvent& event : scene.events) {
-			EXPECT_EQ(event.position, glm::vec2(100.0F, 100.0F));
+			if (event.type != InputEvent::Type::PointerEnter) {
+				EXPECT_EQ(event.position, glm::vec2(100.0F, 100.0F));
+			}
 		}
 		const foundation::ButtonState& left = scene.ticks.back().mouse.at(static_cast<std::size_t>(MouseButton::Left));
 		EXPECT_EQ(left.transitions, 4);
@@ -1151,13 +1225,21 @@ namespace app::testing {
 		EXPECT_EQ(get("/api/input?ev=scroll,40,50,-1&ev=scroll,40,50,-1&ev=scroll,40,50,-1").body, R"({"status":"ok","queued":3})");
 		frame();
 
-		const MainScene& scene = top<MainScene>();
-		EXPECT_EQ(typesOf(scene.events), std::vector(3, InputEvent::Type::Scroll));
+		const MainScene&					scene = top<MainScene>();
+		const std::vector<InputEvent::Type> scroll{InputEvent::Type::PointerEnter, InputEvent::Type::Scroll};
+		std::vector<InputEvent::Type>		expected;
+		for (int i = 0; i < 3; ++i) {
+			expected.insert(expected.end(), scroll.begin(), scroll.end());
+		}
+		EXPECT_EQ(typesOf(scene.events), expected);
 		for (const InputEvent& event : scene.events) {
-			EXPECT_EQ(event.scroll, glm::vec2(0.0F, -1.0F));
-			EXPECT_EQ(event.position, glm::vec2(40.0F, 50.0F));
+			if (event.type == InputEvent::Type::Scroll) {
+				EXPECT_EQ(event.scroll, glm::vec2(0.0F, -1.0F));
+				EXPECT_EQ(event.position, glm::vec2(40.0F, 50.0F));
+			}
 		}
 		EXPECT_EQ(scene.ticks.back().scroll, glm::vec2(0.0F, -3.0F));
+		EXPECT_TRUE(scene.ticks.back().pointerInWindow);
 	}
 
 	// Moves at distinct x tell the order apart; other parameters between them are none of the route's business.
@@ -1172,9 +1254,11 @@ namespace app::testing {
 
 		const MainScene&   scene = top<MainScene>();
 		std::vector<float> across;
-		for (const InputEvent& event : scene.events) {
-			EXPECT_EQ(event.type, InputEvent::Type::PointerMove);
-			across.push_back(event.position.x);
+		ASSERT_EQ(scene.events.size(), 14U);
+		for (std::size_t i = 0; i < scene.events.size(); i += 2) {
+			EXPECT_EQ(scene.events[i].type, InputEvent::Type::PointerEnter) << i;
+			EXPECT_EQ(scene.events[i + 1].type, InputEvent::Type::PointerMove) << i;
+			across.push_back(scene.events[i + 1].position.x);
 		}
 		EXPECT_EQ(across, (std::vector<float>{1, 2, 1, 1, 3, 2, 1}));
 	}
@@ -1191,14 +1275,18 @@ namespace app::testing {
 		frame();
 
 		const MainScene& scene = top<MainScene>();
-		ASSERT_EQ(scene.events.size(), 12U);
-		for (std::size_t i = 0; i < 9; ++i) {
-			EXPECT_EQ(scene.events[i].position, glm::vec2(12.0F, 34.0F)) << i;
+		ASSERT_EQ(scene.events.size(), 15U);
+		for (std::size_t i = 0; i < 12; ++i) {
+			if (i % 4 == 0) {
+				EXPECT_EQ(scene.events[i].type, InputEvent::Type::PointerEnter) << i;
+			} else {
+				EXPECT_EQ(scene.events[i].position, glm::vec2(12.0F, 34.0F)) << i;
+			}
 		}
-		EXPECT_EQ(scene.events[9].codepoint, U'A');
-		EXPECT_EQ(scene.events[10].codepoint, U'A');
-		EXPECT_EQ(scene.events[11].type, InputEvent::Type::KeyDown);
-		EXPECT_EQ(scene.events[11].key, Key::A);
+		EXPECT_EQ(scene.events[12].codepoint, U'A');
+		EXPECT_EQ(scene.events[13].codepoint, U'A');
+		EXPECT_EQ(scene.events[14].type, InputEvent::Type::KeyDown);
+		EXPECT_EQ(scene.events[14].key, Key::A);
 
 		// A bare + is a space, so it isn't the U+ of a codepoint.
 		const Reply spaced = getRaw("/api/input?ev=char,U+0041");
