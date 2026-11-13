@@ -20,6 +20,8 @@
 #include "math/Types.h"
 #include "primitives/FontFamily.h"
 #include "primitives/InstanceData.h"
+#include "primitives/MaskImage.h"
+#include "primitives/WorldCamera.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -218,12 +220,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Arguments for DrawRect
 		struct RectArgs {
-			Foundation::Rect	  bounds;
-			Foundation::RectStyle style;
-			Fill				  fill{};
-			const char*			  id = nullptr; // Optional: for inspection/debugging
-			int32_t				  key = 0;
-			BlendMode			  blend = BlendMode::Alpha;
+			Foundation::Rect		   bounds;
+			Foundation::RectStyle	   style;
+			Fill					   fill{};
+			std::span<const MaskLayer> mask;		 // CSS mask, top layer first; empty is none (docs/masks.md)
+			const char*				   id = nullptr; // Optional: for inspection/debugging
+			int32_t					   key = 0;
+			BlendMode				   blend = BlendMode::Alpha;
 		};
 
 		// Arguments for DrawLine
@@ -255,6 +258,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// border and clip. A hooked rect has one fill colour, so a gradient on one is logged once
 		// per id and the hook drawn over style.fill; a hook the base shader doesn't have is
 		// logged once per id and the rect drawn as if it named none.
+		//
+		// With a `mask`, the rect and its shadow show only where the composited mask covers
+		// (docs/masks.md). The layers are read during the call. A masked rect drawn into a target
+		// with no stencil buffer draws nothing, logged once.
 		void drawRect(const RectArgs& args);
 
 		// Draw a line: a rotated quad as two flat triangles, aliased, or with style.dash
@@ -475,15 +482,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		);
 
 		// --- World-Space Instancing ---
-
-		// The view an instanced or baked world draw is projected with: world meters
-		// to screen pixels through position, zoom and pixelsPerMeter, centred on the
-		// viewport.
-		struct WorldCamera {
-			Foundation::Vec2 position{0.0F, 0.0F};
-			float			 zoom = 1.0F;
-			float			 pixelsPerMeter = 1.0F;
-		};
 
 		// Upload a tessellated mesh once for drawInstanced(); the handle releases the
 		// GPU buffers when destroyed or passed to releaseInstancedMesh().

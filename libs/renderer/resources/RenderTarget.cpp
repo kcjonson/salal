@@ -66,7 +66,7 @@ namespace Renderer {
 	RenderTarget::RenderTarget(RenderTarget&&) noexcept = default;
 	RenderTarget& RenderTarget::operator=(RenderTarget&&) noexcept = default;
 
-	RenderTarget RenderTarget::create(int width, int height, TextureFormat format) {
+	RenderTarget RenderTarget::create(int width, int height, TextureFormat format, Attachments attachments) {
 		RenderTarget target;
 		if (width <= 0 || height <= 0) {
 			LOG_ERROR(Renderer, "RenderTarget: empty size %dx%d", width, height);
@@ -85,7 +85,7 @@ namespace Renderer {
 		if (!impl->texture.isValid()) {
 			return target;
 		}
-		impl->target = gpu->createRenderTarget(impl->texture.handle());
+		impl->target = gpu->createRenderTarget(impl->texture.handle(), attachments == Attachments::ColourAndStencil);
 		if (!impl->target.isValid()) {
 			return target; // the Impl frees the texture
 		}

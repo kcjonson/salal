@@ -101,6 +101,39 @@ namespace Renderer::backend::gl {
 			}
 		}
 
+		GLenum glStencilOperation(StencilOperation operation) {
+			switch (operation) {
+				case StencilOperation::Zero:
+					return GL_ZERO;
+				case StencilOperation::Replace:
+					return GL_REPLACE;
+				case StencilOperation::Invert:
+					return GL_INVERT;
+				case StencilOperation::Keep:
+				default:
+					return GL_KEEP;
+			}
+		}
+
+		// `stencil`'s test, function and operations; off is the fixed state's (test off, every bit written).
+		void applyStencil(const StencilState& stencil) {
+			if (!stencil.test) {
+				glDisable(GL_STENCIL_TEST);
+				glStencilMask(0xFF);
+				return;
+			}
+			glEnable(GL_STENCIL_TEST);
+			glStencilFunc(stencil.function == StencilFunction::Equal ? GL_EQUAL : GL_ALWAYS, stencil.reference, stencil.readMask);
+			// Depth testing is off, so depth-fail never happens.
+			glStencilOp(glStencilOperation(stencil.fail), GL_KEEP, glStencilOperation(stencil.pass));
+			glStencilMask(stencil.writeMask);
+		}
+
+		void applyColourWrites(bool writeColour) {
+			const GLboolean on = writeColour ? GL_TRUE : GL_FALSE;
+			glColorMask(on, on, on, on);
+		}
+
 		// A float attribute of `components` at `offset` in a `stride`-byte vertex of the bound GL_ARRAY_BUFFER.
 		void floatAttribute(GLuint location, GLint components, size_t stride, size_t offset, GLuint divisor = 0) {
 			glEnableVertexAttribArray(location);
@@ -168,6 +201,13 @@ namespace Renderer::backend::gl {
 		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uniformAlignment);
 		glGetQueryiv(GL_TIMESTAMP, GL_QUERY_COUNTER_BITS, &timestampBits);
 		drawRing = makeRing(kUniformBinding, sizeof(DrawUniforms));
+		GLint stencilBits = 0;
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_STENCIL, GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits);
+		windowStencil = stencilBits >= 8;
+		if (!windowStencil) {
+			LOG_WARNING(Renderer, "The window has %d stencil bits, not 8; masked draws on it draw nothing", stencilBits);
+		}
 		applyFixedState();
 	}
 
@@ -179,6 +219,8 @@ namespace Renderer::backend::gl {
 		glDisable(GL_DEPTH_TEST);
 		glDisable(GL_CULL_FACE);
 		glDisable(GL_SCISSOR_TEST);
+		applyStencil({});
+		applyColourWrites(true);
 	}
 
 	void GLBackend::beginFrame() {
@@ -195,6 +237,21 @@ namespace Renderer::backend::gl {
 	void GLBackend::clear(const Foundation::Color& color) {
 		glClearColor(color.r, color.g, color.b, color.a);
 		glClear(GL_COLOR_BUFFER_BIT);
+	}
+
+	void GLBackend::clearStencil(uint8_t bits) {
+		if (!hasStencil()) {
+			return;
+		}
+		glStencilMask(bits); // glClear writes only the bits the write mask lets through
+		glClearStencil(0);
+		glClear(GL_STENCIL_BUFFER_BIT);
+		glStencilMask(0xFF); // the fixed state's
+	}
+
+	bool GLBackend::hasStencil() const {
+		const TargetSlot* slot = targets.find(boundTarget);
+		return slot != nullptr ? slot->stencil.isValid() : windowStencil;
 	}
 
 	void GLBackend::invalidateState() {
@@ -291,7 +348,7 @@ namespace Renderer::backend::gl {
 		return slot != nullptr ? slot->framebuffer.handle() : 0;
 	}
 
-	RenderTargetHandle GLBackend::createRenderTarget(TextureHandle colour) {
+	RenderTargetHandle GLBackend::createRenderTarget(TextureHandle colour, bool withStencil) {
 		const TextureSlot* texture = textures.find(colour);
 		if (texture == nullptr) {
 			LOG_ERROR(Renderer, "createRenderTarget: texture %u is not in the table", colour.value);
@@ -302,13 +359,18 @@ namespace Renderer::backend::gl {
 		GLFramebuffer fbo = GLFramebuffer::create();
 		fbo.bind();
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture->texture.handle(), 0);
+		// Depth 24 with stencil 8 rather than stencil alone: every GL 3.3 driver can complete it.
+		GLRenderbuffer stencil = withStencil ? GLRenderbuffer::create(GL_DEPTH24_STENCIL8, width, height) : GLRenderbuffer{};
+		if (withStencil) {
+			glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, stencil.handle());
+		}
 		const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer(boundTarget));
 		if (status != GL_FRAMEBUFFER_COMPLETE) {
 			LOG_ERROR(Renderer, "RenderTarget %dx%d: framebuffer incomplete (0x%x)", width, height, status);
 			return {};
 		}
-		return targets.insert({.framebuffer = std::move(fbo), .width = width, .height = height});
+		return targets.insert({.framebuffer = std::move(fbo), .stencil = std::move(stencil), .width = width, .height = height});
 	}
 
 	void GLBackend::setRenderTarget(RenderTargetHandle target) {
@@ -623,7 +685,9 @@ namespace Renderer::backend::gl {
 		GLuint									 program = 0;
 		GLuint									 vertexArray = 0;
 		std::optional<BlendState>				 blend;
-		std::array<TextureHandle, kTextureSlots> bound{}; // what this submission left on each unit
+		StencilState							 stencil{};			 // off is the fixed state, in force on entry
+		bool									 writeColour = true; // so are colour writes
+		std::array<TextureHandle, kTextureSlots> bound{};			 // what this submission left on each unit
 		for (const DrawCall& call : calls) {
 			const Shader* pipeline = pipelines.find(call.pipeline);
 			GeometrySlot* geometry = geometries.find(call.geometry);
@@ -645,6 +709,14 @@ namespace Renderer::backend::gl {
 			if (blend != call.blend) {
 				applyBlend(call.blend);
 				blend = call.blend;
+			}
+			if (stencil != call.stencil) {
+				applyStencil(call.stencil);
+				stencil = call.stencil;
+			}
+			if (writeColour != call.writeColour) {
+				applyColourWrites(call.writeColour);
+				writeColour = call.writeColour;
 			}
 			for (size_t unit = 0; unit < kTextureSlots; ++unit) {
 				if (call.textures[unit].isValid() && call.textures[unit] != bound[unit]) {
@@ -680,7 +752,13 @@ namespace Renderer::backend::gl {
 
 		// What the batch has always left behind: no vertex array (a game's index-buffer
 		// bind would otherwise land in ours), no texture on a unit it bound, unit 0
-		// active, blending off.
+		// active, blending off, and the fixed stencil and colour-write state.
+		if (stencil != StencilState{}) {
+			applyStencil({});
+		}
+		if (!writeColour) {
+			applyColourWrites(true);
+		}
 		if (vertexArray != 0) {
 			GLVertexArray::unbind();
 		}

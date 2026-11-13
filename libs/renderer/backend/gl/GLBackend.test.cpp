@@ -539,7 +539,7 @@ namespace Renderer::backend::gl {
 
 		const TextureHandle		 atlas = createTexture({.width = 1, .height = 1});
 		const TextureHandle		 colour = createTexture({.width = 4, .height = 4});
-		const RenderTargetHandle target = gpu->createRenderTarget(colour);
+		const RenderTargetHandle target = gpu->createRenderTarget(colour, false);
 		ASSERT_TRUE(target.isValid());
 		gpu->setRenderTarget(target);
 		gpu->clear({0.0F, 0.0F, 0.0F, 0.0F});

@@ -13,6 +13,7 @@
 #include "backend/gl/GLBuffer.h"
 #include "backend/gl/GLFramebuffer.h"
 #include "backend/gl/GLQuery.h"
+#include "backend/gl/GLRenderbuffer.h"
 #include "backend/gl/GLTexture.h"
 #include "backend/gl/GLVertexArray.h"
 #include "backend/gl/Shader.h"
@@ -40,6 +41,8 @@ namespace Renderer::backend::gl {
 		void endFrame() override;
 		void setWindowSize(int width, int height) override;
 		void clear(const Foundation::Color& color) override;
+		void clearStencil(uint8_t bits) override;
+		bool hasStencil() const override;
 		void invalidateState() override;
 
 		TextureHandle createTexture(const TextureDesc& desc) override;
@@ -47,7 +50,7 @@ namespace Renderer::backend::gl {
 		void		  destroyTexture(TextureHandle texture) override;
 		bool		  hasTexture(TextureHandle texture) const override { return textures.find(texture) != nullptr; }
 
-		RenderTargetHandle createRenderTarget(TextureHandle colour) override;
+		RenderTargetHandle createRenderTarget(TextureHandle colour, bool withStencil) override;
 		void			   setRenderTarget(RenderTargetHandle target) override;
 		void			   readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) override;
 		void			   destroyRenderTarget(RenderTargetHandle target) override;
@@ -94,9 +97,10 @@ namespace Renderer::backend::gl {
 		};
 
 		struct TargetSlot {
-			GLFramebuffer framebuffer;
-			int			  width = 0;
-			int			  height = 0;
+			GLFramebuffer  framebuffer;
+			GLRenderbuffer stencil; // depth 24, stencil 8, when the target has a stencil buffer; the depth is unused
+			int			   width = 0;
+			int			   height = 0;
 		};
 
 		struct BufferSlot {
@@ -149,6 +153,7 @@ namespace Renderer::backend::gl {
 		std::vector<GLuint>		 inactiveHookBindings; // points whose block a pipeline had inactive; writes there are dropped
 
 		RenderTargetHandle boundTarget;
+		bool			   windowStencil = false; // the default framebuffer has 8 stencil bits
 		int				   windowWidth = 0;
 		int				   windowHeight = 0;
 	};

@@ -27,10 +27,15 @@ namespace Renderer {
 		RenderTarget(RenderTarget&&) noexcept;
 		RenderTarget& operator=(RenderTarget&&) noexcept;
 
+		// What a target draws into: a colour texture, and with ColourAndStencil an 8-bit
+		// stencil buffer, which a draw with a CSS mask needs (docs/masks.md).
+		enum class Attachments : uint8_t { Colour, ColourAndStencil };
+
 		// A width x height target with one colour attachment in `format`, its
 		// contents undefined until cleared; invalid, with an error logged, if the
 		// framebuffer cannot be completed.
-		static RenderTarget create(int width, int height, TextureFormat format = TextureFormat::Rgba8);
+		static RenderTarget
+		create(int width, int height, TextureFormat format = TextureFormat::Rgba8, Attachments attachments = Attachments::Colour);
 
 		[[nodiscard]] bool isValid() const { return impl != nullptr; }
 

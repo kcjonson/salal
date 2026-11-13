@@ -554,6 +554,7 @@ namespace app {
 			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, config.glVersion.minor);
 			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 			glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+			glfwWindowHint(GLFW_STENCIL_BITS, 8); // what a CSS mask is built in (docs/masks.md); GLFW's default, stated
 			return {
 				.window = glfwCreateWindow(width, height, config.title.c_str(), fullscreen, nullptr),
 				.fullscreenOn = fullscreen != nullptr ? config.fullscreenMonitor : std::nullopt,

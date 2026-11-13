@@ -109,8 +109,8 @@ namespace Renderer::backend {
 	TEST(NullBackendTest, TargetsNeedATexture) {
 		NullBackend			gpu;
 		const TextureHandle colour = gpu.createTexture({.width = 2, .height = 2});
-		EXPECT_TRUE(gpu.createRenderTarget(colour).isValid());
-		EXPECT_FALSE(gpu.createRenderTarget(TextureHandle{}).isValid());
+		EXPECT_TRUE(gpu.createRenderTarget(colour, false).isValid());
+		EXPECT_FALSE(gpu.createRenderTarget(TextureHandle{}, false).isValid());
 		EXPECT_FALSE(gpu.createTexture({.width = 0, .height = 2}).isValid());
 	}
 
@@ -172,7 +172,7 @@ namespace Renderer::backend {
 		EXPECT_EQ(window, (std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7}));
 
 		const TextureHandle		 colour = gpu.createTexture({.width = 1, .height = 1});
-		const RenderTargetHandle target = gpu.createRenderTarget(colour);
+		const RenderTargetHandle target = gpu.createRenderTarget(colour, false);
 		std::vector<uint8_t>	 shortSpan(3, 7);
 		gpu.readPixels(target, shortSpan);
 		EXPECT_EQ(shortSpan, std::vector<uint8_t>(3, 7));

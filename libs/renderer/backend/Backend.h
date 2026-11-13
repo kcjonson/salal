@@ -67,6 +67,28 @@ namespace Renderer::backend {
 	// BatchRenderer.h), so mixing the two never splits a draw.
 	enum class BlendState : uint8_t { Alpha };
 
+	// The stencil test's function: a fragment passes when (reference & readMask) OP
+	// (stored & readMask).
+	enum class StencilFunction : uint8_t { Always, Equal };
+
+	// What a fragment does to the stored stencil value, under the write mask.
+	enum class StencilOperation : uint8_t { Keep, Zero, Replace, Invert };
+
+	// A draw's use of the bound target's 8-bit stencil buffer, which the batch builds a
+	// CSS mask in (docs/masks.md). Off (`test` false) is the fixed state. With depth
+	// testing off, `pass` applies to every fragment that passes the stencil test.
+	struct StencilState {
+		bool			 test = false;
+		StencilFunction	 function = StencilFunction::Always;
+		uint8_t			 reference = 0;
+		uint8_t			 readMask = 0xFF;
+		uint8_t			 writeMask = 0xFF;
+		StencilOperation fail = StencilOperation::Keep;
+		StencilOperation pass = StencilOperation::Keep;
+
+		bool operator==(const StencilState&) const = default;
+	};
+
 	// A member of a hook's uniform block, as the generated header names it: its name as GL
 	// names it ("Block.member" in a block with an instance name), its GLSL type, its std140
 	// offset, and its size in bytes (an array's elements at their std140 stride). A C++
@@ -130,6 +152,8 @@ namespace Renderer::backend {
 		PipelineHandle							 pipeline;
 		GeometryHandle							 geometry;
 		BlendState								 blend = BlendState::Alpha;
+		StencilState							 stencil{};
+		bool									 writeColour = true; // false writes the stencil alone
 		std::array<TextureHandle, kTextureSlots> textures{};
 		uint32_t								 indexOffset = 0;
 		uint32_t								 indexCount = 0;
@@ -174,10 +198,12 @@ namespace Renderer::backend {
 	// not be made (logged), and every call taking a stale or invalid handle does
 	// nothing.
 	//
-	// State: depth test, culling and scissor are off for every draw, fixed state set
-	// at creation, beginFrame() and invalidateState(). Bindings (pipeline, geometry,
-	// texture, blend) are made by each draw() and assumed to survive nothing outside
-	// it, because a game's own GPU code runs between the renderer's submissions. The
+	// State: depth test, culling, scissor and stencil test are off and every colour
+	// channel and stencil bit is written, fixed state set at creation, beginFrame() and
+	// invalidateState(). A draw's stencil state and colour writes are set by draw(), which
+	// puts the fixed state back before it returns, so neither outlives its submission.
+	// Bindings (pipeline, geometry, texture, blend) are made by each draw() and assumed
+	// to survive nothing outside it, because a game's own GPU code runs between the renderer's submissions. The
 	// one exception is the uniforms: setUniforms() binds them to uniform binding point
 	// 0 and setHookUniforms() the hooks' blocks to points 1 up, which are the
 	// renderer's, and draws read them there, so a game's GL that binds a uniform buffer
@@ -204,6 +230,14 @@ namespace Renderer::backend {
 		// Clear the bound target's colour to `color` exactly (the caller premultiplies).
 		virtual void clear(const Foundation::Color& color) = 0;
 
+		// Zero the stencil bits in `bits` across the bound target, leaving the others; nothing
+		// on a target with no stencil buffer.
+		virtual void clearStencil(uint8_t bits) = 0;
+
+		// Whether the bound target has an 8-bit stencil buffer: the window when it was made
+		// with one, a render target when it was made with ColourAndStencil.
+		[[nodiscard]] virtual bool hasStencil() const = 0;
+
 		// GPU code outside the renderer changed the fixed state or a uniform binding point
 		// the renderer's blocks read; set both again.
 		virtual void invalidateState() = 0;
@@ -220,8 +254,9 @@ namespace Renderer::backend {
 
 		// --- Render targets ---
 
-		// A target drawing into `colour`, which stays the caller's to destroy (after the target).
-		virtual RenderTargetHandle createRenderTarget(TextureHandle colour) = 0;
+		// A target drawing into `colour`, which stays the caller's to destroy (after the
+		// target), with an 8-bit stencil buffer of its own when `stencil`.
+		virtual RenderTargetHandle createRenderTarget(TextureHandle colour, bool stencil) = 0;
 		// Bind `target`, {} for the window, with a viewport over all of it.
 		virtual void setRenderTarget(RenderTargetHandle target) = 0;
 		// The target's colour ({} the window's) as RGBA8, bottom row first, into

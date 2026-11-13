@@ -26,22 +26,39 @@ namespace Renderer::backend {
 		}
 	}
 
-	RenderTargetHandle NullBackend::createRenderTarget(TextureHandle colour) {
-		return textureTable.find(colour) != nullptr ? targetTable.insert(colour) : RenderTargetHandle{};
+	RenderTargetHandle NullBackend::createRenderTarget(TextureHandle colour, bool withStencil) {
+		return textureTable.find(colour) != nullptr ? targetTable.insert({.colour = colour, .stencil = withStencil}) : RenderTargetHandle{};
+	}
+
+	void NullBackend::setRenderTarget(RenderTargetHandle target) {
+		targetBinds.push_back(target);
+		boundTarget = targetTable.find(target) != nullptr ? target : RenderTargetHandle{};
+	}
+
+	void NullBackend::clearStencil(uint8_t bits) {
+		if (hasStencil()) {
+			stencilClearRecord.push_back({.bits = bits, .drawsBefore = recordedDraws.size()});
+		}
+	}
+
+	bool NullBackend::hasStencil() const {
+		const TargetRecord* target = targetTable.find(boundTarget);
+		return target != nullptr ? target->stencil : windowStencil;
 	}
 
 	void NullBackend::readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) {
 		++pixelReadCount;
 		// What GL reads, zeroed: the target's texture (the window at its set size), and
 		// nothing for a stale target or a span short of width * height * 4.
-		const TextureHandle* colour = targetTable.find(target);
-		if (target.isValid() && colour == nullptr) {
+		const TargetRecord* record = targetTable.find(target);
+		if (target.isValid() && record == nullptr) {
 			return;
 		}
-		const TextureDesc* texture = colour != nullptr ? textureTable.find(*colour) : nullptr;
-		const int		   width = colour != nullptr ? (texture != nullptr ? texture->width : 0) : window.first;
-		const int		   height = colour != nullptr ? (texture != nullptr ? texture->height : 0) : window.second;
-		const size_t	   bytes = static_cast<size_t>(std::max(width, 0)) * static_cast<size_t>(std::max(height, 0)) * 4;
+		const TextureHandle* colour = record != nullptr ? &record->colour : nullptr;
+		const TextureDesc*	 texture = colour != nullptr ? textureTable.find(*colour) : nullptr;
+		const int			 width = colour != nullptr ? (texture != nullptr ? texture->width : 0) : window.first;
+		const int			 height = colour != nullptr ? (texture != nullptr ? texture->height : 0) : window.second;
+		const size_t		 bytes = static_cast<size_t>(std::max(width, 0)) * static_cast<size_t>(std::max(height, 0)) * 4;
 		if (bytes == 0 || rgba.size() < bytes) {
 			return;
 		}
@@ -185,6 +202,7 @@ namespace Renderer::backend {
 		targetBinds.clear();
 		updates.clear();
 		clearColors.clear();
+		stencilClearRecord.clear();
 		frameCount = 0;
 		invalidationCount = 0;
 		timestampCount = 0;

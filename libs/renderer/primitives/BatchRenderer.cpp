@@ -106,23 +106,41 @@ namespace Renderer {
 		gpu.destroyPipeline(pipeline);
 	}
 
-	void BatchRenderer::recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend) {
+	void BatchRenderer::recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend, uint32_t mask) {
 		const uint32_t end = static_cast<uint32_t>(instances.size());
 		if (end <= groupStart) {
 			return;
 		}
+		// A Subtract's cover passes fill the box round every quad drawn under its mask.
+		if (mask != 0) {
+			MaskEntry& entry = maskEntries[mask - 1];
+			for (uint32_t index = groupStart; index < end; ++index) {
+				for (const Foundation::Vec2& corner : instances[index].corners) {
+					entry.cover = entry.covered ? Foundation::Vec4(
+													  std::min(entry.cover.x, corner.x),
+													  std::min(entry.cover.y, corner.y),
+													  std::max(entry.cover.z, corner.x),
+													  std::max(entry.cover.w, corner.y)
+												  )
+												: Foundation::Vec4(corner.x, corner.y, corner.x, corner.y);
+					entry.covered = true;
+				}
+			}
+		}
 		const uint64_t order = (static_cast<uint64_t>(sortDomain) << 32U) | (static_cast<uint32_t>(key) ^ 0x80000000U);
-		// Straight after a group with the same order and blend, an add joins it: the
+		// Straight after a group with the same order, blend and mask, an add joins it: the
 		// stable sort would keep the two together anyway, and a text run, a glyph an add,
 		// stays one group.
 		if (!drawGroups.empty()) {
 			DrawGroup& last = drawGroups.back();
-			if (last.instanceStart + last.instanceCount == groupStart && last.order == order && last.blend == blend) {
+			if (last.instanceStart + last.instanceCount == groupStart && last.order == order && last.blend == blend && last.mask == mask) {
 				last.instanceCount = end - last.instanceStart;
 				return;
 			}
 		}
-		drawGroups.push_back({.instanceStart = groupStart, .instanceCount = end - groupStart, .order = order, .blend = blend});
+		drawGroups.push_back(
+			{.instanceStart = groupStart, .instanceCount = end - groupStart, .order = order, .blend = blend, .mask = mask}
+		);
 		if (key != 0) {
 			anyKey = true;
 		}
@@ -160,7 +178,8 @@ namespace Renderer {
 		int32_t											 key,
 		Primitives::BlendMode							 blend,
 		const Primitives::Fill&							 fill,
-		const char*										 id
+		const char*										 id,
+		uint32_t										 mask
 	) { // NOLINT(readability-convert-member-functions-to-static)
 		if (clipEmpty) {
 			return;
@@ -270,7 +289,7 @@ namespace Renderer {
 		}
 		quad.flags |= static_cast<uint8_t>((borderPosition << kQuadBorderShift) | (bare << kQuadBareShift));
 
-		recordGroup(groupStart, key, blend);
+		recordGroup(groupStart, key, blend, mask);
 	}
 
 	ResolvedDash resolveDash(const Foundation::DashPattern& pattern, float width, float length, bool closed) {
@@ -358,7 +377,8 @@ namespace Renderer {
 		const Foundation::BoxShadow& shadow,
 		const CornerRadii&			 radii,
 		int32_t						 key,
-		Primitives::BlendMode		 blend
+		Primitives::BlendMode		 blend,
+		uint32_t					 mask
 	) {
 		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
 		// The shadow's SDF shape is the rect grown by `spread`; the quad is grown a
@@ -385,7 +405,91 @@ namespace Renderer {
 		std::fill(std::begin(quad.fills), std::end(quad.fills), color);
 		quad.shape[1] = halves(blur, 0.0F);
 
-		recordGroup(groupStart, key, blend);
+		recordGroup(groupStart, key, blend, mask);
+	}
+
+	// --- Masks ---
+
+	uint32_t BatchRenderer::internMask(std::span<const MaskLayerGeometry> layers) {
+		if (layers.empty()) {
+			return 0;
+		}
+		const auto	 layerStart = static_cast<uint32_t>(maskLayers.size());
+		const size_t triangleMark = maskTriangles.size();
+		const bool	 isIdentity = transformClass == TransformClass::kIdentity;
+		uint64_t	 hash = 14695981039346656037ULL; // FNV-1a
+		const auto	 mix = [&hash](uint64_t value) {
+			  hash = (hash ^ value) * 1099511628211ULL;
+		};
+		for (const MaskLayerGeometry& layer : layers) {
+			MaskLayerEntry entry{
+				.composite = layer.composite,
+				.triangleStart = static_cast<uint32_t>(maskTriangles.size() / 3),
+				.meshGeometry = layer.meshGeometry,
+				.meshInstances = layer.meshInstances,
+				.meshIndexCount = layer.meshIndexCount,
+				.camera = layer.camera,
+			};
+			if (!layer.meshGeometry.isValid()) {
+				for (size_t index = 0; index + 2 < layer.indices.size(); index += 3) {
+					if (layer.indices[index] >= layer.vertices.size() || layer.indices[index + 1] >= layer.vertices.size() ||
+						layer.indices[index + 2] >= layer.vertices.size()) {
+						continue;
+					}
+					for (size_t corner = 0; corner < 3; ++corner) {
+						maskTriangles.push_back(
+							TransformPosition(layer.vertices[layer.indices[index + corner]], currentTransform, isIdentity)
+						);
+					}
+				}
+			}
+			entry.triangleCount = static_cast<uint32_t>(maskTriangles.size() / 3) - entry.triangleStart;
+			mix(static_cast<uint64_t>(entry.composite));
+			mix(entry.triangleCount);
+			mix(entry.meshGeometry.value);
+			maskLayers.push_back(entry);
+		}
+		for (size_t index = triangleMark; index < maskTriangles.size(); ++index) {
+			mix(std::bit_cast<uint32_t>(maskTriangles[index].x));
+			mix(std::bit_cast<uint32_t>(maskTriangles[index].y));
+		}
+
+		// An equal mask already in the table is shared, so equal masks build once.
+		const auto layerCount = static_cast<uint32_t>(layers.size());
+		for (size_t index = 0; index < maskEntries.size(); ++index) {
+			const MaskEntry& existing = maskEntries[index];
+			if (existing.hash != hash || existing.layerCount != layerCount) {
+				continue;
+			}
+			bool same = true;
+			for (uint32_t offset = 0; offset < layerCount && same; ++offset) {
+				same = sameLayer(maskLayers[existing.layerStart + offset], maskLayers[layerStart + offset]);
+			}
+			if (same) {
+				maskLayers.resize(layerStart);
+				maskTriangles.resize(triangleMark);
+				return static_cast<uint32_t>(index + 1);
+			}
+		}
+		maskEntries.push_back({.layerStart = layerStart, .layerCount = layerCount, .hash = hash});
+		return static_cast<uint32_t>(maskEntries.size());
+	}
+
+	bool BatchRenderer::sameLayer(const MaskLayerEntry& first, const MaskLayerEntry& second) const {
+		if (first.composite != second.composite || first.triangleCount != second.triangleCount ||
+			first.meshGeometry != second.meshGeometry || first.meshInstances != second.meshInstances ||
+			first.meshIndexCount != second.meshIndexCount || !(first.camera == second.camera)) {
+			return false;
+		}
+		const auto firstTriangles = maskTriangles.begin() + (static_cast<ptrdiff_t>(first.triangleStart) * 3);
+		const auto secondTriangles = maskTriangles.begin() + (static_cast<ptrdiff_t>(second.triangleStart) * 3);
+		return std::equal(firstTriangles, firstTriangles + (static_cast<ptrdiff_t>(first.triangleCount) * 3), secondTriangles);
+	}
+
+	void BatchRenderer::clearMasks() {
+		maskEntries.clear();
+		maskLayers.clear();
+		maskTriangles.clear();
 	}
 
 	void BatchRenderer::addTriangles(const TriangleMeshArgs& mesh) {
@@ -689,6 +793,13 @@ namespace Renderer {
 			gpu.destroyTexture(texture);
 		}
 		pendingFrees.clear();
+		for (const MeshObjects& mesh : pendingMeshFrees) {
+			gpu.destroyGeometry(mesh.geometry);
+			gpu.destroyBuffer(mesh.instances);
+			gpu.destroyBuffer(mesh.indices);
+			gpu.destroyBuffer(mesh.vertices);
+		}
+		pendingMeshFrees.clear();
 	}
 
 	DrawPlan BatchRenderer::plan() {
@@ -718,12 +829,12 @@ namespace Renderer {
 		// sample; everything else is tagged invalid (it ignores the textures bound).
 		// Walking the groups in emit order, each textured quad takes its texture's slot
 		// in the run, adding it when it's new; a new run starts where a quad needs a
-		// texture the run has no slot left for, or where a group's GPU blend state
+		// texture the run has no slot left for, or where a group's GPU blend state or mask
 		// differs from the run's. Quads are never reordered, so key order is exact, and
-		// with up to kTextureSlots textures and one blend state (any mix of Alpha and
-		// Additive) the frame is one run.
+		// with up to kTextureSlots textures, one blend state (any mix of Alpha and
+		// Additive) and no masks the frame is one run.
 		runs.clear();
-		DrawRun	   current{.instanceStart = 0, .instanceCount = 0, .blendState = backend::BlendState::Alpha};
+		DrawRun	   current{.instanceStart = 0, .instanceCount = 0, .blendState = backend::BlendState::Alpha, .mask = 0};
 		uint8_t	   slotsUsed = 0;
 		uint32_t   emitted = 0;
 		const auto cutAt = [&](uint32_t at) {
@@ -737,9 +848,10 @@ namespace Renderer {
 		};
 		for (const DrawGroup& group : drawGroups) {
 			const backend::BlendState state = blendState(group.blend);
-			if (state != current.blendState) {
+			if (state != current.blendState || group.mask != current.mask) {
 				cutAt(emitted);
 				current.blendState = state;
+				current.mask = group.mask;
 			}
 			for (uint32_t i = 0; i < group.instanceCount; ++i) {
 				const TextureHandle required = instanceTextures[group.instanceStart + i];
@@ -773,9 +885,38 @@ namespace Renderer {
 
 		const DrawPlan drawPlan = plan();
 
-		// The whole batch, every flush: the stream buffer starts over
-		gpu.updateBuffer(instanceBuffer, 0, drawPlan.instances.size_bytes(), drawPlan.instances.data());
-		frameUploadBytes += drawPlan.instances.size_bytes();
+		// The whole batch, every flush: the stream buffer starts over. With masks, each
+		// layer's triangles and each mask's cover quad follow the plan's quads, as flat
+		// quads with no clip.
+		std::span<const BatchInstance> upload = drawPlan.instances;
+		uint32_t					   coverStart = 0;
+		if (!maskEntries.empty()) {
+			maskedUpload.assign(drawPlan.instances.begin(), drawPlan.instances.end());
+			const auto flatQuad = [this](const Foundation::Vec2(&corners)[4]) {
+				BatchInstance& quad = maskedUpload.emplace_back();
+				std::copy(std::begin(corners), std::end(corners), std::begin(quad.corners));
+				quad.mode = static_cast<uint8_t>(QuadMode::Flat);
+			};
+			layerFirstInstance.resize(maskLayers.size());
+			for (size_t layerIndex = 0; layerIndex < maskLayers.size(); ++layerIndex) {
+				const MaskLayerEntry& layer = maskLayers[layerIndex];
+				layerFirstInstance[layerIndex] = static_cast<uint32_t>(maskedUpload.size());
+				for (uint32_t triangle = 0; triangle < layer.triangleCount; ++triangle) {
+					const Foundation::Vec2* points = &maskTriangles[(static_cast<size_t>(layer.triangleStart) + triangle) * 3];
+					const Foundation::Vec2	corners[4] = {points[0], points[1], points[2], points[2]};
+					flatQuad(corners);
+				}
+			}
+			coverStart = static_cast<uint32_t>(maskedUpload.size());
+			for (const MaskEntry& entry : maskEntries) {
+				const Foundation::Vec4& box = entry.cover;
+				const Foundation::Vec2	corners[4] = {{box.x, box.y}, {box.z, box.y}, {box.z, box.w}, {box.x, box.w}};
+				flatQuad(corners);
+			}
+			upload = maskedUpload;
+		}
+		gpu.updateBuffer(instanceBuffer, 0, upload.size_bytes(), upload.data());
+		frameUploadBytes += upload.size_bytes();
 
 		// Create projection matrix
 		// If CoordinateSystem is set, use it for DPI-aware projection (logical pixels)
@@ -808,25 +949,48 @@ namespace Renderer {
 
 		// Set instanced = false for standard batched rendering path
 		uniforms.instanced = 0;
+		batchedUniforms = uniforms;
 		gpu.setUniforms(uniforms);
 
-		// One draw call per run, as one submission
+		// One draw call per run, as one submission unless a mask is built between runs. A
+		// masked run lands where the built mask's accumulator bit is set; consecutive runs
+		// under the same mask share its build, since nothing between them writes the stencil.
+		const backend::StencilState maskTest{
+			.test = true,
+			.function = backend::StencilFunction::Equal,
+			.reference = kMaskAccumulatorBit,
+			.readMask = kMaskAccumulatorBit,
+			.writeMask = 0,
+		};
 		drawCalls.clear();
+		// A GPU span holds draws, never the uploads before them, here and in drawInstanced().
+		beginGpuSpan();
+		uint32_t built = 0;
 		for (const DrawRun& run : drawPlan.runs) {
+			if (run.mask != 0 && run.mask != built) {
+				// Decided here, against the target bound now: a target is begun without a flush.
+				if (!gpu.hasStencil()) {
+					if (!warnedNoStencil) {
+						warnedNoStencil = true;
+						LOG_ERROR(Renderer, "A masked draw met a target with no stencil buffer; it draws nothing (logged once)");
+					}
+					continue;
+				}
+				buildMask(run.mask, coverStart + run.mask - 1);
+				built = run.mask;
+			}
 			drawCalls.push_back(
 				{.pipeline = pipeline,
 				 .geometry = geometry,
 				 .blend = run.blendState,
+				 .stencil = run.mask != 0 ? maskTest : backend::StencilState{},
 				 .textures = run.textures,
 				 .firstInstance = run.instanceStart,
 				 .instanceCount = run.instanceCount}
 			);
 		}
-		// A GPU span holds draws, never the uploads before them, here and in drawInstanced().
-		beginGpuSpan();
-		gpu.draw(drawCalls);
+		submitPending();
 		endGpuSpan();
-		drawCallCount += drawCalls.size();
 		freePending();
 
 		// Accumulate stats before clearing: an instance, six vertices and two triangles a quad
@@ -843,6 +1007,123 @@ namespace Renderer {
 		pendingFills.reset();
 		anyKey = false;
 		sortDomain = 0;
+		clearMasks();
+	}
+
+	void BatchRenderer::submitPending() {
+		if (drawCalls.empty()) {
+			return;
+		}
+		gpu.draw(drawCalls);
+		drawCallCount += drawCalls.size();
+		drawCalls.clear();
+	}
+
+	// The mask in two stencil bits: the accumulator holds the layers composited so far, bottom
+	// up, and the scratch bit a Subtract layer's coverage. Add sets the accumulator where the
+	// layer lands (source over, for binary coverage the union). Subtract draws the layer into the
+	// scratch bit, then two cover passes over the masked quads' box make the accumulator the
+	// layer outside what it held: zero it where the scratch bit is clear, then invert both bits
+	// where it is set, which also clears the scratch bit. The bottom layer's composite is
+	// ignored. Every layer draws aliased, with no clip and no colour.
+	void BatchRenderer::buildMask(uint32_t index, uint32_t coverInstance) {
+		using backend::StencilFunction;
+		using backend::StencilOperation;
+		const backend::StencilState addLayer{
+			.test = true,
+			.reference = kMaskAccumulatorBit,
+			.writeMask = kMaskAccumulatorBit,
+			.pass = StencilOperation::Replace,
+		};
+		const backend::StencilState scratchLayer{
+			.test = true,
+			.reference = kMaskScratchBit,
+			.writeMask = kMaskScratchBit,
+			.pass = StencilOperation::Replace,
+		};
+		const backend::StencilState clearOutsideLayer{
+			.test = true,
+			.function = StencilFunction::Equal,
+			.reference = 0,
+			.readMask = kMaskScratchBit,
+			.writeMask = kMaskAccumulatorBit,
+			.pass = StencilOperation::Zero,
+		};
+		const backend::StencilState invertInsideLayer{
+			.test = true,
+			.function = StencilFunction::Equal,
+			.reference = kMaskScratchBit,
+			.readMask = kMaskScratchBit,
+			.writeMask = kMaskAccumulatorBit | kMaskScratchBit,
+			.pass = StencilOperation::Invert,
+		};
+		const auto stencilOnly = [this](const backend::StencilState& stencil, uint32_t firstInstance, uint32_t instanceCount) {
+			if (instanceCount > 0) {
+				drawCalls.push_back(
+					{.pipeline = pipeline,
+					 .geometry = geometry,
+					 .stencil = stencil,
+					 .writeColour = false,
+					 .firstInstance = firstInstance,
+					 .instanceCount = instanceCount}
+				);
+			}
+		};
+
+		submitPending();
+		gpu.clearStencil(kMaskAccumulatorBit | kMaskScratchBit);
+		const MaskEntry& entry = maskEntries[index - 1];
+		for (uint32_t offset = entry.layerCount; offset-- > 0;) {
+			const uint32_t				 layerIndex = entry.layerStart + offset;
+			const MaskLayerEntry&		 layer = maskLayers[layerIndex];
+			const bool					 subtract = offset + 1 < entry.layerCount && layer.composite == Primitives::MaskComposite::Subtract;
+			const backend::StencilState& coverage = subtract ? scratchLayer : addLayer;
+			if (layer.meshGeometry.isValid()) {
+				// One copy at the world origin under the layer's camera, drawn under the
+				// instanced uniforms, then the batch's again.
+				submitPending();
+				gpu.setUniforms(worldUniforms(layer.camera.position, layer.camera.zoom, layer.camera.pixelsPerMeter));
+				const InstanceData origin;
+				gpu.updateBuffer(layer.meshInstances, 0, sizeof(InstanceData), &origin);
+				const backend::DrawCall meshCall{
+					.pipeline = pipeline,
+					.geometry = layer.meshGeometry,
+					.stencil = coverage,
+					.writeColour = false,
+					.indexCount = layer.meshIndexCount,
+					.instanceCount = 1,
+				};
+				gpu.draw({&meshCall, 1});
+				++drawCallCount;
+				gpu.setUniforms(batchedUniforms);
+			} else {
+				stencilOnly(coverage, layerFirstInstance[layerIndex], layer.triangleCount);
+			}
+			if (subtract) {
+				stencilOnly(clearOutsideLayer, coverInstance, 1);
+				stencilOnly(invertInsideLayer, coverInstance, 1);
+			}
+		}
+		submitPending();
+	}
+
+	backend::DrawUniforms BatchRenderer::worldUniforms(Foundation::Vec2 cameraPosition, float cameraZoom, float pixelsPerMeter) const {
+		backend::DrawUniforms world = uniforms;
+		world.projection = coordinateSystem != nullptr
+							   ? coordinateSystem->CreateScreenSpaceProjection()
+							   : glm::ortho(0.0F, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight), 0.0F, -1.0F, 1.0F);
+		// World to screen is done in the shader from the camera
+		world.transform = Foundation::Mat4(1.0F);
+		world.instanced = 1;
+		world.cameraPosition = cameraPosition;
+		world.cameraZoom = cameraZoom;
+		world.pixelsPerMeter = pixelsPerMeter;
+		// Logical pixels, as the projection is (CreateScreenSpaceProjection uses logical pixels)
+		world.viewportSize = Foundation::Vec2(static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
+		if (coordinateSystem != nullptr) {
+			world.viewportSize = coordinateSystem->getWindowSize();
+		}
+		return world;
 	}
 
 	void BatchRenderer::beginFrameStats() {
@@ -866,6 +1147,7 @@ namespace Renderer {
 		pendingFills.reset();
 		anyKey = false;
 		sortDomain = 0;
+		clearMasks();
 		clearClipBounds();
 	}
 
@@ -1020,12 +1302,15 @@ namespace Renderer {
 		return handle;
 	}
 
-	void BatchRenderer::releaseInstancedMesh(backend::Backend* owner, InstancedMeshHandle& handle) {
-		if (owner != nullptr) {
-			owner->destroyGeometry(handle.geometry);
-			owner->destroyBuffer(handle.instances);
-			owner->destroyBuffer(handle.indices);
-			owner->destroyBuffer(handle.vertices);
+	void BatchRenderer::releaseInstancedMesh(BatchRenderer* batch, InstancedMeshHandle& handle) {
+		if (batch != nullptr && (handle.geometry.isValid() || handle.vertices.isValid())) {
+			batch->pendingMeshFrees.push_back(
+				{.geometry = handle.geometry, .vertices = handle.vertices, .indices = handle.indices, .instances = handle.instances}
+			);
+			// A pending draw's mask may name the mesh; with none it goes now.
+			if (batch->instances.empty()) {
+				batch->freePending();
+			}
 		}
 		handle.geometry = {};
 		handle.instances = {};
@@ -1048,33 +1333,7 @@ namespace Renderer {
 			return;
 		}
 
-		// Set up projection matrix (same as flush())
-		Foundation::Mat4 projection;
-		if (coordinateSystem != nullptr) {
-			projection = coordinateSystem->CreateScreenSpaceProjection();
-		} else {
-			projection = glm::ortho(0.0F, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight), 0.0F, -1.0F, 1.0F);
-		}
-		uniforms.projection = projection;
-
-		// Identity transform (world→screen is done in shader via instancing uniforms)
-		uniforms.transform = Foundation::Mat4(1.0F);
-
-		// Set instancing uniforms
-		uniforms.instanced = 1; // Enable instanced rendering path
-		uniforms.cameraPosition = cameraPosition;
-		uniforms.cameraZoom = cameraZoom;
-		uniforms.pixelsPerMeter = pixelsPerMeter;
-		// Use logical pixels for viewport size to match the projection matrix
-		// (CreateScreenSpaceProjection uses logical pixels, not physical pixels)
-		float logicalWidth = static_cast<float>(viewportWidth);
-		float logicalHeight = static_cast<float>(viewportHeight);
-		if (coordinateSystem != nullptr) {
-			glm::vec2 windowSize = coordinateSystem->getWindowSize();
-			logicalWidth = windowSize.x;
-			logicalHeight = windowSize.y;
-		}
-		uniforms.viewportSize = Foundation::Vec2(logicalWidth, logicalHeight);
+		uniforms = worldUniforms(cameraPosition, cameraZoom, pixelsPerMeter);
 		gpu.setUniforms(uniforms);
 
 		// Handle overflow by batching multiple draw calls if needed
