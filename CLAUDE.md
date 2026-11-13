@@ -52,6 +52,8 @@ repo's `specboard.md`.
   contract: how a game adds vertex code, and fill hooks that colour a rect per
   pixel, to the one program at build time (`salal_base_shader()`), the hook
   points, uniform blocks, and what fails the build.
+- **[docs/masks.md](docs/masks.md)** is the stencil mask: writing a value with
+  colour off, drawing where the mask matches, and where a mask may not leak.
 - **[docs/app-api.md](docs/app-api.md)** is the phase 2 design of `app`: the
   frame, input and the per-tick snapshot, scenes, settings and saves, the dev
   server, and the seven PRs that land it.
@@ -227,7 +229,7 @@ There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
 renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
 `blend` and `input_test`), `fill_hook` (the renderer tests' fill hook, which the
-sandbox's base shader is assembled with), `border` (rect borders on some sides, and dashed), ui's (`ui_order`, `ui_text`, `ui_theme`,
+sandbox's base shader is assembled with), `border` (rect borders on some sides, and dashed), `mask` (a stencil mask over two moving shapes), ui's (`ui_order`, `ui_text`, `ui_theme`,
 `ui_layout`, `ui_grid`, `ui_clip`, `ui_scroll`, `ui_input`, `ui_focus`, `ui_icons`, `ui_motion`, `ui_display`,
 `ui_controls`, `ui_overlays`, `ui_overlay_components` and `ui_drag`) and the perf suite's (`perf_quads`, `perf_text`,
 `perf_world` and `perf_ui`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`

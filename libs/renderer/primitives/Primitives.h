@@ -541,6 +541,38 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Pop the most recent clip, restoring the one it was pushed in, if any.
 		void popClip();
 
+		// --- Masks ---
+		//
+		// The bound target's 8-bit stencil buffer, written by some draws and tested by
+		// others (docs/masks.md). The window has one; a RenderTarget has one when made with
+		// RenderTarget::Attachments::ColourAndMask. A Write draw sets the mask to its value
+		// wherever a fragment lands, whatever the fragment's alpha (an anti-aliased edge
+		// writes its whole ramp, so a mask's edges are drawn aliased), and draws no colour; a
+		// Test draw lands only where the stored mask compares to its value. Clips apply to
+		// both, as to any batched draw.
+		using MaskMode = backend::MaskMode;
+		using MaskCompare = backend::MaskCompare;
+		using Mask = backend::MaskState;
+
+		// Set the bound target's whole mask to `value`. Pending draws in a Write or Test mask
+		// are flushed first, so they see the mask as it was.
+		void clearMask(uint8_t value = 0);
+
+		// Draw everything from here, batched, instanced (drawInstanced) and baked
+		// (beginBakedPass), in `mask`, until the next call; setMask({}) turns it off. A
+		// change flushes what is pending, so draws before it are drawn before draws after
+		// it whatever their keys; keys order draws within one mask as anywhere else. The
+		// mask is the renderer's, applied to each of its submissions and taken off after,
+		// so a game's own GL is never masked and never leaves a mask on. Refused, logged
+		// once, on a target with no mask and inside a baked pass. The mask goes off at
+		// beginFrame(), around a RenderTarget (begin() turns it off and end() restores the
+		// one it was begun in), and in an app at the end of each scene's render, its ui's
+		// and each debug layer's.
+		void setMask(const Mask& mask);
+
+		// The mask in force.
+		Mask getMask();
+
 		// Transform stack (for world-space rendering)
 		void			 PushTransform(const Foundation::Mat4& transform);
 		void			 PopTransform();

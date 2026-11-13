@@ -817,6 +817,7 @@ namespace Renderer {
 				{.pipeline = pipeline,
 				 .geometry = geometry,
 				 .blend = run.blendState,
+				 .mask = mask,
 				 .textures = run.textures,
 				 .firstInstance = run.instanceStart,
 				 .instanceCount = run.instanceCount}
@@ -867,6 +868,15 @@ namespace Renderer {
 		anyKey = false;
 		sortDomain = 0;
 		clearClipBounds();
+		mask = {};
+	}
+
+	void BatchRenderer::setMask(const backend::MaskState& state) {
+		if (state == mask) {
+			return;
+		}
+		flush();
+		mask = state;
 	}
 
 	void BatchRenderer::endFrame() {
@@ -1091,6 +1101,7 @@ namespace Renderer {
 				.pipeline = pipeline,
 				.geometry = handle.geometry,
 				.blend = backend::BlendState::Alpha,
+				.mask = mask,
 				.indexCount = handle.indexCount,
 				.instanceCount = batchSize
 			};
@@ -1134,8 +1145,8 @@ namespace Renderer {
 		uniforms.bakedAlpha = 1.0F;
 		gpu.setUniforms(uniforms);
 
-		// The same blend state as every batch draw; the caller's VAO draws follow
-		gpu.beginForeignDraws(pipeline, backend::BlendState::Alpha);
+		// The same blend state as every batch draw, and the mask in force; the caller's VAO draws follow
+		gpu.beginForeignDraws(pipeline, backend::BlendState::Alpha, mask);
 		bakedPassOpen = true;
 		beginGpuSpan();
 	}

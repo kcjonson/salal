@@ -77,6 +77,8 @@ namespace Renderer::backend {
 		void endFrame() override {}
 		void setWindowSize(int width, int height) override;
 		void clear(const Foundation::Color& color) override { clearColors.push_back(color); }
+		void clearMask(uint8_t value) override;
+		bool hasMask() const override;
 		void invalidateState() override { ++invalidationCount; }
 
 		TextureHandle createTexture(const TextureDesc& desc) override;
@@ -84,8 +86,8 @@ namespace Renderer::backend {
 		void		  destroyTexture(TextureHandle texture) override { textureTable.erase(texture); }
 		bool		  hasTexture(TextureHandle texture) const override { return textureTable.find(texture) != nullptr; }
 
-		RenderTargetHandle createRenderTarget(TextureHandle colour) override;
-		void			   setRenderTarget(RenderTargetHandle target) override { targetBinds.push_back(target); }
+		RenderTargetHandle createRenderTarget(TextureHandle colour, bool mask) override;
+		void			   setRenderTarget(RenderTargetHandle target) override;
 		void			   readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) override;
 		void			   destroyRenderTarget(RenderTargetHandle target) override { targetTable.erase(target); }
 
@@ -102,7 +104,7 @@ namespace Renderer::backend {
 		void setUniforms(const DrawUniforms& uniforms) override;
 		void setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) override;
 		void draw(std::span<const DrawCall> calls) override;
-		void beginForeignDraws(PipelineHandle pipeline, BlendState blend) override;
+		void beginForeignDraws(PipelineHandle pipeline, BlendState blend, const MaskState& mask) override;
 		void endForeignDraws() override { ++foreignDrawEnds; }
 
 		QueryHandle createTimestampQuery() override { return queryTable.insert(false); }
@@ -129,6 +131,13 @@ namespace Renderer::backend {
 		[[nodiscard]] int			 foreignDrawsBegun() const { return foreignDrawBegins; }
 		[[nodiscard]] PipelineHandle foreignPipeline() const { return lastForeignPipeline; }
 		[[nodiscard]] int			 foreignDrawsEnded() const { return foreignDrawEnds; }
+		// The mask the last beginForeignDraws() drew in.
+		[[nodiscard]] const MaskState& foreignMask() const { return lastForeignMask; }
+		// The values clearMask() set on a target with a mask, in order.
+		[[nodiscard]] const std::vector<uint8_t>& maskClears() const { return maskClearValues; }
+
+		// Whether the window has a mask, as a GL window made with stencil bits does; true until set.
+		void setWindowMask(bool mask) { windowMask = mask; }
 
 		// The buffer's bytes as last written; empty for an invalid or stale handle.
 		[[nodiscard]] std::span<const uint8_t> bufferContents(BufferHandle buffer) const;
@@ -149,12 +158,17 @@ namespace Renderer::backend {
 			std::vector<uint8_t> bytes;
 		};
 
-		SlotTable<TextureHandle, TextureDesc>		 textureTable;
-		SlotTable<RenderTargetHandle, TextureHandle> targetTable;
-		SlotTable<BufferHandle, BufferRecord>		 bufferTable;
-		SlotTable<GeometryHandle, GeometryDesc>		 geometryTable;
-		SlotTable<PipelineHandle, PipelineRecord>	 pipelineTable;
-		SlotTable<QueryHandle, bool>				 queryTable; // written yet
+		SlotTable<TextureHandle, TextureDesc> textureTable;
+		struct TargetRecord {
+			TextureHandle colour;
+			bool		  mask = false;
+		};
+
+		SlotTable<RenderTargetHandle, TargetRecord> targetTable;
+		SlotTable<BufferHandle, BufferRecord>		bufferTable;
+		SlotTable<GeometryHandle, GeometryDesc>		geometryTable;
+		SlotTable<PipelineHandle, PipelineRecord>	pipelineTable;
+		SlotTable<QueryHandle, bool>				queryTable; // written yet
 
 		// The hooked rects among a batched draw's instances.
 		std::vector<RecordedFill> fillsOf(const DrawCall& call) const;
@@ -169,6 +183,10 @@ namespace Renderer::backend {
 		DrawUniforms					currentUniforms;
 		std::pair<int, int>				window{0, 0};
 		PipelineHandle					lastForeignPipeline;
+		MaskState						lastForeignMask;
+		std::vector<uint8_t>			maskClearValues;
+		RenderTargetHandle				boundTarget;
+		bool							windowMask = true;
 		int								frameCount = 0;
 		int								invalidationCount = 0;
 		int								timestampCount = 0;

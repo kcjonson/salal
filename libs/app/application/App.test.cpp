@@ -958,6 +958,31 @@ namespace app::testing {
 		EXPECT_EQ(drawnX(), (std::vector<float>{0.0F, 10.0F, 20.0F, 30.0F, 40.0F}));
 	}
 
+	TEST_F(AppTest, AMaskASceneLeavesSetEndsWithItsRenderAndMasksNeitherItsUiNorTheDebugLayers) {
+		start();
+		hooks()["A"].onEnter = [](App& running) {
+			running.scenes().top()->root().addChild<ui::Rectangle>({.position = {10.0F, 0.0F}, .size = {10.0F, 10.0F}});
+		};
+		hooks()["A"].render = [](App& /*running*/) {
+			Renderer::Primitives::setMask({.mode = Renderer::Primitives::MaskMode::Test, .value = 1});
+			rectAt(0.0F, 0);
+		};
+		app->addDebugLayer(std::make_unique<RectDebugLayer>(40.0F, 0));
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		clearDraws();
+		frame(0.0);
+
+		auto* gpu = dynamic_cast<Renderer::backend::NullBackend*>(Renderer::backend::active());
+		ASSERT_NE(gpu, nullptr);
+		ASSERT_EQ(gpu->draws().size(), 2U);
+		EXPECT_EQ(gpu->draws()[0].call.mask, (Renderer::Primitives::Mask{.mode = Renderer::Primitives::MaskMode::Test, .value = 1}));
+		EXPECT_EQ(gpu->draws()[0].call.instanceCount, 1U);
+		EXPECT_EQ(gpu->draws()[1].call.mask, Renderer::Primitives::Mask{});
+		EXPECT_EQ(gpu->draws()[1].call.instanceCount, 2U); // the ui's rect and the debug layer's
+		EXPECT_EQ(Renderer::Primitives::getMask(), Renderer::Primitives::Mask{});
+	}
+
 	TEST_F(AppTest, ASceneUiFollowsTheWindowAndGoesOnceOnExitHasRun) {
 		start();
 		hooks()["A"].onEnter = [](App& running) {

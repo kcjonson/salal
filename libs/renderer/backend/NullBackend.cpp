@@ -26,22 +26,39 @@ namespace Renderer::backend {
 		}
 	}
 
-	RenderTargetHandle NullBackend::createRenderTarget(TextureHandle colour) {
-		return textureTable.find(colour) != nullptr ? targetTable.insert(colour) : RenderTargetHandle{};
+	RenderTargetHandle NullBackend::createRenderTarget(TextureHandle colour, bool mask) {
+		return textureTable.find(colour) != nullptr ? targetTable.insert({.colour = colour, .mask = mask}) : RenderTargetHandle{};
+	}
+
+	void NullBackend::setRenderTarget(RenderTargetHandle target) {
+		targetBinds.push_back(target);
+		boundTarget = targetTable.find(target) != nullptr ? target : RenderTargetHandle{};
+	}
+
+	void NullBackend::clearMask(uint8_t value) {
+		if (hasMask()) {
+			maskClearValues.push_back(value);
+		}
+	}
+
+	bool NullBackend::hasMask() const {
+		const TargetRecord* target = targetTable.find(boundTarget);
+		return target != nullptr ? target->mask : windowMask;
 	}
 
 	void NullBackend::readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) {
 		++pixelReadCount;
 		// What GL reads, zeroed: the target's texture (the window at its set size), and
 		// nothing for a stale target or a span short of width * height * 4.
-		const TextureHandle* colour = targetTable.find(target);
-		if (target.isValid() && colour == nullptr) {
+		const TargetRecord* record = targetTable.find(target);
+		if (target.isValid() && record == nullptr) {
 			return;
 		}
-		const TextureDesc* texture = colour != nullptr ? textureTable.find(*colour) : nullptr;
-		const int		   width = colour != nullptr ? (texture != nullptr ? texture->width : 0) : window.first;
-		const int		   height = colour != nullptr ? (texture != nullptr ? texture->height : 0) : window.second;
-		const size_t	   bytes = static_cast<size_t>(std::max(width, 0)) * static_cast<size_t>(std::max(height, 0)) * 4;
+		const TextureHandle* colour = record != nullptr ? &record->colour : nullptr;
+		const TextureDesc*	 texture = colour != nullptr ? textureTable.find(*colour) : nullptr;
+		const int			 width = colour != nullptr ? (texture != nullptr ? texture->width : 0) : window.first;
+		const int			 height = colour != nullptr ? (texture != nullptr ? texture->height : 0) : window.second;
+		const size_t		 bytes = static_cast<size_t>(std::max(width, 0)) * static_cast<size_t>(std::max(height, 0)) * 4;
 		if (bytes == 0 || rgba.size() < bytes) {
 			return;
 		}
@@ -145,9 +162,10 @@ namespace Renderer::backend {
 		++submissionCount;
 	}
 
-	void NullBackend::beginForeignDraws(PipelineHandle pipeline, BlendState /*blend*/) {
+	void NullBackend::beginForeignDraws(PipelineHandle pipeline, BlendState /*blend*/, const MaskState& mask) {
 		++foreignDrawBegins;
 		lastForeignPipeline = pipeline;
+		lastForeignMask = mask;
 	}
 
 	void NullBackend::writeTimestamp(QueryHandle query) {
@@ -185,6 +203,7 @@ namespace Renderer::backend {
 		targetBinds.clear();
 		updates.clear();
 		clearColors.clear();
+		maskClearValues.clear();
 		frameCount = 0;
 		invalidationCount = 0;
 		timestampCount = 0;
@@ -194,6 +213,7 @@ namespace Renderer::backend {
 		foreignDrawBegins = 0;
 		foreignDrawEnds = 0;
 		lastForeignPipeline = {};
+		lastForeignMask = {};
 	}
 
 } // namespace Renderer::backend

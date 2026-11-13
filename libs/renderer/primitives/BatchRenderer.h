@@ -313,6 +313,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Clear clip bounds (disables clipping)
 		void clearClipBounds();
 
+		// --- Mask ---
+
+		// The mask every draw from here runs in, batched, instanced and baked. A change
+		// flushes what is pending first, so it is drawn in the mask it was added under.
+		void					  setMask(const backend::MaskState& state);
+		const backend::MaskState& getMask() const { return mask; }
+
+		// Between beginBakedPass() and endBakedPass().
+		bool inBakedPass() const { return bakedPassOpen; }
+
 		// --- Transform ---
 
 		// Set the current transform matrix.
@@ -497,6 +507,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Between beginBakedPass() and endBakedPass(): setBakedAlpha() submits the
 		// uniforms at once, for the caller's next draw.
 		bool bakedPassOpen = false;
+
+		// The mask the pending draws were added under, which their draw calls carry.
+		backend::MaskState mask;
 
 		// Viewport dimensions
 		int viewportWidth = 800;

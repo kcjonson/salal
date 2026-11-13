@@ -101,6 +101,50 @@ namespace Renderer::backend::gl {
 			}
 		}
 
+		// GL tests `value OP stored`; MaskCompare reads `stored OP value`, so the orderings turn round.
+		GLenum glCompare(MaskCompare compare) {
+			switch (compare) {
+				case MaskCompare::NotEqual:
+					return GL_NOTEQUAL;
+				case MaskCompare::Less:
+					return GL_GREATER;
+				case MaskCompare::LessEqual:
+					return GL_GEQUAL;
+				case MaskCompare::Greater:
+					return GL_LESS;
+				case MaskCompare::GreaterEqual:
+					return GL_LEQUAL;
+				case MaskCompare::Equal:
+				default:
+					return GL_EQUAL;
+			}
+		}
+
+		// The stencil and colour-write state of `mask`; Off is the fixed state's.
+		void applyMask(const MaskState& mask) {
+			switch (mask.mode) {
+				case MaskMode::Off:
+					glDisable(GL_STENCIL_TEST);
+					glStencilMask(0xFF);
+					glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+					break;
+				case MaskMode::Write:
+					glEnable(GL_STENCIL_TEST);
+					glStencilFunc(GL_ALWAYS, mask.value, 0xFF);
+					glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+					glStencilMask(0xFF);
+					glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+					break;
+				case MaskMode::Test:
+					glEnable(GL_STENCIL_TEST);
+					glStencilFunc(glCompare(mask.compare), mask.value, 0xFF);
+					glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+					glStencilMask(0x00);
+					glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+					break;
+			}
+		}
+
 		// A float attribute of `components` at `offset` in a `stride`-byte vertex of the bound GL_ARRAY_BUFFER.
 		void floatAttribute(GLuint location, GLint components, size_t stride, size_t offset, GLuint divisor = 0) {
 			glEnableVertexAttribArray(location);
@@ -168,6 +212,13 @@ namespace Renderer::backend::gl {
 		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uniformAlignment);
 		glGetQueryiv(GL_TIMESTAMP, GL_QUERY_COUNTER_BITS, &timestampBits);
 		drawRing = makeRing(kUniformBinding, sizeof(DrawUniforms));
+		GLint stencilBits = 0;
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_STENCIL, GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits);
+		windowMask = stencilBits >= 8;
+		if (!windowMask) {
+			LOG_WARNING(Renderer, "The window has %d stencil bits, not 8; masks on it are refused", stencilBits);
+		}
 		applyFixedState();
 	}
 
@@ -179,6 +230,7 @@ namespace Renderer::backend::gl {
 		glDisable(GL_DEPTH_TEST);
 		glDisable(GL_CULL_FACE);
 		glDisable(GL_SCISSOR_TEST);
+		applyMask({});
 	}
 
 	void GLBackend::beginFrame() {
@@ -195,6 +247,20 @@ namespace Renderer::backend::gl {
 	void GLBackend::clear(const Foundation::Color& color) {
 		glClearColor(color.r, color.g, color.b, color.a);
 		glClear(GL_COLOR_BUFFER_BIT);
+	}
+
+	void GLBackend::clearMask(uint8_t value) {
+		if (!hasMask()) {
+			return;
+		}
+		glStencilMask(0xFF); // the fixed state's, which glClear honours
+		glClearStencil(value);
+		glClear(GL_STENCIL_BUFFER_BIT);
+	}
+
+	bool GLBackend::hasMask() const {
+		const TargetSlot* slot = targets.find(boundTarget);
+		return slot != nullptr ? slot->mask.isValid() : windowMask;
 	}
 
 	void GLBackend::invalidateState() {
@@ -291,7 +357,7 @@ namespace Renderer::backend::gl {
 		return slot != nullptr ? slot->framebuffer.handle() : 0;
 	}
 
-	RenderTargetHandle GLBackend::createRenderTarget(TextureHandle colour) {
+	RenderTargetHandle GLBackend::createRenderTarget(TextureHandle colour, bool mask) {
 		const TextureSlot* texture = textures.find(colour);
 		if (texture == nullptr) {
 			LOG_ERROR(Renderer, "createRenderTarget: texture %u is not in the table", colour.value);
@@ -302,13 +368,18 @@ namespace Renderer::backend::gl {
 		GLFramebuffer fbo = GLFramebuffer::create();
 		fbo.bind();
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture->texture.handle(), 0);
+		// Depth 24 with stencil 8 rather than stencil alone: every GL 3.3 driver can complete it.
+		GLRenderbuffer stencil = mask ? GLRenderbuffer::create(GL_DEPTH24_STENCIL8, width, height) : GLRenderbuffer{};
+		if (mask) {
+			glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, stencil.handle());
+		}
 		const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer(boundTarget));
 		if (status != GL_FRAMEBUFFER_COMPLETE) {
 			LOG_ERROR(Renderer, "RenderTarget %dx%d: framebuffer incomplete (0x%x)", width, height, status);
 			return {};
 		}
-		return targets.insert({.framebuffer = std::move(fbo), .width = width, .height = height});
+		return targets.insert({.framebuffer = std::move(fbo), .mask = std::move(stencil), .width = width, .height = height});
 	}
 
 	void GLBackend::setRenderTarget(RenderTargetHandle target) {
@@ -623,6 +694,7 @@ namespace Renderer::backend::gl {
 		GLuint									 program = 0;
 		GLuint									 vertexArray = 0;
 		std::optional<BlendState>				 blend;
+		MaskState								 mask{};  // Off is the fixed state, in force on entry
 		std::array<TextureHandle, kTextureSlots> bound{}; // what this submission left on each unit
 		for (const DrawCall& call : calls) {
 			const Shader* pipeline = pipelines.find(call.pipeline);
@@ -645,6 +717,10 @@ namespace Renderer::backend::gl {
 			if (blend != call.blend) {
 				applyBlend(call.blend);
 				blend = call.blend;
+			}
+			if (mask != call.mask) {
+				applyMask(call.mask);
+				mask = call.mask;
 			}
 			for (size_t unit = 0; unit < kTextureSlots; ++unit) {
 				if (call.textures[unit].isValid() && call.textures[unit] != bound[unit]) {
@@ -680,7 +756,10 @@ namespace Renderer::backend::gl {
 
 		// What the batch has always left behind: no vertex array (a game's index-buffer
 		// bind would otherwise land in ours), no texture on a unit it bound, unit 0
-		// active, blending off.
+		// active, blending off, and the fixed mask state.
+		if (mask != MaskState{}) {
+			applyMask({});
+		}
 		if (vertexArray != 0) {
 			GLVertexArray::unbind();
 		}
@@ -700,8 +779,9 @@ namespace Renderer::backend::gl {
 		}
 	}
 
-	void GLBackend::beginForeignDraws(PipelineHandle pipeline, BlendState blend) {
+	void GLBackend::beginForeignDraws(PipelineHandle pipeline, BlendState blend, const MaskState& mask) {
 		applyBlend(blend);
+		applyMask(mask);
 		// No pipeline binds no program, so the caller's draws draw nothing rather than
 		// run under whatever program a game's pass left bound.
 		const Shader* shader = pipelines.find(pipeline);
@@ -711,6 +791,7 @@ namespace Renderer::backend::gl {
 	void GLBackend::endForeignDraws() {
 		GLVertexArray::unbind();
 		glDisable(GL_BLEND);
+		applyMask({});
 	}
 
 	// --- Timestamp queries ---

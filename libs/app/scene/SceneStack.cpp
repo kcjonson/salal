@@ -2,6 +2,7 @@
 
 #include "application/App.h"
 #include "detail/Guard.h"
+#include "detail/MaskBarrier.h"
 #include "input/Input.h"
 
 #include <primitives/Primitives.h>
@@ -267,16 +268,19 @@ namespace app {
 	}
 
 	// Each scene is its own sort domain, so what a covered scene draws at a high key stays under the
-	// scene over it, and so is each scene's ui, over the scene and under the next.
+	// scene over it, and so is each scene's ui, over the scene and under the next. A mask either leaves
+	// set ends with it.
 	void SceneStack::render(float liveAlpha) {
 		for (std::size_t i = firstRendered(); i < entries.size(); ++i) {
 			Scene&		scene = *entries[i].scene;
 			const float alpha = i + 1 == entries.size() ? liveAlpha : entries[i].coveredAlpha;
 			Renderer::Primitives::sortBarrier();
 			detail::guard(scene.name(), "render", [&] { scene.render(alpha); });
+			detail::endMask(scene.name(), "render");
 			if (scene.uiContext != nullptr) {
 				Renderer::Primitives::sortBarrier();
 				detail::guard(scene.name(), "ui render", [&] { scene.uiContext->render(); });
+				detail::endMask(scene.name(), "ui render");
 			}
 		}
 	}

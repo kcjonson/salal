@@ -69,6 +69,9 @@ namespace Renderer::Primitives {
 	// beginFrame found a clip or transform still pushed, and said so.
 	static bool g_warnedUnbalancedStacks = false;
 
+	// beginFrame found a mask still set, and said so.
+	static bool g_warnedMaskLeftOn = false;
+
 	// Tessellated polygon fills, keyed by a hash of the outline's vertex bits and
 	// checked against a copy of the outline, so a hash collision is a miss, never a
 	// wrong mesh. A silhouette drawn every frame (under a changing PushTransform)
@@ -230,7 +233,11 @@ namespace Renderer::Primitives {
 			g_backend->beginFrame();
 		}
 		if (g_batchRenderer != nullptr) {
-			g_batchRenderer->beginFrame();
+			if (g_batchRenderer->getMask().mode != MaskMode::Off && !g_warnedMaskLeftOn) {
+				g_warnedMaskLeftOn = true;
+				LOG_WARNING(Renderer, "beginFrame: a mask was still set, a setMask without setMask({}); turned off (warned once)");
+			}
+			g_batchRenderer->beginFrame(); // turns the mask off
 			g_batchRenderer->setTransform(g_currentTransform);
 		}
 	}
@@ -867,6 +874,45 @@ namespace Renderer::Primitives {
 				g_batchRenderer->setClipBounds(g_clipStack.back());
 			}
 		}
+	}
+
+	// --- Masks ---
+
+	void clearMask(uint8_t value) {
+		if (g_backend == nullptr) {
+			return;
+		}
+		if (g_batchRenderer != nullptr && g_batchRenderer->getMask().mode != MaskMode::Off) {
+			g_batchRenderer->flush();
+		}
+		g_backend->clearMask(value);
+	}
+
+	void setMask(const Mask& mask) {
+		if (g_batchRenderer == nullptr || mask == g_batchRenderer->getMask()) {
+			return;
+		}
+		if (g_batchRenderer->inBakedPass()) {
+			static bool warned = false;
+			if (!warned) {
+				warned = true;
+				LOG_ERROR(Renderer, "setMask inside a baked pass is refused; set it around the pass (logged once)");
+			}
+			return;
+		}
+		if (mask.mode != MaskMode::Off && !g_backend->hasMask()) {
+			static bool warned = false;
+			if (!warned) {
+				warned = true;
+				LOG_ERROR(Renderer, "setMask: the bound target has no mask; refused (logged once)");
+			}
+			return;
+		}
+		g_batchRenderer->setMask(mask);
+	}
+
+	Mask getMask() {
+		return g_batchRenderer != nullptr ? g_batchRenderer->getMask() : Mask{};
 	}
 
 	// --- Transform Stack ---

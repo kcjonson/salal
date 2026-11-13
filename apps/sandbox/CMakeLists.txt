@@ -8,6 +8,7 @@ add_executable(salal_sandbox
     scenes/BorderScene.cpp
     scenes/FillHookScene.cpp
     scenes/InputTestScene.cpp
+    scenes/MaskScene.cpp
     scenes/PerfQuadsScene.cpp
     scenes/PerfTextScene.cpp
     scenes/PerfUiScene.cpp

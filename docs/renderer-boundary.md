@@ -161,16 +161,18 @@ struct HookUniformBlock { const char* hook; const char* block; uint32_t binding;
 struct FillHook { const char* hook; uint32_t index; }; // one per fill hook, from the generated header
 struct ShaderSource { const char* vertex; const char* fragment; std::span<const HookUniformBlock> hookBlocks; std::span<const FillHook> fillHooks; }; // GLSL text, assembled at build time; file names under shaders/ until the hooks
 struct GeometryDesc { VertexLayout layout; BufferHandle vertices, indices, instances; };
-struct DrawCall { PipelineHandle pipeline; GeometryHandle geometry; BlendState blend; TextureHandle texture; uint32_t indexOffset; uint32_t indexCount; uint32_t instanceCount; };
+struct MaskState { MaskMode mode; uint8_t value; MaskCompare compare; }; // the stencil mask (masks.md): Off, Write or Test
+struct DrawCall { PipelineHandle pipeline; GeometryHandle geometry; BlendState blend; MaskState mask; TextureHandle texture; uint32_t indexOffset; uint32_t indexCount; uint32_t instanceCount; };
 struct DrawUniforms { /* the 10 non-sampler uniforms, the std140 block in shaders/includes/uniforms.glsl: 176 bytes (16 and 208 until the grass deform left), every offset static_asserted */ };
-class Backend { // one per context; depth off, cull off and no scissor are fixed state, set at creation, beginFrame and invalidateState
+class Backend { // one per context; depth off, cull off, no scissor and no stencil test are fixed state, set at creation, beginFrame and invalidateState
 	virtual void beginFrame() = 0;
 	virtual void endFrame() = 0;
 	virtual void setWindowSize(int width, int height) = 0; // what setRenderTarget({}) restores and readPixels({}) reads
 	virtual void clear(const Color&) = 0;
 	virtual void invalidateState() = 0;
 	virtual TextureHandle createTexture(const TextureDesc&) = 0; // plus updateTexture
-	virtual RenderTargetHandle createRenderTarget(TextureHandle colour) = 0; // the texture stays the caller's
+	virtual void clearMask(uint8_t value) = 0; // plus hasMask(), for the bound target
+	virtual RenderTargetHandle createRenderTarget(TextureHandle colour, bool mask) = 0; // the texture stays the caller's; a mask is a stencil attachment
 	virtual void setRenderTarget(RenderTargetHandle) = 0; // {} is the window
 	virtual void readPixels(RenderTargetHandle, std::span<uint8_t>) = 0; // synchronous, stalls by design
 	virtual BufferHandle createBuffer(BufferUsage, size_t bytes, const void* data) = 0;
@@ -180,7 +182,7 @@ class Backend { // one per context; depth off, cull off and no scissor are fixed
 	virtual void setUniforms(const DrawUniforms&) = 0; // new values take fresh storage, so a draw in flight keeps its own
 	virtual void setHookUniforms(uint32_t binding, std::span<const std::byte>) = 0; // a hook's block, the same way, on its binding point
 	virtual void draw(std::span<const DrawCall>) = 0; // one submission
-	virtual void beginForeignDraws(PipelineHandle, BlendState) = 0; // the baked pass's own VAO draws, until endForeignDraws()
+	virtual void beginForeignDraws(PipelineHandle, BlendState, const MaskState&) = 0; // the baked pass's own VAO draws, until endForeignDraws()
 	virtual void endForeignDraws() = 0;
 	virtual QueryHandle createTimestampQuery() = 0; // plus writeTimestamp, timestampReady, timestampNs, and destroy* per handle type
 };
