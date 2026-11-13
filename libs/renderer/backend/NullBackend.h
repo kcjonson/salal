@@ -61,6 +61,12 @@ namespace Renderer::backend {
 			int			  height = 0;
 		};
 
+		// One clearStencil(): the bits it zeroed, and how many draws were recorded before it.
+		struct StencilClear {
+			uint8_t bits = 0;
+			size_t	drawsBefore = 0;
+		};
+
 		// Live objects of each kind.
 		struct Counts {
 			size_t textures = 0;
@@ -77,8 +83,8 @@ namespace Renderer::backend {
 		void endFrame() override {}
 		void setWindowSize(int width, int height) override;
 		void clear(const Foundation::Color& color) override { clearColors.push_back(color); }
-		void clearMask(uint8_t value) override;
-		bool hasMask() const override;
+		void clearStencil(uint8_t bits) override;
+		bool hasStencil() const override;
 		void invalidateState() override { ++invalidationCount; }
 
 		TextureHandle createTexture(const TextureDesc& desc) override;
@@ -86,7 +92,7 @@ namespace Renderer::backend {
 		void		  destroyTexture(TextureHandle texture) override { textureTable.erase(texture); }
 		bool		  hasTexture(TextureHandle texture) const override { return textureTable.find(texture) != nullptr; }
 
-		RenderTargetHandle createRenderTarget(TextureHandle colour, bool mask) override;
+		RenderTargetHandle createRenderTarget(TextureHandle colour, bool withStencil) override;
 		void			   setRenderTarget(RenderTargetHandle target) override;
 		void			   readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) override;
 		void			   destroyRenderTarget(RenderTargetHandle target) override { targetTable.erase(target); }
@@ -104,7 +110,7 @@ namespace Renderer::backend {
 		void setUniforms(const DrawUniforms& uniforms) override;
 		void setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) override;
 		void draw(std::span<const DrawCall> calls) override;
-		void beginForeignDraws(PipelineHandle pipeline, BlendState blend, const MaskState& mask) override;
+		void beginForeignDraws(PipelineHandle pipeline, BlendState blend) override;
 		void endForeignDraws() override { ++foreignDrawEnds; }
 
 		QueryHandle createTimestampQuery() override { return queryTable.insert(false); }
@@ -131,13 +137,11 @@ namespace Renderer::backend {
 		[[nodiscard]] int			 foreignDrawsBegun() const { return foreignDrawBegins; }
 		[[nodiscard]] PipelineHandle foreignPipeline() const { return lastForeignPipeline; }
 		[[nodiscard]] int			 foreignDrawsEnded() const { return foreignDrawEnds; }
-		// The mask the last beginForeignDraws() drew in.
-		[[nodiscard]] const MaskState& foreignMask() const { return lastForeignMask; }
-		// The values clearMask() set on a target with a mask, in order.
-		[[nodiscard]] const std::vector<uint8_t>& maskClears() const { return maskClearValues; }
+		// clearStencil() calls on a target with a stencil buffer, in order.
+		[[nodiscard]] const std::vector<StencilClear>& stencilClears() const { return stencilClearRecord; }
 
-		// Whether the window has a mask, as a GL window made with stencil bits does; true until set.
-		void setWindowMask(bool mask) { windowMask = mask; }
+		// Whether the window has a stencil buffer, as a GL window made with stencil bits does; true until set.
+		void setWindowStencil(bool stencil) { windowStencil = stencil; }
 
 		// The buffer's bytes as last written; empty for an invalid or stale handle.
 		[[nodiscard]] std::span<const uint8_t> bufferContents(BufferHandle buffer) const;
@@ -161,7 +165,7 @@ namespace Renderer::backend {
 		SlotTable<TextureHandle, TextureDesc> textureTable;
 		struct TargetRecord {
 			TextureHandle colour;
-			bool		  mask = false;
+			bool		  stencil = false;
 		};
 
 		SlotTable<RenderTargetHandle, TargetRecord> targetTable;
@@ -183,10 +187,9 @@ namespace Renderer::backend {
 		DrawUniforms					currentUniforms;
 		std::pair<int, int>				window{0, 0};
 		PipelineHandle					lastForeignPipeline;
-		MaskState						lastForeignMask;
-		std::vector<uint8_t>			maskClearValues;
+		std::vector<StencilClear>		stencilClearRecord;
 		RenderTargetHandle				boundTarget;
-		bool							windowMask = true;
+		bool							windowStencil = true;
 		int								frameCount = 0;
 		int								invalidationCount = 0;
 		int								timestampCount = 0;

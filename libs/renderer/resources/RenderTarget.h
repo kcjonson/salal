@@ -27,25 +27,22 @@ namespace Renderer {
 		RenderTarget(RenderTarget&&) noexcept;
 		RenderTarget& operator=(RenderTarget&&) noexcept;
 
-		// What a target draws into: a colour texture, and with ColourAndMask an 8-bit mask
-		// of its own for Primitives::setMask (docs/masks.md).
-		enum class Attachments : uint8_t { Colour, ColourAndMask };
+		// What a target draws into: a colour texture, and with ColourAndStencil an 8-bit
+		// stencil buffer, which a draw with a CSS mask needs (docs/masks.md).
+		enum class Attachments : uint8_t { Colour, ColourAndStencil };
 
 		// A width x height target with one colour attachment in `format`, its
-		// contents undefined until cleared, its mask too; invalid, with an error logged,
-		// if the framebuffer cannot be completed.
+		// contents undefined until cleared; invalid, with an error logged, if the
+		// framebuffer cannot be completed.
 		static RenderTarget
 		create(int width, int height, TextureFormat format = TextureFormat::Rgba8, Attachments attachments = Attachments::Colour);
 
 		[[nodiscard]] bool isValid() const { return impl != nullptr; }
 
-		// Bind as the current target, viewport over the whole texture, with no mask set:
-		// the mask in force is turned off first (its pending draws flushed where they were
-		// added), and end() sets it again.
+		// Bind as the current target, viewport over the whole texture.
 		void begin();
 
-		// Rebind the target below (the backbuffer at the bottom) and its viewport, with
-		// the mask that was set at begin(); a mask set inside is turned off first. An
+		// Rebind the target below (the backbuffer at the bottom) and its viewport. An
 		// end() while an inner target is still open is refused (logged once) and the
 		// target stays begun, so ending the inner one and then this one recovers.
 		void end();

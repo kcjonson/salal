@@ -1,6 +1,6 @@
 #pragma once
 
-// GLRenderbuffer - RAII wrapper for an OpenGL renderbuffer, a render target's mask.
+// GLRenderbuffer - RAII wrapper for an OpenGL renderbuffer, a render target's stencil buffer.
 
 #include <GL/glew.h>
 

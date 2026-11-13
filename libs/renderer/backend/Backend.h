@@ -67,23 +67,26 @@ namespace Renderer::backend {
 	// BatchRenderer.h), so mixing the two never splits a draw.
 	enum class BlendState : uint8_t { Alpha };
 
-	// What a draw does with the bound target's 8-bit stencil buffer, the mask
-	// (docs/masks.md). Off: nothing, the fixed state. Write: every fragment the draw
-	// lands sets the mask to `value`, whatever its alpha, and writes no colour. Test:
-	// the draw lands only where the stored mask compares to `value` as `compare` says,
-	// and leaves the mask as it is.
-	enum class MaskMode : uint8_t { Off, Write, Test };
+	// The stencil test's function: a fragment passes when (reference & readMask) OP
+	// (stored & readMask).
+	enum class StencilFunction : uint8_t { Always, Equal };
 
-	// How Test compares the stored mask against the draw's value: Less lands where the
-	// stored mask is below the value.
-	enum class MaskCompare : uint8_t { Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual };
+	// What a fragment does to the stored stencil value, under the write mask.
+	enum class StencilOperation : uint8_t { Keep, Zero, Replace, Invert };
 
-	struct MaskState {
-		MaskMode	mode = MaskMode::Off;
-		uint8_t		value = 0;
-		MaskCompare compare = MaskCompare::Equal; // Test's only
+	// A draw's use of the bound target's 8-bit stencil buffer, which the batch builds a
+	// CSS mask in (docs/masks.md). Off (`test` false) is the fixed state. With depth
+	// testing off, `pass` applies to every fragment that passes the stencil test.
+	struct StencilState {
+		bool			 test = false;
+		StencilFunction	 function = StencilFunction::Always;
+		uint8_t			 reference = 0;
+		uint8_t			 readMask = 0xFF;
+		uint8_t			 writeMask = 0xFF;
+		StencilOperation fail = StencilOperation::Keep;
+		StencilOperation pass = StencilOperation::Keep;
 
-		bool operator==(const MaskState&) const = default;
+		bool operator==(const StencilState&) const = default;
 	};
 
 	// A member of a hook's uniform block, as the generated header names it: its name as GL
@@ -149,7 +152,8 @@ namespace Renderer::backend {
 		PipelineHandle							 pipeline;
 		GeometryHandle							 geometry;
 		BlendState								 blend = BlendState::Alpha;
-		MaskState								 mask{};
+		StencilState							 stencil{};
+		bool									 writeColour = true; // false writes the stencil alone
 		std::array<TextureHandle, kTextureSlots> textures{};
 		uint32_t								 indexOffset = 0;
 		uint32_t								 indexCount = 0;
@@ -196,10 +200,10 @@ namespace Renderer::backend {
 	//
 	// State: depth test, culling, scissor and stencil test are off and every colour
 	// channel and stencil bit is written, fixed state set at creation, beginFrame() and
-	// invalidateState(). A draw's mask sets the stencil state it needs and draw() puts
-	// the fixed state back before it returns, so no mask outlives its submission.
-	// Bindings (pipeline, geometry, texture, blend) are made by each draw() and assumed to survive nothing outside
-	// it, because a game's own GPU code runs between the renderer's submissions. The
+	// invalidateState(). A draw's stencil state and colour writes are set by draw(), which
+	// puts the fixed state back before it returns, so neither outlives its submission.
+	// Bindings (pipeline, geometry, texture, blend) are made by each draw() and assumed
+	// to survive nothing outside it, because a game's own GPU code runs between the renderer's submissions. The
 	// one exception is the uniforms: setUniforms() binds them to uniform binding point
 	// 0 and setHookUniforms() the hooks' blocks to points 1 up, which are the
 	// renderer's, and draws read them there, so a game's GL that binds a uniform buffer
@@ -226,12 +230,13 @@ namespace Renderer::backend {
 		// Clear the bound target's colour to `color` exactly (the caller premultiplies).
 		virtual void clear(const Foundation::Color& color) = 0;
 
-		// Set the bound target's whole mask to `value`; nothing on a target with no mask.
-		virtual void clearMask(uint8_t value) = 0;
+		// Zero the stencil bits in `bits` across the bound target, leaving the others; nothing
+		// on a target with no stencil buffer.
+		virtual void clearStencil(uint8_t bits) = 0;
 
-		// Whether the bound target has a mask: the window when it was made with stencil
-		// bits, a render target when it was made with one.
-		[[nodiscard]] virtual bool hasMask() const = 0;
+		// Whether the bound target has an 8-bit stencil buffer: the window when it was made
+		// with one, a render target when it was made with ColourAndStencil.
+		[[nodiscard]] virtual bool hasStencil() const = 0;
 
 		// GPU code outside the renderer changed the fixed state or a uniform binding point
 		// the renderer's blocks read; set both again.
@@ -250,8 +255,8 @@ namespace Renderer::backend {
 		// --- Render targets ---
 
 		// A target drawing into `colour`, which stays the caller's to destroy (after the
-		// target), with an 8-bit mask of its own when `mask`.
-		virtual RenderTargetHandle createRenderTarget(TextureHandle colour, bool mask) = 0;
+		// target), with an 8-bit stencil buffer of its own when `stencil`.
+		virtual RenderTargetHandle createRenderTarget(TextureHandle colour, bool stencil) = 0;
 		// Bind `target`, {} for the window, with a viewport over all of it.
 		virtual void setRenderTarget(RenderTargetHandle target) = 0;
 		// The target's colour ({} the window's) as RGBA8, bottom row first, into
@@ -302,11 +307,11 @@ namespace Renderer::backend {
 		// their points (and, on GL, the generic buffer bindings its writes used).
 		virtual void draw(std::span<const DrawCall> calls) = 0;
 
-		// Bind `pipeline` in `blend` and `mask` for draws the caller issues itself, from
-		// its own vertex arrays, until endForeignDraws(), which puts the fixed state back:
-		// worldsim's baked chunk meshes under the base shader (docs/renderer-boundary.md,
-		// question 2). setUniforms() between those draws applies from the next one.
-		virtual void beginForeignDraws(PipelineHandle pipeline, BlendState blend, const MaskState& mask) = 0;
+		// Bind `pipeline` in `blend` for draws the caller issues itself, from its own
+		// vertex arrays, until endForeignDraws(): worldsim's baked chunk meshes under
+		// the base shader (docs/renderer-boundary.md, question 2). setUniforms()
+		// between those draws applies from the next one.
+		virtual void beginForeignDraws(PipelineHandle pipeline, BlendState blend) = 0;
 		virtual void endForeignDraws() = 0;
 
 		// --- Timestamp queries ---

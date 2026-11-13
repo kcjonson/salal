@@ -161,8 +161,8 @@ struct HookUniformBlock { const char* hook; const char* block; uint32_t binding;
 struct FillHook { const char* hook; uint32_t index; }; // one per fill hook, from the generated header
 struct ShaderSource { const char* vertex; const char* fragment; std::span<const HookUniformBlock> hookBlocks; std::span<const FillHook> fillHooks; }; // GLSL text, assembled at build time; file names under shaders/ until the hooks
 struct GeometryDesc { VertexLayout layout; BufferHandle vertices, indices, instances; };
-struct MaskState { MaskMode mode; uint8_t value; MaskCompare compare; }; // the stencil mask (masks.md): Off, Write or Test
-struct DrawCall { PipelineHandle pipeline; GeometryHandle geometry; BlendState blend; MaskState mask; TextureHandle texture; uint32_t indexOffset; uint32_t indexCount; uint32_t instanceCount; };
+struct StencilState { bool test; StencilFunction function; uint8_t reference, readMask, writeMask; StencilOperation fail, pass; }; // what a CSS mask's build and test use (masks.md); test off is the fixed state
+struct DrawCall { PipelineHandle pipeline; GeometryHandle geometry; BlendState blend; StencilState stencil; bool writeColour; TextureHandle texture; uint32_t indexOffset; uint32_t indexCount; uint32_t instanceCount; };
 struct DrawUniforms { /* the 10 non-sampler uniforms, the std140 block in shaders/includes/uniforms.glsl: 176 bytes (16 and 208 until the grass deform left), every offset static_asserted */ };
 class Backend { // one per context; depth off, cull off, no scissor and no stencil test are fixed state, set at creation, beginFrame and invalidateState
 	virtual void beginFrame() = 0;
@@ -171,8 +171,8 @@ class Backend { // one per context; depth off, cull off, no scissor and no stenc
 	virtual void clear(const Color&) = 0;
 	virtual void invalidateState() = 0;
 	virtual TextureHandle createTexture(const TextureDesc&) = 0; // plus updateTexture
-	virtual void clearMask(uint8_t value) = 0; // plus hasMask(), for the bound target
-	virtual RenderTargetHandle createRenderTarget(TextureHandle colour, bool mask) = 0; // the texture stays the caller's; a mask is a stencil attachment
+	virtual void clearStencil(uint8_t bits) = 0; // those bits to 0 across the bound target; plus hasStencil()
+	virtual RenderTargetHandle createRenderTarget(TextureHandle colour, bool withStencil) = 0; // the texture stays the caller's
 	virtual void setRenderTarget(RenderTargetHandle) = 0; // {} is the window
 	virtual void readPixels(RenderTargetHandle, std::span<uint8_t>) = 0; // synchronous, stalls by design
 	virtual BufferHandle createBuffer(BufferUsage, size_t bytes, const void* data) = 0;
@@ -182,7 +182,7 @@ class Backend { // one per context; depth off, cull off, no scissor and no stenc
 	virtual void setUniforms(const DrawUniforms&) = 0; // new values take fresh storage, so a draw in flight keeps its own
 	virtual void setHookUniforms(uint32_t binding, std::span<const std::byte>) = 0; // a hook's block, the same way, on its binding point
 	virtual void draw(std::span<const DrawCall>) = 0; // one submission
-	virtual void beginForeignDraws(PipelineHandle, BlendState, const MaskState&) = 0; // the baked pass's own VAO draws, until endForeignDraws()
+	virtual void beginForeignDraws(PipelineHandle, BlendState) = 0; // the baked pass's own VAO draws, until endForeignDraws()
 	virtual void endForeignDraws() = 0;
 	virtual QueryHandle createTimestampQuery() = 0; // plus writeTimestamp, timestampReady, timestampNs, and destroy* per handle type
 };
@@ -286,7 +286,7 @@ a new batch entry:
 | arc or ring with partial fill | one quad in a new SDF mode, `data2 = (innerR, outerR, sweep / 2, mode)`, the start angle folded into the quad's local coordinates (turned so the arc's middle lies along +x), next to text and shadow in `base.frag` | yes: one render-mode constant and about twenty lines of GLSL; `drawCircle` draws its disk and border in this mode too, where a 64-segment fan faceted at HUD radii |
 | line with width, polyline | `drawLine` is already a rotated quad; `drawPolyline({points, width, color, cap, join, closed})` is a convex SDF piece per segment, a capsule or a box run on to the miter point, cut along each joint's bisector so neighbours share the cut's two end points as the same floats and the rasteriser gives each pixel to one piece; joins round or miter (exact up to a right-angle turn, round past it), caps butt, round or square; a translucent stroke covers each pixel once except where it crosses itself, at a segment too short for its joints' cuts, and within about 8.6 degrees of a hairpin; points within a quarter of a device pixel of the line drawn without them are dropped first, so sub-pixel input noise leaves no such short segments | no |
 | silhouette stroke, rim light | `drawPolygon` with `style.border`: a closed stroke with miter joins, its outer edge the border's width outside the outline and its inner edge a pixel inside, over the fill's edge; it is drawPolyline's stroke, so its pieces overlap where drawPolyline's do; a notch is mitered into its corner, except beside an edge too short for its cut, where it is round with a flat piece into the corner | no |
-| clip by silhouette, hold-fill | the fill rises, so it is the polygon under a rect clip, which the fast per-vertex path already does; the stencil path clip stays unbuilt | no |
+| clip by silhouette, hold-fill | the fill rises, so it is the polygon under a rect clip, which the fast per-vertex path already does; a clip to any vector shape is a CSS mask on a rect ([masks.md](masks.md)), built in the stencil | no |
 | transform stack for wrap ghosts | exists: `PushTransform`, baked at add time; draw an entity up to four times | no |
 | fixed-aspect viewport with letterboxing | a scale-and-translate transform plus a rect clip pushed at frame start; the backend viewport stays full | no |
 | bloom, additive glow | `RenderTarget` + additive blend + `drawImage(texture, rect)` as a plain-sample render mode; the blur is a second pipeline, the first after the base shader, its source built in at build time as the base shader's is (`createPipeline` takes text since the hooks), Quick Run or later | `drawImage` yes; the blur later |

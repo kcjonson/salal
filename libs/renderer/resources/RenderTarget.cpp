@@ -43,7 +43,6 @@ namespace Renderer {
 		int				   width = 0;
 		int				   height = 0;
 		bool			   inUse = false;
-		Primitives::Mask   outerMask; // the mask in force at begin(), which end() sets again
 
 		Impl() = default;
 
@@ -86,7 +85,7 @@ namespace Renderer {
 		if (!impl->texture.isValid()) {
 			return target;
 		}
-		impl->target = gpu->createRenderTarget(impl->texture.handle(), attachments == Attachments::ColourAndMask);
+		impl->target = gpu->createRenderTarget(impl->texture.handle(), attachments == Attachments::ColourAndStencil);
 		if (!impl->target.isValid()) {
 			return target; // the Impl frees the texture
 		}
@@ -99,8 +98,6 @@ namespace Renderer {
 		if (!impl || impl->inUse) {
 			return;
 		}
-		impl->outerMask = Primitives::getMask();
-		Primitives::setMask({});
 		stack().push_back(impl->target);
 		if (backend::Backend* gpu = backend::active(); gpu != nullptr) {
 			gpu->setRenderTarget(impl->target);
@@ -112,14 +109,9 @@ namespace Renderer {
 		if (!impl || !impl->inUse) {
 			return;
 		}
-		if (stack().back() != impl->target) {
-			pop(impl->target); // refused and logged; the mask stays as it is
-			return;
+		if (pop(impl->target)) {
+			impl->inUse = false;
 		}
-		Primitives::setMask({});
-		pop(impl->target);
-		impl->inUse = false;
-		Primitives::setMask(impl->outerMask);
 	}
 
 	TextureHandle RenderTarget::texture() const {

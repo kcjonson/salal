@@ -26,8 +26,8 @@ namespace Renderer::backend {
 		}
 	}
 
-	RenderTargetHandle NullBackend::createRenderTarget(TextureHandle colour, bool mask) {
-		return textureTable.find(colour) != nullptr ? targetTable.insert({.colour = colour, .mask = mask}) : RenderTargetHandle{};
+	RenderTargetHandle NullBackend::createRenderTarget(TextureHandle colour, bool withStencil) {
+		return textureTable.find(colour) != nullptr ? targetTable.insert({.colour = colour, .stencil = withStencil}) : RenderTargetHandle{};
 	}
 
 	void NullBackend::setRenderTarget(RenderTargetHandle target) {
@@ -35,15 +35,15 @@ namespace Renderer::backend {
 		boundTarget = targetTable.find(target) != nullptr ? target : RenderTargetHandle{};
 	}
 
-	void NullBackend::clearMask(uint8_t value) {
-		if (hasMask()) {
-			maskClearValues.push_back(value);
+	void NullBackend::clearStencil(uint8_t bits) {
+		if (hasStencil()) {
+			stencilClearRecord.push_back({.bits = bits, .drawsBefore = recordedDraws.size()});
 		}
 	}
 
-	bool NullBackend::hasMask() const {
+	bool NullBackend::hasStencil() const {
 		const TargetRecord* target = targetTable.find(boundTarget);
-		return target != nullptr ? target->mask : windowMask;
+		return target != nullptr ? target->stencil : windowStencil;
 	}
 
 	void NullBackend::readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) {
@@ -162,10 +162,9 @@ namespace Renderer::backend {
 		++submissionCount;
 	}
 
-	void NullBackend::beginForeignDraws(PipelineHandle pipeline, BlendState /*blend*/, const MaskState& mask) {
+	void NullBackend::beginForeignDraws(PipelineHandle pipeline, BlendState /*blend*/) {
 		++foreignDrawBegins;
 		lastForeignPipeline = pipeline;
-		lastForeignMask = mask;
 	}
 
 	void NullBackend::writeTimestamp(QueryHandle query) {
@@ -203,7 +202,7 @@ namespace Renderer::backend {
 		targetBinds.clear();
 		updates.clear();
 		clearColors.clear();
-		maskClearValues.clear();
+		stencilClearRecord.clear();
 		frameCount = 0;
 		invalidationCount = 0;
 		timestampCount = 0;
@@ -213,7 +212,6 @@ namespace Renderer::backend {
 		foreignDrawBegins = 0;
 		foreignDrawEnds = 0;
 		lastForeignPipeline = {};
-		lastForeignMask = {};
 	}
 
 } // namespace Renderer::backend

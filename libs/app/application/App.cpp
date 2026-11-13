@@ -1,7 +1,6 @@
 #include "application/App.h"
 
 #include "detail/Guard.h"
-#include "detail/MaskBarrier.h"
 #include "storage/UserDirectories.h"
 
 #include <primitives/Primitives.h>
@@ -608,7 +607,6 @@ namespace app {
 		for (const std::unique_ptr<DebugLayer>& layer : debugLayers) {
 			Renderer::Primitives::sortBarrier();
 			detail::guard("DebugLayer", "render", [&] { layer->render(); });
-			detail::endMask("DebugLayer", "render");
 		}
 
 		Renderer::Primitives::endFrame();

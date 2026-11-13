@@ -1,12 +1,13 @@
-// Masks (docs/masks.md): what reaches the backend, headless on the null backend, and what the
-// pixels hold, drawn through Primitives into a RenderTarget with a mask on a hidden GL 3.3 core
-// context and read back (skipped where no context can be made).
+// CSS masks on drawRect (docs/masks.md): what reaches the backend, headless on the null backend, and
+// what the pixels hold, drawn through Primitives into a RenderTarget with a stencil buffer on a hidden
+// GL 3.3 core context and read back (skipped where no context can be made).
 
 #include "primitives/Primitives.h"
 
 #include "BaseShader.h"
 #include "backend/NullBackend.h"
 #include "backend/gl/GLBackend.h"
+#include "primitives/BatchRenderer.h"
 #include "resources/RenderTarget.h"
 #include "vector/Types.h"
 
@@ -26,25 +27,18 @@
 
 namespace Renderer {
 
-	using Primitives::Mask;
-	using Primitives::MaskCompare;
-	using Primitives::MaskMode;
+	using Primitives::MaskComposite;
+	using Primitives::MaskImage;
+	using Primitives::MaskLayer;
 
 	namespace {
-		constexpr Mask write(uint8_t value) {
-			return {.mode = MaskMode::Write, .value = value};
+		// The four corners of an axis-aligned square, as a polygon outline.
+		std::array<Foundation::Vec2, 4> square(float left, float top, float right, float bottom) {
+			return {{{left, top}, {right, top}, {right, bottom}, {left, bottom}}};
 		}
 
-		constexpr Mask test(uint8_t value, MaskCompare compare = MaskCompare::Equal) {
-			return {.mode = MaskMode::Test, .value = value, .compare = compare};
-		}
-
-		void rect(float x, float y, float width, float height, const Foundation::Color& color, int32_t key = 0) {
-			Primitives::drawRect({.bounds = {x, y, width, height}, .style = {.fill = color}, .key = key});
-		}
-
-		// A width x height rectangle from the origin, for drawInstanced.
-		renderer::TessellatedMesh square(float width, float height) {
+		// A width x height rectangle from the origin, for uploadInstancedMesh.
+		renderer::TessellatedMesh rectangleMesh(float width, float height) {
 			renderer::TessellatedMesh mesh;
 			mesh.vertices = {{0.0F, 0.0F}, {width, 0.0F}, {width, height}, {0.0F, height}};
 			mesh.indices = {0, 1, 2, 0, 2, 3};
@@ -54,7 +48,7 @@ namespace Renderer {
 
 	// --- On the null backend ---
 
-	class MaskFlushTest : public ::testing::Test {
+	class MaskBatchTest : public ::testing::Test {
 	  protected:
 		void SetUp() override {
 			auto owned = std::make_unique<backend::NullBackend>();
@@ -68,128 +62,148 @@ namespace Renderer {
 
 		void TearDown() override { Primitives::shutdown(); }
 
+		static void rect(float x, std::span<const MaskLayer> mask, int32_t key = 0) {
+			Primitives::drawRect({.bounds = {x, 0.0F, 4.0F, 4.0F}, .style = {.fill = Foundation::Color::red()}, .mask = mask, .key = key});
+		}
+
+		// The draws that write colour: the masked and unmasked runs, not the mask builds.
+		std::vector<backend::NullBackend::RecordedDraw> colourDraws() const {
+			std::vector<backend::NullBackend::RecordedDraw> drawn;
+			for (const backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
+				if (draw.call.writeColour) {
+					drawn.push_back(draw);
+				}
+			}
+			return drawn;
+		}
+
+		// The batch's upload, as the last flush wrote it.
+		std::vector<BatchInstance> uploaded() const {
+			const backend::GeometryDesc*   geometry = gpu->geometry(gpu->draws().front().call.geometry);
+			const std::span<const uint8_t> bytes = gpu->bufferContents(geometry->vertices);
+			std::vector<BatchInstance>	   quads(bytes.size() / sizeof(BatchInstance));
+			std::memcpy(quads.data(), bytes.data(), quads.size() * sizeof(BatchInstance));
+			return quads;
+		}
+
 		backend::NullBackend* gpu = nullptr;
 	};
 
-	TEST_F(MaskFlushTest, AChangeFlushesWhatWasAddedUnderTheMaskBeforeIt) {
-		rect(0.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red());
-		Primitives::setMask(write(1));
-		ASSERT_EQ(gpu->draws().size(), 1U);
-		EXPECT_EQ(gpu->draws()[0].call.mask, Mask{});
-
-		rect(0.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red());
-		Primitives::setMask(write(1)); // no change, no flush
-		EXPECT_EQ(gpu->draws().size(), 1U);
-		Primitives::setMask(test(1));
-		ASSERT_EQ(gpu->draws().size(), 2U);
-		EXPECT_EQ(gpu->draws()[1].call.mask, write(1));
-
-		rect(0.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red());
-		Primitives::setMask({});
-		ASSERT_EQ(gpu->draws().size(), 3U);
-		EXPECT_EQ(gpu->draws()[2].call.mask, test(1));
-		EXPECT_EQ(Primitives::getMask(), Mask{});
-	}
-
-	TEST_F(MaskFlushTest, AChangeIsAnOrderBoundaryWhateverTheKeys) {
-		Primitives::setMask(write(1));
-		rect(0.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red(), 100);
-		Primitives::setMask(test(1));
-		rect(10.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red(), -100);
-		rect(20.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red(), -200);
+	TEST_F(MaskBatchTest, EqualMasksInternOnceAndShareOneBuild) {
+		const std::array<Foundation::Vec2, 4> first = square(0.0F, 0.0F, 8.0F, 8.0F);
+		const std::array<Foundation::Vec2, 4> copy = first; // equal content, other memory
+		const std::array<MaskLayer, 1>		  firstMask = {{{.image = MaskImage::polygon(first)}}};
+		const std::array<MaskLayer, 1>		  copyMask = {{{.image = MaskImage::polygon(copy)}}};
+		rect(0.0F, firstMask);
+		rect(10.0F, copyMask);
 		Primitives::endFrame();
 
-		ASSERT_EQ(gpu->draws().size(), 2U);
-		EXPECT_EQ(gpu->draws()[0].call.mask, write(1));
-		EXPECT_EQ(gpu->draws()[1].call.mask, test(1));
-		// Within the test mask the keys still sort: the -200 rect first.
-		const backend::GeometryDesc*   geometry = gpu->geometry(gpu->draws()[1].call.geometry);
-		const std::span<const uint8_t> bytes = gpu->bufferContents(geometry->vertices);
-		ASSERT_EQ(bytes.size(), 2 * sizeof(BatchInstance));
-		BatchInstance first{};
-		std::memcpy(&first, bytes.data(), sizeof(first));
-		EXPECT_EQ(first.corners[0].x, 20.0F);
+		EXPECT_EQ(gpu->stencilClears().size(), 1U);
+		const std::vector<backend::NullBackend::RecordedDraw> drawn = colourDraws();
+		ASSERT_EQ(drawn.size(), 1U); // both rects in one run
+		EXPECT_EQ(drawn[0].call.instanceCount, 2U);
+		EXPECT_TRUE(drawn[0].call.stencil.test);
+
+		// A different mask builds again.
+		Primitives::beginFrame();
+		gpu->clearRecord();
+		const std::array<Foundation::Vec2, 4> other = square(0.0F, 0.0F, 9.0F, 8.0F);
+		const std::array<MaskLayer, 1>		  otherMask = {{{.image = MaskImage::polygon(other)}}};
+		rect(0.0F, firstMask);
+		rect(10.0F, otherMask);
+		Primitives::endFrame();
+		EXPECT_EQ(gpu->stencilClears().size(), 2U);
+		EXPECT_EQ(colourDraws().size(), 2U);
 	}
 
-	TEST_F(MaskFlushTest, InstancedAndBakedDrawsCarryTheMaskInForce) {
-		InstancedMeshHandle mesh = Primitives::uploadInstancedMesh(square(1.0F, 1.0F), 4);
-		ASSERT_TRUE(mesh.isValid());
-		const InstanceData instance({0.0F, 0.0F}, 0.0F, 1.0F, Foundation::Vec4(1.0F));
-		Primitives::setMask(write(2));
-		Primitives::drawInstanced(mesh, &instance, 1, {});
-		ASSERT_EQ(gpu->draws().size(), 1U);
-		EXPECT_EQ(gpu->draws()[0].call.mask, write(2));
+	TEST_F(MaskBatchTest, AMaskCutsARunAndKeysKeepTheirOrder) {
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::rect({0.0F, 0.0F, 32.0F, 32.0F})}}};
+		rect(20.0F, mask, 2);
+		rect(10.0F, {}, 1);
+		rect(30.0F, mask, 3);
+		Primitives::endFrame();
 
-		Primitives::setMask(test(2, MaskCompare::NotEqual));
-		Primitives::beginBakedPass({});
-		EXPECT_EQ(gpu->foreignMask(), test(2, MaskCompare::NotEqual));
-		Primitives::setMask({}); // refused inside the pass
-		EXPECT_EQ(Primitives::getMask(), test(2, MaskCompare::NotEqual));
-		Primitives::endBakedPass();
-		Primitives::setMask({});
-		EXPECT_EQ(Primitives::getMask(), Mask{});
+		const std::vector<backend::NullBackend::RecordedDraw> drawn = colourDraws();
+		ASSERT_EQ(drawn.size(), 2U);
+		EXPECT_FALSE(drawn[0].call.stencil.test);
+		EXPECT_TRUE(drawn[1].call.stencil.test);
+		const std::vector<BatchInstance> quads = uploaded();
+		ASSERT_GE(quads.size(), 3U);
+		EXPECT_EQ(quads[0].corners[0].x, 10.0F); // key 1
+		EXPECT_EQ(quads[1].corners[0].x, 20.0F); // key 2
+		EXPECT_EQ(quads[2].corners[0].x, 30.0F); // key 3
+		EXPECT_EQ(drawn[1].call.firstInstance, 1U);
+		EXPECT_EQ(drawn[1].call.instanceCount, 2U);
+		// One build, before the masked run: an equal mask on both sides of the key sort.
+		ASSERT_EQ(gpu->stencilClears().size(), 1U);
 	}
 
-	TEST_F(MaskFlushTest, ClearFlushesOnlyDrawsAddedUnderAMask) {
-		rect(0.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red());
-		Primitives::clearMask(3);
-		EXPECT_TRUE(gpu->draws().empty());
-		Primitives::setMask(write(1));
-		rect(0.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red());
-		Primitives::clearMask(0);
-		ASSERT_EQ(gpu->draws().size(), 2U);
-		EXPECT_EQ(gpu->draws()[1].call.mask, write(1));
-		EXPECT_EQ(gpu->maskClears(), (std::vector<uint8_t>{3, 0}));
+	TEST_F(MaskBatchTest, LayersAreCopiedAtTheCallAndDrawnUnclippedWithNoColour) {
+		std::array<Foundation::Vec2, 4> outline = square(0.0F, 0.0F, 6.0F, 6.0F);
+		const std::array<MaskLayer, 1>	mask = {{{.image = MaskImage::polygon(outline)}}};
+		Primitives::pushClip({0.0F, 0.0F, 2.0F, 2.0F});
+		rect(0.0F, mask);
+		Primitives::popClip();
+		outline = square(40.0F, 40.0F, 50.0F, 50.0F); // after the call: the mask already holds the first outline
+		Primitives::endFrame();
+
+		const std::vector<BatchInstance> quads = uploaded();
+		bool							 sawLayer = false;
+		for (const backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
+			if (draw.call.writeColour) {
+				continue;
+			}
+			sawLayer = true;
+			for (uint32_t index = draw.call.firstInstance; index < draw.call.firstInstance + draw.call.instanceCount; ++index) {
+				EXPECT_EQ(quads[index].clip, Foundation::Vec4(0.0F));
+				for (const Foundation::Vec2& corner : quads[index].corners) {
+					EXPECT_LE(corner.x, 6.0F);
+					EXPECT_LE(corner.y, 6.0F);
+				}
+			}
+		}
+		EXPECT_TRUE(sawLayer);
 	}
 
-	TEST_F(MaskFlushTest, ATargetWithNoMaskRefusesOne) {
+	TEST_F(MaskBatchTest, AMaskedDrawOnATargetWithNoStencilDrawsNothing) {
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::rect({0.0F, 0.0F, 32.0F, 32.0F})}}};
+		gpu->setWindowStencil(false);
+		rect(0.0F, mask);
+		rect(10.0F, {});
+		Primitives::endFrame();
+		const std::vector<backend::NullBackend::RecordedDraw> drawn = colourDraws();
+		ASSERT_EQ(drawn.size(), 1U);
+		EXPECT_FALSE(drawn[0].call.stencil.test);
+		EXPECT_TRUE(gpu->stencilClears().empty());
+
+		// A render target made without one, decided at the flush against the target bound then.
+		gpu->setWindowStencil(true);
 		RenderTarget plain = RenderTarget::create(8, 8);
 		ASSERT_TRUE(plain.isValid());
-		plain.begin();
-		Primitives::setMask(write(1));
-		EXPECT_EQ(Primitives::getMask(), Mask{});
-		Primitives::clearMask(1);
-		EXPECT_TRUE(gpu->maskClears().empty());
-		plain.end();
-
-		gpu->setWindowMask(false);
-		Primitives::setMask(write(1));
-		EXPECT_EQ(Primitives::getMask(), Mask{});
-	}
-
-	TEST_F(MaskFlushTest, ATargetBeginsWithNoMaskAndEndsWithTheOneItWasBegunIn) {
-		RenderTarget masked = RenderTarget::create(8, 8, TextureFormat::Rgba8, RenderTarget::Attachments::ColourAndMask);
-		ASSERT_TRUE(masked.isValid());
-		Primitives::setMask(test(1));
-		rect(0.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red());
-		masked.begin();
-		EXPECT_EQ(Primitives::getMask(), Mask{});
-		ASSERT_EQ(gpu->draws().size(), 1U); // the window's masked rect, before the target was bound
-		EXPECT_EQ(gpu->draws()[0].call.mask, test(1));
-
-		Primitives::setMask(write(5)); // the target has a mask of its own
-		EXPECT_EQ(Primitives::getMask(), write(5));
-		rect(0.0F, 0.0F, 4.0F, 4.0F, Foundation::Color::red());
-		masked.end();
-		ASSERT_EQ(gpu->draws().size(), 2U); // flushed into the target, under its mask
-		EXPECT_EQ(gpu->draws()[1].call.mask, write(5));
-		EXPECT_EQ(Primitives::getMask(), test(1));
-		Primitives::setMask({});
-	}
-
-	TEST_F(MaskFlushTest, BeginFrameTurnsAMaskLeftSetOff) {
-		Primitives::setMask(write(1));
 		Primitives::beginFrame();
-		EXPECT_EQ(Primitives::getMask(), Mask{});
+		gpu->clearRecord();
+		rect(0.0F, mask);
+		plain.begin();
+		Primitives::flush();
+		plain.end();
+		EXPECT_TRUE(colourDraws().empty());
 	}
 
-	TEST_F(MaskFlushTest, AClipNeitherOpensNorClosesAMask) {
-		Primitives::setMask(write(1));
-		Primitives::pushClip({0.0F, 0.0F, 8.0F, 8.0F});
-		EXPECT_EQ(Primitives::getMask(), write(1));
-		Primitives::popClip();
-		EXPECT_EQ(Primitives::getMask(), write(1));
-		Primitives::setMask({});
+	TEST_F(MaskBatchTest, AMeshReleasedBeforeTheFlushLivesUntilItsMaskIsBuilt) {
+		auto mesh = std::make_unique<InstancedMeshHandle>(Primitives::uploadInstancedMesh(rectangleMesh(4.0F, 4.0F), 1));
+		ASSERT_TRUE(mesh->isValid());
+		const size_t				   liveBefore = gpu->live().geometries;
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::mesh(*mesh, {})}}};
+		rect(0.0F, mask);
+		mesh.reset();
+		EXPECT_EQ(gpu->live().geometries, liveBefore);
+		Primitives::endFrame();
+		bool drewMesh = false;
+		for (const backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
+			drewMesh = drewMesh || (!draw.call.writeColour && draw.call.indexCount == 6U);
+		}
+		EXPECT_TRUE(drewMesh);
+		EXPECT_EQ(gpu->live().geometries, liveBefore - 1);
 	}
 
 	// --- Pixels on GL ---
@@ -213,17 +227,17 @@ namespace Renderer {
 				GTEST_SKIP() << "Could not create GLFW window (no OpenGL context available)";
 			}
 			glfwMakeContextCurrent(window);
-			std::unique_ptr<backend::gl::GLBackend> gl = backend::gl::GLBackend::create();
-			if (gl == nullptr) {
+			std::unique_ptr<backend::gl::GLBackend> created = backend::gl::GLBackend::create();
+			if (created == nullptr) {
 				glfwDestroyWindow(window);
 				window = nullptr;
 				glfwTerminate();
 				GTEST_SKIP() << "GLEW initialization failed";
 			}
-			Primitives::init(std::move(gl), base_shader::source());
+			Primitives::init(std::move(created), base_shader::source());
 			Primitives::setCoordinateSystem(nullptr);
 			Primitives::setViewport(kSize, kSize);
-			target = RenderTarget::create(kSize, kSize, TextureFormat::Rgba8, RenderTarget::Attachments::ColourAndMask);
+			target = RenderTarget::create(kSize, kSize, TextureFormat::Rgba8, RenderTarget::Attachments::ColourAndStencil);
 			ASSERT_TRUE(target.isValid());
 		}
 
@@ -236,13 +250,12 @@ namespace Renderer {
 			}
 		}
 
-		// One frame into the target: colour cleared to opaque blue, the mask to 0, then `draw`.
+		// One frame into the target, its colour cleared to opaque blue, then `draw`, then read back.
 		template <typename Draw>
 		void render(Draw draw) {
 			target.begin();
 			Primitives::setViewport(kSize, kSize);
 			Primitives::clear(Foundation::Color(0.0F, 0.0F, 1.0F, 1.0F));
-			Primitives::clearMask(0);
 			Primitives::beginFrame();
 			draw();
 			Primitives::endFrame();
@@ -253,34 +266,23 @@ namespace Renderer {
 
 		// The pixel at (x, y), y down; readPixels rows run bottom up.
 		std::array<int, 4> pixel(int x, int y) const {
-			const size_t i = ((static_cast<size_t>(kSize - 1 - y) * kSize) + static_cast<size_t>(x)) * 4;
-			return {pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]};
+			const size_t index = ((static_cast<size_t>(kSize - 1 - y) * kSize) + static_cast<size_t>(x)) * 4;
+			return {pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3]};
 		}
 
 		static void expectNear(const std::array<int, 4>& actual, const std::array<int, 4>& expected, int tolerance = 1) {
-			for (size_t c = 0; c < 4; ++c) {
-				EXPECT_LE(std::abs(actual[c] - expected[c]), tolerance)
-					<< "channel " << c << ": " << actual[0] << "," << actual[1] << "," << actual[2] << "," << actual[3];
+			for (size_t channel = 0; channel < 4; ++channel) {
+				EXPECT_LE(std::abs(actual[channel] - expected[channel]), tolerance)
+					<< "channel " << channel << ": " << actual[0] << "," << actual[1] << "," << actual[2] << "," << actual[3];
 			}
 		}
 
-		// The whole target in `color`, where the mask lets it land; past its edges, so the rect's
-		// anti-aliased edge falls outside.
-		static void fill(const Foundation::Color& color) { rect(-4.0F, -4.0F, kSize + 8.0F, kSize + 8.0F, color); }
-
-		// Two triangles over [x0, x1) x [y0, y1), aliased, as a game draws a mask's shape.
-		static void quad(float x0, float y0, float x1, float y1) {
-			const std::array<Foundation::Vec2, 4>	 corners = {{{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}}};
-			static constexpr std::array<uint16_t, 6> kIndices = {0, 1, 2, 0, 2, 3};
-			Primitives::drawTriangles(
-				{.vertices = corners.data(),
-				 .indices = kIndices.data(),
-				 .vertexCount = corners.size(),
-				 .indexCount = kIndices.size(),
-				 .color = Foundation::Color::white()}
-			);
+		// The whole target in `color` under `mask`; past its edges, so the rect's anti-aliased edge falls outside.
+		static void fill(const Foundation::Color& color, std::span<const MaskLayer> mask) {
+			Primitives::drawRect({.bounds = kView, .style = {.fill = color}, .mask = mask});
 		}
 
+		static constexpr Foundation::Rect	kView{-4.0F, -4.0F, kSize + 8.0F, kSize + 8.0F};
 		static constexpr std::array<int, 4> kBlue = {0, 0, 255, 255};
 		static constexpr std::array<int, 4> kRed = {255, 0, 0, 255};
 		static constexpr std::array<int, 4> kGreen = {0, 255, 0, 255};
@@ -290,103 +292,144 @@ namespace Renderer {
 		std::vector<uint8_t> pixels;
 	};
 
-	TEST_F(MaskDrawTest, BatchedTrianglesWriteTheMaskAndNoColour) {
-		render([] {
-			Primitives::setMask(write(1));
-			quad(0.0F, 0.0F, 16.0F, 32.0F);
-			Primitives::setMask({});
-		});
+	TEST_F(MaskDrawTest, ARectMinusAPolygon) {
+		const std::array<Foundation::Vec2, 4> sight = square(8.0F, 8.0F, 24.0F, 24.0F);
+		const std::array<MaskLayer, 2>		  mask = {{
+			   {.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(sight)},
+		   }};
+		render([&] { fill(Foundation::Color::red(), mask); });
+		expectNear(pixel(2, 2), kRed);
+		expectNear(pixel(30, 30), kRed);
+		expectNear(pixel(7, 16), kRed);
+		expectNear(pixel(8, 8), kBlue);
+		expectNear(pixel(16, 16), kBlue);
+		expectNear(pixel(23, 23), kBlue);
+		expectNear(pixel(24, 16), kRed);
+	}
+
+	TEST_F(MaskDrawTest, ARectMinusAMeshPlusAPolygon) {
+		// The unseen cover: the view minus what has been seen (a mesh in world space) and a shape pending.
+		InstancedMeshHandle					  seen = Primitives::uploadInstancedMesh(rectangleMesh(8.0F, kSize), 1);
+		const std::array<Foundation::Vec2, 4> pending = square(24.0F, 0.0F, 32.0F, 32.0F);
+		ASSERT_TRUE(seen.isValid());
+		// World equals screen: the camera at the viewport's centre, one pixel a metre.
+		const Primitives::WorldCamera  camera{.position = {16.0F, 16.0F}};
+		const std::array<MaskLayer, 3> mask = {{
+			{.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			{.image = MaskImage::mesh(seen, camera)},
+			{.image = MaskImage::polygon(pending)},
+		}};
+		render([&] { fill(Foundation::Color::red(), mask); });
+		expectNear(pixel(4, 16), kBlue);
+		expectNear(pixel(7, 2), kBlue);
+		expectNear(pixel(8, 2), kRed);
+		expectNear(pixel(16, 16), kRed);
+		expectNear(pixel(23, 30), kRed);
+		expectNear(pixel(24, 30), kBlue);
+	}
+
+	TEST_F(MaskDrawTest, TheSameLayersReorderedGiveTheOtherRegion) {
+		const std::array<Foundation::Vec2, 4> outline = square(8.0F, 8.0F, 24.0F, 24.0F);
+		const Foundation::Rect				  leftHalf{0.0F, 0.0F, 16.0F, 32.0F};
+		const std::array<MaskLayer, 2>		  halfMinusSquare = {{
+			   {.image = MaskImage::rect(leftHalf), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(outline)},
+		   }};
+		const std::array<MaskLayer, 2>		  squareMinusHalf = {{
+			   {.image = MaskImage::polygon(outline), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::rect(leftHalf)},
+		   }};
+		render([&] { fill(Foundation::Color::red(), halfMinusSquare); });
+		expectNear(pixel(4, 16), kRed); // the half, outside the square
+		expectNear(pixel(12, 4), kRed);
+		expectNear(pixel(12, 16), kBlue); // both
+		expectNear(pixel(20, 16), kBlue); // the square alone
+		render([&] { fill(Foundation::Color::red(), squareMinusHalf); });
+		expectNear(pixel(4, 16), kBlue);
+		expectNear(pixel(12, 4), kBlue);
+		expectNear(pixel(12, 16), kBlue);
+		expectNear(pixel(20, 16), kRed);
+		expectNear(pixel(28, 16), kBlue);
+	}
+
+	TEST_F(MaskDrawTest, TheBottomLayersCompositeIsIgnored) {
+		const std::array<Foundation::Vec2, 4> outline = square(8.0F, 8.0F, 24.0F, 24.0F);
+		const std::array<MaskLayer, 1>		  alone = {{{.image = MaskImage::polygon(outline), .composite = MaskComposite::Subtract}}};
+		render([&] { fill(Foundation::Color::red(), alone); });
+		expectNear(pixel(16, 16), kRed);
 		expectNear(pixel(4, 4), kBlue);
-		expectNear(pixel(28, 4), kBlue);
-
-		render([] {
-			Primitives::setMask(write(1));
-			quad(0.0F, 0.0F, 16.0F, 32.0F);
-			Primitives::setMask(test(1));
-			fill(Foundation::Color::red());
-			Primitives::setMask(test(0));
-			fill(Foundation::Color::green());
-			Primitives::setMask({});
-		});
-		expectNear(pixel(0, 0), kRed);
-		expectNear(pixel(15, 31), kRed);
-		expectNear(pixel(16, 0), kGreen);
-		expectNear(pixel(31, 31), kGreen);
 	}
 
-	TEST_F(MaskDrawTest, AnInstancedMeshWritesTheMask) {
-		InstancedMeshHandle mesh = Primitives::uploadInstancedMesh(square(32.0F, 8.0F), 4);
-		ASSERT_TRUE(mesh.isValid());
-		render([&] {
-			// World equals screen here: the camera at the viewport's centre, one pixel a metre.
-			const InstanceData instance({0.0F, 24.0F}, 0.0F, 1.0F, Foundation::Vec4(1.0F));
-			Primitives::setMask(write(1));
-			Primitives::drawInstanced(mesh, &instance, 1, {.position = {16.0F, 16.0F}});
-			Primitives::setMask(test(1));
-			fill(Foundation::Color::red());
-			Primitives::setMask({});
-		});
-		expectNear(pixel(4, 23), kBlue);
-		expectNear(pixel(4, 24), kRed);
-		expectNear(pixel(28, 31), kRed);
-	}
-
-	TEST_F(MaskDrawTest, OverlappingWritesReplaceAndEachValueFillsItsOwnArea) {
-		// The player-visibility cover: 1 is seen, 2 in sight, 0 never seen.
-		render([] {
-			Primitives::setMask(write(1));
-			quad(0.0F, 0.0F, 20.0F, 20.0F);
-			Primitives::setMask(write(2));
-			quad(12.0F, 12.0F, 32.0F, 32.0F);
-			Primitives::setMask(test(0));
-			fill(Foundation::Color::red());
-			Primitives::setMask(test(1));
-			fill(Foundation::Color(0.0F, 0.0F, 0.0F, 0.5F));
-			Primitives::setMask({});
-		});
-		expectNear(pixel(28, 2), kRed);			   // 0
-		expectNear(pixel(2, 28), kRed);			   // 0
-		expectNear(pixel(2, 2), {0, 0, 128, 255}); // 1: half black over blue
-		expectNear(pixel(16, 16), kBlue);		   // 2, over 1
-		expectNear(pixel(28, 28), kBlue);		   // 2
-	}
-
-	TEST_F(MaskDrawTest, OrderedComparesReadTheStoredMaskAgainstTheValue) {
-		const auto areas = [] {
-			Primitives::setMask(write(1));
-			quad(0.0F, 0.0F, 16.0F, 32.0F);
-			Primitives::setMask(write(2));
-			quad(16.0F, 0.0F, 32.0F, 16.0F);
+	TEST_F(MaskDrawTest, AConcavePolygonCoversItsOutlineAndNotItsNotch) {
+		const std::array<Foundation::Vec2, 6> ell = {
+			{{4.0F, 4.0F}, {28.0F, 4.0F}, {28.0F, 12.0F}, {12.0F, 12.0F}, {12.0F, 28.0F}, {4.0F, 28.0F}}
 		};
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::polygon(ell)}}};
+		render([&] { fill(Foundation::Color::red(), mask); });
+		expectNear(pixel(24, 8), kRed);
+		expectNear(pixel(8, 24), kRed);
+		expectNear(pixel(20, 20), kBlue); // the notch
+		expectNear(pixel(2, 2), kBlue);
+	}
+
+	TEST_F(MaskDrawTest, TwoMasksInOneFrameEachMaskTheirOwnDraw) {
+		const std::array<MaskLayer, 1> left = {{{.image = MaskImage::rect({0.0F, 0.0F, 16.0F, 32.0F})}}};
+		const std::array<MaskLayer, 1> right = {{{.image = MaskImage::rect({16.0F, 0.0F, 16.0F, 32.0F})}}};
 		render([&] {
-			areas();
-			Primitives::setMask(test(2, MaskCompare::Less));
-			fill(Foundation::Color::red());
-			Primitives::setMask({});
+			fill(Foundation::Color::red(), left);
+			fill(Foundation::Color::green(), right);
+			fill(Foundation::Color::red(), left); // the first mask again, after the second
 		});
-		expectNear(pixel(4, 4), kRed);	 // 1 < 2
-		expectNear(pixel(28, 28), kRed); // 0 < 2
-		expectNear(pixel(28, 4), kBlue); // 2
+		expectNear(pixel(4, 16), kRed);
+		expectNear(pixel(28, 16), kGreen);
+	}
+
+	TEST_F(MaskDrawTest, AMaskedDrawUnderAClipIsClippedAndItsMaskIsNot) {
+		const std::array<MaskLayer, 1> topHalf = {{{.image = MaskImage::rect({0.0F, 0.0F, 32.0F, 16.0F})}}};
+		render([&] {
+			Primitives::pushClip({0.0F, 0.0F, 16.0F, 32.0F});
+			fill(Foundation::Color::red(), topHalf);
+			Primitives::popClip();
+			fill(Foundation::Color::green(), topHalf); // the same mask, unclipped
+		});
+		expectNear(pixel(4, 4), kGreen);
+		expectNear(pixel(28, 4), kGreen);
+		expectNear(pixel(4, 28), kBlue);
 
 		render([&] {
-			areas();
-			Primitives::setMask(test(0, MaskCompare::Greater));
-			fill(Foundation::Color::red());
-			Primitives::setMask({});
+			Primitives::pushClip({0.0F, 0.0F, 16.0F, 32.0F});
+			fill(Foundation::Color::red(), topHalf);
+			Primitives::popClip();
 		});
 		expectNear(pixel(4, 4), kRed);
-		expectNear(pixel(28, 4), kRed);
-		expectNear(pixel(28, 28), kBlue);
+		expectNear(pixel(28, 4), kBlue); // the draw's clip
+		expectNear(pixel(4, 28), kBlue); // the mask
 	}
 
-	TEST_F(MaskDrawTest, NothingIsMaskedOnceItIsOffAndTheGlStateIsTheFixedState) {
-		render([] {
-			Primitives::setMask(write(1));
-			quad(0.0F, 0.0F, 16.0F, 32.0F);
-			Primitives::setMask(test(1));
-			fill(Foundation::Color::red());
+	TEST_F(MaskDrawTest, AMeshReleasedBeforeTheFlushStillMasks) {
+		render([&] {
+			InstancedMeshHandle			   seen = Primitives::uploadInstancedMesh(rectangleMesh(kSize, 8.0F), 1);
+			const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::mesh(seen, {.position = {16.0F, 16.0F}})}}};
+			fill(Foundation::Color::red(), mask);
+			Primitives::releaseInstancedMesh(seen);
+		});
+		expectNear(pixel(16, 4), kRed);
+		expectNear(pixel(16, 12), kBlue);
+	}
+
+	TEST_F(MaskDrawTest, AFlushLeavesTheFixedStateAndAGamesLeftoverStencilChangesNothing) {
+		const std::array<MaskLayer, 1> left = {{{.image = MaskImage::rect({0.0F, 0.0F, 16.0F, 32.0F})}}};
+		render([&] {
+			// A game's own GL before the renderer's: stencil bits set everywhere, a test left on.
+			glClearStencil(0xFF);
+			glClear(GL_STENCIL_BUFFER_BIT);
+			glEnable(GL_STENCIL_TEST);
+			glStencilFunc(GL_NEVER, 0, 0xFF);
+			glStencilMask(0x00);
+			Primitives::invalidateState();
+			fill(Foundation::Color::red(), left);
 			Primitives::flush();
-			// A game's own GL between the renderer's submissions finds no mask on.
 			EXPECT_FALSE(glIsEnabled(GL_STENCIL_TEST));
 			std::array<GLboolean, 4> colourWrites{};
 			glGetBooleanv(GL_COLOR_WRITEMASK, colourWrites.data());
@@ -394,56 +437,12 @@ namespace Renderer {
 			GLint stencilWrites = 0;
 			glGetIntegerv(GL_STENCIL_WRITEMASK, &stencilWrites);
 			EXPECT_EQ(stencilWrites & 0xFF, 0xFF);
-			// One that leaves a stencil test on, and says so, doesn't mask the renderer's draws.
-			glEnable(GL_STENCIL_TEST);
-			glStencilFunc(GL_NEVER, 0, 0xFF);
-			Primitives::invalidateState();
-			Primitives::setMask({});
-			rect(24.0F, 0.0F, 8.0F, 8.0F, Foundation::Color::green());
+			Primitives::drawRect({.bounds = {24.0F, 24.0F, 8.0F, 8.0F}, .style = {.fill = Foundation::Color::green()}});
 		});
 		expectNear(pixel(4, 4), kRed);
-		expectNear(pixel(20, 20), kBlue);
-		expectNear(pixel(28, 4), kGreen);
+		expectNear(pixel(20, 4), kBlue);
+		expectNear(pixel(28, 28), kGreen);
 		EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
-	}
-
-	TEST_F(MaskDrawTest, AClipCutsWhatAMaskWriteWritesAndWhatATestDraws) {
-		render([] {
-			Primitives::setMask(write(1));
-			Primitives::pushClip({0.0F, 0.0F, 8.0F, 32.0F});
-			quad(0.0F, 0.0F, 32.0F, 32.0F); // writes only inside the clip
-			Primitives::popClip();
-			Primitives::setMask(test(1));
-			Primitives::pushClip({0.0F, 0.0F, 32.0F, 16.0F});
-			fill(Foundation::Color::red());
-			Primitives::popClip();
-			Primitives::setMask({});
-		});
-		expectNear(pixel(4, 4), kRed);
-		expectNear(pixel(4, 24), kBlue); // in the mask, outside the test's clip
-		expectNear(pixel(12, 4), kBlue); // outside the write's clip
-	}
-
-	TEST_F(MaskDrawTest, ATargetBegunInsideAMaskDrawsUnmaskedAndTheMaskHoldsAfter) {
-		RenderTarget inner = RenderTarget::create(kSize, kSize, TextureFormat::Rgba8, RenderTarget::Attachments::ColourAndMask);
-		ASSERT_TRUE(inner.isValid());
-		std::vector<uint8_t> innerPixels(static_cast<size_t>(kSize) * kSize * 4, 0);
-		render([&] {
-			Primitives::setMask(write(1));
-			quad(0.0F, 0.0F, 16.0F, 32.0F);
-			Primitives::setMask(test(1));
-			inner.begin();
-			Primitives::clear(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F));
-			fill(Foundation::Color::green());
-			Primitives::flush(); // a target's end() flushes nothing of its own
-			inner.end();
-			fill(Foundation::Color::red());
-			Primitives::setMask({});
-		});
-		inner.readPixels(innerPixels);
-		EXPECT_EQ(innerPixels[(31 * kSize + 28) * 4 + 1], 255); // green everywhere in the inner target
-		expectNear(pixel(4, 4), kRed);
-		expectNear(pixel(28, 4), kBlue);
 	}
 
 } // namespace Renderer

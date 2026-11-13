@@ -41,8 +41,8 @@ namespace Renderer::backend::gl {
 		void endFrame() override;
 		void setWindowSize(int width, int height) override;
 		void clear(const Foundation::Color& color) override;
-		void clearMask(uint8_t value) override;
-		bool hasMask() const override;
+		void clearStencil(uint8_t bits) override;
+		bool hasStencil() const override;
 		void invalidateState() override;
 
 		TextureHandle createTexture(const TextureDesc& desc) override;
@@ -50,7 +50,7 @@ namespace Renderer::backend::gl {
 		void		  destroyTexture(TextureHandle texture) override;
 		bool		  hasTexture(TextureHandle texture) const override { return textures.find(texture) != nullptr; }
 
-		RenderTargetHandle createRenderTarget(TextureHandle colour, bool mask) override;
+		RenderTargetHandle createRenderTarget(TextureHandle colour, bool withStencil) override;
 		void			   setRenderTarget(RenderTargetHandle target) override;
 		void			   readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) override;
 		void			   destroyRenderTarget(RenderTargetHandle target) override;
@@ -68,7 +68,7 @@ namespace Renderer::backend::gl {
 		void setUniforms(const DrawUniforms& uniforms) override;
 		void setHookUniforms(uint32_t binding, std::span<const std::byte> bytes) override;
 		void draw(std::span<const DrawCall> calls) override;
-		void beginForeignDraws(PipelineHandle pipeline, BlendState blend, const MaskState& mask) override;
+		void beginForeignDraws(PipelineHandle pipeline, BlendState blend) override;
 		void endForeignDraws() override;
 
 		QueryHandle createTimestampQuery() override;
@@ -98,7 +98,7 @@ namespace Renderer::backend::gl {
 
 		struct TargetSlot {
 			GLFramebuffer  framebuffer;
-			GLRenderbuffer mask; // depth 24, stencil 8, when the target has a mask; the depth is unused
+			GLRenderbuffer stencil; // depth 24, stencil 8, when the target has a stencil buffer; the depth is unused
 			int			   width = 0;
 			int			   height = 0;
 		};
@@ -153,7 +153,7 @@ namespace Renderer::backend::gl {
 		std::vector<GLuint>		 inactiveHookBindings; // points whose block a pipeline had inactive; writes there are dropped
 
 		RenderTargetHandle boundTarget;
-		bool			   windowMask = false; // the default framebuffer has stencil bits
+		bool			   windowStencil = false; // the default framebuffer has 8 stencil bits
 		int				   windowWidth = 0;
 		int				   windowHeight = 0;
 	};

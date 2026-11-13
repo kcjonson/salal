@@ -1,87 +1,131 @@
 # Masks
 
-A mask is the bound target's 8-bit stencil buffer. Some draws write a value into it with colour off;
-later draws land only where the stored value compares to theirs. The GPU decides which pixels are
-inside which shapes, so overlapping, moving vector shapes cut each other with hard edges: no
-render-to-texture, no blur, no polygon booleans on the CPU. Worldsim's player visibility cover is the
-first use; lighting is expected to be the next.
+A rect can carry a CSS mask: `mask-image` layers composited with `mask-composite`, the rect showing
+only where the result covers. It follows CSS Masking Level 1 (css-masking-1) for what it builds and
+says so where it stops. Overlapping, moving vector shapes cut each other with hard edges and no
+polygon booleans on the CPU. Worldsim's player visibility cover is the first use; lighting is expected
+to be the next.
 
 ## API
 
-In `Primitives` (`libs/renderer/primitives/Primitives.h`):
+`primitives/MaskImage.h`, and `RectArgs::mask` in `primitives/Primitives.h`:
 
 ```cpp
-using Mask = backend::MaskState; // {MaskMode mode; uint8_t value; MaskCompare compare;}
-// MaskMode    Off, Write, Test
-// MaskCompare Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual (stored OP value)
+namespace Renderer::Primitives {
+	enum class MaskComposite : uint8_t { Add, Subtract };
 
-void clearMask(uint8_t value = 0);
-void setMask(const Mask& mask); // setMask({}) is off
-Mask getMask();
+	class MaskImage { // closed: built only through its factories
+	  public:
+		static MaskImage rect(const Foundation::Rect& bounds);
+		static MaskImage polygon(std::span<const Foundation::Vec2> points);
+		static MaskImage mesh(const InstancedMeshHandle& mesh, const WorldCamera& camera);
+	};
+
+	struct MaskLayer {
+		MaskImage	  image;
+		MaskComposite composite = MaskComposite::Add;
+	};
+}
+// RectArgs, after `fill`:
+std::span<const MaskLayer> mask; // top layer first; empty is no mask
 ```
 
-A frame that fills the view where no shape is, dims where the first set of shapes is but the second
-isn't, and leaves the second set untouched:
+The cover worldsim draws, the translucent fill first and the opaque one over it, each mask a rect
+minus a union:
 
 ```cpp
-namespace P = Renderer::Primitives;
-P::clearMask(0);
-P::setMask({.mode = P::MaskMode::Write, .value = 1});
-P::drawInstanced(seenMesh, &instance, 1, camera); // an uploaded world mesh
-P::drawTriangles(extraPolygon);
-P::setMask({.mode = P::MaskMode::Write, .value = 2});
-for (const Fan& sight : sights) {
-	P::drawTriangles(sight.args); // replace: 2 wins over 1 where they overlap
+std::vector<MaskLayer> dimMask = {{.image = MaskImage::rect(view), .composite = MaskComposite::Subtract}};
+for (const SightShape& sight : sights) {
+	dimMask.push_back({.image = MaskImage::polygon(sight.screenPoints)});
 }
-P::setMask({.mode = P::MaskMode::Test, .value = 0});
-P::drawRect({.bounds = view, .style = {.fill = unexplored}});
-P::setMask({.mode = P::MaskMode::Test, .value = 1});
-P::drawRect({.bounds = view, .style = {.fill = {0.0F, 0.0F, 0.0F, 0.6F}}});
-P::setMask({});
+Primitives::drawRect({.bounds = view, .style = {.fill = {0.0F, 0.0F, 0.0F, kSeenDimAlpha}}, .mask = dimMask, .key = coverKey});
+
+std::vector<MaskLayer> unseenMask = {
+	{.image = MaskImage::rect(view), .composite = MaskComposite::Subtract},
+	{.image = MaskImage::mesh(seenMesh, camera)},
+};
+for (const PendingShape& pending : pendingShapes) {
+	unseenMask.push_back({.image = MaskImage::polygon(pending.screenPoints)});
+}
+Primitives::drawRect({.bounds = view, .style = {.fill = kUnseenColor}, .mask = unseenMask, .key = coverKey + 1});
 ```
 
 `apps/sandbox`'s `mask` scene draws this over a busy background.
 
+## Mapping to CSS
+
+| CSS | salal | not built |
+|---|---|---|
+| `mask` on an element | `RectArgs::mask` | `mask` on any other draw's args |
+| `mask-image` | `MaskImage::rect`, `polygon` (CSS `polygon()`, nonzero), `mesh` (an uploaded mesh, as an SVG `<mask>`'s vector children) | `circle()`, `ellipse()`, `url()`, gradients, images, a nested mask image |
+| layers, listed top first | the span's order | |
+| `mask-composite: add` | `MaskComposite::Add` | |
+| `mask-composite: subtract` | `MaskComposite::Subtract` | |
+| `mask-composite: intersect`, `exclude` | | both |
+| `mask-mode` | luminance and alpha are the same for hard coverage, so there is no mode | `mask-mode` |
+| `mask-position`, `mask-size`, `mask-repeat`, `mask-origin` | a layer is where its points are | all four |
+| `mask-clip` | none: a layer is never clipped | `mask-clip` |
+
+Each is "not built until a game asks", salal's rule; none is refused for a reason that would stop it
+being added.
+
 ## Rules
 
-- **Write** sets the mask to the value wherever a fragment lands, whatever its alpha, and writes no
-  colour. Anti-aliased edges (a polygon's feather ring, an SDF shape's ramp) write their whole ramp,
-  so draw a mask's shapes aliased: `drawTriangles` without `antiAlias`, or an uploaded mesh. A shape's
-  edge then follows GL's rasterisation rules, so two shapes that share an edge share no pixel.
-- **Test** draws only where the stored mask compares to the value, and never changes the mask.
-- **Every renderer draw takes the mask in force**: batched draws, `drawInstanced`, and a baked pass,
-  which takes the mask set when `beginBakedPass` ran. `setMask` inside a baked pass is refused.
-- **A change flushes.** `setMask` with a different mask submits what is pending first, so draws added
-  before it are drawn before draws added after it, whatever their keys. Within one mask keys sort as
-  they do anywhere. `clearMask` flushes first when a mask is set, so pending masked draws see the mask
-  as it was. A repeat of the mask in force costs nothing.
-- **Clips apply** to Write and Test draws as to any batched draw: a write under `pushClip` writes
-  only inside the clip. `pushClip` and `popClip` neither set nor end a mask.
-- **The mask never outlives a submission on the GPU.** The backend sets the stencil and colour-write
-  state a draw's mask needs and puts the fixed state back (stencil test off, every colour channel and
-  stencil bit written) before it returns, and `endForeignDraws` does the same. A game's own GL between
-  the renderer's draws is never masked by it. A game's GL that leaves stencil test or colour writes
-  changed calls `Primitives::invalidateState()`, as it already does for depth, culling and scissor.
-- **The mask goes off** at `beginFrame()` (warned once if one was left set), at the end of each
-  scene's render, its ui's render and each debug layer's in an `app::App` (warned once), so nothing
-  past the world/ui barrier is masked by the world pass, and around a `RenderTarget` (below).
-- **Refused, logged once,** on a target with no mask.
+- **Compositing is CSS's.** Layers composite bottom up, each with everything under it. `Add` is source
+  over: the layer and what is under it. `Subtract` is the layer where it falls outside what is under
+  it. The bottom layer's composite is ignored, as in CSS, since there is nothing under it. The rect
+  shows only where the result covers.
+- **Coverage is binary.** A layer covers a pixel or doesn't, by GL's rasterisation rules, so a mask's
+  edges are hard and two layers that share an edge share no pixel. The masked rect itself keeps its own
+  anti-aliased edge, rounded corners and border; its shadow is masked with it.
+- **Coordinates.** A `rect` or `polygon` layer is in the current transform's space, mapped at the draw
+  like any batched draw. A `mesh` layer is in world space under its camera, one copy at the world
+  origin, as `drawInstanced` would draw it with an identity instance.
+- **Fill rule.** A polygon fills by the nonzero rule, tessellated as `drawPolygon`'s fill is and from
+  the same cache, so a self-crossing outline covers what drawPolygon would fill.
+- **Lifetime.** Everything a draw's args point at is read during the call: rect and polygon layers are
+  copied into the batch then, as `PolygonArgs::vertices` is, so the caller's points can change or go
+  as soon as `drawRect` returns. A `MaskImage::polygon` holds the span, so the points must live until
+  that call. A mesh layer names the mesh, which must not be destroyed before the frame's flush;
+  releasing an instanced mesh while draws are pending waits for the end of the next flush, as freeing
+  a texture does, so a caller that releases or re-uploads the mesh mid-frame keeps the layer.
+- **Clips.** `pushClip` clips the masked rect as any draw. It never clips a layer.
+- **Keys.** A mask never enters the sort key. Masked draws sort with everything else and the batch
+  cuts a run where the mask changes, as it does for the blend state, so key order stays exact. Equal
+  masks, compared by content, share one entry, and consecutive runs under the same mask share one
+  build.
+- **A target with no stencil buffer** draws a masked rect as nothing, logged once: drawn unmasked it
+  would cover the whole view. This is decided at the flush, against the target bound then, since
+  `RenderTarget::begin` flushes nothing.
 
-## Where a mask lives
+## How it is built
+
+Underneath, a mask is two bits of the bound target's stencil buffer, which no caller sees. At add time
+a masked rect's layers are mapped to the screen and interned into the flush's mask table, deduplicated
+by content, and the rect's draw group carries the entry's index. At flush, before a run whose mask
+differs from the last one built, the mask is built:
+
+1. The two bits are cleared across the target, so nothing carries over between builds and a game's GL
+   that left values in the stencil changes nothing.
+2. Layers are drawn bottom up, aliased, with no clip and no colour. `Add` sets the accumulator bit
+   where the layer lands.
+3. `Subtract` draws the layer into the scratch bit, then two cover passes over the box round the
+   rects drawn under the mask: one zeroes the accumulator where the scratch bit is clear, the next
+   inverts both bits where it is set, which leaves the accumulator as the layer outside what it held
+   and clears the scratch bit.
+4. The run draws where the accumulator bit is set.
+
+A mesh layer draws under the instanced uniforms and the batch's uniforms are set again after it; the
+uniform ring takes several writes in one flush and a draw keeps the values it was given.
+
+The backend draws each call in its `StencilState` (test, function, reference, read and write masks,
+operations) and `writeColour`, and puts the fixed state back, stencil test off and every colour channel
+and stencil bit written, before `draw` returns. A game's GL that leaves stencil or colour-write state
+changed calls `Primitives::invalidateState()`, as it already does for depth, culling and scissor.
+
+## Where a stencil buffer lives
 
 The window has one: the GLFW platform asks for 8 stencil bits, and the GL backend checks the default
-framebuffer at creation and refuses masks (logged) when it has fewer.
-
-A `RenderTarget` has one when made with `RenderTarget::Attachments::ColourAndMask` (a depth 24,
-stencil 8 renderbuffer; depth is unused). One made with the default `Colour` has none, and `setMask`
-is refused while it is bound. `begin()` turns the mask in force off, so its pending draws flush where
-they were added and nothing drawn into the target is masked by the window's mask; `end()` turns off a
-mask set inside the target and sets the one that was in force at `begin()` again. A target's mask is
-its own, cleared with `clearMask` while it is bound, and undefined until then.
-
-## Backend
-
-`backend::DrawCall` carries a `MaskState`, `beginForeignDraws` takes one, and the backend has
-`clearMask(value)` and `hasMask()` for the bound target; `createRenderTarget` takes whether to attach a
-mask. `NullBackend` records each draw's mask, the clears and the foreign pass's mask, and
-`setWindowMask(false)` stands in for a window made without stencil bits.
+framebuffer at creation and warns when it has fewer. A `RenderTarget` has one when made with
+`RenderTarget::Attachments::ColourAndStencil` (a depth 24, stencil 8 renderbuffer; depth is unused),
+and none with the default `Colour`.

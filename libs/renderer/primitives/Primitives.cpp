@@ -69,9 +69,6 @@ namespace Renderer::Primitives {
 	// beginFrame found a clip or transform still pushed, and said so.
 	static bool g_warnedUnbalancedStacks = false;
 
-	// beginFrame found a mask still set, and said so.
-	static bool g_warnedMaskLeftOn = false;
-
 	// Tessellated polygon fills, keyed by a hash of the outline's vertex bits and
 	// checked against a copy of the outline, so a hash collision is a miss, never a
 	// wrong mesh. A silhouette drawn every frame (under a changing PushTransform)
@@ -233,11 +230,7 @@ namespace Renderer::Primitives {
 			g_backend->beginFrame();
 		}
 		if (g_batchRenderer != nullptr) {
-			if (g_batchRenderer->getMask().mode != MaskMode::Off && !g_warnedMaskLeftOn) {
-				g_warnedMaskLeftOn = true;
-				LOG_WARNING(Renderer, "beginFrame: a mask was still set, a setMask without setMask({}); turned off (warned once)");
-			}
-			g_batchRenderer->beginFrame(); // turns the mask off
+			g_batchRenderer->beginFrame();
 			g_batchRenderer->setTransform(g_currentTransform);
 		}
 	}
@@ -364,6 +357,13 @@ namespace Renderer::Primitives {
 
 	// --- Drawing Functions ---
 
+	// MaskImage's content for the batch (MaskImage.h names this its friend).
+	struct MaskImageAccess {
+		// The batch's index for `layers`: rects and polygons as triangles in local units, a
+		// polygon tessellated by the nonzero rule as drawPolygon's fill is, a mesh as its handles.
+		static uint32_t intern(BatchRenderer& batch, std::span<const MaskLayer> layers);
+	};
+
 	void drawRect(const RectArgs& args) {
 		if (g_batchRenderer == nullptr) {
 			return;
@@ -372,16 +372,17 @@ namespace Renderer::Primitives {
 		// The corners round by the border's radius, square beside a side it leaves bare.
 		const std::optional<Foundation::BorderStyle>& border = args.style.border;
 		const CornerRadii radii = rectCornerRadii(border.has_value() ? std::max(border->cornerRadius, 0.0F) : 0.0F, border);
+		const uint32_t	  mask = MaskImageAccess::intern(*g_batchRenderer, args.mask);
 
 		// Outer box-shadow / glow sits behind the fill (emit first).
 		if (args.style.boxShadow.has_value()) {
-			g_batchRenderer->addShadowQuad(args.bounds, args.style.boxShadow.value(), radii, args.key, args.blend);
+			g_batchRenderer->addShadowQuad(args.bounds, args.style.boxShadow.value(), radii, args.key, args.blend, mask);
 		}
 
 		// Single AddQuad call handles fill, border, rounded corners, and an optional
 		// gradient (per-corner vertex colors) or fill hook via the GPU.
 		g_batchRenderer->addQuad(
-			args.bounds, args.style.fill, border, radii, args.style.gradient, args.key, args.blend, args.fill, args.id
+			args.bounds, args.style.fill, border, radii, args.style.gradient, args.key, args.blend, args.fill, args.id, mask
 		);
 	}
 
@@ -552,6 +553,64 @@ namespace Renderer::Primitives {
 		}
 
 	} // namespace
+
+	uint32_t MaskImageAccess::intern(BatchRenderer& batch, std::span<const MaskLayer> layers) {
+		if (layers.empty()) {
+			return 0;
+		}
+		// Every layer's triangles are copied out first, since a later polygon may empty the
+		// polygon cache, then handed over as spans into the copies.
+		struct Range {
+			size_t vertexStart = 0;
+			size_t vertexCount = 0;
+			size_t indexStart = 0;
+			size_t indexCount = 0;
+		};
+		static thread_local std::vector<Foundation::Vec2>  vertices;
+		static thread_local std::vector<uint16_t>		   indices;
+		static thread_local std::vector<Range>			   ranges;
+		static thread_local std::vector<MaskLayerGeometry> geometries;
+		vertices.clear();
+		indices.clear();
+		ranges.clear();
+		geometries.clear();
+		for (const MaskLayer& layer : layers) {
+			const MaskImage& image = layer.image;
+			Range			 range{.vertexStart = vertices.size(), .indexStart = indices.size()};
+			if (image.kind == MaskImage::Kind::Rect) {
+				const Foundation::Rect& bounds = image.bounds;
+				vertices.insert(
+					vertices.end(),
+					{{bounds.x, bounds.y},
+					 {bounds.x + bounds.width, bounds.y},
+					 {bounds.x + bounds.width, bounds.y + bounds.height},
+					 {bounds.x, bounds.y + bounds.height}}
+				);
+				indices.insert(indices.end(), {0, 1, 2, 0, 2, 3});
+			} else if (image.kind == MaskImage::Kind::Polygon && image.points.size() >= 3) {
+				const renderer::TessellatedMesh& fill = polygonFill(image.points).mesh;
+				vertices.insert(vertices.end(), fill.vertices.begin(), fill.vertices.end());
+				indices.insert(indices.end(), fill.indices.begin(), fill.indices.end());
+			}
+			range.vertexCount = vertices.size() - range.vertexStart;
+			range.indexCount = indices.size() - range.indexStart;
+			ranges.push_back(range);
+		}
+		for (size_t index = 0; index < layers.size(); ++index) {
+			const MaskImage& image = layers[index].image;
+			const Range&	 range = ranges[index];
+			geometries.push_back(
+				{.composite = layers[index].composite,
+				 .vertices = std::span(vertices).subspan(range.vertexStart, range.vertexCount),
+				 .indices = std::span(indices).subspan(range.indexStart, range.indexCount),
+				 .meshGeometry = image.kind == MaskImage::Kind::Mesh ? image.meshGeometry : GeometryHandle{},
+				 .meshInstances = image.meshInstances,
+				 .meshIndexCount = image.meshIndexCount,
+				 .camera = image.camera}
+			);
+		}
+		return batch.internMask(geometries);
+	}
 
 	void drawPolygon(const PolygonArgs& args) {
 		if (g_batchRenderer == nullptr || args.vertices.size() < 3) {
@@ -751,7 +810,7 @@ namespace Renderer::Primitives {
 	}
 
 	void releaseInstancedMesh(InstancedMeshHandle& handle) {
-		BatchRenderer::releaseInstancedMesh(g_backend.get(), handle);
+		BatchRenderer::releaseInstancedMesh(g_batchRenderer.get(), handle);
 	}
 
 	void drawInstanced(const InstancedMeshHandle& handle, const InstanceData* instances, uint32_t count, const WorldCamera& camera) {
@@ -874,45 +933,6 @@ namespace Renderer::Primitives {
 				g_batchRenderer->setClipBounds(g_clipStack.back());
 			}
 		}
-	}
-
-	// --- Masks ---
-
-	void clearMask(uint8_t value) {
-		if (g_backend == nullptr) {
-			return;
-		}
-		if (g_batchRenderer != nullptr && g_batchRenderer->getMask().mode != MaskMode::Off) {
-			g_batchRenderer->flush();
-		}
-		g_backend->clearMask(value);
-	}
-
-	void setMask(const Mask& mask) {
-		if (g_batchRenderer == nullptr || mask == g_batchRenderer->getMask()) {
-			return;
-		}
-		if (g_batchRenderer->inBakedPass()) {
-			static bool warned = false;
-			if (!warned) {
-				warned = true;
-				LOG_ERROR(Renderer, "setMask inside a baked pass is refused; set it around the pass (logged once)");
-			}
-			return;
-		}
-		if (mask.mode != MaskMode::Off && !g_backend->hasMask()) {
-			static bool warned = false;
-			if (!warned) {
-				warned = true;
-				LOG_ERROR(Renderer, "setMask: the bound target has no mask; refused (logged once)");
-			}
-			return;
-		}
-		g_batchRenderer->setMask(mask);
-	}
-
-	Mask getMask() {
-		return g_batchRenderer != nullptr ? g_batchRenderer->getMask() : Mask{};
 	}
 
 	// --- Transform Stack ---

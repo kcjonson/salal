@@ -130,14 +130,34 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	}
 
 	// One draw call: `instanceCount` quads from `instanceStart` in the emit order, in
-	// one GPU blend state, binding up to kTextureSlots textures, which its quads pick
-	// by their slot; the rest invalid, binding nothing.
+	// one GPU blend state and under one mask (its index in the flush's mask table, 0 for
+	// none), binding up to kTextureSlots textures, which its quads pick by their slot;
+	// the rest invalid, binding nothing.
 	struct DrawRun {
 		uint32_t										  instanceStart = 0;
 		uint32_t										  instanceCount = 0;
 		std::array<TextureHandle, backend::kTextureSlots> textures{};
 		backend::BlendState								  blendState = backend::BlendState::Alpha;
+		uint32_t										  mask = 0;
 	};
+
+	// A CSS mask layer as the batch takes it (docs/masks.md): a mask-composite, and either its
+	// coverage as triangles in the current transform's space or an uploaded mesh, one copy at the
+	// world origin under a camera.
+	struct MaskLayerGeometry {
+		Primitives::MaskComposite		  composite = Primitives::MaskComposite::Add;
+		std::span<const Foundation::Vec2> vertices;
+		std::span<const uint16_t>		  indices;
+		GeometryHandle					  meshGeometry; // valid for a mesh layer
+		BufferHandle					  meshInstances;
+		uint32_t						  meshIndexCount = 0;
+		Primitives::WorldCamera			  camera;
+	};
+
+	// The stencil bits a mask is built in: the composited mask, and a layer's coverage while a
+	// Subtract composites it.
+	constexpr uint8_t kMaskAccumulatorBit = 0x01U;
+	constexpr uint8_t kMaskScratchBit = 0x02U;
 
 	// What flush() submits: the quads in emit order and the runs they split into.
 	// Both point into the batch and stay valid until the next add or flush.
@@ -178,7 +198,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			int32_t											 key = 0,
 			Primitives::BlendMode							 blend = Primitives::BlendMode::Alpha,
 			const Primitives::Fill&							 fill = {},
-			const char*										 id = nullptr
+			const char*										 id = nullptr,
+			uint32_t										 mask = 0
 		);
 
 		// Whether a quad added since the last flush names `hook`, one of the base shader's fill
@@ -194,8 +215,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			const Foundation::BoxShadow& shadow,
 			const CornerRadii&			 radii,
 			int32_t						 key = 0,
-			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha
+			Primitives::BlendMode		 blend = Primitives::BlendMode::Alpha,
+			uint32_t					 mask = 0
 		);
+
+		// --- Masks ---
+
+		// The index of `layers` (top first) in this flush's mask table, adding it unless an
+		// equal mask is there already; 0, no mask, for no layers. A quad added with the index
+		// draws where the composited mask covers (docs/masks.md). The layers' triangles are
+		// mapped through the current transform and copied.
+		uint32_t internMask(std::span<const MaskLayerGeometry> layers);
 
 		// Add an indexed triangle mesh as one draw group (drawTriangles, drawLine, a
 		// polygon's fill and shadow), a flat quad a triangle. With `mesh.feather`, a ring
@@ -313,16 +343,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Clear clip bounds (disables clipping)
 		void clearClipBounds();
 
-		// --- Mask ---
-
-		// The mask every draw from here runs in, batched, instanced and baked. A change
-		// flushes what is pending first, so it is drawn in the mask it was added under.
-		void					  setMask(const backend::MaskState& state);
-		const backend::MaskState& getMask() const { return mask; }
-
-		// Between beginBakedPass() and endBakedPass().
-		bool inBakedPass() const { return bakedPassOpen; }
-
 		// --- Transform ---
 
 		// Set the current transform matrix.
@@ -379,9 +399,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		/// @return Handle for subsequent draw calls
 		InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 
-		/// Release an instanced mesh's buffers and geometry on `owner` (nothing to
-		/// release when it is null, after shutdown) and leave the handle invalid.
-		static void releaseInstancedMesh(backend::Backend* owner, InstancedMeshHandle& handle);
+		/// Release an instanced mesh's buffers and geometry through `batch` (nothing to
+		/// release when it is null, after shutdown) and leave the handle invalid. With draws
+		/// pending, which a mask layer may name the mesh in, the free waits for the end of the
+		/// next flush, as a texture's does.
+		static void releaseInstancedMesh(BatchRenderer* batch, InstancedMeshHandle& handle);
 
 		/// Draw multiple instances of a mesh with GPU instancing.
 		/// Transforms are computed on GPU using camera uniforms.
@@ -425,12 +447,14 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// its sign bit flipped in the low one, so one unsigned compare sorts by domain,
 		// then key, negative keys first. plan() keeps submission order unless some
 		// group carries a non-zero key, in which case groups are stable-sorted by
-		// order and their quads copied out in that order.
+		// order and their quads copied out in that order. A group's mask is never part of
+		// its order, and two groups join only under the same mask.
 		struct DrawGroup {
 			uint32_t			  instanceStart;
 			uint32_t			  instanceCount;
 			uint64_t			  order;
 			Primitives::BlendMode blend;
+			uint32_t			  mask; // index in the mask table, 0 for none
 		};
 		std::vector<DrawGroup> drawGroups;
 		bool				   anyKey = false;
@@ -443,7 +467,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		std::vector<DrawRun>	   runs;
 
 		// Record the quads [groupStart, current end) as one draw group.
-		void recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend);
+		void recordGroup(uint32_t groupStart, int32_t key, Primitives::BlendMode blend, uint32_t mask = 0);
 
 		// Append a quad of `mode` over `corners` (TL, TR, BR, BL, before the transform),
 		// drawn with `blend` and sampling `texture`, with the current clip; the caller
@@ -463,11 +487,71 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// it is stale or waiting to be freed.
 		bool sampleable(TextureHandle texture);
 
-		// Destroy the textures whose frees waited for a flush.
+		// Destroy the textures and meshes whose frees waited for a flush.
 		void freePending();
 
 		// Textures released while draws were pending, freed at the end of the next flush.
 		std::vector<TextureHandle> pendingFrees;
+
+		// Instanced meshes released while draws were pending, freed with the textures.
+		struct MeshObjects {
+			GeometryHandle geometry;
+			BufferHandle   vertices;
+			BufferHandle   indices;
+			BufferHandle   instances;
+		};
+		std::vector<MeshObjects> pendingMeshFrees;
+
+		// The flush's mask table (docs/masks.md). Entry i is mask index i + 1: its layers, top
+		// first, a run of maskLayers, and the box on screen round every quad drawn under it,
+		// which a Subtract's cover passes fill. A layer's triangles are a run of maskTriangles,
+		// three points each, on screen. Emptied with the batch.
+		struct MaskLayerEntry {
+			Primitives::MaskComposite composite = Primitives::MaskComposite::Add;
+			uint32_t				  triangleStart = 0;
+			uint32_t				  triangleCount = 0;
+			GeometryHandle			  meshGeometry;
+			BufferHandle			  meshInstances;
+			uint32_t				  meshIndexCount = 0;
+			Primitives::WorldCamera	  camera;
+		};
+		struct MaskEntry {
+			uint32_t		 layerStart = 0;
+			uint32_t		 layerCount = 0;
+			uint64_t		 hash = 0;
+			Foundation::Vec4 cover{0.0F}; // (minX, minY, maxX, maxY), empty until a quad is drawn under it
+			bool			 covered = false;
+		};
+		std::vector<MaskEntry>		  maskEntries;
+		std::vector<MaskLayerEntry>	  maskLayers;
+		std::vector<Foundation::Vec2> maskTriangles;
+
+		// Whether two interned layers are the same mask-image under the same composite.
+		bool sameLayer(const MaskLayerEntry& first, const MaskLayerEntry& second) const;
+
+		// Empty the mask table, with the batch.
+		void clearMasks();
+
+		// Build mask `index` in the bound target's stencil bits for the run after it, from its
+		// layers' quads uploaded at layerFirstInstance and its cover quad at `coverInstance`.
+		void buildMask(uint32_t index, uint32_t coverInstance);
+
+		// flush()'s draw calls gathered under the batched uniforms, submitted before anything
+		// that must follow them on the GPU.
+		void submitPending();
+
+		// The uniforms an instanced draw under the camera reads, from the batch's.
+		backend::DrawUniforms worldUniforms(Foundation::Vec2 cameraPosition, float cameraZoom, float pixelsPerMeter) const;
+
+		// flush()'s upload when it holds masks: the plan's quads, then each layer's triangles and
+		// each mask's cover quad; the instance each layer's triangles start at, by maskLayers
+		// index; and the uniforms the batched draws read.
+		std::vector<BatchInstance> maskedUpload;
+		std::vector<uint32_t>	   layerFirstInstance;
+		backend::DrawUniforms	   batchedUniforms;
+
+		// A masked run met a target with no stencil buffer, and said so.
+		bool warnedNoStencil = false;
 
 		// The last texture sampleable() found live; releaseTexture() forgets it, so a
 		// text run checks its atlas with the backend once.
@@ -507,9 +591,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Between beginBakedPass() and endBakedPass(): setBakedAlpha() submits the
 		// uniforms at once, for the caller's next draw.
 		bool bakedPassOpen = false;
-
-		// The mask the pending draws were added under, which their draw calls carry.
-		backend::MaskState mask;
 
 		// Viewport dimensions
 		int viewportWidth = 800;

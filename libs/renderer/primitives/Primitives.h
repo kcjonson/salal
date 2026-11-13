@@ -20,6 +20,8 @@
 #include "math/Types.h"
 #include "primitives/FontFamily.h"
 #include "primitives/InstanceData.h"
+#include "primitives/MaskImage.h"
+#include "primitives/WorldCamera.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -218,12 +220,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Arguments for DrawRect
 		struct RectArgs {
-			Foundation::Rect	  bounds;
-			Foundation::RectStyle style;
-			Fill				  fill{};
-			const char*			  id = nullptr; // Optional: for inspection/debugging
-			int32_t				  key = 0;
-			BlendMode			  blend = BlendMode::Alpha;
+			Foundation::Rect		   bounds;
+			Foundation::RectStyle	   style;
+			Fill					   fill{};
+			std::span<const MaskLayer> mask;		 // CSS mask, top layer first; empty is none (docs/masks.md)
+			const char*				   id = nullptr; // Optional: for inspection/debugging
+			int32_t					   key = 0;
+			BlendMode				   blend = BlendMode::Alpha;
 		};
 
 		// Arguments for DrawLine
@@ -255,6 +258,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// border and clip. A hooked rect has one fill colour, so a gradient on one is logged once
 		// per id and the hook drawn over style.fill; a hook the base shader doesn't have is
 		// logged once per id and the rect drawn as if it named none.
+		//
+		// With a `mask`, the rect and its shadow show only where the composited mask covers
+		// (docs/masks.md). The layers are read during the call. A masked rect drawn into a target
+		// with no stencil buffer draws nothing, logged once.
 		void drawRect(const RectArgs& args);
 
 		// Draw a line: a rotated quad as two flat triangles, aliased, or with style.dash
@@ -476,15 +483,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// --- World-Space Instancing ---
 
-		// The view an instanced or baked world draw is projected with: world meters
-		// to screen pixels through position, zoom and pixelsPerMeter, centred on the
-		// viewport.
-		struct WorldCamera {
-			Foundation::Vec2 position{0.0F, 0.0F};
-			float			 zoom = 1.0F;
-			float			 pixelsPerMeter = 1.0F;
-		};
-
 		// Upload a tessellated mesh once for drawInstanced(); the handle releases the
 		// GPU buffers when destroyed or passed to releaseInstancedMesh().
 		InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
@@ -540,38 +538,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Pop the most recent clip, restoring the one it was pushed in, if any.
 		void popClip();
-
-		// --- Masks ---
-		//
-		// The bound target's 8-bit stencil buffer, written by some draws and tested by
-		// others (docs/masks.md). The window has one; a RenderTarget has one when made with
-		// RenderTarget::Attachments::ColourAndMask. A Write draw sets the mask to its value
-		// wherever a fragment lands, whatever the fragment's alpha (an anti-aliased edge
-		// writes its whole ramp, so a mask's edges are drawn aliased), and draws no colour; a
-		// Test draw lands only where the stored mask compares to its value. Clips apply to
-		// both, as to any batched draw.
-		using MaskMode = backend::MaskMode;
-		using MaskCompare = backend::MaskCompare;
-		using Mask = backend::MaskState;
-
-		// Set the bound target's whole mask to `value`. Pending draws in a Write or Test mask
-		// are flushed first, so they see the mask as it was.
-		void clearMask(uint8_t value = 0);
-
-		// Draw everything from here, batched, instanced (drawInstanced) and baked
-		// (beginBakedPass), in `mask`, until the next call; setMask({}) turns it off. A
-		// change flushes what is pending, so draws before it are drawn before draws after
-		// it whatever their keys; keys order draws within one mask as anywhere else. The
-		// mask is the renderer's, applied to each of its submissions and taken off after,
-		// so a game's own GL is never masked and never leaves a mask on. Refused, logged
-		// once, on a target with no mask and inside a baked pass. The mask goes off at
-		// beginFrame(), around a RenderTarget (begin() turns it off and end() restores the
-		// one it was begun in), and in an app at the end of each scene's render, its ui's
-		// and each debug layer's.
-		void setMask(const Mask& mask);
-
-		// The mask in force.
-		Mask getMask();
 
 		// Transform stack (for world-space rendering)
 		void			 PushTransform(const Foundation::Mat4& transform);

@@ -12,6 +12,10 @@
 
 namespace Renderer {
 
+	namespace Primitives { // NOLINT(readability-identifier-naming)
+		class MaskImage;
+	}
+
 	/// Per-instance data for GPU instancing (32 bytes, 16-byte aligned)
 	/// This data is uploaded once per instance and used by the vertex shader
 	/// to transform mesh vertices to screen space.
@@ -66,6 +70,7 @@ namespace Renderer {
 
 	  private:
 		friend class BatchRenderer;
+		friend class Primitives::MaskImage; // a mesh layer names the mesh's geometry
 
 		// The backend's objects; BatchRenderer makes and releases them.
 		GeometryHandle geometry;		 // the mesh and instance buffers in the InstancedMesh layout

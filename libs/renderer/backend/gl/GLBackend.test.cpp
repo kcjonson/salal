@@ -504,7 +504,7 @@ namespace Renderer::backend::gl {
 		const PipelineHandle pipeline = gpu->createPipeline(base_shader::source());
 		ASSERT_TRUE(pipeline.isValid());
 		glUseProgram(gpu->programName(pipeline)); // whatever a game's pass left bound
-		gpu->beginForeignDraws({}, BlendState::Alpha, {});
+		gpu->beginForeignDraws({}, BlendState::Alpha);
 		GLint program = -1;
 		glGetIntegerv(GL_CURRENT_PROGRAM, &program);
 		EXPECT_EQ(program, 0);
