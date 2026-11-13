@@ -52,37 +52,44 @@ namespace app::detail {
 
 	} // namespace
 
-	TEST(InputParserTest, PointerEventsCarryTheirPositionAndButton) {
+	// Each pointer event is led by an enter, so the injected pointer is in the window.
+	TEST(InputParserTest, PointerEventsEnterTheWindowAndCarryTheirPositionAndButton) {
 		const ParsedInput parsed = parse({"move,10,20", "down,1.5,2.5,right", "up,3,4,middle", "scroll,5,6,-2"});
 		ASSERT_TRUE(parsed.error.empty()) << parsed.error;
-		ASSERT_EQ(parsed.events.size(), 4U);
-		expectPointer(parsed.events[0], Type::PointerMove, 10.0F, 20.0F);
-		expectPointer(parsed.events[1], Type::PointerDown, 1.5F, 2.5F, MouseButton::Right);
-		expectPointer(parsed.events[2], Type::PointerUp, 3.0F, 4.0F, MouseButton::Middle);
-		expectPointer(parsed.events[3], Type::Scroll, 5.0F, 6.0F);
-		EXPECT_EQ(parsed.events[3].scroll.x, 0.0F);
-		EXPECT_EQ(parsed.events[3].scroll.y, -2.0F);
+		ASSERT_EQ(parsed.events.size(), 8U);
+		for (std::size_t i = 0; i < parsed.events.size(); i += 2) {
+			EXPECT_EQ(parsed.events[i].type, Type::PointerEnter) << i;
+			EXPECT_EQ(parsed.events[i].device, kMouse) << i;
+		}
+		expectPointer(parsed.events[1], Type::PointerMove, 10.0F, 20.0F);
+		expectPointer(parsed.events[3], Type::PointerDown, 1.5F, 2.5F, MouseButton::Right);
+		expectPointer(parsed.events[5], Type::PointerUp, 3.0F, 4.0F, MouseButton::Middle);
+		expectPointer(parsed.events[7], Type::Scroll, 5.0F, 6.0F);
+		EXPECT_EQ(parsed.events[7].scroll.x, 0.0F);
+		EXPECT_EQ(parsed.events[7].scroll.y, -2.0F);
 	}
 
-	TEST(InputParserTest, AClickIsAMoveADownAndAnUp) {
+	TEST(InputParserTest, AClickIsAnEnterAMoveADownAndAnUp) {
 		const ParsedInput parsed = parse({"click,7,8"});
-		ASSERT_EQ(parsed.events.size(), 3U);
-		expectPointer(parsed.events[0], Type::PointerMove, 7.0F, 8.0F);
-		expectPointer(parsed.events[1], Type::PointerDown, 7.0F, 8.0F);
-		expectPointer(parsed.events[2], Type::PointerUp, 7.0F, 8.0F);
+		ASSERT_EQ(parsed.events.size(), 4U);
+		EXPECT_EQ(parsed.events[0].type, Type::PointerEnter);
+		expectPointer(parsed.events[1], Type::PointerMove, 7.0F, 8.0F);
+		expectPointer(parsed.events[2], Type::PointerDown, 7.0F, 8.0F);
+		expectPointer(parsed.events[3], Type::PointerUp, 7.0F, 8.0F);
 	}
 
-	TEST(InputParserTest, ADragIsAPressFourMovesAlongAndARelease) {
+	TEST(InputParserTest, ADragIsAnEnterAPressFourMovesAlongAndARelease) {
 		const ParsedInput parsed = parse({"drag,10,20,50,100"});
 		ASSERT_TRUE(parsed.error.empty()) << parsed.error;
-		ASSERT_EQ(parsed.events.size(), 7U);
-		expectPointer(parsed.events[0], Type::PointerMove, 10.0F, 20.0F);
-		expectPointer(parsed.events[1], Type::PointerDown, 10.0F, 20.0F);
-		expectPointer(parsed.events[2], Type::PointerMove, 20.0F, 40.0F);
-		expectPointer(parsed.events[3], Type::PointerMove, 30.0F, 60.0F);
-		expectPointer(parsed.events[4], Type::PointerMove, 40.0F, 80.0F);
-		expectPointer(parsed.events[5], Type::PointerMove, 50.0F, 100.0F);
-		expectPointer(parsed.events[6], Type::PointerUp, 50.0F, 100.0F);
+		ASSERT_EQ(parsed.events.size(), 8U);
+		EXPECT_EQ(parsed.events[0].type, Type::PointerEnter);
+		expectPointer(parsed.events[1], Type::PointerMove, 10.0F, 20.0F);
+		expectPointer(parsed.events[2], Type::PointerDown, 10.0F, 20.0F);
+		expectPointer(parsed.events[3], Type::PointerMove, 20.0F, 40.0F);
+		expectPointer(parsed.events[4], Type::PointerMove, 30.0F, 60.0F);
+		expectPointer(parsed.events[5], Type::PointerMove, 40.0F, 80.0F);
+		expectPointer(parsed.events[6], Type::PointerMove, 50.0F, 100.0F);
+		expectPointer(parsed.events[7], Type::PointerUp, 50.0F, 100.0F);
 		EXPECT_EQ(errorOf("drag,1,2,3"), "expected drag,x0,y0,x1,y1");
 		EXPECT_EQ(errorOf("drag,1,2,3,y"), "non-numeric coordinates");
 	}

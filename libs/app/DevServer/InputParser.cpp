@@ -225,6 +225,10 @@ namespace app::detail {
 				return true;
 			}
 
+			// An injected pointer is over the window wherever the real cursor is, so each pointer event is led
+			// by the PointerEnter a window system sends; the real cursor's next enter or leave says otherwise.
+			static void enterWindow(std::vector<InputEvent>& out) { out.push_back({.type = Type::PointerEnter, .device = kMouse}); }
+
 			bool pointer(std::string_view type, std::vector<InputEvent>& out) {
 				const bool		  scroll = type == "scroll";
 				const bool		  takesButton = type == "down" || type == "up" || type == "click";
@@ -246,6 +250,7 @@ namespace app::detail {
 					InputEvent wheel = at;
 					wheel.type = Type::Scroll;
 					wheel.scroll = {0.0F, *delta};
+					enterWindow(out);
 					out.push_back(wheel);
 					return true;
 				}
@@ -265,6 +270,7 @@ namespace app::detail {
 					event.mouseButton = button;
 					return event;
 				};
+				enterWindow(out);
 				if (type == "move" || type == "click") {
 					out.push_back(make(Type::PointerMove));
 				}
@@ -299,6 +305,7 @@ namespace app::detail {
 					 event.mouseButton = foundation::MouseButton::Left;
 					 out.push_back(event);
 				};
+				enterWindow(out);
 				push(Type::PointerMove, from);
 				push(Type::PointerDown, from);
 				for (int step = 1; step <= kDragSteps; ++step) {
