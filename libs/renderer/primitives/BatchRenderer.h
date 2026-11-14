@@ -504,16 +504,18 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// The flush's mask table (docs/masks.md). Entry i is mask index i + 1: its layers, top
 		// first, a run of maskLayers, and the box on screen round every quad drawn under it,
-		// which a Subtract's cover passes fill. A layer's triangles are a run of maskTriangles,
-		// three points each, on screen. Emptied with the batch.
+		// which a Subtract's cover passes fill and a layer must hold to be built inverted. A layer's triangles are a run of maskTriangles,
+		// three points each, on screen; `screenBox` is set when they are exactly an axis-aligned
+		// box on screen, (minX, minY, maxX, maxY), split along a diagonal. Emptied with the batch.
 		struct MaskLayerEntry {
-			Primitives::MaskComposite composite = Primitives::MaskComposite::Add;
-			uint32_t				  triangleStart = 0;
-			uint32_t				  triangleCount = 0;
-			GeometryHandle			  meshGeometry;
-			BufferHandle			  meshInstances;
-			uint32_t				  meshIndexCount = 0;
-			Primitives::WorldCamera	  camera;
+			Primitives::MaskComposite		composite = Primitives::MaskComposite::Add;
+			uint32_t						triangleStart = 0;
+			uint32_t						triangleCount = 0;
+			GeometryHandle					meshGeometry;
+			BufferHandle					meshInstances;
+			uint32_t						meshIndexCount = 0;
+			Primitives::WorldCamera			camera;
+			std::optional<Foundation::Vec4> screenBox;
 		};
 		struct MaskEntry {
 			uint32_t		 layerStart = 0;
@@ -529,12 +531,21 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Whether two interned layers are the same mask-image under the same composite.
 		bool sameLayer(const MaskLayerEntry& first, const MaskLayerEntry& second) const;
 
+		// The axis-aligned box on screen that maskTriangles' run [triangleStart, + triangleCount)
+		// is exactly, as MaskLayerEntry::screenBox holds it, or none.
+		std::optional<Foundation::Vec4> screenBoxOf(uint32_t triangleStart, uint32_t triangleCount) const;
+
+		// Whether `layer` covers every pixel a quad drawn under mask `entry` can reach: its
+		// triangles are an axis-aligned box on screen holding the entry's cover box.
+		static bool coversEntry(const MaskLayerEntry& layer, const MaskEntry& entry);
+
 		// Empty the mask table, with the batch.
 		void clearMasks();
 
 		// Build mask `index` in the bound target's stencil bits for the run after it, from its
 		// layers' quads uploaded at layerFirstInstance and its cover quad at `coverInstance`.
-		void buildMask(uint32_t index, uint32_t coverInstance);
+		// True when it is built inverted: the run draws where the accumulator bit is clear.
+		bool buildMask(uint32_t index, uint32_t coverInstance);
 
 		// flush()'s draw calls gathered under the batched uniforms, submitted before anything
 		// that must follow them on the GPU.

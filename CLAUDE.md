@@ -239,7 +239,7 @@ renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
 sandbox's base shader is assembled with), `border` (rect borders on some sides, and dashed), `mask` (CSS masks: the player visibility cover over two moving sights), ui's (`ui_order`, `ui_text`, `ui_theme`,
 `ui_layout`, `ui_grid`, `ui_clip`, `ui_scroll`, `ui_input`, `ui_focus`, `ui_icons`, `ui_motion`, `ui_display`,
 `ui_controls`, `ui_overlays`, `ui_overlay_components` and `ui_drag`) and the perf suite's (`perf_quads`, `perf_text`,
-`perf_world` and `perf_ui`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
+`perf_world`, `perf_ui` and `perf_mask`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
 has its state and the tab's and rows' bounds). It serves the dev server on
 127.0.0.1:8090 in Debug and RelWithDebInfo (`--http-port <port>` for another).
 Run `build/apps/sandbox/Debug/sandbox.exe --scene=<name>` in the background,

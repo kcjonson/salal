@@ -13,6 +13,7 @@
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -206,6 +207,104 @@ namespace Renderer {
 		EXPECT_EQ(gpu->live().geometries, liveBefore - 1);
 	}
 
+	// The stencil-only draws of the last frame: the mask builds.
+	std::vector<backend::NullBackend::RecordedDraw> buildDraws(const backend::NullBackend& gpu) {
+		std::vector<backend::NullBackend::RecordedDraw> built;
+		for (const backend::NullBackend::RecordedDraw& draw : gpu.draws()) {
+			if (!draw.call.writeColour) {
+				built.push_back(draw);
+			}
+		}
+		return built;
+	}
+
+	TEST_F(MaskBatchTest, ARectMinusAUnionThatHoldsItsDrawsIsBuiltInvertedWithNoCoverPass) {
+		const Foundation::Rect				  view{0.0F, 0.0F, 64.0F, 64.0F};
+		const std::array<Foundation::Vec2, 4> first = square(4.0F, 4.0F, 20.0F, 20.0F);
+		const std::array<Foundation::Vec2, 4> second = square(16.0F, 16.0F, 40.0F, 40.0F);
+		const std::array<MaskLayer, 3>		  mask = {{
+			   {.image = MaskImage::rect(view), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(first)},
+			   {.image = MaskImage::polygon(second)},
+		   }};
+		Primitives::drawRect({.bounds = view, .style = {.fill = Foundation::Color::red()}, .mask = mask});
+		Primitives::endFrame();
+
+		ASSERT_EQ(gpu->stencilClears().size(), 1U);
+		const std::vector<backend::NullBackend::RecordedDraw> built = buildDraws(*gpu);
+		ASSERT_EQ(built.size(), 2U); // the union, a polygon a call; the rect draws nothing
+		for (const backend::NullBackend::RecordedDraw& draw : built) {
+			EXPECT_EQ(draw.call.stencil.pass, backend::StencilOperation::Replace);
+			EXPECT_EQ(draw.call.stencil.writeMask, kMaskAccumulatorBit); // never the scratch bit
+		}
+		std::vector<backend::NullBackend::RecordedDraw> drawn = colourDraws();
+		ASSERT_EQ(drawn.size(), 1U);
+		EXPECT_EQ(drawn[0].call.stencil.reference, 0U); // where the union is not
+		EXPECT_EQ(drawn[0].call.stencil.readMask, kMaskAccumulatorBit);
+
+		// A draw under the same mask past the rect: the rect no longer holds every draw, so the mask
+		// is built the general way, the rect into the scratch bit and two cover passes.
+		Primitives::beginFrame();
+		gpu->clearRecord();
+		Primitives::drawRect({.bounds = view, .style = {.fill = Foundation::Color::red()}, .mask = mask});
+		Primitives::drawRect({.bounds = {70.0F, 0.0F, 4.0F, 4.0F}, .style = {.fill = Foundation::Color::red()}, .mask = mask});
+		Primitives::endFrame();
+		ASSERT_EQ(gpu->stencilClears().size(), 1U);
+		const std::vector<backend::NullBackend::RecordedDraw> general = buildDraws(*gpu);
+		ASSERT_EQ(general.size(), 5U);
+		EXPECT_EQ(general[2].call.stencil.writeMask, kMaskScratchBit);
+		EXPECT_EQ(general[3].call.instanceCount, 1U);
+		EXPECT_EQ(general[4].call.instanceCount, 1U);
+		drawn = colourDraws();
+		ASSERT_EQ(drawn.size(), 1U);
+		EXPECT_EQ(drawn[0].call.stencil.reference, kMaskAccumulatorBit);
+	}
+
+	TEST_F(MaskBatchTest, ARectHoldsADrawOnlyWhenItIsAnAxisAlignedBoxRoundIt) {
+		const Foundation::Rect		   view{0.0F, 0.0F, 32.0F, 32.0F};
+		const std::array<MaskLayer, 2> mask = {{
+			{.image = MaskImage::rect(view), .composite = MaskComposite::Subtract},
+			{.image = MaskImage::rect({8.0F, 8.0F, 8.0F, 8.0F})},
+		}};
+		const auto					   coverPasses = [this] {
+			for (const backend::NullBackend::RecordedDraw& draw : buildDraws(*gpu)) {
+				if (draw.call.stencil.writeMask == kMaskScratchBit) {
+					return true;
+				}
+			}
+			return false;
+		};
+
+		// Scaled and moved, the rect stays a box and holds the draw under the same transform.
+		Primitives::PushTransform(glm::scale(glm::translate(Foundation::Mat4(1.0F), {3.25F, 2.5F, 0.0F}), {0.75F, 0.75F, 1.0F}));
+		Primitives::drawRect({.bounds = view, .style = {.fill = Foundation::Color::red()}, .mask = mask});
+		Primitives::PopTransform();
+		Primitives::endFrame();
+		EXPECT_FALSE(coverPasses());
+
+		// Turned, it is no longer an axis-aligned box.
+		Primitives::beginFrame();
+		gpu->clearRecord();
+		Primitives::PushTransform(glm::rotate(Foundation::Mat4(1.0F), 0.3F, {0.0F, 0.0F, 1.0F}));
+		Primitives::drawRect({.bounds = view, .style = {.fill = Foundation::Color::red()}, .mask = mask});
+		Primitives::PopTransform();
+		Primitives::endFrame();
+		EXPECT_TRUE(coverPasses());
+
+		// A masked rect's outside border grows its quad past the rect.
+		Primitives::beginFrame();
+		gpu->clearRecord();
+		Primitives::drawRect(
+			{.bounds = view,
+			 .style =
+				 {.fill = Foundation::Color::red(),
+				  .border = Foundation::BorderStyle{.width = 2.0F, .position = Foundation::BorderPosition::Outside}},
+			 .mask = mask}
+		);
+		Primitives::endFrame();
+		EXPECT_TRUE(coverPasses());
+	}
+
 	// --- Pixels on GL ---
 
 	class MaskDrawTest : public ::testing::Test {
@@ -280,6 +379,34 @@ namespace Renderer {
 		// The whole target in `color` under `mask`; past its edges, so the rect's anti-aliased edge falls outside.
 		static void fill(const Foundation::Color& color, std::span<const MaskLayer> mask) {
 			Primitives::drawRect({.bounds = kView, .style = {.fill = color}, .mask = mask});
+		}
+
+		// `scene` drawn twice, then compared byte for byte. The second time, it calls
+		// asGeneralBuild with each of its masks, which draws a transparent rect under the mask far
+		// past the target, so no layer holds every draw under it and the mask is built the general
+		// way, with cover passes for every Subtract, where the first may be built inverted.
+		template <typename Scene>
+		void expectSameAsGeneralBuild(Scene scene) {
+			render([&] { scene(false); });
+			const std::vector<uint8_t> built = pixels;
+			render([&] { scene(true); });
+			ASSERT_EQ(built.size(), pixels.size());
+			for (size_t index = 0; index < pixels.size(); index += 4) {
+				if (std::memcmp(&built[index], &pixels[index], 4) != 0) {
+					const auto offset = static_cast<int>(index / 4);
+					ADD_FAILURE() << "pixel (" << offset % kSize << ", " << kSize - 1 - (offset / kSize) << "): " << int{built[index]}
+								  << "," << int{built[index + 1]} << "," << int{built[index + 2]} << "," << int{built[index + 3]}
+								  << " against the general build's " << int{pixels[index]} << "," << int{pixels[index + 1]} << ","
+								  << int{pixels[index + 2]} << "," << int{pixels[index + 3]};
+					return;
+				}
+			}
+		}
+
+		static void asGeneralBuild(bool general, std::span<const MaskLayer> mask) {
+			if (general) {
+				Primitives::drawRect({.bounds = {1000.0F, 1000.0F, 4.0F, 4.0F}, .style = {.fill = {0.0F, 0.0F, 0.0F, 0.0F}}, .mask = mask});
+			}
 		}
 
 		static constexpr Foundation::Rect	kView{-4.0F, -4.0F, kSize + 8.0F, kSize + 8.0F};
@@ -443,6 +570,178 @@ namespace Renderer {
 		expectNear(pixel(20, 4), kBlue);
 		expectNear(pixel(28, 28), kGreen);
 		EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+	}
+
+	// --- A mask built inverted against the general build ---
+
+	TEST_F(MaskDrawTest, ARectMinusOverlappingLayersAndAMeshIsTheGeneralBuild) {
+		InstancedMeshHandle					  seen = Primitives::uploadInstancedMesh(rectangleMesh(9.5F, 20.0F), 1);
+		const std::array<Foundation::Vec2, 4> first = square(6.5F, 5.0F, 20.0F, 19.25F);
+		const std::array<Foundation::Vec2, 3> second = {{{14.0F, 12.0F}, {31.0F, 18.5F}, {17.0F, 30.0F}}};
+		ASSERT_TRUE(seen.isValid());
+		const std::array<MaskLayer, 4> mask = {{
+			{.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			{.image = MaskImage::mesh(seen, {.position = {16.0F, 16.0F}})},
+			{.image = MaskImage::polygon(first)},
+			{.image = MaskImage::polygon(second)},
+		}};
+		expectSameAsGeneralBuild([&](bool general) {
+			fill(Foundation::Color::red(), mask);
+			asGeneralBuild(general, mask);
+		});
+		expectNear(pixel(2, 30), kRed);
+		expectNear(pixel(10, 10), kBlue);
+		expectNear(pixel(18, 20), kBlue);
+	}
+
+	TEST_F(MaskDrawTest, PartlyCoveredMaskedRectsWithTheirOwnEdgesAreTheGeneralBuild) {
+		// The rect is each draw's own bounds, or the box round two, edges off the pixel grid, so the
+		// draws' anti-aliased edges and rounded corners fall inside the target, on the rect's edges.
+		const Foundation::Rect				  bounds{5.25F, 6.75F, 20.5F, 17.25F};
+		const Foundation::Rect				  pair{3.5F, 3.5F, 25.0F, 25.0F};
+		const std::array<Foundation::Vec2, 4> crossing = square(10.0F, 2.0F, 18.0F, 30.0F);
+		const std::array<MaskLayer, 2>		  own = {{
+			   {.image = MaskImage::rect(bounds), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(crossing)},
+		   }};
+		const std::array<MaskLayer, 2>		  round = {{
+			   {.image = MaskImage::rect(pair), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(crossing)},
+		   }};
+		expectSameAsGeneralBuild([&](bool general) {
+			Primitives::drawRect(
+				{.bounds = bounds,
+				 .style = {.fill = Foundation::Color::red(), .border = Foundation::BorderStyle{.width = 0.0F, .cornerRadius = 4.5F}},
+				 .mask = own}
+			);
+			asGeneralBuild(general, own);
+		});
+		expectSameAsGeneralBuild([&](bool general) {
+			Primitives::drawRect({.bounds = {3.5F, 3.5F, 12.0F, 12.0F}, .style = {.fill = Foundation::Color::green()}, .mask = round});
+			Primitives::drawRect({.bounds = {16.5F, 16.5F, 12.0F, 12.0F}, .style = {.fill = Foundation::Color::red()}, .mask = round});
+			asGeneralBuild(general, round);
+		});
+	}
+
+	TEST_F(MaskDrawTest, ClippedMaskedRectsAreTheGeneralBuild) {
+		const std::array<Foundation::Vec2, 4> sight = square(4.0F, 9.0F, 26.0F, 21.0F);
+		const std::array<MaskLayer, 2>		  mask = {{
+			   {.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(sight)},
+		   }};
+		expectSameAsGeneralBuild([&](bool general) {
+			Primitives::pushClip({7.5F, 0.0F, 13.0F, 32.0F});
+			fill(Foundation::Color::red(), mask);
+			asGeneralBuild(general, mask);
+			Primitives::popClip();
+		});
+		expectNear(pixel(10, 4), kRed);
+		expectNear(pixel(10, 16), kBlue);
+		expectNear(pixel(4, 4), kBlue); // the clip
+	}
+
+	TEST_F(MaskDrawTest, ARectThatDoesNotHoldTheDrawIsBuiltTheGeneralWay) {
+		const std::array<Foundation::Vec2, 4> sight = square(12.0F, 12.0F, 30.0F, 30.0F);
+		const std::array<MaskLayer, 2>		  mask = {{
+			   {.image = MaskImage::rect({8.0F, 8.0F, 16.0F, 16.0F}), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(sight)},
+		   }};
+		expectSameAsGeneralBuild([&](bool general) {
+			fill(Foundation::Color::red(), mask);
+			asGeneralBuild(general, mask);
+		});
+		expectNear(pixel(4, 4), kBlue); // outside the rect
+		expectNear(pixel(10, 10), kRed);
+		expectNear(pixel(16, 16), kBlue); // under the sight
+		expectNear(pixel(28, 28), kBlue);
+	}
+
+	TEST_F(MaskDrawTest, ARectMinusAnEmptyUnionIsTheGeneralBuild) {
+		const std::array<Foundation::Vec2, 2> nothing = {{{4.0F, 4.0F}, {20.0F, 20.0F}}}; // no polygon: no triangles
+		const std::array<MaskLayer, 2>		  mask = {{
+			   {.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(nothing)},
+		   }};
+		expectSameAsGeneralBuild([&](bool general) {
+			fill(Foundation::Color::red(), mask);
+			asGeneralBuild(general, mask);
+		});
+		expectNear(pixel(0, 0), kRed);
+		expectNear(pixel(12, 12), kRed);
+		expectNear(pixel(31, 31), kRed);
+	}
+
+	TEST_F(MaskDrawTest, TwoCoversInOneFrameAreTheGeneralBuild) {
+		// Worldsim's: a translucent fill over the view minus the sights, then an opaque one over the
+		// view minus what was seen and what is pending.
+		InstancedMeshHandle					  seen = Primitives::uploadInstancedMesh(rectangleMesh(14.0F, 14.0F), 1);
+		const std::array<Foundation::Vec2, 4> sight = square(2.0F, 2.0F, 9.5F, 11.0F);
+		const std::array<Foundation::Vec2, 3> pending = {{{20.0F, 18.0F}, {31.0F, 31.0F}, {18.0F, 29.0F}}};
+		ASSERT_TRUE(seen.isValid());
+		const std::array<MaskLayer, 2> dim = {{
+			{.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			{.image = MaskImage::polygon(sight)},
+		}};
+		const std::array<MaskLayer, 3> unseen = {{
+			{.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			{.image = MaskImage::mesh(seen, {.position = {16.0F, 16.0F}})},
+			{.image = MaskImage::polygon(pending)},
+		}};
+		expectSameAsGeneralBuild([&](bool general) {
+			fill(Foundation::Color(0.0F, 0.0F, 0.0F, 0.6F), dim);
+			fill(Foundation::Color::green(), unseen);
+			asGeneralBuild(general, dim);
+			asGeneralBuild(general, unseen);
+		});
+		expectNear(pixel(4, 4), kBlue);				   // in sight
+		expectNear(pixel(12, 4), {0, 0, 102, 255}, 2); // seen, dimmed
+		expectNear(pixel(28, 4), kGreen);			   // never seen
+	}
+
+	TEST_F(MaskDrawTest, ARectUnderAScaleAndMoveIsTheGeneralBuild) {
+		const Foundation::Rect				  view{0.0F, 0.0F, 40.0F, 40.0F};
+		const std::array<Foundation::Vec2, 4> sight = square(10.0F, 7.0F, 27.0F, 33.0F);
+		const std::array<MaskLayer, 2>		  mask = {{
+			   {.image = MaskImage::rect(view), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(sight)},
+		   }};
+		expectSameAsGeneralBuild([&](bool general) {
+			Primitives::PushTransform(glm::scale(glm::translate(Foundation::Mat4(1.0F), {3.25F, 2.5F, 0.0F}), {0.7F, 0.7F, 1.0F}));
+			Primitives::drawRect({.bounds = view, .style = {.fill = Foundation::Color::red()}, .mask = mask});
+			asGeneralBuild(general, mask);
+			Primitives::PopTransform();
+		});
+	}
+
+	TEST_F(MaskDrawTest, LayersOverAnInvertedBuildAreTheGeneralBuild) {
+		// An Add over the inverted union, and a Subtract by a layer that does not hold the draw.
+		const std::array<Foundation::Vec2, 4> under = square(4.0F, 4.0F, 20.0F, 20.0F);
+		const std::array<Foundation::Vec2, 4> over = square(14.0F, 14.0F, 28.0F, 28.0F);
+		const std::array<MaskLayer, 3>		  added = {{
+			   {.image = MaskImage::polygon(over)},
+			   {.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(under)},
+		   }};
+		const std::array<MaskLayer, 3>		  subtracted = {{
+			   {.image = MaskImage::polygon(over), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
+			   {.image = MaskImage::polygon(under)},
+		   }};
+		expectSameAsGeneralBuild([&](bool general) {
+			fill(Foundation::Color::red(), added);
+			asGeneralBuild(general, added);
+		});
+		expectNear(pixel(8, 8), kBlue);	 // the union alone
+		expectNear(pixel(16, 16), kRed); // the added layer
+		expectNear(pixel(2, 30), kRed);
+		expectNear(pixel(24, 24), kRed);
+		expectSameAsGeneralBuild([&](bool general) {
+			fill(Foundation::Color::red(), subtracted);
+			asGeneralBuild(general, subtracted);
+		});
+		expectNear(pixel(16, 16), kRed);  // the layer where the union is: outside the rect minus the union
+		expectNear(pixel(24, 24), kBlue); // the layer alone
+		expectNear(pixel(2, 30), kBlue);
 	}
 
 } // namespace Renderer

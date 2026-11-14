@@ -111,7 +111,8 @@ namespace Renderer {
 		if (end <= groupStart) {
 			return;
 		}
-		// A Subtract's cover passes fill the box round every quad drawn under its mask.
+		// The box round every quad drawn under its mask: what a Subtract's cover passes fill, and
+		// what a layer must hold for the mask to be built inverted.
 		if (mask != 0) {
 			MaskEntry& entry = maskEntries[mask - 1];
 			for (uint32_t index = groupStart; index < end; ++index) {
@@ -444,6 +445,7 @@ namespace Renderer {
 				}
 			}
 			entry.triangleCount = static_cast<uint32_t>(maskTriangles.size() / 3) - entry.triangleStart;
+			entry.screenBox = screenBoxOf(entry.triangleStart, entry.triangleCount);
 			mix(static_cast<uint64_t>(entry.composite));
 			mix(entry.triangleCount);
 			mix(entry.meshGeometry.value);
@@ -484,6 +486,39 @@ namespace Renderer {
 		const auto firstTriangles = maskTriangles.begin() + (static_cast<ptrdiff_t>(first.triangleStart) * 3);
 		const auto secondTriangles = maskTriangles.begin() + (static_cast<ptrdiff_t>(second.triangleStart) * 3);
 		return std::equal(firstTriangles, firstTriangles + (static_cast<ptrdiff_t>(first.triangleCount) * 3), secondTriangles);
+	}
+
+	std::optional<Foundation::Vec4> BatchRenderer::screenBoxOf(uint32_t triangleStart, uint32_t triangleCount) const {
+		if (triangleCount != 2) {
+			return std::nullopt;
+		}
+		// Two triangles (a, b, c) and (a, c, d) round the corners a, b, c, d of an axis-aligned
+		// box, in either winding: exactly the box, split along its diagonal ac. Compared exactly,
+		// so a transform that turns the box by a hair leaves it a general layer.
+		const Foundation::Vec2* points = &maskTriangles[static_cast<size_t>(triangleStart) * 3];
+		const Foundation::Vec2& first = points[0];
+		const Foundation::Vec2& second = points[1];
+		const Foundation::Vec2& third = points[2];
+		const Foundation::Vec2& fourth = points[5];
+		if (points[3] != first || points[4] != third) {
+			return std::nullopt;
+		}
+		const bool rowFirst = first.y == second.y && second.x == third.x && third.y == fourth.y && fourth.x == first.x;
+		const bool columnFirst = first.x == second.x && second.y == third.y && third.x == fourth.x && fourth.y == first.y;
+		if (!rowFirst && !columnFirst) {
+			return std::nullopt;
+		}
+		return Foundation::Vec4(
+			std::min(first.x, third.x), std::min(first.y, third.y), std::max(first.x, third.x), std::max(first.y, third.y)
+		);
+	}
+
+	bool BatchRenderer::coversEntry(const MaskLayerEntry& layer, const MaskEntry& entry) {
+		if (!layer.screenBox.has_value() || !entry.covered) {
+			return false;
+		}
+		const Foundation::Vec4& box = *layer.screenBox;
+		return box.x <= entry.cover.x && box.y <= entry.cover.y && entry.cover.z <= box.z && entry.cover.w <= box.w;
 	}
 
 	void BatchRenderer::clearMasks() {
@@ -953,9 +988,10 @@ namespace Renderer {
 		gpu.setUniforms(uniforms);
 
 		// One draw call per run, as one submission unless a mask is built between runs. A
-		// masked run lands where the built mask's accumulator bit is set; consecutive runs
-		// under the same mask share its build, since nothing between them writes the stencil.
-		const backend::StencilState maskTest{
+		// masked run lands where the built mask holds, its accumulator bit set or, built
+		// inverted, clear; consecutive runs under the same mask share its build, since nothing
+		// between them writes the stencil.
+		backend::StencilState maskTest{
 			.test = true,
 			.function = backend::StencilFunction::Equal,
 			.reference = kMaskAccumulatorBit,
@@ -976,7 +1012,8 @@ namespace Renderer {
 					}
 					continue;
 				}
-				buildMask(run.mask, coverStart + run.mask - 1);
+				const bool inverted = buildMask(run.mask, coverStart + run.mask - 1);
+				maskTest.reference = inverted ? 0 : kMaskAccumulatorBit;
 				built = run.mask;
 			}
 			drawCalls.push_back(
@@ -1019,14 +1056,24 @@ namespace Renderer {
 		drawCalls.clear();
 	}
 
-	// The mask in two stencil bits: the accumulator holds the layers composited so far, bottom
-	// up, and the scratch bit a Subtract layer's coverage. Add sets the accumulator where the
-	// layer lands (source over, for binary coverage the union). Subtract draws the layer into the
-	// scratch bit, then two cover passes over the masked quads' box make the accumulator the
-	// layer outside what it held: zero it where the scratch bit is clear, then invert both bits
-	// where it is set, which also clears the scratch bit. The bottom layer's composite is
-	// ignored. Every layer draws aliased, with no clip and no colour.
-	void BatchRenderer::buildMask(uint32_t index, uint32_t coverInstance) {
+	// The mask, composited bottom up, evaluated in two stencil bits over the box round the
+	// quads drawn under it (the entry's cover box), the only pixels a masked run reaches. The
+	// accumulator holds the layers composited so far, either as is or inverted: the mask is the
+	// accumulator bit xor `inverted`. The scratch bit holds a Subtract layer's coverage.
+	//
+	// - Add (and the bottom layer, whose composite is ignored) is the union: it sets the
+	//   accumulator where the layer lands, or zeroes it there when inverted.
+	// - Subtract by a layer that covers the whole box (coversEntry), all ones there, is the
+	//   complement of what is under it, so it flips `inverted` and draws nothing.
+	// - Subtract by any other layer is the layer outside what is under it. The layer is drawn
+	//   into the scratch bit, then two cover passes over the box: zero the accumulator where the
+	//   scratch bit is clear; then, where it is set, invert the accumulator (not inverted: the
+	//   layer outside what it held) or leave it (inverted: what it holds is already the
+	//   complement), and clear the scratch bit. The result is not inverted.
+	//
+	// Every layer draws aliased, with no clip and no colour. Returns `inverted`, which the
+	// masked runs' test reads: they draw where the accumulator bit is clear when it is set.
+	bool BatchRenderer::buildMask(uint32_t index, uint32_t coverInstance) {
 		using backend::StencilFunction;
 		using backend::StencilOperation;
 		const backend::StencilState addLayer{
@@ -1034,6 +1081,11 @@ namespace Renderer {
 			.reference = kMaskAccumulatorBit,
 			.writeMask = kMaskAccumulatorBit,
 			.pass = StencilOperation::Replace,
+		};
+		const backend::StencilState addInvertedLayer{
+			.test = true,
+			.writeMask = kMaskAccumulatorBit,
+			.pass = StencilOperation::Zero,
 		};
 		const backend::StencilState scratchLayer{
 			.test = true,
@@ -1057,6 +1109,14 @@ namespace Renderer {
 			.writeMask = kMaskAccumulatorBit | kMaskScratchBit,
 			.pass = StencilOperation::Invert,
 		};
+		const backend::StencilState keepInsideLayer{
+			.test = true,
+			.function = StencilFunction::Equal,
+			.reference = kMaskScratchBit,
+			.readMask = kMaskScratchBit,
+			.writeMask = kMaskScratchBit,
+			.pass = StencilOperation::Invert,
+		};
 		const auto stencilOnly = [this](const backend::StencilState& stencil, uint32_t firstInstance, uint32_t instanceCount) {
 			if (instanceCount > 0) {
 				drawCalls.push_back(
@@ -1070,14 +1130,23 @@ namespace Renderer {
 			}
 		};
 
+		const MaskEntry& entry = maskEntries[index - 1];
+		const auto		 subtracts = [&entry, this](uint32_t offset) {
+			  return offset + 1 < entry.layerCount && maskLayers[entry.layerStart + offset].composite == Primitives::MaskComposite::Subtract;
+		};
+
 		submitPending();
 		gpu.clearStencil(kMaskAccumulatorBit | kMaskScratchBit);
-		const MaskEntry& entry = maskEntries[index - 1];
+		bool inverted = false;
 		for (uint32_t offset = entry.layerCount; offset-- > 0;) {
-			const uint32_t				 layerIndex = entry.layerStart + offset;
-			const MaskLayerEntry&		 layer = maskLayers[layerIndex];
-			const bool					 subtract = offset + 1 < entry.layerCount && layer.composite == Primitives::MaskComposite::Subtract;
-			const backend::StencilState& coverage = subtract ? scratchLayer : addLayer;
+			const uint32_t		  layerIndex = entry.layerStart + offset;
+			const MaskLayerEntry& layer = maskLayers[layerIndex];
+			const bool			  subtract = subtracts(offset);
+			if (subtract && coversEntry(layer, entry)) {
+				inverted = !inverted;
+				continue;
+			}
+			const backend::StencilState& coverage = subtract ? scratchLayer : (inverted ? addInvertedLayer : addLayer);
 			if (layer.meshGeometry.isValid()) {
 				// One copy at the world origin under the layer's camera, drawn under the
 				// instanced uniforms, then the batch's again.
@@ -1101,10 +1170,12 @@ namespace Renderer {
 			}
 			if (subtract) {
 				stencilOnly(clearOutsideLayer, coverInstance, 1);
-				stencilOnly(invertInsideLayer, coverInstance, 1);
+				stencilOnly(inverted ? keepInsideLayer : invertInsideLayer, coverInstance, 1);
+				inverted = false;
 			}
 		}
 		submitPending();
+		return inverted;
 	}
 
 	backend::DrawUniforms BatchRenderer::worldUniforms(Foundation::Vec2 cameraPosition, float cameraZoom, float pixelsPerMeter) const {
