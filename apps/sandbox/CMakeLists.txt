@@ -9,6 +9,7 @@ add_executable(salal_sandbox
     scenes/FillHookScene.cpp
     scenes/InputTestScene.cpp
     scenes/MaskScene.cpp
+    scenes/PerfMaskScene.cpp
     scenes/PerfQuadsScene.cpp
     scenes/PerfTextScene.cpp
     scenes/PerfUiScene.cpp
