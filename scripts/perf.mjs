@@ -46,7 +46,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SCENES = ['perf_quads', 'perf_text', 'perf_world', 'perf_ui'];
+const SCENES = ['perf_quads', 'perf_text', 'perf_world', 'perf_ui', 'perf_mask'];
 const FORBIDDEN_PORT = 8090;
 const EXIT = { pass: 0, regressed: 1, invalid: 2, inconclusive: 3 };
 
@@ -63,6 +63,7 @@ const GATES = {
 	perf_text: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
 	perf_world: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
 	perf_ui: { 'cpuMs.p50': 4, 'renderMs.p50': 4, 'gpuMs.p50': 4 },
+	perf_mask: { 'cpuMs.p50': 3, 'renderMs.p50': 3, 'gpuMs.p50': 3 },
 };
 // Fixed for fixed content: a head that draws more, uploads more or makes more draw calls fails, unless
 // --allow-counts. A moving camera culls a little differently in each capture window, so a count fails

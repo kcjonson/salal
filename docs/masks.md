@@ -103,17 +103,58 @@ being added.
 Underneath, a mask is two bits of the bound target's stencil buffer, which no caller sees. At add time
 a masked rect's layers are mapped to the screen and interned into the flush's mask table, deduplicated
 by content, and the rect's draw group carries the entry's index. At flush, before a run whose mask
-differs from the last one built, the mask is built:
+differs from the last one built, the mask is built.
+
+The build evaluates the layers as a small expression, bottom up, over the box round every quad drawn
+under the mask (its cover box, the only pixels its runs can reach). The accumulator bit holds the
+layers composited so far, either as is or inverted, and the scratch bit holds a layer's coverage
+while a `Subtract` composites it.
 
 1. The two bits are cleared across the target, so nothing carries over between builds and a game's GL
    that left values in the stencil changes nothing.
-2. Layers are drawn bottom up, aliased, with no clip and no colour. `Add` sets the accumulator bit
-   where the layer lands.
-3. `Subtract` draws the layer into the scratch bit, then two cover passes over the box round the
-   rects drawn under the mask: one zeroes the accumulator where the scratch bit is clear, the next
-   inverts both bits where it is set, which leaves the accumulator as the layer outside what it held
-   and clears the scratch bit.
-4. The run draws where the accumulator bit is set.
+2. Layers are drawn bottom up, aliased, with no clip and no colour. `Add`, and the bottom layer,
+   sets the accumulator where the layer lands, or zeroes it there while the accumulator is
+   inverted.
+3. `Subtract` by a layer that holds the cover box is the complement of what is under it, so it
+   inverts the accumulator by flipping how it is read, and draws nothing.
+4. `Subtract` by any other layer draws it into the scratch bit, then two cover passes over the cover
+   box: one zeroes the accumulator where the scratch bit is clear, the next, where it is set,
+   inverts the accumulator (or, while it is inverted, leaves it) and clears the scratch bit. That
+   leaves the accumulator, not inverted, as the layer outside what it held.
+5. The run draws where the accumulator bit is set, or clear when it ended inverted.
+
+A layer holds the cover box when its triangles on screen are exactly an axis-aligned box, two
+triangles over its four corners split along a diagonal (a `rect` layer under a transform that only
+scales and moves; compared exactly, so one turned by a hair is not), and that box contains the cover
+box, edges included. The cover box is the bounds of the masked quads' corners as they were sent: a
+rect's quad is its bounds, grown by a centred or outside border, and its shadow's quad is part of
+it. A clip only removes pixels, so it doesn't enter. This is exact, not a near match, so the cover
+the game draws, a rect layer with the masked rect's own bounds, depends on both making the same
+corners from those bounds to the bit: a `rect` layer and every rect's quad take theirs from one
+function (`rectCorners`), from the edges, `x` and `x + width`. A quad made from its centre plus and
+minus half its size lands an ulp off for about a third of float rects, and would miss. The layer and
+the masked quads go through the same vertex transform, which is monotonic, so the containment
+holds on the GPU too. A pixel centre exactly on an edge is decided by a tie rule. OpenGL's own
+guarantee, that two triangles sharing an edge never both draw a pixel on it, covers only an edge
+with the same two endpoints, and the box's edge and a masked quad's lie on one line but can end at
+different points. What this rests on is the top-left rule every desktop GPU uses, which decides by
+the edge's line and the side its triangle lies on alone, so collinear edges are decided alike
+whatever their endpoints. A pixel centre inside a
+masked quad lies in the cover box, so in the box: inside it, the box draws it; on an edge of the box
+the box leaves out, the quad's triangles lie on one side of that same line, so the rule leaves it
+out of them too. Within the run's pixels the layer is all ones, so `Subtract` by it is exactly the
+complement. When the condition fails, as with a box that stops short of a masked rect, a turned box
+or a polygon layer, the layer is built by step 4, exactly as before.
+
+Worldsim's two covers, the view minus a union, are each the clear, the union's draws and the fill:
+two full-view passes a mask where the general build took five (the clear, the rect into the scratch
+bit, two cover passes and the fill). In the sandbox's `perf_mask`, which draws them over a 3072 by
+1728 window, the frame's GPU time went from 0.640 to 0.273 ms. Of what is left, the two clears are
+about 0.04 ms; clearing all eight stencil bits instead of two was about 0.01 ms cheaper, and drawing
+adjoining union layers in one call or clearing one bit instead of two measured nothing, so neither
+is done. `Mask.test.cpp` draws scenes both ways, the second with a
+transparent rect under the same mask far past the target so no layer holds the cover box, and
+compares the pixels byte for byte.
 
 A mesh layer draws under the instanced uniforms and the batch's uniforms are set again after it; the
 uniform ring takes several writes in one flush and a draw keeps the values it was given.

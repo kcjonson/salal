@@ -75,12 +75,13 @@ frame rate fell because of its own change or the engine's.
 
 ### The scenes
 
-Four sandbox scenes, each fixed content from a fixed seed, with any motion a
+Five sandbox scenes, each fixed content from a fixed seed, with any motion a
 function of the tick, so every frame of a tick draws the same. The first three
 were built to measure what the instanced-quad and texture-slot rework
 ([ui-design.md](../ui-design.md), Per-draw data and Texture residency)
 changed: the batcher's CPU time per quad, the bytes it uploads, and the draw
-calls texture changes cost. The fourth is ui's walk.
+calls texture changes cost. The fourth is ui's walk, the fifth masked draws
+([masks.md](../masks.md)), whose cost is nearly all GPU fill.
 
 | scene | what it draws | what it guards |
 |---|---|---|
@@ -88,6 +89,7 @@ calls texture changes cost. The fourth is ui's walk.
 | `perf_text` | 223 list rows in six sizes, 11 to 24 px: a background, an image icon from twelve that cycle, a label in one font atlas and a value and unit in a second (the sandbox's font loaded twice) | glyph batching and texture slots: fourteen textures a frame, so a run is cut each time it needs a ninth, 38 draw calls a frame |
 | `perf_world` | worldsim's VectorPerf 10,000 stars inside a clip, 120 stroked roads, a flush, 3,000 instanced trees, 400 rotating polygons from six cached silhouettes sorted by key, a barrier, 200 labels, then four clipped screen panels, under a panning, zooming camera | the world path: triangles as quads, strokes, the key sort, barriers, clips and flushes |
 | `perf_ui` | 1,250 cards of eight ui components each, three deep, one in ten raised by zIndex, on a stage that moves with the tick, under a menu anchored to a card, a modal dialog over its scrim, two toasts and a tooltip | ui's walk and layout, its key sort and the overlay stack's placement, over 10,049 components |
+| `perf_mask` | worldsim's player visibility cover over a window of tiles: a translucent fill over the whole window masked by the view minus four sight polygons, then an opaque one masked by the view minus a seen mesh of 3,072 triangles and three pending polygons, under a moving camera; the view is the window and a moving fraction of a pixel round it, a float rect off the pixel grid as worldsim's is | the stencil mask build: the passes each mask costs over the whole window |
 
 ### What a capture holds
 
@@ -196,6 +198,10 @@ its figure. Exit codes:
 | `perf_text` | `cpuMs`, `renderMs`, `gpuMs` p50 | 3% | 0% | 0% | 100% |
 | `perf_world` | `cpuMs`, `renderMs`, `gpuMs` p50 | 3% | 0% | 0% | 99.9% |
 | `perf_ui` | `cpuMs`, `renderMs`, `gpuMs` p50 | 4% | 0.66%, 0.10%, 0.27% | 6.9%, 1.6%, 1.8% | 69%, 89%, 67% |
+| `perf_mask` | `cpuMs`, `renderMs`, `gpuMs` p50 | 3% | not calibrated | not calibrated | not calibrated |
+
+`perf_mask` came later and holds the others' 3% until a `noise` run on an idle
+machine calibrates it.
 
 Calibrated on `kevinsgamingdesktop` (Ryzen 9 5950X, RTX 3090, Windows 11,
 the sandbox's window 3072 by 1728) on 2026-10-31 from 12:50 UTC: `noise`, 20

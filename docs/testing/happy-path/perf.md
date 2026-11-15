@@ -14,8 +14,9 @@ Release perf build, `build-perf/apps/sandbox/Release/sandbox.exe` (`<exe>`), wit
 8. `--scene=perf_ui`: overlapping dark cards, each with a coloured border, header, dot, "#n" title, a number and a meter, over a 1600 by 900 area, dimmed by a scrim over the whole window; a menu of eight rows below one card, dimmed with them; a dialog of twelve rows centred on the window, two toasts at the top right and a yellow tooltip, "a tooltip, above everything", above a card, none of them dimmed. `/api/state?what=scene` has 1250 cards, 10049 nodes and 5 overlays; every `/api/ui/lint` violation is a `sibling-overlap` of cards.
 9. Two screenshots a second apart: the cards, the menu and the tooltip have moved together; the dialog and the toasts haven't.
 10. A capture: `drawCalls.p50` 1, `instances.p50` 16,504.
-11. `op=stop` with no capture running: 409.
-12. `node scripts/perf.mjs compare --threshold abc`: "isn't a number", exit code 2.
-13. `node scripts/perf.mjs run --exe <exe> --scenes perf_quads --runs 1 --window 2`: one run, its gated figures printed, a JSON file under `perf-results/local/`, exit code 0.
-14. `node scripts/perf.mjs compare --exe <exe> --base-exe <exe> --scenes perf_quads --runs 3`: each gated line shows both sides' spread, the counts match, it ends "perf: pass", exit code 0.
-15. The same `run` while something else listens on 127.0.0.1:8094: "port 8094 is in use", exit code 2.
+11. `--scene=perf_mask`: flat slate over the window except a large spiky blob, where the tiles show dimmed, with dimmed wobbly lobes here and there past its edge; four circles show the tiles at full colour, cut off by the slate where one reaches past the blob, every edge hard. A capture: `drawCalls.p50` 12, `instances.p50` 1,307.
+12. `op=stop` with no capture running: 409.
+13. `node scripts/perf.mjs compare --threshold abc`: "isn't a number", exit code 2.
+14. `node scripts/perf.mjs run --exe <exe> --scenes perf_quads --runs 1 --window 2`: one run, its gated figures printed, a JSON file under `perf-results/local/`, exit code 0.
+15. `node scripts/perf.mjs compare --exe <exe> --base-exe <exe> --scenes perf_quads --runs 3`: each gated line shows both sides' spread, the counts match, it ends "perf: pass", exit code 0.
+16. The same `run` while something else listens on 127.0.0.1:8094: "port 8094 is in use", exit code 2.
