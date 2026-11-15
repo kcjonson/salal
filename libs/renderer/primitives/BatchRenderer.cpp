@@ -147,8 +147,12 @@ namespace Renderer {
 		}
 	}
 
-	BatchInstance&
-	BatchRenderer::pushQuad(QuadMode mode, const Foundation::Vec2 (&corners)[4], Primitives::BlendMode blend, TextureHandle texture) {
+	BatchInstance& BatchRenderer::pushQuad(
+		QuadMode							 mode,
+		std::span<const Foundation::Vec2, 4> corners,
+		Primitives::BlendMode				 blend,
+		TextureHandle						 texture
+	) {
 		const bool			   isIdentity = transformClass == TransformClass::kIdentity;
 		const Foundation::Vec2 onScreen[4] = {
 			TransformPosition(corners[0], currentTransform, isIdentity),
@@ -159,8 +163,12 @@ namespace Renderer {
 		return pushScreenQuad(mode, onScreen, blend, texture);
 	}
 
-	BatchInstance&
-	BatchRenderer::pushScreenQuad(QuadMode mode, const Foundation::Vec2 (&corners)[4], Primitives::BlendMode blend, TextureHandle texture) {
+	BatchInstance& BatchRenderer::pushScreenQuad(
+		QuadMode							 mode,
+		std::span<const Foundation::Vec2, 4> corners,
+		Primitives::BlendMode				 blend,
+		TextureHandle						 texture
+	) {
 		BatchInstance& quad = instances.emplace_back();
 		std::copy(std::begin(corners), std::end(corners), std::begin(quad.corners));
 		quad.clip = currentClipBounds;
@@ -252,19 +260,8 @@ namespace Renderer {
 		} else if (borderPosition == 2) {
 			borderOuterExtent = borderWidth;
 		}
-		const float			   extentW = halfW + borderOuterExtent;
-		const float			   extentH = halfH + borderOuterExtent;
-		const float			   centerX = bounds.x + halfW;
-		const float			   centerY = bounds.y + halfH;
-		const Foundation::Vec2 corners[4] = {
-			{centerX - extentW, centerY - extentH},
-			{centerX + extentW, centerY - extentH},
-			{centerX + extentW, centerY + extentH},
-			{centerX - extentW, centerY + extentH},
-		};
-
-		BatchInstance& quad = pushQuad(QuadMode::Rect, corners, blend);
-		quad.geometry = {halfW, halfH, extentW, extentH};
+		BatchInstance& quad = pushQuad(QuadMode::Rect, rectCorners(bounds, borderOuterExtent), blend);
+		quad.geometry = {halfW, halfH, halfW + borderOuterExtent, halfH + borderOuterExtent};
 		quad.radii[0] = halves(radii[0], radii[1]);
 		quad.radii[1] = halves(radii[2], radii[3]);
 		for (int i = 0; i < 4; ++i) {
@@ -334,6 +331,16 @@ namespace Renderer {
 		return (4.0F * (half.x + half.y)) + (((std::numbers::pi_v<float> * 0.5F) - 2.0F) * radiusSum);
 	}
 
+	std::array<Foundation::Vec2, 4> rectCorners(const Foundation::Rect& bounds, float outset) {
+		// From the edges, not the centre: at outset 0 these are the bounds' own x and x + width,
+		// where the centre plus and minus half the width can land an ulp off.
+		const float left = bounds.x - outset;
+		const float top = bounds.y - outset;
+		const float right = (bounds.x + bounds.width) + outset;
+		const float bottom = (bounds.y + bounds.height) + outset;
+		return {{{left, top}, {right, top}, {right, bottom}, {left, bottom}}};
+	}
+
 	CornerRadii rectCornerRadii(float radius, const std::optional<Foundation::BorderStyle>& border) {
 		if (!border.has_value() || !(border->width > 0.0F)) {
 			return {radius, radius, radius, radius};
@@ -390,16 +397,10 @@ namespace Renderer {
 			return;
 		}
 		const float			   blur = shadow.blur > 0.0F ? shadow.blur : 0.5F;
-		const float			   cx = bounds.x + (bounds.width * 0.5F) + shadow.offset.x;
-		const float			   cy = bounds.y + (bounds.height * 0.5F) + shadow.offset.y;
-		const float			   extentW = halfW + blur;
-		const float			   extentH = halfH + blur;
-		const Foundation::Vec2 corners[4] = {
-			{cx - extentW, cy - extentH}, {cx + extentW, cy - extentH}, {cx + extentW, cy + extentH}, {cx - extentW, cy + extentH}
-		};
+		const Foundation::Rect moved{bounds.x + shadow.offset.x, bounds.y + shadow.offset.y, bounds.width, bounds.height};
 
-		BatchInstance& quad = pushQuad(QuadMode::Shadow, corners, blend);
-		quad.geometry = {halfW, halfH, extentW, extentH};
+		BatchInstance& quad = pushQuad(QuadMode::Shadow, rectCorners(moved, shadow.spread + blur), blend);
+		quad.geometry = {halfW, halfH, halfW + blur, halfH + blur};
 		quad.radii[0] = halves(radii[0] + shadow.spread, radii[1] + shadow.spread);
 		quad.radii[1] = halves(radii[2] + shadow.spread, radii[3] + shadow.spread);
 		const uint32_t color = premultiplied(shadow.color.toVec4());
@@ -699,11 +700,8 @@ namespace Renderer {
 		if (clipEmpty || !args.texture.isValid() || !sampleable(args.texture)) {
 			return;
 		}
-		const Foundation::Rect& b = args.bounds;
-		const Foundation::Vec2	corners[4] = {{b.x, b.y}, {b.x + b.width, b.y}, {b.x + b.width, b.y + b.height}, {b.x, b.y + b.height}};
-
 		const uint32_t groupStart = static_cast<uint32_t>(instances.size());
-		BatchInstance& quad = pushQuad(QuadMode::Image, corners, args.blend, args.texture);
+		BatchInstance& quad = pushQuad(QuadMode::Image, rectCorners(args.bounds), args.blend, args.texture);
 		quad.geometry = {args.uvMin.x, args.uvMin.y, args.uvMax.x, args.uvMax.y};
 		std::fill(std::begin(quad.fills), std::end(quad.fills), premultiplied(args.tint.toVec4()));
 		recordGroup(groupStart, args.key, args.blend);

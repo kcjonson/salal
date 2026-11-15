@@ -102,6 +102,11 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// `radius` at each corner, but square beside a side `border` leaves bare when it has a width.
 	CornerRadii rectCornerRadii(float radius, const std::optional<Foundation::BorderStyle>& border);
 
+	// The corners (TL, TR, BR, BL) of `bounds` moved out by `outset` on every side. Every quad and
+	// mask layer made from a rect takes its corners from here, so the same bounds give the same
+	// corners to the bit, which a rect layer holding a masked rect's quad rests on (docs/masks.md).
+	std::array<Foundation::Vec2, 4> rectCorners(const Foundation::Rect& bounds, float outset = 0.0F);
+
 	// A dash pattern as the shader cuts it: `dash` drawn, then `gap` not, the pattern standing
 	// `offset` in where the path's length is 0 (in [0, dash + gap)), each dash butt or round.
 	// A gap of 0 is solid.
@@ -473,11 +478,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// drawn with `blend` and sampling `texture`, with the current clip; the caller
 		// fills in the rest.
 		BatchInstance&
-		pushQuad(QuadMode mode, const Foundation::Vec2 (&corners)[4], Primitives::BlendMode blend, TextureHandle texture = {});
+		pushQuad(QuadMode mode, std::span<const Foundation::Vec2, 4> corners, Primitives::BlendMode blend, TextureHandle texture = {});
 
 		// The same with corners already on screen, as a mesh's and a stroke's are.
-		BatchInstance&
-		pushScreenQuad(QuadMode mode, const Foundation::Vec2 (&corners)[4], Primitives::BlendMode blend, TextureHandle texture = {});
+		BatchInstance& pushScreenQuad(
+			QuadMode							 mode,
+			std::span<const Foundation::Vec2, 4> corners,
+			Primitives::BlendMode				 blend,
+			TextureHandle						 texture = {}
+		);
 
 		// Scratch for addTriangles: the mesh's positions on screen and colours.
 		std::vector<Foundation::Vec2> meshPositions;

@@ -578,14 +578,8 @@ namespace Renderer::Primitives {
 			const MaskImage& image = layer.image;
 			Range			 range{.vertexStart = vertices.size(), .indexStart = indices.size()};
 			if (image.kind == MaskImage::Kind::Rect) {
-				const Foundation::Rect& bounds = image.bounds;
-				vertices.insert(
-					vertices.end(),
-					{{bounds.x, bounds.y},
-					 {bounds.x + bounds.width, bounds.y},
-					 {bounds.x + bounds.width, bounds.y + bounds.height},
-					 {bounds.x, bounds.y + bounds.height}}
-				);
+				const std::array<Foundation::Vec2, 4> corners = rectCorners(image.bounds);
+				vertices.insert(vertices.end(), corners.begin(), corners.end());
 				indices.insert(indices.end(), {0, 1, 2, 0, 2, 3});
 			} else if (image.kind == MaskImage::Kind::Polygon && image.points.size() >= 3) {
 				const renderer::TessellatedMesh& fill = polygonFill(image.points).mesh;

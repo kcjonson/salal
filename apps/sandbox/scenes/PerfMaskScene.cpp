@@ -1,7 +1,8 @@
 // perf_mask: masked draws (docs/masks.md) as worldsim's player visibility cover draws them, two a
 // frame over the whole window. A dim fill masked by the view minus four sight polygons, then an
 // opaque fill masked by the view minus a seen mesh of 3,072 triangles and three pending polygons,
-// over a background of tiles. Fixed content, moved by the tick, so every frame of a tick is the same.
+// over a background of tiles. The view is a float rect round the window, as worldsim's is. Fixed
+// content, moved by the tick, so every frame of a tick is the same.
 
 #include "Scenes.h"
 
@@ -105,8 +106,10 @@ namespace {
 				pendings[pending] = blob(toScreen(centre), 0.3F * camera.pixelsPerMeter, kPendingPoints, 0.15F);
 			}
 
-			// The window exactly, as worldsim's view is.
-			const Foundation::Rect view{0.0F, 0.0F, width, height};
+			// The window and a moving fraction of a pixel round it, its edges off the pixel grid, as
+			// worldsim's view, from camera floats, is.
+			const float			   margin = 0.5F + (0.4F * std::sin(time * 1.3F));
+			const Foundation::Rect view{-margin, -margin * 0.75F, width + (2.0F * margin), height + (1.5F * margin)};
 
 			std::vector<Primitives::MaskLayer> dimMask = {
 				{.image = Primitives::MaskImage::rect(view), .composite = Primitives::MaskComposite::Subtract}

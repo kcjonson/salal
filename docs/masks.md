@@ -128,11 +128,18 @@ triangles over its four corners split along a diagonal (a `rect` layer under a t
 scales and moves; compared exactly, so one turned by a hair is not), and that box contains the cover
 box, edges included. The cover box is the bounds of the masked quads' corners as they were sent: a
 rect's quad is its bounds, grown by a centred or outside border, and its shadow's quad is part of
-it. A clip only removes pixels, so it doesn't enter. This is exact, not a near match. The layer and
+it. A clip only removes pixels, so it doesn't enter. This is exact, not a near match, so the cover
+the game draws, a rect layer with the masked rect's own bounds, depends on both making the same
+corners from those bounds to the bit: a `rect` layer and every rect's quad take theirs from one
+function (`rectCorners`), from the edges, `x` and `x + width`. A quad made from its centre plus and
+minus half its size lands an ulp off for about a third of float rects, and would miss. The layer and
 the masked quads go through the same vertex transform, which is monotonic, so the containment
-holds on the GPU too. Rasterisation decides a pixel on a shared edge with a tie rule that depends
-only on the edge's direction, consistently (OpenGL requires that two triangles sharing an edge never
-both draw a pixel on it, and every desktop GPU uses the top-left rule). A pixel centre inside a
+holds on the GPU too. A pixel centre exactly on an edge is decided by a tie rule. OpenGL's own
+guarantee, that two triangles sharing an edge never both draw a pixel on it, covers only an edge
+with the same two endpoints, and the box's edge and a masked quad's lie on one line but can end at
+different points. What this rests on is the top-left rule every desktop GPU uses, which decides by
+the edge's line and the side its triangle lies on alone, so collinear edges are decided alike
+whatever their endpoints. A pixel centre inside a
 masked quad lies in the cover box, so in the box: inside it, the box draws it; on an edge of the box
 the box leaves out, the quad's triangles lie on one side of that same line, so the rule leaves it
 out of them too. Within the run's pixels the layer is all ones, so `Subtract` by it is exactly the
