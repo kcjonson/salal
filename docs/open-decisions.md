@@ -9,6 +9,10 @@ surveys behind [phase-0-audit.md](phase-0-audit.md),
 [app-carve-out.md](app-carve-out.md) and
 [consumer-requirements.md](consumer-requirements.md).
 
+As of 2026-11-16 one question is open: B, audio, which is deferred and waits
+with its work. Every other letter below is settled or dropped, and says so
+where it stands.
+
 ## Settled
 
 Written into the docs as decided, with the reason.
@@ -92,6 +96,11 @@ differential corpus from dual-deck-builder that could not be run against C++
 at all.
 
 ## B. Audio
+
+Open, and deferred (Kevin, 2026-10-29, and again 2026-11-16): audio is far
+future, so phase 2b is parked and nothing waits on this answer. On the board
+the question sits with the audio work it gates, in one epic, and is decided
+when that work is picked up.
 
 Question. Does audio live in the engine or per game, and on which library?
 
@@ -375,6 +384,12 @@ draws as per-call GL state changes that defeat the batcher.
 
 ## H. Vector and SVG asset conventions
 
+Settled 2026-11-16, by the narrowings below and nothing further: the vector
+code came across with `renderer`, salal ships no fonts and no art atlas,
+`SVGLoader` takes no asset root, and a game either resolves a path with
+`Foundation::findResource` or embeds a folder with `salal_art()`. Worldsim's
+path conventions are worldsim's.
+
 Question. Do worldsim's vector and SVG asset conventions (nanosvg load,
 tessellation in `renderer/vector`, TileAtlasBuilder's hardcoded
 `assets/tiles/surfaces/<name>/pattern.svg` at
@@ -389,7 +404,7 @@ texture store with budgeted uploads) that may disagree with worldsim's
 conventions. Worldsim's asset reads are direct filesystem with ResourcePath as
 the only seam (app-carve-out.md).
 
-Recommendation. Still open. The vector tessellation moves as code; the path
+Recommendation, as first written. Open. The vector tessellation moves as code; the path
 conventions and TileAtlasBuilder's bootstrap stay game-side (the bootstrap is
 already settled). Decide the rest when dual-deck-builder's presentation port
 shows what its art atlas needs.
@@ -415,12 +430,13 @@ executable's folder; one that would rather not stage files embeds a folder with
 `loadSVG`'s byte-span overload the bytes. What is left of H is worldsim's own
 path conventions, which are worldsim's.
 
-Needed by. Phase 1 at the latest for what moves; the convention question can
-wait until Job B's presentation phase.
+Needed by. Settled, so no longer a gate. It was needed by phase 1 for what
+moved, with the convention question left for the first game to load its own
+SVG.
 
-If deferred. Low cost. Worldsim keeps working either way; the risk is that
-renderer's public API grows a worldsim-shaped asset path that
-dual-deck-builder then has to route around.
+If deferred. Moot, as it is settled. The risk was that renderer's public API
+grew a worldsim-shaped asset path that dual-deck-builder then had to route
+around.
 
 ## I. Multi-device focus
 
@@ -444,7 +460,19 @@ Needed by. Phase 3, and only if asteroids keeps the simultaneous call.
 If deferred. The co-op shop goes turn-based or split-pane; nothing else in any
 consumer needs it.
 
+Decided 2026-10-30. `ui` has one focus per player inside each scene's context.
+A device belongs to a player through `app`'s slot claiming, each player's
+devices drive that player's focus, a modal blocks only its own player, and
+activate, cancel and navigation come from foundation's `ActionMap`. Recorded
+in [ui-design.md](ui-design.md), "Services and input routing" and "Remaining
+rules".
+
 ## J. Differential harness for dual-deck-builder
+
+Dropped 2026-10-30: dual-deck-builder is an unreleased proof of concept and
+its C++ port is a rebuild to an early alpha, with no RNG, output or save
+compatibility with the TypeScript. No golden corpus and no differential
+harness, so the question is moot.
 
 Question. Who produces the golden JSON corpus that Job B's differential tests
 diff against, and when?
