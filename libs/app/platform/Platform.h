@@ -33,7 +33,8 @@ namespace app {
 		// Opens behind every other window and without the keyboard, for a launch that tests the game while
 		// someone works at the same desktop. It is an ordinary window otherwise: on the taskbar, drawn every
 		// frame, and in front once clicked. Never fullscreen, at create or by setFullscreen. Behind the others
-		// on Windows; elsewhere unfocused, wherever the window system stacks it.
+		// on Windows; elsewhere it asks for no focus, and the window system stacks and focuses it as it will
+		// (an X11 window manager may focus it anyway).
 		bool	  background = false;
 		GlVersion glVersion; // no window, logged with the version asked for, where the driver can't give it
 		// The smallest the window's content gets, in framebuffer pixels, so a ui scale that follows the

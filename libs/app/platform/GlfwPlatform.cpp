@@ -552,7 +552,8 @@ namespace app {
 		};
 
 		// Shows a window made hidden, under every other window where the window system can be told to
-		// (Windows), and without the keyboard everywhere. Made hidden so it is never on top, even for a frame.
+		// (Windows), and without asking for the keyboard everywhere. Made hidden so it is never on top, even
+		// for a frame.
 		void showInBackground(GLFWwindow* window) {
 #ifdef _WIN32
 			SetWindowPos(glfwGetWin32Window(window), HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
