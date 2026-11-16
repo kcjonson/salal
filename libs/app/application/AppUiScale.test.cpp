@@ -8,6 +8,7 @@
 #include "tests/TempDir.h"
 
 #include <gtest/gtest.h>
+#include <ui/components/Button.h>
 
 #include <filesystem>
 #include <fstream>
@@ -102,6 +103,9 @@ namespace app::testing {
 		EXPECT_FLOAT_EQ(app->uiScale(), 2.0F);
 		EXPECT_FLOAT_EQ(app->uiLayoutScale(), 2.0F);
 		EXPECT_EQ(canvas(), Foundation::Vec2(400.0F, 300.0F));
+		const auto& scene = top<CanvasScene>();
+		ASSERT_EQ(scene.heard.size(), 1U);
+		EXPECT_EQ(scene.heard[0], Foundation::Vec2(400.0F, 300.0F));
 
 		// The window's size doesn't enter into it.
 		platform->resize(1600, 1200);
@@ -291,6 +295,99 @@ namespace app::testing {
 		app->setUiScale(0.9F);
 		EXPECT_FLOAT_EQ(app->uiScale(), 0.9F);
 		EXPECT_TRUE(scene.heard.empty());
+	}
+
+	TEST_F(AppUiScaleTest, ANewFactorReachesTheDebugLayersAndThenTheScenesAsAResizeDoes) {
+		start(referenced(), window(1920, 1080));
+		app->addDebugLayer(std::make_unique<RecordingDebugLayer>("layer"));
+		app->scenes().push<SceneA>();
+		frame(0.0);
+		take();
+
+		app->setUiScale(1.2F);
+		EXPECT_EQ(take(), (std::vector<std::string>{"layer.onResize 1920x1080", "A.onResize 1920x1080"}));
+		app->setUiScale(1.2F);
+		EXPECT_TRUE(take().empty());
+	}
+
+	// The control's handler sets the scale, and the scene's onResize takes the control it was called from
+	// out and builds another in its place, all inside the click's dispatch.
+	TEST_F(AppUiScaleTest, AControlThatSetsTheScaleIsRebuiltInOnResizeInsideItsOwnClick) {
+		class RebuildingScene final : public TypedScene<> {
+		  public:
+			const char* name() const override { return "Rebuilding"; }
+			void		onEnter(App& app) override {
+				   owner = &app;
+				   build();
+			}
+			void render(float /*alpha*/) override {}
+			void onResize(const Renderer::Viewport& /*viewport*/) override {
+				heard.push_back(ui().getViewport());
+				if (button.get() != nullptr) {
+					ui().root().get()->removeChild(button);
+				}
+				build();
+			}
+
+			ui::Ref<ui::Button>			  button;
+			std::vector<Foundation::Vec2> heard;
+			int							  presses = 0;
+
+		  private:
+			void build() {
+				button = ui().root().addChild<ui::Button>({
+					.size = {100.0F, 40.0F},
+					.label = "Bigger",
+					.onPress = [this] {
+						++presses;
+						owner->setUiScale(2.0F);
+					},
+				});
+			}
+
+			App* owner = nullptr;
+		};
+		const auto click = [this] {
+			platform->push(
+				{.type = foundation::InputEvent::Type::PointerDown,
+				 .mouseButton = foundation::MouseButton::Left,
+				 .position = {20.0F, 20.0F}}
+			);
+			frame(0.0);
+			platform->push(
+				{.type = foundation::InputEvent::Type::PointerUp, .mouseButton = foundation::MouseButton::Left, .position = {20.0F, 20.0F}}
+			);
+			frame(0.0);
+		};
+
+		start(config(), window(800, 600));
+		app->scenes().push<RebuildingScene>();
+		frame(0.0);
+		auto&				  scene = top<RebuildingScene>();
+		const ui::ComponentId oldButton = scene.button.componentId();
+		const std::vector	  oldChildren = scene.button.get()->getChildren();
+		ASSERT_FALSE(oldChildren.empty());
+
+		click();
+		EXPECT_EQ(scene.presses, 1);
+		ASSERT_EQ(scene.heard.size(), 1U);
+		EXPECT_EQ(scene.heard[0], Foundation::Vec2(400.0F, 300.0F));
+		EXPECT_EQ(scene.ui().find(oldButton), nullptr);
+		for (const ui::ComponentId child : oldChildren) {
+			EXPECT_EQ(scene.ui().find(child), nullptr);
+		}
+		ui::Button* rebuilt = scene.button.get();
+		ASSERT_NE(rebuilt, nullptr);
+		EXPECT_NE(scene.button.componentId(), oldButton);
+		EXPECT_FALSE(rebuilt->isPressed());
+		EXPECT_EQ(scene.root().get()->getSize(), Foundation::Vec2(400.0F, 300.0F));
+		EXPECT_EQ(rebuilt->screenBounds().size(), Foundation::Vec2(100.0F, 40.0F));
+
+		// At 2 the click lands at (10, 10) in ui px, on the rebuilt control; the same scale resizes nothing.
+		click();
+		EXPECT_EQ(scene.presses, 2);
+		EXPECT_EQ(scene.heard.size(), 1U);
+		EXPECT_FALSE(rebuilt->isPressed());
 	}
 
 	TEST_F(AppUiScaleTest, FullscreenChangesTheScaleAtOnceAndTheScenesUiAtTheNextPoll) {

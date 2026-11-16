@@ -448,6 +448,10 @@ namespace app {
 			return;
 		}
 		resized = false;
+		resizeLayersAndScenes();
+	}
+
+	void App::resizeLayersAndScenes() {
 		const Renderer::Viewport& window = coordinates.viewport();
 		for (auto it = debugLayers.rbegin(); it != debugLayers.rend(); ++it) {
 			detail::guard("DebugLayer", "onResize", [&] { (*it)->onResize(window); });
@@ -787,7 +791,7 @@ namespace app {
 		scaleOfUi = std::clamp(scale, config.uiScale.minFactor, config.uiScale.maxFactor);
 		userSettings.set(kUiScale, scaleOfUi);
 		if (uiLayoutScale() != before) {
-			sceneStack.resized(coordinates.viewport());
+			resizeLayersAndScenes();
 		}
 	}
 

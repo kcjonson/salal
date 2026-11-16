@@ -75,8 +75,11 @@ namespace app {
 		virtual void		fixedUpdate(const TickContext& /*tick*/) {}
 		virtual void		update(const FrameContext& /*frame*/) {}
 		virtual void		render(float alpha) = 0; // alpha into the current fixed step, 0 to 1
-		virtual void		onResize(const Renderer::Viewport& /*viewport*/) {}
-		virtual bool		opaque() const { return true; } // false: the scenes below keep rendering (a pause menu over the arena)
+		// Also inside any setUiScale that changes the canvas, this scene's own onEnter, onExit and control
+		// handlers included, so it's safe before onEnter has built and after onExit has begun tearing down.
+		// It never sets the ui scale itself.
+		virtual void onResize(const Renderer::Viewport& /*viewport*/) {}
+		virtual bool opaque() const { return true; } // false: the scenes below keep rendering (a pause menu over the arena)
 		// True: this scene's ui lays out in AppConfig::uiScale's frame, its roots and overlays against the
 		// frame and ui().background() against the window. Read when the ui is made and when the scene enters.
 		virtual bool		framed() const { return false; }

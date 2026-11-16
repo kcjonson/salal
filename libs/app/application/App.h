@@ -92,8 +92,10 @@ namespace app {
 		// The player's ui scale (R7.5), held to AppConfig::uiScale's factors and kept in settings() as
 		// ui.scale, which the App reads at create. With a reference in AppConfig::uiScale it's the factor
 		// on the scale the window's resolution gives; with none it's the scale itself, over the window's
-		// logical pixels. A scale that changes the canvas reaches every stacked scene at once, as a resize
-		// does: its ui at the new scale, then its onResize; one the floor holds calls nothing.
+		// logical pixels. A scale that changes the canvas makes a resize's calls before it returns: every
+		// debug layer's onResize, then every stacked scene's ui at the new scale and its onResize, whoever
+		// called it (a scene's onEnter, onExit or a control's handler). Not from inside an onResize. One the
+		// floor holds calls nothing.
 		void				setUiScale(float scale);
 		[[nodiscard]] float uiScale() const { return scaleOfUi; }
 		// What every scene's ui is scaled by now, over the window's logical pixels: it lays out on the
@@ -209,6 +211,9 @@ namespace app {
 		void  endSection(float& section);
 		void  showCursor();
 		void  recordCapturedFrame(double frameSeconds);
+		// A new canvas, from a resize or the ui scale: every debug layer's onResize, then every stacked
+		// scene's ui and onResize.
+		void resizeLayersAndScenes();
 
 		std::unique_ptr<Diagnostics>				diagnostics; // first, so it goes last and the teardown is logged and covered
 		AppConfig									config;
