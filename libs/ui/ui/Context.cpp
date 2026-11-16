@@ -128,7 +128,7 @@ namespace ui {
 				std::erase(roots, backgroundRoot);
 				roots.insert(roots.begin(), backgroundRoot);
 				placeRoot(*made);
-				made->layoutDirty = true;
+				made->markLayoutDirty();
 				orderDirty = true;
 				geometryDirty = true;
 			}
@@ -240,7 +240,7 @@ namespace ui {
 		for (const ComponentId rootId : roots) {
 			if (Component* rootComponent = registry.find(rootId)) {
 				placeRoot(*rootComponent);
-				rootComponent->layoutDirty = true;
+				rootComponent->markLayoutDirty();
 				dirtyBoundaries.push_back(rootId);
 			}
 		}
