@@ -5,6 +5,9 @@
 //   --http-port <port>   the dev server's port, which also turns the server on; --http-port=<port> too
 //   --no-vsync           present without waiting for the display, for perf runs; the game hands it to
 //                        WindowConfig::vsync, which a settings file's video.vsync, read at create, overrides
+//   --background         open the window behind the others and unfocused, for a launch that tests the game while
+//                        someone works at the same desktop; the game hands it to WindowConfig::background, and
+//                        turns FrameConfig::freezeTicksOnFocusLoss off with it, or no fixed tick ever runs
 //   --help
 // Anything else is left for the game.
 
@@ -17,6 +20,7 @@ namespace app {
 		std::optional<std::string> scene;
 		std::optional<int>		   httpPort;
 		bool					   vsync = true;
+		bool					   background = false;
 		bool					   help = false;
 		bool valid = true; // false, logged, for a --http-port with no port (or a flag where its port goes) or one that isn't 1 to 65535
 	};

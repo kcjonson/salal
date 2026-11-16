@@ -29,6 +29,7 @@ namespace app {
 		EXPECT_FALSE(none.httpPort.has_value());
 		EXPECT_FALSE(none.help);
 		EXPECT_TRUE(none.vsync);
+		EXPECT_FALSE(none.background);
 		EXPECT_TRUE(none.valid);
 
 		const CommandLine noArgv = parseCommandLine(0, nullptr);
@@ -36,11 +37,12 @@ namespace app {
 		EXPECT_FALSE(noArgv.scene.has_value());
 	}
 
-	TEST(CommandLineTest, SceneHttpPortNoVsyncAndHelp) {
-		const CommandLine all = parse({"--scene=main_menu", "--http-port", "8090", "--no-vsync", "--help"});
+	TEST(CommandLineTest, SceneHttpPortNoVsyncBackgroundAndHelp) {
+		const CommandLine all = parse({"--scene=main_menu", "--http-port", "8090", "--no-vsync", "--background", "--help"});
 		EXPECT_EQ(all.scene, "main_menu");
 		EXPECT_EQ(all.httpPort, 8090);
 		EXPECT_FALSE(all.vsync);
+		EXPECT_TRUE(all.background);
 		EXPECT_TRUE(all.help);
 		EXPECT_TRUE(all.valid);
 	}

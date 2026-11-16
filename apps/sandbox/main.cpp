@@ -73,7 +73,7 @@ namespace {
 	};
 
 	void printUsage(std::FILE* stream) {
-		std::fprintf(stream, "Usage: sandbox [--scene=<name>] [--http-port <port>] [--no-vsync] [--help]\nScenes:");
+		std::fprintf(stream, "Usage: sandbox [--scene=<name>] [--http-port <port>] [--no-vsync] [--background] [--help]\nScenes:");
 		for (const sandbox::SceneInfo* scene : kScenes) {
 			std::fprintf(stream, " %s", scene->name);
 		}
@@ -96,12 +96,15 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	std::unique_ptr<app::Platform> platform = app::createGlfwPlatform({.title = "salal sandbox", .vsync = commandLine.vsync});
+	std::unique_ptr<app::Platform> platform =
+		app::createGlfwPlatform({.title = "salal sandbox", .vsync = commandLine.vsync, .background = commandLine.background});
 	if (platform == nullptr) {
 		return 1;
 	}
 	std::unique_ptr<app::App> app = app::App::create(
 		{.applicationName = "sandbox",
+		 // A background window never has the keyboard, so its ticks can't wait for it
+		 .frame = {.freezeTicksOnFocusLoss = !commandLine.background},
 		 .baseShader = base_shader::source(),
 		 .fontAtlases = kFontAtlases,
 		 .defaultFont = sandbox::kMonoFont,

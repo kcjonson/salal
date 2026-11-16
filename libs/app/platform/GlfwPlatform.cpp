@@ -13,6 +13,17 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -96,14 +107,23 @@ namespace app {
 		  public:
 			// `fullscreenOn` is the monitor the window was made fullscreen on, `windowedRect` where it
 			// goes when it leaves fullscreen until it has been windowed itself, `vsync` the swap
-			// interval the context was given, and `minimumPixels` the WindowConfig's minimum size.
-			GlfwPlatform(GLFWwindow* glfwWindow, std::optional<int> fullscreenOn, WindowRect windowedRect, bool vsync, Extent minimumPixels)
+			// interval the context was given, `minimumPixels` the WindowConfig's minimum size, and
+			// `inBackground` its background.
+			GlfwPlatform(
+				GLFWwindow*		   glfwWindow,
+				std::optional<int> fullscreenOn,
+				WindowRect		   windowedRect,
+				bool			   vsync,
+				Extent			   minimumPixels,
+				bool			   inBackground
+			)
 				: window(glfwWindow),
 				  hasFocus(glfwGetWindowAttrib(glfwWindow, GLFW_FOCUSED) == GLFW_TRUE),
 				  fullscreenIndex(fullscreenOn),
 				  windowed(windowedRect),
 				  swapInterval(vsync),
-				  minimum(minimumPixels) {
+				  minimum(minimumPixels),
+				  background(inBackground) {
 				g_glfwPlatform = this;
 				glfwSetWindowUserPointer(window, this);
 				glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
@@ -191,6 +211,10 @@ namespace app {
 				GLFWmonitor* const target = monitor ? monitorAt(*monitor) : nullptr;
 				if (monitor && target == nullptr) {
 					return; // logged; the window stays as it is
+				}
+				if (monitor && background) {
+					LOG_INFO(Engine, "Window: a background window stays windowed, fullscreen on monitor %d not applied", *monitor);
+					return;
 				}
 				const std::optional<int> index = monitor;
 				if (index == fullscreenIndex) {
@@ -483,6 +507,7 @@ namespace app {
 			bool																		  swapInterval;
 			Extent																		  minimum;		   // framebuffer pixels; 0 for none
 			Extent																		  minimumOnScreen; // as GLFW's limits have it now
+			bool																		  background;
 			glm::vec2																	  cursor{};
 			EventRelay																	  relay;
 			GamepadTracker																  gamepads;
@@ -526,15 +551,25 @@ namespace app {
 			WindowRect		   windowed;
 		};
 
+		// Shows a window made hidden, under every other window where the window system can be told to
+		// (Windows), and without the keyboard everywhere. Made hidden so it is never on top, even for a frame.
+		void showInBackground(GLFWwindow* window) {
+#ifdef _WIN32
+			SetWindowPos(glfwGetWin32Window(window), HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+#else
+			glfwShowWindow(window);
+#endif
+		}
+
 		// The window, windowed at sizePercent of the primary monitor's work area or covering a fullscreen
-		// monitor, and where it goes when windowed. No window, logged, with no monitor or video mode to
-		// size it by.
+		// monitor, and where it goes when windowed; a background window is windowed, shown behind the
+		// others. No window, logged, with no monitor or video mode to size it by.
 		CreatedWindow createWindow(const WindowConfig& config) {
 			const std::optional<WindowRect> windowed = windowedRect(config.sizePercent);
 			if (!windowed) {
 				return {};
 			}
-			GLFWmonitor* const fullscreen = config.fullscreenMonitor ? monitorAt(*config.fullscreenMonitor) : nullptr;
+			GLFWmonitor* const fullscreen = config.fullscreenMonitor && !config.background ? monitorAt(*config.fullscreenMonitor) : nullptr;
 			int				   width = windowed->width;
 			int				   height = windowed->height;
 			if (fullscreen != nullptr) {
@@ -555,8 +590,17 @@ namespace app {
 			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 			glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 			glfwWindowHint(GLFW_STENCIL_BITS, 8); // what a CSS mask is built in (docs/masks.md); GLFW's default, stated
+			const int shownAtCreate = config.background ? GLFW_FALSE : GLFW_TRUE;
+			glfwWindowHint(GLFW_VISIBLE, shownAtCreate);
+			glfwWindowHint(GLFW_FOCUSED, shownAtCreate);
+			glfwWindowHint(GLFW_FOCUS_ON_SHOW, shownAtCreate);
+			GLFWwindow* const window = glfwCreateWindow(width, height, config.title.c_str(), fullscreen, nullptr);
+			if (window != nullptr && config.background) {
+				showInBackground(window);
+				LOG_INFO(Engine, "Window: in the background, behind the other windows and unfocused");
+			}
 			return {
-				.window = glfwCreateWindow(width, height, config.title.c_str(), fullscreen, nullptr),
+				.window = window,
 				.fullscreenOn = fullscreen != nullptr ? config.fullscreenMonitor : std::nullopt,
 				.windowed = *windowed,
 			};
@@ -597,7 +641,8 @@ namespace app {
 			created.fullscreenOn,
 			created.windowed,
 			config.vsync,
-			Extent{.width = std::max(0, config.minWidth), .height = std::max(0, config.minHeight)}
+			Extent{.width = std::max(0, config.minWidth), .height = std::max(0, config.minHeight)},
+			config.background
 		);
 	}
 
