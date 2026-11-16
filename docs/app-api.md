@@ -80,7 +80,7 @@ What changed since app-carve-out.md's survey, and matters here:
 
 ```
 main()                                  the game's
-  parseCommandLine(argc, argv)          --scene, --http-port, --no-vsync, --help; separate so a test passes no argv
+  parseCommandLine(argc, argv)          --scene, --http-port, --no-vsync, --background, --help; separate so a test passes no argv
   createGlfwPlatform(window)            or createHeadlessPlatform(...) in a test
   App::create(config, platform)         nullptr on failure, logged; never exits the process
     Platform     window, GL context, event callbacks, gamepads, clipboard, present
@@ -207,8 +207,8 @@ struct AppConfig {
 	bool metrics = false;
 };
 
-struct CommandLine { std::optional<std::string> scene; std::optional<int> httpPort; bool vsync = true; bool help = false; bool valid = true; };
-CommandLine parseCommandLine(int argc, char** argv); // --http-port enables the server, as today; --no-vsync is for perf runs, the game's to hand to WindowConfig
+struct CommandLine { std::optional<std::string> scene; std::optional<int> httpPort; bool vsync = true; bool background = false; bool help = false; bool valid = true; };
+CommandLine parseCommandLine(int argc, char** argv); // --http-port enables the server, as today; --no-vsync is for perf runs and --background opens the window behind the others and unfocused, both the game's to hand to WindowConfig
 
 class App {
 public:
@@ -347,7 +347,8 @@ Pause stops fixed ticks and update, for scenes and debug layers, as worldsim's
 pause skips `SceneManager::update` (and with it overlay update) today; render
 keeps going. Focus loss freezes only the fixed accumulator, so a backgrounded
 window doesn't replay ten seconds of ticks, and worldsim, which ticks nothing,
-is unaffected. `step(n)` runs exactly `n` fixed steps whatever the wall clock
+is unaffected. A window opened with `--background` never has focus, so its
+game turns the freeze off (the sandbox does). `step(n)` runs exactly `n` fixed steps whatever the wall clock
 did, which is what a headless "run a seeded sortie N ticks" test and the dev
 server's step both need; dual-deck-builder's `stepFrame` steps by wall-clock
 time and can't do this.

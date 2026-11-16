@@ -95,4 +95,26 @@ namespace app {
 		EXPECT_GE(platform->viewport().framebufferHeight, 360);
 	}
 
+	// A background window is showing, without the keyboard where the window system leaves that to the
+	// window (an X11 window manager may focus a new one whatever it asked), and stays windowed when asked
+	// to go fullscreen.
+	TEST(GlfwPlatformTest, ABackgroundWindowShowsUnfocusedAndStaysWindowed) {
+		std::unique_ptr<Platform> platform = createGlfwPlatform(
+			{.title = "salal background test", .sizePercent = 0.1F, .fullscreenMonitor = 0, .vsync = false, .background = true}
+		);
+		if (platform == nullptr) {
+			GTEST_SKIP() << "No window with a GL 3.3 core context here";
+		}
+		GLFWwindow* const window = glfwGetCurrentContext();
+		ASSERT_NE(window, nullptr);
+		EXPECT_EQ(glfwGetWindowAttrib(window, GLFW_VISIBLE), GLFW_TRUE);
+#if defined(_WIN32) || defined(__APPLE__)
+		EXPECT_FALSE(platform->focused());
+#endif
+		EXPECT_EQ(platform->fullscreenMonitor(), std::nullopt);
+		platform->setFullscreen(0);
+		EXPECT_EQ(platform->fullscreenMonitor(), std::nullopt);
+		EXPECT_EQ(glfwGetWindowMonitor(window), nullptr);
+	}
+
 } // namespace app

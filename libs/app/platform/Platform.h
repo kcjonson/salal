@@ -30,7 +30,13 @@ namespace app {
 		float			   sizePercent = 0.8F; // of the primary monitor's work area
 		std::optional<int> fullscreenMonitor;  // an index into the connected monitors; windowed when unset or out of range
 		bool			   vsync = true;
-		GlVersion		   glVersion; // no window, logged with the version asked for, where the driver can't give it
+		// Opens behind every other window and without the keyboard, for a launch that tests the game while
+		// someone works at the same desktop. It is an ordinary window otherwise: on the taskbar, drawn every
+		// frame, and in front once clicked. Never fullscreen, at create or by setFullscreen. Behind the others
+		// on Windows; elsewhere it asks for no focus, and the window system stacks and focuses it as it will
+		// (an X11 window manager may focus it anyway).
+		bool	  background = false;
+		GlVersion glVersion; // no window, logged with the version asked for, where the driver can't give it
 		// The smallest the window's content gets, in framebuffer pixels, so a ui scale that follows the
 		// resolution has a floor under it; 0 for none. It outranks sizePercent, a saved size and the work
 		// area: a window on a monitor smaller than this is this size anyway.
@@ -91,9 +97,10 @@ namespace app {
 		// size and place the window had before it went fullscreen. A monitor is its position in the window
 		// system's list of the monitors connected now, 0 the primary, so unplugging one can change which
 		// monitor an index names. A monitor that isn't connected changes nothing, logged, fullscreen or
-		// not. The resize reaches the next poll's listener as one from outside a poll does; viewport() has
-		// the new size at once where the window system resizes at once (Windows, macOS), and after the poll
-		// that brings it otherwise.
+		// not, and so does any monitor on a background window (WindowConfig::background). The resize
+		// reaches the next poll's listener as one from outside a poll does; viewport() has the new size at
+		// once where the window system resizes at once (Windows, macOS), and after the poll that brings it
+		// otherwise.
 		virtual void setFullscreen(std::optional<int> monitor) = 0;
 		// The monitor the window is fullscreen on, as setFullscreen was given it; nullopt while windowed.
 		// Not updated when monitors come and go.

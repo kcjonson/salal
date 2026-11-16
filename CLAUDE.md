@@ -242,10 +242,19 @@ sandbox's base shader is assembled with), `border` (rect borders on some sides, 
 `perf_world`, `perf_ui` and `perf_mask`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`
 has its state and the tab's and rows' bounds). It serves the dev server on
 127.0.0.1:8090 in Debug and RelWithDebInfo (`--http-port <port>` for another).
-Run `build/apps/sandbox/Debug/sandbox.exe --scene=<name>` in the background,
-which starts in that scene with the picker closed, and stop it with
+Run `build/apps/sandbox/Debug/sandbox.exe --scene=<name> --background` in the
+background, which starts in that scene with the picker closed, its window behind
+every other window and unfocused, and stop it with
 `curl "http://127.0.0.1:8090/api/control?action=exit"`, which answers once the
 app is torn down and the port is free.
+
+Every launch an agent makes passes `--background`, whatever it is for (a
+happy-path pass, a screenshot, a subagent's check): without it the window lands
+on top of Kevin's work and takes the keyboard. Two launches go without it, and
+only these: one made for Kevin to test something by hand, and one he asked for.
+When in doubt it is a background launch. `scripts/perf.mjs` is the scripted
+exception and launches in the foreground itself, since a covered window isn't
+presented the same way and its timings wouldn't compare.
 
 `/api/ui/screenshot`, `/api/ui/tree` for element bounds, `/api/ui/lint` for
 layout invariant violations (expect `"count":0` before screenshotting
