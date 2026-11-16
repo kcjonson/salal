@@ -242,11 +242,11 @@ endfunction()
 
 salal_check_layering()
 
-# salal's cmake helpers called from a consumer's own directory, as a game that fetches salal calls
-# them. Only the manifest has anything to check there, and it does nothing off MSVC.
+# salal_windows_manifest called from a consumer's own directory, as a game that fetches salal calls
+# it. It does nothing off MSVC.
 if(SALAL_BUILD_TESTS AND BUILD_TESTING AND MSVC)
     add_test(
-        NAME salal_helpers_work_from_a_consumer_directory
+        NAME salal_windows_manifest_works_from_a_consumer_directory
         COMMAND "${CMAKE_COMMAND}" --fresh -S "${PROJECT_SOURCE_DIR}/cmake/tests/consumer" -B "${PROJECT_BINARY_DIR}/consumer"
                 -G "${CMAKE_GENERATOR}" "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
                 "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" "-DVCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
