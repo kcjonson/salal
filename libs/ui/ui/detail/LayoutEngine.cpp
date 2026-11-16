@@ -94,9 +94,8 @@ namespace ui::detail {
 		}
 	} // namespace
 
-	LayoutEngine::LayoutEngine(const Registry& owner, std::uint32_t layoutPass, std::vector<ComponentId>& movedComponents)
+	LayoutEngine::LayoutEngine(const Registry& owner, std::vector<ComponentId>& movedComponents)
 		: registry(owner),
-		  pass(layoutPass),
 		  moved(movedComponents) {}
 
 	// --- Measuring ---
@@ -112,8 +111,8 @@ namespace ui::detail {
 			return {0.0F, 0.0F};
 		}
 		for (const Component::Measured& kept : node.measured) {
-			if (kept.valid && (kept.pass == pass || !node.layoutDirty) && sameMeasure(kept.width, width) &&
-				sameMeasure(kept.height, height) && kept.parentBox == parentBox && kept.availableWidth == availableWidth) {
+			if (kept.valid && sameMeasure(kept.width, width) && sameMeasure(kept.height, height) && kept.parentBox == parentBox &&
+				kept.availableWidth == availableWidth) {
 				return kept.result;
 			}
 		}
@@ -192,7 +191,6 @@ namespace ui::detail {
 			.parentBox = parentBox,
 			.availableWidth = availableWidth,
 			.result = result,
-			.pass = pass,
 			.valid = true,
 		};
 		return result;

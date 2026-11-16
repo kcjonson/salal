@@ -299,7 +299,6 @@ namespace ui {
 		int						 paintingSlot = 0; // the slot buildOrder fills
 		std::vector<ComponentId> dirtyBoundaries;  // where the next pass lays out from
 		std::vector<ComponentId> updateRequests;   // for the next update
-		std::uint32_t			 layoutPass = 0;
 		std::vector<OrderItem>	 orderScratch;
 		bool					 geometryDirty = true;
 		bool					 orderDirty = true;

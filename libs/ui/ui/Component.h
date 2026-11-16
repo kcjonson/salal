@@ -395,14 +395,13 @@ namespace ui {
 		friend class detail::FocusManager;
 		friend class detail::LayoutEngine;
 
-		// A measure the layout pass took, kept while nothing under the component changes.
+		// A measure the layout pass took, kept until something under the component changes.
 		struct Measured {
 			std::optional<float> width;
 			std::optional<float> height;
 			Foundation::Vec2	 parentBox{0.0F, 0.0F};
 			float				 availableWidth = 0.0F;
 			Foundation::Vec2	 result{0.0F, 0.0F};
-			std::uint32_t		 pass = 0;
 			bool				 valid = false;
 		};
 
@@ -437,6 +436,8 @@ namespace ui {
 		// Layout must run again from here: its own box changed (`ownBox`, which its parent places) or
 		// what it holds did. Marks it and its ancestors up to the relayout boundary.
 		void layoutChanged(bool ownBox);
+		// Dirty, and every measure it kept is gone: each was taken of what it held before.
+		void markLayoutDirty();
 		void orderChanged() const;
 		// Its size can't change with what's under it: a root, or both axes px or a percentage.
 		[[nodiscard]] bool isLayoutBoundary() const;

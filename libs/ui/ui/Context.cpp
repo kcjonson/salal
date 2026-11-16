@@ -287,8 +287,7 @@ namespace ui {
 		std::vector<ComponentId>	  moved;
 		bool						  changed = hoverStale;
 		if (!dirtyBoundaries.empty()) {
-			++layoutPass;
-			detail::LayoutEngine		   engine(registry, layoutPass, moved);
+			detail::LayoutEngine		   engine(registry, moved);
 			const std::vector<ComponentId> boundaries = std::exchange(dirtyBoundaries, {});
 			for (const ComponentId boundaryId : boundaries) {
 				Component* boundary = registry.find(boundaryId);
