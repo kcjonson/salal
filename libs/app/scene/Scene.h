@@ -8,8 +8,8 @@
 // time ui() is called, with its roots the window's logical size. A scene mounts its roots in onEnter;
 // the App updates the context after the scene's update, lays it out every frame the scene renders,
 // draws it after the scene's render() behind a sort barrier, so the scene's keys and ui's never
-// interleave, resizes it with the window before onResize, and destroys it, unmounting everything,
-// once onExit has run.
+// interleave, resizes it with the window and the App's ui scale before onResize (a setUiScale that
+// changes the canvas is a resize too), and destroys it, unmounting everything, once onExit has run.
 
 #include <CoordinateSystem/CoordinateSystem.h>
 #include <input/InputTypes.h>
@@ -75,8 +75,11 @@ namespace app {
 		virtual void		fixedUpdate(const TickContext& /*tick*/) {}
 		virtual void		update(const FrameContext& /*frame*/) {}
 		virtual void		render(float alpha) = 0; // alpha into the current fixed step, 0 to 1
-		virtual void		onResize(const Renderer::Viewport& /*viewport*/) {}
-		virtual bool		opaque() const { return true; } // false: the scenes below keep rendering (a pause menu over the arena)
+		// Also inside any setUiScale that changes the canvas, this scene's own onEnter, onExit and control
+		// handlers included, so it has to be safe before onEnter has built and after onExit has begun tearing down.
+		// It never sets the ui scale itself.
+		virtual void onResize(const Renderer::Viewport& /*viewport*/) {}
+		virtual bool opaque() const { return true; } // false: the scenes below keep rendering (a pause menu over the arena)
 		// True: this scene's ui lays out in AppConfig::uiScale's frame, its roots and overlays against the
 		// frame and ui().background() against the window. Read when the ui is made and when the scene enters.
 		virtual bool		framed() const { return false; }

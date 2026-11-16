@@ -506,7 +506,7 @@ namespace ui {
 	// and its ancestors' while their size hangs on it. The walk stops at the first boundary, which the
 	// context lays out from on the next pass.
 	void Component::layoutChanged(bool ownBox) {
-		layoutDirty = true;
+		markLayoutDirty();
 		if (context == nullptr) {
 			return;
 		}
@@ -517,13 +517,19 @@ namespace ui {
 			return;
 		}
 		while (node != nullptr) {
-			node->layoutDirty = true;
+			node->markLayoutDirty();
 			if (node->isLayoutBoundary()) {
 				context->dirtyBoundaries.push_back(node->selfId);
 				return;
 			}
 			node = node->parentComponent();
 		}
+	}
+
+	void Component::markLayoutDirty() {
+		layoutDirty = true;
+		measured[0] = {};
+		measured[1] = {};
 	}
 
 	void Component::orderChanged() const {

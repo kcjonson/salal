@@ -235,14 +235,6 @@ namespace app {
 		}
 	}
 
-	void SceneStack::scaleUi(float scale) {
-		for (Entry& entry : entries) {
-			if (entry.scene->uiContext != nullptr) {
-				entry.scene->uiContext->setScale(scale);
-			}
-		}
-	}
-
 	std::size_t SceneStack::firstRendered() const {
 		std::size_t first = entries.size();
 		while (first > 0) {

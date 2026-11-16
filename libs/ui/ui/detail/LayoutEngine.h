@@ -38,7 +38,7 @@ namespace ui::detail {
 	class LayoutEngine {
 	  public:
 		// `moved` collects the components the pass moved or resized, for their onLayout.
-		LayoutEngine(const Registry& registry, std::uint32_t pass, std::vector<ComponentId>& moved);
+		LayoutEngine(const Registry& registry, std::vector<ComponentId>& moved);
 
 		// `node`'s size is decided: lay out what's under it.
 		void arrange(Component& node);
@@ -103,7 +103,6 @@ namespace ui::detail {
 		void place(Component& child, Foundation::Vec2 offset, Foundation::Vec2 size);
 
 		const Registry&			  registry;
-		std::uint32_t			  pass;
 		std::vector<ComponentId>& moved;
 		std::vector<FlexItem>	  items;
 		std::vector<FlexLine>	  lines;

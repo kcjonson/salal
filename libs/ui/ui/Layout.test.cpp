@@ -118,6 +118,28 @@ namespace ui {
 		EXPECT_EQ(boundsOf(fixed), fixedBefore);
 	}
 
+	// A measure kept from before a change of content, at the room an earlier viewport gave, is not the
+	// measure once the viewport is back at that size. In a Free root the text is measured once a pass,
+	// at the viewport's width.
+	TEST_F(UiLayoutTest, AContentChangeDropsTheMeasuresKeptAtEveryEarlierSize) {
+		constexpr Foundation::Vec2 kWide{1024.0F, 768.0F};
+		Ref<FakeText>			   text = context.root().addChild<FakeText>({.words = 21});
+		context.layout();
+		context.setViewport(kWide);
+		context.layout();
+		EXPECT_EQ(text.get()->getSize(), Foundation::Vec2(21.0F * kWord, kLine));
+		context.setViewport(kViewport);
+		context.layout();
+		EXPECT_EQ(text.get()->getSize(), Foundation::Vec2(20.0F * kWord, 2.0F * kLine));
+
+		text.get()->setWords(5);
+		context.layout();
+		EXPECT_EQ(text.get()->getSize(), Foundation::Vec2(5.0F * kWord, kLine));
+		context.setViewport(kWide);
+		context.layout();
+		EXPECT_EQ(text.get()->getSize(), Foundation::Vec2(5.0F * kWord, kLine));
+	}
+
 	// --- Flex ---
 
 	TEST_F(UiLayoutTest, AColumnStacksChildrenWithGapPaddingAndMarginsAndHugsThem) {

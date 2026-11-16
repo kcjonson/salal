@@ -448,9 +448,14 @@ namespace app {
 			return;
 		}
 		resized = false;
+		resizeLayersAndScenes();
+	}
+
+	void App::resizeLayersAndScenes() {
 		const Renderer::Viewport& window = coordinates.viewport();
-		for (auto it = debugLayers.rbegin(); it != debugLayers.rend(); ++it) {
-			detail::guard("DebugLayer", "onResize", [&] { (*it)->onResize(window); });
+		for (std::size_t index = debugLayers.size(); index-- > 0;) {
+			DebugLayer* layer = debugLayers[index].get();
+			detail::guard("DebugLayer", "onResize", [&] { layer->onResize(window); });
 		}
 		sceneStack.resized(window);
 	}
@@ -783,9 +788,12 @@ namespace app {
 	}
 
 	void App::setUiScale(float scale) {
+		const float before = uiLayoutScale();
 		scaleOfUi = std::clamp(scale, config.uiScale.minFactor, config.uiScale.maxFactor);
 		userSettings.set(kUiScale, scaleOfUi);
-		sceneStack.scaleUi(uiLayoutScale());
+		if (uiLayoutScale() != before) {
+			resizeLayersAndScenes();
+		}
 	}
 
 	float App::uiPixelScale() const {
