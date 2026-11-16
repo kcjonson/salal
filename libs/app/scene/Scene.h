@@ -76,7 +76,7 @@ namespace app {
 		virtual void		update(const FrameContext& /*frame*/) {}
 		virtual void		render(float alpha) = 0; // alpha into the current fixed step, 0 to 1
 		// Also inside any setUiScale that changes the canvas, this scene's own onEnter, onExit and control
-		// handlers included, so it's safe before onEnter has built and after onExit has begun tearing down.
+		// handlers included, so it has to be safe before onEnter has built and after onExit has begun tearing down.
 		// It never sets the ui scale itself.
 		virtual void onResize(const Renderer::Viewport& /*viewport*/) {}
 		virtual bool opaque() const { return true; } // false: the scenes below keep rendering (a pause menu over the arena)

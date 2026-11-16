@@ -453,8 +453,9 @@ namespace app {
 
 	void App::resizeLayersAndScenes() {
 		const Renderer::Viewport& window = coordinates.viewport();
-		for (auto it = debugLayers.rbegin(); it != debugLayers.rend(); ++it) {
-			detail::guard("DebugLayer", "onResize", [&] { (*it)->onResize(window); });
+		for (std::size_t index = debugLayers.size(); index-- > 0;) {
+			DebugLayer* layer = debugLayers[index].get();
+			detail::guard("DebugLayer", "onResize", [&] { layer->onResize(window); });
 		}
 		sceneStack.resized(window);
 	}

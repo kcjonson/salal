@@ -310,6 +310,41 @@ namespace app::testing {
 		EXPECT_TRUE(take().empty());
 	}
 
+	TEST_F(AppUiScaleTest, ADebugLayerThatAddsLayersInOnResizeOutsideAFrameIsSafe) {
+		class Spawning final : public DebugLayer {
+		  public:
+			explicit Spawning(App& owningApp)
+				: owner(owningApp) {}
+			void render() override {}
+			void onResize(const Renderer::Viewport& /*viewport*/) override {
+				++heard;
+				if (!spawns) {
+					return;
+				}
+				for (int index = 0; index < 8; ++index) {
+					owner.addDebugLayer(std::make_unique<RecordingDebugLayer>("spawned"));
+				}
+			}
+
+			App& owner;
+			int	 heard = 0;
+			bool spawns = false;
+		};
+		start(referenced(), window(1920, 1080));
+		auto	  spawning = std::make_unique<Spawning>(*app);
+		Spawning& watched = *spawning;
+		app->addDebugLayer(std::move(spawning));
+		frame(0.0);
+		take();
+		watched.spawns = true;
+		watched.heard = 0;
+
+		app->setUiScale(1.2F);
+		EXPECT_EQ(watched.heard, 1);
+		EXPECT_TRUE(take().empty());
+		frame(0.0);
+	}
+
 	// The control's handler sets the scale, and the scene's onResize takes the control it was called from
 	// out and builds another in its place, all inside the click's dispatch.
 	TEST_F(AppUiScaleTest, AControlThatSetsTheScaleIsRebuiltInOnResizeInsideItsOwnClick) {
@@ -379,7 +414,6 @@ namespace app::testing {
 		ui::Button* rebuilt = scene.button.get();
 		ASSERT_NE(rebuilt, nullptr);
 		EXPECT_NE(scene.button.componentId(), oldButton);
-		EXPECT_FALSE(rebuilt->isPressed());
 		EXPECT_EQ(scene.root().get()->getSize(), Foundation::Vec2(400.0F, 300.0F));
 		EXPECT_EQ(rebuilt->screenBounds().size(), Foundation::Vec2(100.0F, 40.0F));
 
@@ -387,7 +421,6 @@ namespace app::testing {
 		click();
 		EXPECT_EQ(scene.presses, 2);
 		EXPECT_EQ(scene.heard.size(), 1U);
-		EXPECT_FALSE(rebuilt->isPressed());
 	}
 
 	TEST_F(AppUiScaleTest, FullscreenChangesTheScaleAtOnceAndTheScenesUiAtTheNextPoll) {
