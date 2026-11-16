@@ -133,8 +133,9 @@ to [worldsim#324](https://github.com/kcjonson/worldsim/pull/324). Worldsim runs 
 mouse only, with its `libs/ui` and the bridge deleted. The scene diff and the
 happy-path scripts were deferred and are still to do; the perf suite is in, and
 so is `display: Grid`, which followed.
-Next is phase 2b, audio, once decision B is settled. The extraction doc has the
-detail and the reasoning for the order.
+Phase 2b, audio, is deferred along with decision B (far future; don't propose
+it as next work). The extraction doc has the detail and the reasoning for the
+order.
 
 Each extraction phase is its own branch and PR **in worldsim**, converting it to
 consume this repo. Not one giant branch: worldsim is active, and a long-lived
@@ -418,17 +419,18 @@ No tests on feel.
 
 ## Open decisions
 
-Don't guess at these; ask. The live list, each with a recommendation and the
-phase that needs the answer, is
-[docs/open-decisions.md](docs/open-decisions.md), mirrored as items on the
-board: audio, dual-deck-builder's UI spec (being decided rule by rule in
-[docs/ui-design.md](docs/ui-design.md), not adopted wholesale), vector/SVG conventions, multi-device focus, and the dual-deck-builder golden
-corpus.
+Don't guess at these; ask. The record, each with its question, evidence and
+what it came to, is [docs/open-decisions.md](docs/open-decisions.md). One is
+still open: audio, which is deferred and sits on the board with the work it
+gates. Dual-deck-builder's UI spec is the reference, taken rule by rule in
+[docs/ui-design.md](docs/ui-design.md), not adopted wholesale.
 
 Resolved since the first version of this file: work is tracked in Specboard
 (see above). Input types in `foundation/input/`, poller in `app`, settled
 2026-10-26 (decision D). The engine's game PRNG is dual-deck-builder's `Rng`,
 in `foundation/random/Rng.h`, with Pcg32 and SplitMix64 kept for worldgen, and
 the ECS core stays in worldsim, both settled 2026-10-26 (decisions A and E).
+Vector/SVG conventions (H) and multi-device focus (I) are settled, and the
+dual-deck-builder golden corpus (J) is dropped.
 The "engine-extraction.md" item is dropped; that file never existed in
 worldsim, and the plan is [docs/extraction.md](docs/extraction.md).

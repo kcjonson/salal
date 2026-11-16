@@ -9,8 +9,8 @@ with phase 2 done, and 2026-10-30 with phase 3 done.
 This is the engine repo. `foundation` and `renderer` are imported (plain copies
 of worldsim at `870dd755` and `2cc7e40a`); phase 2 is done, with `app` in
 (`v0.10.0` to `v0.15.0`) and worldsim converted onto it; phase 3 is done,
-with `ui` built in salal and worldsim running on it at `v0.29.0`. Next is
-phase 2b, audio, once decision B is settled. "Sequencing" below says where each
+with `ui` built in salal and worldsim running on it at `v0.29.0`. Phase
+2b, audio, is deferred along with decision B. "Sequencing" below says where each
 stands.
 
 ## Corrections in this revision (2026-10-25)
@@ -723,11 +723,12 @@ the consumers need from a frame owner and worldsim never built:
 Job A of the migration lands here. Worldsim consumes. The asteroids feel
 prototype can start here.
 
-### Phase 2b, audio
+### Phase 2b, audio (deferred)
 
-Decision B, and next now that phase 3 is done. Planned for after `app` and before
-`ui`, because the feel prototype wants audible thrust and nothing in `ui`
-depends on it; `ui` went first once it blocked every game's feature work.
+Decision B, and parked: audio is far future (2026-10-29, again 2026-11-16).
+Planned for after `app` and before `ui`, because the feel prototype wants
+audible thrust and nothing in `ui` depends on it; `ui` went first once it
+blocked every game's feature work, and audio has not come up since.
 
 ### Phase 3, extract `ui` (done 2026-10-30)
 
@@ -800,19 +801,12 @@ becomes real with a second developer.
 
 The questions that need Kevin are in [open-decisions.md](open-decisions.md),
 each with a recommendation, the evidence, and the phase that needs the answer,
-and each tracked on the board. By letter:
+and each tracked on the board. One is left:
 
-- B. Audio: in the engine or per game, and which library.
-- C. Adopt dual-deck-builder's `docs/ui-rendering-spec/` as the normative spec
-  for `ui`.
-- F. The `ui` storage model during extraction, shared_ptr graph or value
-  semantics.
-- H. Whether worldsim's vector/SVG asset conventions come with `renderer` or
-  get parameterised out (the font half is settled: the game's atlases come in
-  through `FontRenderer::Initialize`).
-- I. Multi-device focus for the asteroids co-op shop.
-- J. The differential harness for dual-deck-builder: a committed golden JSON
-  corpus, which is work in that repo.
+- B. Audio: in the engine or per game, and which library. Deferred with phase
+  2b.
+
+C, F, H and I are settled and J is dropped; that file has what each came to.
 
 Resolved since the first version: the phase 0 audit (done, above), whether this
 document moves into the salal repo (it did), whether work is tracked in
