@@ -613,6 +613,8 @@ class Overlay { /* handleEvent, update(FrameContext), render(), onResize: today'
   a game that wants the overrides out of the binary too wraps them in
   `#if SALAL_DEV_SERVER`.
 - Scenes get `onResize`; today only overlays are told (`SceneManager.cpp:231-235`).
+  It comes after a window resize and after a `setUiScale` that changes the
+  ui's canvas ("UI scale"), each scene's ui already at the new size and scale.
 - Every scene call is wrapped and logged as today, including `handleEvent` and
   the first `onEnter`, which aren't today (`Application.cpp:164-195`,
   `AppLauncher.cpp:350-372`).
@@ -771,7 +773,12 @@ Steam Deck.
   scale at create; a 4K monitor at 150% reads `framebuffer 3840x2160`
   fullscreen.
 - `factor` is the player's setting, kept as `ui.scale`, read at create and
-  held to `minFactor` and `maxFactor` there and in `setUiScale`.
+  held to `minFactor` and `maxFactor` there and in `setUiScale`. A new factor
+  is a new canvas, and every stacked scene hears of it inside `setUiScale` as
+  of a resize: its ui at the new scale, then its `onResize`, top down, with the
+  window's viewport, which hasn't changed. A factor the floor or the ui's
+  limits hold leaves the scale and the canvas where they were, and no scene is
+  called.
 - The scale follows the window at once: `uiLayoutScale()` is computed from the
   viewport the App has now. A scene's ui takes the new size and scale together,
   in one step, before the scene's `onResize`, so nothing lays out at the new

@@ -8,8 +8,8 @@
 // time ui() is called, with its roots the window's logical size. A scene mounts its roots in onEnter;
 // the App updates the context after the scene's update, lays it out every frame the scene renders,
 // draws it after the scene's render() behind a sort barrier, so the scene's keys and ui's never
-// interleave, resizes it with the window before onResize, and destroys it, unmounting everything,
-// once onExit has run.
+// interleave, resizes it with the window and the App's ui scale before onResize (a setUiScale that
+// changes the canvas is a resize too), and destroys it, unmounting everything, once onExit has run.
 
 #include <CoordinateSystem/CoordinateSystem.h>
 #include <input/InputTypes.h>

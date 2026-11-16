@@ -783,9 +783,12 @@ namespace app {
 	}
 
 	void App::setUiScale(float scale) {
+		const float before = uiLayoutScale();
 		scaleOfUi = std::clamp(scale, config.uiScale.minFactor, config.uiScale.maxFactor);
 		userSettings.set(kUiScale, scaleOfUi);
-		sceneStack.scaleUi(uiLayoutScale());
+		if (uiLayoutScale() != before) {
+			sceneStack.resized(coordinates.viewport());
+		}
 	}
 
 	float App::uiPixelScale() const {

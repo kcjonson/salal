@@ -92,7 +92,8 @@ namespace app {
 		// The player's ui scale (R7.5), held to AppConfig::uiScale's factors and kept in settings() as
 		// ui.scale, which the App reads at create. With a reference in AppConfig::uiScale it's the factor
 		// on the scale the window's resolution gives; with none it's the scale itself, over the window's
-		// logical pixels.
+		// logical pixels. A scale that changes the canvas reaches every stacked scene at once, as a resize
+		// does: its ui at the new scale, then its onResize; one the floor holds calls nothing.
 		void				setUiScale(float scale);
 		[[nodiscard]] float uiScale() const { return scaleOfUi; }
 		// What every scene's ui is scaled by now, over the window's logical pixels: it lays out on the

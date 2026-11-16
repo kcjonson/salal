@@ -263,6 +263,36 @@ namespace app::testing {
 		EXPECT_EQ(scene.root().get()->getSize(), scene.heard[0]);
 	}
 
+	TEST_F(AppUiScaleTest, ANewFactorReachesEveryStackedSceneWithItsUiAlreadyAtTheNewCanvas) {
+		start(referenced(), window(1920, 1080));
+		app->scenes().push<CanvasScene>();
+		frame(0.0);
+		auto& below = top<CanvasScene>();
+		app->scenes().push<CanvasScene>();
+		frame(0.0);
+		auto& above = top<CanvasScene>();
+
+		app->setUiScale(1.2F);
+		for (const CanvasScene* scene : {&above, &below}) {
+			ASSERT_EQ(scene->heard.size(), 1U);
+			EXPECT_NEAR(scene->heard[0].x, 1600.0F, 1e-2F);
+			EXPECT_NEAR(scene->heard[0].y, 900.0F, 1e-2F);
+		}
+		EXPECT_EQ(above.root().get()->getSize(), above.heard[0]);
+	}
+
+	// At 1280 x 720 both factors are under the floor, so the canvas stays and no scene hears of it.
+	TEST_F(AppUiScaleTest, ANewFactorTheFloorHoldsChangesNoCanvasAndTellsNoScene) {
+		start(referenced(), window(1280, 720));
+		app->scenes().push<CanvasScene>();
+		frame(0.0);
+		auto& scene = top<CanvasScene>();
+		app->setUiScale(0.8F);
+		app->setUiScale(0.9F);
+		EXPECT_FLOAT_EQ(app->uiScale(), 0.9F);
+		EXPECT_TRUE(scene.heard.empty());
+	}
+
 	TEST_F(AppUiScaleTest, FullscreenChangesTheScaleAtOnceAndTheScenesUiAtTheNextPoll) {
 		start(referenced(), [](HeadlessPlatform& headless) {
 			headless.setWindowSize(1920, 1080);

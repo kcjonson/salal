@@ -191,7 +191,7 @@ namespace app {
 		// For the App. Step 6, with the top scene's alpha now, which a scene it covers keeps.
 		void   apply(float liveAlpha);
 		Entry* topEntry() { return entries.empty() ? nullptr : &entries.back(); }
-		// Every stacked scene's ui viewport, then its onResize, top down.
+		// Every stacked scene's ui at the window's size and the App's ui scale, then its onResize, top down.
 		void resized(const Renderer::Viewport& viewport);
 		// The top scene's ui update, after its own.
 		void updateTopUi(double dt);
@@ -203,8 +203,7 @@ namespace app {
 		ui::Cursor topUiCursor() const;
 		// The App's frame for a scene that opts in; none for one that doesn't, and with no frame configured.
 		std::optional<Foundation::Vec2> frameOf(const Scene& scene) const;
-		// Every stacked scene's ui at the App's ui scale.
-		void scaleUi(float scale);
+		// Every stacked scene's ui with its tweens completed on their first tick, or not.
 		void reduceMotionUi(bool reduced);
 		// The ui of every scene render() draws, laid out.
 		void layoutUi();
