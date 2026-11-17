@@ -52,9 +52,9 @@ repo's `specboard.md`.
   contract: how a game adds vertex code, and fill hooks that colour a rect per
   pixel, to the one program at build time (`salal_base_shader()`), the hook
   points, uniform blocks, and what fails the build.
-- **[docs/masks.md](docs/masks.md)** is CSS `mask`, `mask-composite` and
-  `mask-mode` on a rect, with content layers of shapes blended by
-  `mix-blend-mode` and `isolation` for partial coverage: the mapping to
+- **[docs/masks.md](docs/masks.md)** is CSS `mask` and `mask-composite` on a
+  rect, with content layers (an SVG `<mask>` read by luminance) of shapes
+  blended by `mix-blend-mode` for partial coverage: the mapping to
   css-masking-1, what isn't built, the lifetime and coordinate rules, and the
   stencil, alpha and depth builds underneath.
 - **[docs/app-api.md](docs/app-api.md)** is the phase 2 design of `app`: the
