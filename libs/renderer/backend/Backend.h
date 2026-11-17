@@ -221,10 +221,12 @@ namespace Renderer::backend {
 	// nothing.
 	//
 	// State: depth test, culling, scissor and stencil test are off and every colour
-	// channel, stencil bit and the depth buffer are written, fixed state set at creation,
+	// channel, stencil bit and the depth buffer are written, with the depth function and
+	// depth clear value at GL's defaults (less, 1), fixed state set at creation,
 	// beginFrame() and invalidateState(). A draw's stencil state, depth state and channel
 	// writes are set by draw(), which puts the fixed state back, and the blend equation to
-	// add, before it returns, so none outlives its submission.
+	// add with Alpha's factors, before it returns, so none outlives its submission;
+	// clearDepth() puts the clear value back too.
 	// Bindings (pipeline, geometry, texture, blend) are made by each draw() and assumed
 	// to survive nothing outside it, because a game's own GPU code runs between the renderer's submissions. The
 	// one exception is the uniforms: setUniforms() binds them to uniform binding point

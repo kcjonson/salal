@@ -182,11 +182,13 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 	// The stencil bits a mask's rect, polygon and mesh layers are built in: the composited mask,
 	// and a layer's coverage while a Subtract composites it. A content layer's shapes build their
-	// own masks in the next two.
+	// own masks in the next two, and are drawn only where the last one is set: over the cover box,
+	// set while a content layer is evaluated and clear everywhere otherwise.
 	constexpr uint8_t kMaskAccumulatorBit = 0x01U;
 	constexpr uint8_t kMaskScratchBit = 0x02U;
 	constexpr uint8_t kShapeMaskAccumulatorBit = 0x04U;
 	constexpr uint8_t kShapeMaskScratchBit = 0x08U;
+	constexpr uint8_t kCoverBoxBit = 0x10U;
 
 	// How many isolated groups a content layer evaluates in depth between depth clears: group k
 	// keeps its value v at depth (k + v / 2) / kCoverageGroupsPerClear, so a later group always lies

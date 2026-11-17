@@ -1201,15 +1201,23 @@ namespace Renderer {
 	// (buildCoverageMask): the destination alpha first multiplied by the quad's own, then its
 	// colour, straight, over the target by that alpha, so the quad lands at its alpha times the
 	// mask, as CSS composites a masked element. The alpha is set back to 1 over the cover box after
-	// each, which leaves the target opaque there whatever its alpha held.
+	// each, which leaves the target opaque there whatever its alpha held, and the cover box's
+	// stencil bit cleared with it; the bit is cleared across the target once before the run, since
+	// a game's GL may have left it set.
 	void BatchRenderer::drawUnderCoverage(const DrawRun& run) {
 		if (!gpu.hasAlphaAndDepth()) {
 			if (!warnedNoAlphaAndDepth) {
 				warnedNoAlphaAndDepth = true;
-				LOG_ERROR(Renderer, "A draw under a content mask met a target with no alpha or depth; it draws nothing (logged once)");
+				LOG_ERROR(
+					Renderer,
+					"A draw under a content mask met a target with no alpha or depth: it needs the window made with 8 alpha and 24 "
+					"depth bits, or a RenderTarget whose format has alpha made with ColourAndStencil; it draws nothing (logged once)"
+				);
 			}
 			return;
 		}
+		submitPending();
+		gpu.clearStencil(kCoverBoxBit);
 		backend::DrawUniforms straight = batchedUniforms;
 		straight.straightOutput = 1;
 		const uint32_t opaqueCover = coverQuadStart + (2 * (run.mask - 1)) + 1;
@@ -1240,6 +1248,7 @@ namespace Renderer {
 				{.pipeline = pipeline,
 				 .geometry = geometry,
 				 .blend = backend::BlendState::Replace,
+				 .stencil = {.test = true, .writeMask = kCoverBoxBit, .pass = backend::StencilOperation::Zero},
 				 .writes = backend::ChannelWrites::Alpha,
 				 .firstInstance = opaqueCover,
 				 .instanceCount = 1}
@@ -1265,8 +1274,10 @@ namespace Renderer {
 	// The content layer on top of mask `index`, its value in the target's alpha over the cover box:
 	//
 	// - The layers under it are built in the stencil as any mask is.
-	// - The canvas starts at 0 over the cover box. A shape outside a group lands on it by its blend,
-	//   replace, max or min on alpha, under its own mask's stencil bit.
+	// - The canvas starts at 0 over the cover box, which sets the cover box's stencil bit there; every
+	//   shape draws only where that bit is set, so none writes alpha or depth outside the box.
+	// - A shape outside a group lands on the canvas by its blend, replace, max or min on alpha, under
+	//   its own mask's stencil bit.
 	// - An isolated group's value, the greatest of its shapes, is found in depth: its shapes are drawn
 	//   with their values as depth, above every earlier group's, keeping the greater, colour off and
 	//   each under its own mask; then drawn again where their depth equals what is stored, writing
@@ -1284,6 +1295,7 @@ namespace Renderer {
 			{.pipeline = pipeline,
 			 .geometry = geometry,
 			 .blend = backend::BlendState::Replace,
+			 .stencil = {.test = true, .reference = kCoverBoxBit, .writeMask = kCoverBoxBit, .pass = backend::StencilOperation::Replace},
 			 .writes = backend::ChannelWrites::Alpha,
 			 .firstInstance = zeroCover,
 			 .instanceCount = 1}
@@ -1370,7 +1382,13 @@ namespace Renderer {
 		Foundation::Vec2	   coverageDepth
 	) {
 		const MaskShapeEntry& shape = maskShapes[shapeIndex];
-		backend::StencilState stencil{};
+		backend::StencilState stencil{
+			.test = true,
+			.function = backend::StencilFunction::Equal,
+			.reference = kCoverBoxBit,
+			.readMask = kCoverBoxBit,
+			.writeMask = 0,
+		};
 		if (underOwnMask && shape.mask != 0) {
 			if (builtShapeMask != shape.mask) {
 				builtShapeMaskInverted = buildMask(
@@ -1378,13 +1396,8 @@ namespace Renderer {
 				);
 				builtShapeMask = shape.mask;
 			}
-			stencil = {
-				.test = true,
-				.function = backend::StencilFunction::Equal,
-				.reference = builtShapeMaskInverted ? uint8_t{0} : kShapeMaskAccumulatorBit,
-				.readMask = kShapeMaskAccumulatorBit,
-				.writeMask = 0,
-			};
+			stencil.reference = builtShapeMaskInverted ? kCoverBoxBit : static_cast<uint8_t>(kCoverBoxBit | kShapeMaskAccumulatorBit);
+			stencil.readMask = static_cast<uint8_t>(kCoverBoxBit | kShapeMaskAccumulatorBit);
 		}
 		if (shape.meshGeometry.isValid()) {
 			backend::DrawUniforms world = worldUniforms(shape.camera.position, shape.camera.zoom, shape.camera.pixelsPerMeter);

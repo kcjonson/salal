@@ -139,6 +139,7 @@ namespace Renderer::backend::gl {
 				case DepthState::Off:
 				default:
 					glDisable(GL_DEPTH_TEST);
+					glDepthFunc(GL_LESS); // GL's default, which a game's depth-tested GL may rely on
 					glDepthMask(GL_TRUE);
 					break;
 			}
@@ -276,6 +277,7 @@ namespace Renderer::backend::gl {
 		glDisable(GL_CULL_FACE);
 		glDisable(GL_SCISSOR_TEST);
 		applyDepth(DepthState::Off);
+		glClearDepth(1.0);
 		applyStencil({});
 		applyChannelWrites(ChannelWrites::All);
 	}
@@ -317,6 +319,7 @@ namespace Renderer::backend::gl {
 		}
 		glClearDepth(0.0);
 		glClear(GL_DEPTH_BUFFER_BIT); // the fixed state writes depth
+		glClearDepth(1.0);			  // the fixed state's, GL's default
 	}
 
 	bool GLBackend::hasAlphaAndDepth() const {
@@ -765,6 +768,7 @@ namespace Renderer::backend::gl {
 		ChannelWrites							 writes = ChannelWrites::All; // so are every channel's writes
 		DepthState								 depth = DepthState::Off;	  // and no depth test
 		bool									 equationChanged = false;	  // a draw blended with other than add
+		bool									 functionChanged = false;	  // or with other factors than Alpha's
 		std::array<TextureHandle, kTextureSlots> bound{};					  // what this submission left on each unit
 		for (const DrawCall& call : calls) {
 			const Shader* pipeline = pipelines.find(call.pipeline);
@@ -788,6 +792,8 @@ namespace Renderer::backend::gl {
 				applyBlend(call.blend);
 				blend = call.blend;
 				equationChanged = equationChanged || call.blend == BlendState::Max || call.blend == BlendState::Min;
+				functionChanged = functionChanged || call.blend == BlendState::MultiplyDestinationAlpha ||
+								  call.blend == BlendState::OverByDestinationAlpha;
 			}
 			if (stencil != call.stencil) {
 				applyStencil(call.stencil);
@@ -848,6 +854,9 @@ namespace Renderer::backend::gl {
 		}
 		if (equationChanged) {
 			glBlendEquation(GL_FUNC_ADD);
+		}
+		if (functionChanged) {
+			glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 		}
 		if (vertexArray != 0) {
 			GLVertexArray::unbind();
