@@ -439,7 +439,7 @@ namespace Renderer {
 				.shapeStart = static_cast<uint32_t>(maskShapes.size()),
 			};
 			if (layer.content) {
-				for (const MaskShapeGeometry& shape : layer.shapes) {
+				for (const MaskElementGeometry& shape : layer.shapes) {
 					internShape(shape, isIdentity, hash);
 				}
 				entry.shapeCount = static_cast<uint32_t>(maskShapes.size()) - entry.shapeStart;
@@ -493,11 +493,11 @@ namespace Renderer {
 		return static_cast<uint32_t>(maskEntries.size());
 	}
 
-	void BatchRenderer::internShape(const MaskShapeGeometry& shape, bool isIdentity, uint64_t& hash) {
+	void BatchRenderer::internShape(const MaskElementGeometry& shape, bool isIdentity, uint64_t& hash) {
 		const auto mix = [&hash](uint64_t value) {
 			hash = (hash ^ value) * 1099511628211ULL;
 		};
-		MaskShapeEntry entry{
+		MaskElementEntry entry{
 			.triangleStart = static_cast<uint32_t>(shapePoints.size() / 3),
 			.meshGeometry = shape.meshGeometry,
 			.meshInstances = shape.meshInstances,
@@ -569,7 +569,7 @@ namespace Renderer {
 		return std::equal(firstTriangles, firstTriangles + (static_cast<ptrdiff_t>(first.triangleCount) * 3), secondTriangles);
 	}
 
-	bool BatchRenderer::sameShape(const MaskShapeEntry& first, const MaskShapeEntry& second) const {
+	bool BatchRenderer::sameShape(const MaskElementEntry& first, const MaskElementEntry& second) const {
 		if (first.triangleCount != second.triangleCount || first.meshGeometry != second.meshGeometry ||
 			first.meshInstances != second.meshInstances || first.meshIndexCount != second.meshIndexCount ||
 			!(first.camera == second.camera) || first.mask != second.mask || first.blend != second.blend || first.group != second.group ||
@@ -1048,7 +1048,7 @@ namespace Renderer {
 			}
 			shapeFirstInstance.resize(maskShapes.size());
 			for (size_t shapeIndex = 0; shapeIndex < maskShapes.size(); ++shapeIndex) {
-				const MaskShapeEntry& shape = maskShapes[shapeIndex];
+				const MaskElementEntry& shape = maskShapes[shapeIndex];
 				shapeFirstInstance[shapeIndex] = static_cast<uint32_t>(maskedUpload.size());
 				for (uint32_t triangle = 0; triangle < shape.triangleCount; ++triangle) {
 					const size_t			first = (static_cast<size_t>(shape.triangleStart) + triangle) * 3;
@@ -1258,13 +1258,13 @@ namespace Renderer {
 	}
 
 	namespace {
-		backend::BlendState coverageBlend(Primitives::MaskBlend blend) {
+		backend::BlendState coverageBlend(Primitives::MixBlendMode blend) {
 			switch (blend) {
-				case Primitives::MaskBlend::Lighten:
+				case Primitives::MixBlendMode::Lighten:
 					return backend::BlendState::Max;
-				case Primitives::MaskBlend::Darken:
+				case Primitives::MixBlendMode::Darken:
 					return backend::BlendState::Min;
-				case Primitives::MaskBlend::Normal:
+				case Primitives::MixBlendMode::Normal:
 				default:
 					return backend::BlendState::Replace;
 			}
@@ -1305,7 +1305,7 @@ namespace Renderer {
 		uint32_t	groupsSinceClear = kCoverageGroupsPerClear;
 		const float groupSpan = 1.0F / static_cast<float>(kCoverageGroupsPerClear);
 		for (uint32_t offset = 0; offset < content.shapeCount;) {
-			const MaskShapeEntry& shape = maskShapes[content.shapeStart + offset];
+			const MaskElementEntry& shape = maskShapes[content.shapeStart + offset];
 			if (shape.group == 0) {
 				drawShape(
 					content.shapeStart + offset,
@@ -1381,7 +1381,7 @@ namespace Renderer {
 		bool				   underOwnMask,
 		Foundation::Vec2	   coverageDepth
 	) {
-		const MaskShapeEntry& shape = maskShapes[shapeIndex];
+		const MaskElementEntry& shape = maskShapes[shapeIndex];
 		backend::StencilState stencil{
 			.test = true,
 			.function = backend::StencilFunction::Equal,

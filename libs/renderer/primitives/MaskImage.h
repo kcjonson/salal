@@ -17,7 +17,7 @@
 
 namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 
-	struct MaskShape;
+	struct MaskElement;
 
 	// CSS mask-composite. The layer is the source; the layers under it, composited first, are the destination.
 	//   Add       source over: the layer and everything under it
@@ -30,17 +30,17 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 	//   Darken   the lesser of the two
 	// A group whose blend isn't Normal is isolated, as CSS makes it: its shapes composite together
 	// first, on nothing, and the result blends with what is under it by the group's blend.
-	enum class MaskBlend : uint8_t { Normal, Lighten, Darken };
+	enum class MixBlendMode : uint8_t { Normal, Lighten, Darken };
 
 	// How a shape in a content layer is filled: one grey, or an SVG linearGradient in user space
 	// with two stops, padded past its ends. A value is a grey from 0, black, to 1, white.
 	class MaskPaint {
 	  public:
-		static MaskPaint flat(float value);
+		static MaskPaint solid(float value);
 
 		// The value runs from `fromValue` at `from` to `toValue` at `to`, in the shape's own space,
 		// and holds each end's value past it.
-		static MaskPaint linear(Foundation::Vec2 from, Foundation::Vec2 to, float fromValue, float toValue);
+		static MaskPaint linearGradient(Foundation::Vec2 from, Foundation::Vec2 to, float fromValue, float toValue);
 
 	  private:
 		friend struct MaskImageAccess;
@@ -87,10 +87,10 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 		// pending already waits for the flush.
 		static MaskImage mesh(const InstancedMeshHandle& mesh, const WorldCamera& camera);
 
-		// An SVG <mask> whose content is `shapes`, painted in order on nothing (black, value 0). The
-		// shapes are read by the draw the layer is given to, so they need to live until that call
+		// An SVG <mask> whose content is `elements`, painted in order on nothing (black, value 0). The
+		// elements are read by the draw the layer is given to, so they need to live until that call
 		// returns.
-		static MaskImage content(std::span<const MaskShape> shapes);
+		static MaskImage svgMask(std::span<const MaskElement> elements);
 
 	  private:
 		friend struct MaskImageAccess;
@@ -106,8 +106,8 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 		BufferHandle					  meshInstances;
 		uint32_t						  meshIndexCount = 0;
 		WorldCamera						  camera;
-		const MaskShape*				  shapes = nullptr;
-		size_t							  shapeCount = 0;
+		const MaskElement*				  elements = nullptr;
+		size_t							  elementCount = 0;
 	};
 
 	// One layer of a CSS mask: its mask-image and mask-composite.
@@ -122,13 +122,13 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 	// fills; a mesh by its vertices' values; a group by its children alone. `mask` is the shape's own
 	// mask, rect, polygon and mesh layers only: it paints only where they cover. Everything is read
 	// by the draw, as the layers are.
-	struct MaskShape {
+	struct MaskElement {
 		std::span<const Foundation::Vec2> points;
 		MaskMesh						  mesh;
-		std::vector<MaskShape>			  children;
-		MaskPaint						  paint = MaskPaint::flat(0.0F);
+		std::vector<MaskElement>			  children;
+		MaskPaint						  paint = MaskPaint::solid(0.0F);
 		std::span<const MaskLayer>		  mask;
-		MaskBlend						  blend = MaskBlend::Normal;
+		MixBlendMode						  blend = MixBlendMode::Normal;
 	};
 
 } // namespace Renderer::Primitives

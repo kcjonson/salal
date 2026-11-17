@@ -16,7 +16,7 @@ expected to be the next.
 ```cpp
 namespace Renderer::Primitives {
 	enum class MaskComposite : uint8_t { Add, Subtract };          // mask-composite
-	enum class MaskBlend : uint8_t { Normal, Lighten, Darken };    // mix-blend-mode, on a content shape or group
+	enum class MixBlendMode : uint8_t { Normal, Lighten, Darken };    // mix-blend-mode, on a content shape or group
 
 	class MaskPaint { // a content shape's fill
 	  public:
@@ -34,7 +34,7 @@ namespace Renderer::Primitives {
 		static MaskImage rect(const Foundation::Rect& bounds);
 		static MaskImage polygon(std::span<const Foundation::Vec2> points);
 		static MaskImage mesh(const InstancedMeshHandle& mesh, const WorldCamera& camera);
-		static MaskImage content(std::span<const MaskShape> shapes); // an SVG <mask> of shapes
+		static MaskImage svgMask(std::span<const MaskElement> elements); // an SVG <mask> of elements
 	};
 
 	struct MaskLayer {
@@ -42,13 +42,13 @@ namespace Renderer::Primitives {
 		MaskComposite composite = MaskComposite::Add;
 	};
 
-	struct MaskShape { // an element inside the <mask>: a <polygon>, a mesh, or a <g>, exactly one
+	struct MaskElement { // an element inside the <mask>: a <polygon>, a mesh, or a <g>, exactly one
 		std::span<const Foundation::Vec2> points;
 		MaskMesh						  mesh;
-		std::vector<MaskShape>			  children;
-		MaskPaint						  paint = MaskPaint::flat(0.0F); // black, as SVG fills
+		std::vector<MaskElement>			  children;
+		MaskPaint						  paint = MaskPaint::solid(0.0F); // black, as SVG fills
 		std::span<const MaskLayer>		  mask;                          // its own mask, hard layers only
-		MaskBlend						  blend = MaskBlend::Normal;
+		MixBlendMode						  blend = MixBlendMode::Normal;
 	};
 }
 // RectArgs, after `fill`:
@@ -72,22 +72,22 @@ and shadows by lighten, each clipped to his bright shape by a mask of its own. T
 least, over the colonists, of each one's greatest darkness:
 
 ```cpp
-std::vector<MaskShape> tint = {{.points = viewPoints, .paint = MaskPaint::flat(1.0F)}};
+std::vector<MaskElement> tint = {{.points = viewPoints, .paint = MaskPaint::solid(1.0F)}};
 // The pieces' masks, which the spans in `tint` point into: reserved, so no push_back moves them.
 std::vector<std::array<MaskLayer, 1>> insideBrightShapes;
 insideBrightShapes.reserve(colonistsInView.size());
 for (const ColonistCover& colonist : colonistsInView) {
 	insideBrightShapes.push_back({{{.image = MaskImage::polygon(colonist.brightShape)}}});
-	MaskShape group{.blend = MaskBlend::Darken};
-	group.children.push_back({.points = colonist.brightShape, .paint = MaskPaint::flat(0.0F)});
+	MaskElement group{.blend = MixBlendMode::Darken};
+	group.children.push_back({.points = colonist.brightShape, .paint = MaskPaint::solid(0.0F)});
 	for (const DarknessPiece& piece : colonist.pieces) {
 		group.children.push_back(
-			{.points = piece.screenPoints, .paint = piece.paint, .mask = insideBrightShapes.back(), .blend = MaskBlend::Lighten}
+			{.points = piece.screenPoints, .paint = piece.paint, .mask = insideBrightShapes.back(), .blend = MixBlendMode::Lighten}
 		);
 	}
 	tint.push_back(std::move(group));
 }
-const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::content(tint)}}};
+const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::svgMask(tint)}}};
 Primitives::drawRect({.bounds = view, .style = {.fill = kTintColor}, .mask = tintMask, .key = coverKey});
 ```
 
@@ -104,15 +104,15 @@ record's meshes and the pending shapes; worldsim's sight-softening design, 7.5, 
 | CSS / SVG | salal | not built |
 |---|---|---|
 | `mask` on an element | `RectArgs::mask` | `mask` on any other draw's args |
-| `mask-image` | `MaskImage::rect`, `polygon` (CSS `polygon()`, nonzero), `mesh` (an uploaded mesh, as an SVG `<mask>`'s vector children), `content` (an SVG `<mask>` of shapes) | `circle()`, `ellipse()`, `url()`, gradients, images |
+| `mask-image` | `MaskImage::rect`, `polygon` (CSS `polygon()`, nonzero), `mesh` (an uploaded mesh, as an SVG `<mask>`'s vector children), `svgMask` (an SVG `<mask>` of elements) | `circle()`, `ellipse()`, `url()`, gradients, images |
 | layers, listed top first | the span's order | |
 | `mask-composite: add`, `subtract` | `MaskComposite::Add`, `Subtract`, source over and source out, on partial values too | `intersect`, `exclude` |
 | `mask-mode`, SVG `mask-type` | a content layer reads its luminance, as `mask: url(#m)` reads an SVG `<mask>` (`match-source`, `mask-type: luminance`); a rect, polygon or mesh layer reads the same either way | `mask-mode: alpha` or `mask-type: alpha` on a content layer |
-| SVG `<polygon>`, `<g>` in a `<mask>` | `MaskShape::points`, `children`; `mesh` for an uploaded mesh | every other element |
-| SVG `fill` with a grey, or a `linearGradient` in user space | `MaskPaint::flat`, `MaskPaint::linear` (two stops, `spreadMethod="pad"`) | more stops, other spreads, `objectBoundingBox`, `radialGradient` |
-| `mix-blend-mode: normal`, `lighten`, `darken` | `MaskBlend::Normal`, `Lighten`, `Darken`, per shape or group | every other mode |
+| SVG `<polygon>`, `<g>` in a `<mask>` | `MaskElement::points`, `children`; `mesh` for an uploaded mesh | every other element |
+| SVG `fill` with a grey, or a `linearGradient` in user space | `MaskPaint::solid`, `MaskPaint::linearGradient` (two stops, `spreadMethod="pad"`) | more stops, other spreads, `objectBoundingBox`, `radialGradient` |
+| `mix-blend-mode: normal`, `lighten`, `darken` | `MixBlendMode::Normal`, `Lighten`, `Darken`, per shape or group | every other mode |
 | isolation | a group whose blend isn't `Normal` is isolated, as CSS makes it | `isolation: isolate` on a `Normal` group |
-| `mask` on an element inside a `<mask>` | `MaskShape::mask`, rect, polygon and mesh layers | a content layer there |
+| `mask` on an element inside a `<mask>` | `MaskElement::mask`, rect, polygon and mesh layers | a content layer there |
 | `mask-position`, `mask-size`, `mask-repeat`, `mask-origin` | a layer is where its points are | all four |
 | `mask-clip` | none: a layer is never clipped | `mask-clip` |
 

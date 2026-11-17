@@ -152,7 +152,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	// mask in the flush's mask table, 0 for none. A shape of an isolated group carries the group's
 	// number, shared by its consecutive shapes (0 for none), and the group's blend; such a group's
 	// value is the greatest of its shapes'.
-	struct MaskShapeGeometry {
+	struct MaskElementGeometry {
 		std::span<const Foundation::Vec2> triangles; // three points a triangle
 		std::span<const float>			  values;	 // one a point
 		GeometryHandle					  meshGeometry;
@@ -160,9 +160,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		uint32_t						  meshIndexCount = 0;
 		Primitives::WorldCamera			  camera;
 		uint32_t						  mask = 0;
-		Primitives::MaskBlend			  blend = Primitives::MaskBlend::Normal;
+		Primitives::MixBlendMode			  blend = Primitives::MixBlendMode::Normal;
 		uint32_t						  group = 0;
-		Primitives::MaskBlend			  groupBlend = Primitives::MaskBlend::Normal;
+		Primitives::MixBlendMode			  groupBlend = Primitives::MixBlendMode::Normal;
 	};
 
 	// A CSS mask layer as the batch takes it (docs/masks.md): a mask-composite, and its coverage as
@@ -177,7 +177,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		uint32_t						   meshIndexCount = 0;
 		Primitives::WorldCamera			   camera;
 		bool							   content = false;
-		std::span<const MaskShapeGeometry> shapes; // a content layer's
+		std::span<const MaskElementGeometry> shapes; // a content layer's
 	};
 
 	// The stencil bits a mask's rect, polygon and mesh layers are built in: the composited mask,
@@ -563,7 +563,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			uint32_t						shapeStart = 0;
 			uint32_t						shapeCount = 0;
 		};
-		struct MaskShapeEntry {
+		struct MaskElementEntry {
 			uint32_t				triangleStart = 0; // in shapePoints, three points a triangle
 			uint32_t				triangleCount = 0;
 			GeometryHandle			meshGeometry;
@@ -571,9 +571,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			uint32_t				meshIndexCount = 0;
 			Primitives::WorldCamera camera;
 			uint32_t				mask = 0;
-			Primitives::MaskBlend	blend = Primitives::MaskBlend::Normal;
+			Primitives::MixBlendMode	blend = Primitives::MixBlendMode::Normal;
 			uint32_t				group = 0;
-			Primitives::MaskBlend	groupBlend = Primitives::MaskBlend::Normal;
+			Primitives::MixBlendMode	groupBlend = Primitives::MixBlendMode::Normal;
 		};
 		struct MaskEntry {
 			uint32_t		 layerStart = 0;
@@ -585,15 +585,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		std::vector<MaskEntry>		  maskEntries;
 		std::vector<MaskLayerEntry>	  maskLayers;
 		std::vector<Foundation::Vec2> maskTriangles;
-		std::vector<MaskShapeEntry>	  maskShapes;
+		std::vector<MaskElementEntry>	  maskShapes;
 		std::vector<Foundation::Vec2> shapePoints;
 		std::vector<float>			  shapeValues;
 
 		// Add a content layer's shape to maskShapes, mixing it into a mask's `hash`.
-		void internShape(const MaskShapeGeometry& shape, bool isIdentity, uint64_t& hash);
+		void internShape(const MaskElementGeometry& shape, bool isIdentity, uint64_t& hash);
 
 		// Whether two interned shapes are the same, their triangles and values compared too.
-		bool sameShape(const MaskShapeEntry& first, const MaskShapeEntry& second) const;
+		bool sameShape(const MaskElementEntry& first, const MaskElementEntry& second) const;
 
 		// Whether two interned layers are the same mask-image under the same composite.
 		bool sameLayer(const MaskLayerEntry& first, const MaskLayerEntry& second) const;

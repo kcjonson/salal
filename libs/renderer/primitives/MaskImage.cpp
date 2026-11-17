@@ -2,14 +2,14 @@
 
 namespace Renderer::Primitives {
 
-	MaskPaint MaskPaint::flat(float value) {
+	MaskPaint MaskPaint::solid(float value) {
 		MaskPaint paint;
 		paint.fromValue = value;
 		paint.toValue = value;
 		return paint;
 	}
 
-	MaskPaint MaskPaint::linear(Foundation::Vec2 from, Foundation::Vec2 to, float fromValue, float toValue) {
+	MaskPaint MaskPaint::linearGradient(Foundation::Vec2 from, Foundation::Vec2 to, float fromValue, float toValue) {
 		MaskPaint paint;
 		paint.from = from;
 		paint.to = to;
@@ -49,11 +49,11 @@ namespace Renderer::Primitives {
 		return image;
 	}
 
-	MaskImage MaskImage::content(std::span<const MaskShape> shapes) {
+	MaskImage MaskImage::svgMask(std::span<const MaskElement> elements) {
 		MaskImage image;
 		image.kind = Kind::Content;
-		image.shapes = shapes.data();
-		image.shapeCount = shapes.size();
+		image.elements = elements.data();
+		image.elementCount = elements.size();
 		return image;
 	}
 

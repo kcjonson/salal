@@ -380,7 +380,7 @@ namespace Renderer::Primitives {
 	  private:
 		class ContentFlattener;
 
-		static bool internOwnMasks(BatchRenderer& batch, std::span<const MaskShape> content, std::vector<uint32_t>& ownMasks);
+		static bool internOwnMasks(BatchRenderer& batch, std::span<const MaskElement> content, std::vector<uint32_t>& ownMasks);
 	};
 
 	void drawRect(const RectArgs& args) {
@@ -588,7 +588,7 @@ namespace Renderer::Primitives {
 		ContentFlattener(
 			std::vector<Foundation::Vec2>&	triangles,
 			std::vector<float>&				values,
-			std::vector<MaskShapeGeometry>& shapes,
+			std::vector<MaskElementGeometry>& shapes,
 			std::vector<size_t>&			triangleStarts,
 			std::span<const uint32_t>		ownMasks
 		)
@@ -599,7 +599,7 @@ namespace Renderer::Primitives {
 			  ownMasks(ownMasks) {}
 
 		// False, with why in `refusal`, for content salal does not evaluate.
-		bool flatten(std::span<const MaskShape> content) { return walk(content, 0, Primitives::MaskBlend::Normal); }
+		bool flatten(std::span<const MaskElement> content) { return walk(content, 0, Primitives::MixBlendMode::Normal); }
 
 		const char* refusal = nullptr;
 
@@ -609,8 +609,8 @@ namespace Renderer::Primitives {
 			float			 at;
 		};
 
-		bool walk(std::span<const MaskShape> content, uint32_t group, Primitives::MaskBlend groupBlend) {
-			for (const MaskShape& shape : content) {
+		bool walk(std::span<const MaskElement> content, uint32_t group, Primitives::MixBlendMode groupBlend) {
+			for (const MaskElement& shape : content) {
 				if (!shape.children.empty()) {
 					if (!shape.points.empty() || shape.mesh.geometry.isValid()) {
 						refusal = "a shape has both children and its own points or mesh";
@@ -625,7 +625,7 @@ namespace Renderer::Primitives {
 						refusal = "a group carries a paint; give its shapes the paint instead";
 						return false;
 					}
-					if (shape.blend == Primitives::MaskBlend::Normal) {
+					if (shape.blend == Primitives::MixBlendMode::Normal) {
 						if (!walk(shape.children, group, groupBlend)) {
 							return false;
 						}
@@ -646,7 +646,7 @@ namespace Renderer::Primitives {
 					refusal = "a shape has both points and a mesh";
 					return false;
 				}
-				if (group != 0 && groupShapes > 0 && shape.blend != Primitives::MaskBlend::Lighten) {
+				if (group != 0 && groupShapes > 0 && shape.blend != Primitives::MixBlendMode::Lighten) {
 					refusal = "an isolated group's shapes after its first are combined by other than lighten";
 					return false;
 				}
@@ -658,9 +658,9 @@ namespace Renderer::Primitives {
 			return true;
 		}
 
-		void add(const MaskShape& shape, uint32_t group, Primitives::MaskBlend groupBlend) {
+		void add(const MaskElement& shape, uint32_t group, Primitives::MixBlendMode groupBlend) {
 			const uint32_t	  ownMask = ownMasks[shapeOrdinal++];
-			MaskShapeGeometry geometry{
+			MaskElementGeometry geometry{
 				.camera = shape.mesh.camera,
 				.mask = ownMask,
 				.blend = shape.blend,
@@ -743,7 +743,7 @@ namespace Renderer::Primitives {
 
 		std::vector<Foundation::Vec2>&	triangles;
 		std::vector<float>&				values;
-		std::vector<MaskShapeGeometry>& shapes;
+		std::vector<MaskElementGeometry>& shapes;
 		std::vector<size_t>&			triangleStarts;
 		std::span<const uint32_t>		ownMasks;
 		size_t							shapeOrdinal = 0;
@@ -755,8 +755,8 @@ namespace Renderer::Primitives {
 
 	// Every leaf shape's own mask, in paint order, interned before the content so the batch's
 	// table holds them; false for content salal does not evaluate there.
-	bool MaskImageAccess::internOwnMasks(BatchRenderer& batch, std::span<const MaskShape> content, std::vector<uint32_t>& ownMasks) {
-		for (const MaskShape& shape : content) {
+	bool MaskImageAccess::internOwnMasks(BatchRenderer& batch, std::span<const MaskElement> content, std::vector<uint32_t>& ownMasks) {
+		for (const MaskElement& shape : content) {
 			if (!shape.children.empty()) {
 				if (!internOwnMasks(batch, shape.children, ownMasks)) {
 					return false;
@@ -795,8 +795,8 @@ namespace Renderer::Primitives {
 			return refuse("more than one content layer");
 		}
 		const MaskImage&				 top = layers.front().image;
-		const std::span<const MaskShape> content =
-			contentLayers == 1 ? std::span<const MaskShape>(top.shapes, top.shapeCount) : std::span<const MaskShape>{};
+		const std::span<const MaskElement> content =
+			contentLayers == 1 ? std::span<const MaskElement>(top.elements, top.elementCount) : std::span<const MaskElement>{};
 		// Filled only for a content layer: interning a shape's own mask, which holds none, comes back
 		// through here and leaves it alone.
 		static thread_local std::vector<uint32_t> ownMasks;
@@ -821,7 +821,7 @@ namespace Renderer::Primitives {
 		static thread_local std::vector<MaskLayerGeometry> geometries;
 		static thread_local std::vector<Foundation::Vec2>  shapeTriangles;
 		static thread_local std::vector<float>			   shapeValues;
-		static thread_local std::vector<MaskShapeGeometry> shapes;
+		static thread_local std::vector<MaskElementGeometry> shapes;
 		static thread_local std::vector<size_t>			   shapeTriangleStarts;
 		vertices.clear();
 		indices.clear();
@@ -871,8 +871,8 @@ namespace Renderer::Primitives {
 				 .meshIndexCount = image.meshIndexCount,
 				 .camera = image.camera,
 				 .content = image.kind == MaskImage::Kind::Content,
-				 .shapes = image.kind == MaskImage::Kind::Content ? std::span<const MaskShapeGeometry>(shapes)
-																  : std::span<const MaskShapeGeometry>{}}
+				 .shapes = image.kind == MaskImage::Kind::Content ? std::span<const MaskElementGeometry>(shapes)
+																  : std::span<const MaskElementGeometry>{}}
 			);
 		}
 		return batch.internMask(geometries);

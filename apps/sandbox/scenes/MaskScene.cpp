@@ -38,12 +38,12 @@ namespace {
 
 	namespace Primitives = Renderer::Primitives;
 	using Foundation::Vec2;
-	using Primitives::MaskBlend;
+	using Primitives::MixBlendMode;
 	using Primitives::MaskComposite;
 	using Primitives::MaskImage;
 	using Primitives::MaskLayer;
 	using Primitives::MaskPaint;
-	using Primitives::MaskShape;
+	using Primitives::MaskElement;
 
 	constexpr const char* kSceneName = "mask";
 	constexpr float		  kPi = std::numbers::pi_v<float>;
@@ -76,13 +76,13 @@ namespace {
 		const Vec2	slope = Vec2((rise1 * second.y) - (rise2 * first.y), (rise2 * first.x) - (rise1 * second.x)) / cross(first, second);
 		const float slopeSquared = glm::dot(slope, slope);
 		if (slopeSquared < 1e-12F) {
-			return MaskPaint::flat(piece.values[0]);
+			return MaskPaint::solid(piece.values[0]);
 		}
 		const auto	least = static_cast<size_t>(std::min_element(piece.values.begin(), piece.values.end()) - piece.values.begin());
 		const float lowest = piece.values[least];
 		const float highest = *std::max_element(piece.values.begin(), piece.values.end());
 		const Vec2	from = piece.corners[least];
-		return MaskPaint::linear(from, from + (slope * ((highest - lowest) / slopeSquared)), lowest, highest);
+		return MaskPaint::linearGradient(from, from + (slope * ((highest - lowest) / slopeSquared)), lowest, highest);
 	}
 
 	// The feather's rectangle inward of an edge, 1 on it and 0 a feather in.
@@ -411,23 +411,23 @@ namespace {
 			std::vector<std::array<Vec2, 3>>	  outlines;
 			insideBrightShapes.reserve(colonists.size());
 			outlines.reserve(pieceCount + pendingPieces.size());
-			std::vector<MaskShape> tint = {{.points = viewPoints, .paint = MaskPaint::flat(1.0F)}};
+			std::vector<MaskElement> tint = {{.points = viewPoints, .paint = MaskPaint::solid(1.0F)}};
 			for (const Colonist& colonist : colonists) {
 				insideBrightShapes.push_back({{{.image = MaskImage::polygon(colonist.bright)}}});
-				MaskShape group{.blend = MaskBlend::Darken};
-				group.children.push_back({.points = colonist.bright, .paint = MaskPaint::flat(0.0F)});
+				MaskElement group{.blend = MixBlendMode::Darken};
+				group.children.push_back({.points = colonist.bright, .paint = MaskPaint::solid(0.0F)});
 				for (const Piece& piece : colonist.pieces) {
 					outlines.push_back(piece.corners);
 					group.children.push_back(
 						{.points = outlines.back(),
 						 .paint = pieceGradient(piece),
 						 .mask = insideBrightShapes.back(),
-						 .blend = MaskBlend::Lighten}
+						 .blend = MixBlendMode::Lighten}
 					);
 				}
 				tint.push_back(std::move(group));
 			}
-			const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::content(tint)}}};
+			const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::svgMask(tint)}}};
 			Primitives::drawRect(
 				{.bounds = view, .style = {.fill = {0.0F, 0.0F, 0.0F, kSeenDimAlpha}}, .mask = tintMask, .key = kCoverKey}
 			);
@@ -438,18 +438,18 @@ namespace {
 				{.image = MaskImage::polygon(abuttingGrown)},
 				{.image = MaskImage::polygon(overlappingGrown)},
 			}};
-			std::vector<MaskShape>		   unseenFeather = {
-				{.mesh = {firstFeather, camera}, .mask = outsidePendingFeather, .blend = MaskBlend::Lighten},
-				{.mesh = {secondFeather, camera}, .mask = outsidePendingFeather, .blend = MaskBlend::Lighten},
+			std::vector<MaskElement>		   unseenFeather = {
+				{.mesh = {firstFeather, camera}, .mask = outsidePendingFeather, .blend = MixBlendMode::Lighten},
+				{.mesh = {secondFeather, camera}, .mask = outsidePendingFeather, .blend = MixBlendMode::Lighten},
 			};
 			for (const Piece& piece : pendingPieces) {
 				outlines.push_back(piece.corners);
-				unseenFeather.push_back({.points = outlines.back(), .paint = pieceGradient(piece), .blend = MaskBlend::Lighten});
+				unseenFeather.push_back({.points = outlines.back(), .paint = pieceGradient(piece), .blend = MixBlendMode::Lighten});
 			}
 			const std::array<Vec2, 4>	   abuttingOutline = kAbutting.outline();
 			const std::array<Vec2, 4>	   overlappingOutline = kOverlapping.outline();
 			const std::array<MaskLayer, 6> unseenMask = {{
-				{.image = MaskImage::content(unseenFeather)},
+				{.image = MaskImage::svgMask(unseenFeather)},
 				{.image = MaskImage::rect(view), .composite = MaskComposite::Subtract},
 				{.image = MaskImage::mesh(firstSeen, camera)},
 				{.image = MaskImage::mesh(secondSeen, camera)},
