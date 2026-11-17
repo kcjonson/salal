@@ -190,6 +190,16 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 	constexpr uint8_t kElementMaskScratchBit = 0x08U;
 	constexpr uint8_t kCoverBoxBit = 0x10U;
 
+	// The stencil bits a mask is built in, and whether they are cleared across the target or,
+	// for an element's own mask, over its cover box.
+	// Namespace scope: clang refuses a nested struct with member initialisers as a default argument
+	// of the enclosing class's member.
+	struct MaskBits {
+		uint8_t accumulator = kMaskAccumulatorBit;
+		uint8_t scratch = kMaskScratchBit;
+		bool	clearOverCover = false;
+	};
+
 	// How many isolated groups a content layer evaluates in depth between depth clears: group k
 	// keeps its value v at depth (k + v / 2) / kCoverageGroupsPerClear, so a later group always lies
 	// above an earlier one and never matches what it left.
@@ -608,14 +618,6 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// Empty the mask table, with the batch.
 		void clearMasks();
-
-		// The stencil bits a mask is built in, and whether they are cleared across the target or,
-		// for an element's own mask, over its cover box.
-		struct MaskBits {
-			uint8_t accumulator = kMaskAccumulatorBit;
-			uint8_t scratch = kMaskScratchBit;
-			bool	clearOverCover = false;
-		};
 
 		// Build mask `index`'s layers from the bottom up to `firstLayer` in the bound target's stencil
 		// `bits`, from their quads uploaded at layerFirstInstance and its cover quads. True when it is
