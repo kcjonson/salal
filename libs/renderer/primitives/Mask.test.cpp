@@ -73,7 +73,7 @@ namespace Renderer {
 		std::vector<backend::NullBackend::RecordedDraw> colourDraws() const {
 			std::vector<backend::NullBackend::RecordedDraw> drawn;
 			for (const backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
-				if (draw.call.writeColour) {
+				if (draw.call.writes != backend::ChannelWrites::None) {
 					drawn.push_back(draw);
 				}
 			}
@@ -153,7 +153,7 @@ namespace Renderer {
 		const std::vector<BatchInstance> quads = uploaded();
 		bool							 sawLayer = false;
 		for (const backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
-			if (draw.call.writeColour) {
+			if (draw.call.writes != backend::ChannelWrites::None) {
 				continue;
 			}
 			sawLayer = true;
@@ -203,7 +203,7 @@ namespace Renderer {
 		Primitives::endFrame();
 		bool drewMesh = false;
 		for (const backend::NullBackend::RecordedDraw& draw : gpu->draws()) {
-			drewMesh = drewMesh || (!draw.call.writeColour && draw.call.indexCount == 6U);
+			drewMesh = drewMesh || (draw.call.writes == backend::ChannelWrites::None && draw.call.indexCount == 6U);
 		}
 		EXPECT_TRUE(drewMesh);
 		EXPECT_EQ(gpu->live().geometries, liveBefore - 1);
@@ -213,7 +213,7 @@ namespace Renderer {
 	std::vector<backend::NullBackend::RecordedDraw> buildDraws(const backend::NullBackend& gpu) {
 		std::vector<backend::NullBackend::RecordedDraw> built;
 		for (const backend::NullBackend::RecordedDraw& draw : gpu.draws()) {
-			if (!draw.call.writeColour) {
+			if (draw.call.writes == backend::ChannelWrites::None) {
 				built.push_back(draw);
 			}
 		}

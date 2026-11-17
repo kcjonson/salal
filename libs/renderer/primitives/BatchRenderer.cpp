@@ -1121,7 +1121,7 @@ namespace Renderer {
 					{.pipeline = pipeline,
 					 .geometry = geometry,
 					 .stencil = stencil,
-					 .writeColour = false,
+					 .writes = backend::ChannelWrites::None,
 					 .firstInstance = firstInstance,
 					 .instanceCount = instanceCount}
 				);
@@ -1156,7 +1156,7 @@ namespace Renderer {
 					.pipeline = pipeline,
 					.geometry = layer.meshGeometry,
 					.stencil = coverage,
-					.writeColour = false,
+					.writes = backend::ChannelWrites::None,
 					.indexCount = layer.meshIndexCount,
 					.instanceCount = 1,
 				};

@@ -140,7 +140,7 @@ vec4 blended(vec4 color, bool additive) {
 	return vec4(color.rgb, additive ? 0.0 : color.a);
 }
 
-void main() {
+void shade() {
 	// Every derivative is taken here, in uniform control flow, before any branch or
 	// discard: inside the mode branches they would be undefined. The rounded box is
 	// the rect's and the shadow's distance; the other modes ignore it.
@@ -325,5 +325,14 @@ void main() {
 		float fit = min(1.0, 0.5 * pxRange / (v_shape.x + soft));
 		float opacity = smoothstep(-soft * fit, soft * fit, pxRange * (sd - 0.5) + v_shape.x * fit);
 		FragColor = blended(v_fill * opacity, additive);
+	}
+}
+
+void main() {
+	shade();
+	// Under a partial-coverage mask the fill's colour is weighted by the coverage in the
+	// target's alpha, which the blend multiplies a straight colour by (docs/masks.md).
+	if (u_straightOutput == 1) {
+		FragColor.rgb = FragColor.a > 0.0 ? FragColor.rgb / FragColor.a : vec3(0.0);
 	}
 }

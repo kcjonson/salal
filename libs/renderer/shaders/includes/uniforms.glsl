@@ -15,4 +15,6 @@ layout(std140) uniform DrawUniforms {
 	float u_viewportHeight; // 156 framebuffer height in physical pixels, for the clip test's y flip
 	float u_pixelRatio;     // 160 physical pixels per logical pixel
 	int   u_instanced;      // 164 0 batched, 1 GPU instancing, 2 baked world space
+	vec2  u_coverageDepth;  // 168 a partial-coverage mask's value as window depth: (base, span), none at span 0
+	int   u_straightOutput; // 176 1: the fragment's colour leaves straight, not premultiplied
 };

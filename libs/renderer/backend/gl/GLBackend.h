@@ -43,6 +43,8 @@ namespace Renderer::backend::gl {
 		void clear(const Foundation::Color& color) override;
 		void clearStencil(uint8_t bits) override;
 		bool hasStencil() const override;
+		void clearDepth() override;
+		bool hasAlphaAndDepth() const override;
 		void invalidateState() override;
 
 		TextureHandle createTexture(const TextureDesc& desc) override;
@@ -98,9 +100,10 @@ namespace Renderer::backend::gl {
 
 		struct TargetSlot {
 			GLFramebuffer  framebuffer;
-			GLRenderbuffer stencil; // depth 24, stencil 8, when the target has a stencil buffer; the depth is unused
+			GLRenderbuffer stencil; // depth 24, stencil 8, when the target has a stencil buffer
 			int			   width = 0;
 			int			   height = 0;
+			bool		   alpha = false; // the colour carries alpha
 		};
 
 		struct BufferSlot {
@@ -153,7 +156,8 @@ namespace Renderer::backend::gl {
 		std::vector<GLuint>		 inactiveHookBindings; // points whose block a pipeline had inactive; writes there are dropped
 
 		RenderTargetHandle boundTarget;
-		bool			   windowStencil = false; // the default framebuffer has 8 stencil bits
+		bool			   windowStencil = false;		// the default framebuffer has 8 stencil bits
+		bool			   windowAlphaAndDepth = false; // and 8 alpha and 24 depth bits
 		int				   windowWidth = 0;
 		int				   windowHeight = 0;
 	};
