@@ -61,6 +61,8 @@ namespace Renderer::backend::gl {
 			{"u_viewportHeight", offsetof(DrawUniforms, viewportHeight)},
 			{"u_pixelRatio", offsetof(DrawUniforms, pixelRatio)},
 			{"u_instanced", offsetof(DrawUniforms, instanced)},
+			{"u_coverageDepth", offsetof(DrawUniforms, coverageDepth)},
+			{"u_straightOutput", offsetof(DrawUniforms, straightOutput)},
 		};
 
 		// Whether the linked program's block holds every member where kBlockMembers says, logging the first that does not.
@@ -93,10 +95,52 @@ namespace Renderer::backend::gl {
 		}
 
 		void applyBlend(BlendState blend) {
+			if (blend == BlendState::Replace) {
+				glDisable(GL_BLEND);
+				return;
+			}
+			glEnable(GL_BLEND);
 			switch (blend) {
+				case BlendState::Max:
+					glBlendEquation(GL_MAX); // takes no factors
+					break;
+				case BlendState::Min:
+					glBlendEquation(GL_MIN);
+					break;
+				case BlendState::MultiplyDestinationAlpha:
+					glBlendEquation(GL_FUNC_ADD);
+					glBlendFuncSeparate(GL_ZERO, GL_ONE, GL_DST_ALPHA, GL_ZERO);
+					break;
+				case BlendState::OverByDestinationAlpha:
+					glBlendEquation(GL_FUNC_ADD);
+					glBlendFuncSeparate(GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ZERO, GL_ONE);
+					break;
 				case BlendState::Alpha:
-					glEnable(GL_BLEND);
+				case BlendState::Replace:
+				default:
+					glBlendEquation(GL_FUNC_ADD);
 					glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+					break;
+			}
+		}
+
+		void applyDepth(DepthState depth) {
+			switch (depth) {
+				case DepthState::GreaterOrEqual:
+					glEnable(GL_DEPTH_TEST);
+					glDepthFunc(GL_GEQUAL);
+					glDepthMask(GL_TRUE);
+					break;
+				case DepthState::Equal:
+					glEnable(GL_DEPTH_TEST);
+					glDepthFunc(GL_EQUAL);
+					glDepthMask(GL_FALSE);
+					break;
+				case DepthState::Off:
+				default:
+					glDisable(GL_DEPTH_TEST);
+					glDepthFunc(GL_LESS); // GL's default, which a game's depth-tested GL may rely on
+					glDepthMask(GL_TRUE);
 					break;
 			}
 		}
@@ -115,23 +159,26 @@ namespace Renderer::backend::gl {
 			}
 		}
 
-		// `stencil`'s test, function and operations; off is the fixed state's (test off, every bit written).
+		// `stencil`'s test, function and operations; off is the fixed state's (test off, every bit
+		// written, and GL's default function and operations, which a game's stencil code may rely on).
 		void applyStencil(const StencilState& stencil) {
 			if (!stencil.test) {
 				glDisable(GL_STENCIL_TEST);
+				glStencilFunc(GL_ALWAYS, 0, 0xFF);
+				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 				glStencilMask(0xFF);
 				return;
 			}
 			glEnable(GL_STENCIL_TEST);
 			glStencilFunc(stencil.function == StencilFunction::Equal ? GL_EQUAL : GL_ALWAYS, stencil.reference, stencil.readMask);
-			// Depth testing is off, so depth-fail never happens.
 			glStencilOp(glStencilOperation(stencil.fail), GL_KEEP, glStencilOperation(stencil.pass));
 			glStencilMask(stencil.writeMask);
 		}
 
-		void applyColourWrites(bool writeColour) {
-			const GLboolean on = writeColour ? GL_TRUE : GL_FALSE;
-			glColorMask(on, on, on, on);
+		void applyChannelWrites(ChannelWrites writes) {
+			const GLboolean colour = writes == ChannelWrites::All || writes == ChannelWrites::Colour ? GL_TRUE : GL_FALSE;
+			const GLboolean alpha = writes == ChannelWrites::All || writes == ChannelWrites::Alpha ? GL_TRUE : GL_FALSE;
+			glColorMask(colour, colour, colour, alpha);
 		}
 
 		// A float attribute of `components` at `offset` in a `stride`-byte vertex of the bound GL_ARRAY_BUFFER.
@@ -208,6 +255,19 @@ namespace Renderer::backend::gl {
 		if (!windowStencil) {
 			LOG_WARNING(Renderer, "The window has %d stencil bits, not 8; masked draws on it draw nothing", stencilBits);
 		}
+		GLint alphaBits = 0;
+		GLint depthBits = 0;
+		glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT, GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE, &alphaBits);
+		glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH, GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits);
+		windowAlphaAndDepth = alphaBits >= 8 && depthBits >= 24;
+		if (!windowAlphaAndDepth) {
+			LOG_WARNING(
+				Renderer,
+				"The window has %d alpha and %d depth bits, not 8 and 24; draws under a partial-coverage mask on it draw nothing",
+				alphaBits,
+				depthBits
+			);
+		}
 		applyFixedState();
 	}
 
@@ -219,8 +279,10 @@ namespace Renderer::backend::gl {
 		glDisable(GL_DEPTH_TEST);
 		glDisable(GL_CULL_FACE);
 		glDisable(GL_SCISSOR_TEST);
+		applyDepth(DepthState::Off);
+		glClearDepth(1.0);
 		applyStencil({});
-		applyColourWrites(true);
+		applyChannelWrites(ChannelWrites::All);
 	}
 
 	void GLBackend::beginFrame() {
@@ -252,6 +314,20 @@ namespace Renderer::backend::gl {
 	bool GLBackend::hasStencil() const {
 		const TargetSlot* slot = targets.find(boundTarget);
 		return slot != nullptr ? slot->stencil.isValid() : windowStencil;
+	}
+
+	void GLBackend::clearDepth() {
+		if (!hasAlphaAndDepth()) {
+			return;
+		}
+		glClearDepth(0.0);
+		glClear(GL_DEPTH_BUFFER_BIT); // the fixed state writes depth
+		glClearDepth(1.0);			  // the fixed state's, GL's default
+	}
+
+	bool GLBackend::hasAlphaAndDepth() const {
+		const TargetSlot* slot = targets.find(boundTarget);
+		return slot != nullptr ? slot->stencil.isValid() && slot->alpha : windowAlphaAndDepth;
 	}
 
 	void GLBackend::invalidateState() {
@@ -370,7 +446,13 @@ namespace Renderer::backend::gl {
 			LOG_ERROR(Renderer, "RenderTarget %dx%d: framebuffer incomplete (0x%x)", width, height, status);
 			return {};
 		}
-		return targets.insert({.framebuffer = std::move(fbo), .stencil = std::move(stencil), .width = width, .height = height});
+		return targets.insert(
+			{.framebuffer = std::move(fbo),
+			 .stencil = std::move(stencil),
+			 .width = width,
+			 .height = height,
+			 .alpha = texture->format != TextureFormat::Rgb8}
+		);
 	}
 
 	void GLBackend::setRenderTarget(RenderTargetHandle target) {
@@ -497,11 +579,11 @@ namespace Renderer::backend::gl {
 			return {};
 		}
 		// The block's size between its last member's end and the struct's padded size, and
-		// every member where the struct has it: a shader reordered within 176 bytes would
+		// every member where the struct has it: a shader reordered within the block would
 		// otherwise link and draw garbage, wherever no GL test runs.
 		GLint blockSize = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
-		constexpr size_t kBlockEnd = offsetof(DrawUniforms, instanced) + sizeof(int32_t);
+		constexpr size_t kBlockEnd = offsetof(DrawUniforms, straightOutput) + sizeof(int32_t);
 		if (blockSize < static_cast<GLint>(kBlockEnd) || static_cast<size_t>(blockSize) > sizeof(DrawUniforms)) {
 			LOG_ERROR(
 				Renderer, "createPipeline: %s is %d bytes in the shaders, %zu in C++", kDrawUniformsBlock, blockSize, sizeof(DrawUniforms)
@@ -685,9 +767,12 @@ namespace Renderer::backend::gl {
 		GLuint									 program = 0;
 		GLuint									 vertexArray = 0;
 		std::optional<BlendState>				 blend;
-		StencilState							 stencil{};			 // off is the fixed state, in force on entry
-		bool									 writeColour = true; // so are colour writes
-		std::array<TextureHandle, kTextureSlots> bound{};			 // what this submission left on each unit
+		StencilState							 stencil{};					  // off is the fixed state, in force on entry
+		ChannelWrites							 writes = ChannelWrites::All; // so are every channel's writes
+		DepthState								 depth = DepthState::Off;	  // and no depth test
+		bool									 equationChanged = false;	  // a draw blended with other than add
+		bool									 functionChanged = false;	  // or with other factors than Alpha's
+		std::array<TextureHandle, kTextureSlots> bound{};					  // what this submission left on each unit
 		for (const DrawCall& call : calls) {
 			const Shader* pipeline = pipelines.find(call.pipeline);
 			GeometrySlot* geometry = geometries.find(call.geometry);
@@ -709,14 +794,21 @@ namespace Renderer::backend::gl {
 			if (blend != call.blend) {
 				applyBlend(call.blend);
 				blend = call.blend;
+				equationChanged = equationChanged || call.blend == BlendState::Max || call.blend == BlendState::Min;
+				functionChanged = functionChanged || call.blend == BlendState::MultiplyDestinationAlpha ||
+								  call.blend == BlendState::OverByDestinationAlpha;
 			}
 			if (stencil != call.stencil) {
 				applyStencil(call.stencil);
 				stencil = call.stencil;
 			}
-			if (writeColour != call.writeColour) {
-				applyColourWrites(call.writeColour);
-				writeColour = call.writeColour;
+			if (writes != call.writes) {
+				applyChannelWrites(call.writes);
+				writes = call.writes;
+			}
+			if (depth != call.depth) {
+				applyDepth(call.depth);
+				depth = call.depth;
 			}
 			for (size_t unit = 0; unit < kTextureSlots; ++unit) {
 				if (call.textures[unit].isValid() && call.textures[unit] != bound[unit]) {
@@ -752,12 +844,22 @@ namespace Renderer::backend::gl {
 
 		// What the batch has always left behind: no vertex array (a game's index-buffer
 		// bind would otherwise land in ours), no texture on a unit it bound, unit 0
-		// active, blending off, and the fixed stencil and colour-write state.
+		// active, blending off with the add equation, and the fixed stencil, depth and
+		// channel-write state.
 		if (stencil != StencilState{}) {
 			applyStencil({});
 		}
-		if (!writeColour) {
-			applyColourWrites(true);
+		if (writes != ChannelWrites::All) {
+			applyChannelWrites(ChannelWrites::All);
+		}
+		if (depth != DepthState::Off) {
+			applyDepth(DepthState::Off);
+		}
+		if (equationChanged) {
+			glBlendEquation(GL_FUNC_ADD);
+		}
+		if (functionChanged) {
+			glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 		}
 		if (vertexArray != 0) {
 			GLVertexArray::unbind();

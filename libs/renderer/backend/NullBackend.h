@@ -85,6 +85,8 @@ namespace Renderer::backend {
 		void clear(const Foundation::Color& color) override { clearColors.push_back(color); }
 		void clearStencil(uint8_t bits) override;
 		bool hasStencil() const override;
+		void clearDepth() override;
+		bool hasAlphaAndDepth() const override;
 		void invalidateState() override { ++invalidationCount; }
 
 		TextureHandle createTexture(const TextureDesc& desc) override;
@@ -139,9 +141,13 @@ namespace Renderer::backend {
 		[[nodiscard]] int			 foreignDrawsEnded() const { return foreignDrawEnds; }
 		// clearStencil() calls on a target with a stencil buffer, in order.
 		[[nodiscard]] const std::vector<StencilClear>& stencilClears() const { return stencilClearRecord; }
+		// clearDepth() calls on a target with alpha and depth: how many draws were recorded before each.
+		[[nodiscard]] const std::vector<size_t>& depthClears() const { return depthClearRecord; }
 
 		// Whether the window has a stencil buffer, as a GL window made with stencil bits does; true until set.
 		void setWindowStencil(bool stencil) { windowStencil = stencil; }
+		// Whether the window has 8 alpha and 24 depth bits; true until set.
+		void setWindowAlphaAndDepth(bool alphaAndDepth) { windowAlphaAndDepth = alphaAndDepth; }
 
 		// The buffer's bytes as last written; empty for an invalid or stale handle.
 		[[nodiscard]] std::span<const uint8_t> bufferContents(BufferHandle buffer) const;
@@ -188,8 +194,10 @@ namespace Renderer::backend {
 		std::pair<int, int>				window{0, 0};
 		PipelineHandle					lastForeignPipeline;
 		std::vector<StencilClear>		stencilClearRecord;
+		std::vector<size_t>				depthClearRecord;
 		RenderTargetHandle				boundTarget;
 		bool							windowStencil = true;
+		bool							windowAlphaAndDepth = true;
 		int								frameCount = 0;
 		int								invalidationCount = 0;
 		int								timestampCount = 0;

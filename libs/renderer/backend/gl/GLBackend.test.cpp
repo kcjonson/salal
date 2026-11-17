@@ -291,14 +291,14 @@ namespace Renderer::backend::gl {
 
 		GLint size = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &size);
-		EXPECT_GE(size, static_cast<GLint>(offsetof(DrawUniforms, instanced) + sizeof(int32_t)));
+		EXPECT_GE(size, static_cast<GLint>(offsetof(DrawUniforms, straightOutput) + sizeof(int32_t)));
 		EXPECT_LE(size, static_cast<GLint>(sizeof(DrawUniforms)));
 		GLint binding = -1;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_BINDING, &binding);
 		EXPECT_EQ(binding, static_cast<GLint>(GLBackend::kUniformBinding));
 		GLint members = 0;
 		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS, &members);
-		EXPECT_EQ(members, 10);
+		EXPECT_EQ(members, 12);
 
 		// Every member where std140 puts it, which is where the C++ struct has it.
 		const std::pair<const char*, size_t> offsets[] = {
@@ -312,6 +312,8 @@ namespace Renderer::backend::gl {
 			{"u_viewportHeight", offsetof(DrawUniforms, viewportHeight)},
 			{"u_pixelRatio", offsetof(DrawUniforms, pixelRatio)},
 			{"u_instanced", offsetof(DrawUniforms, instanced)},
+			{"u_coverageDepth", offsetof(DrawUniforms, coverageDepth)},
+			{"u_straightOutput", offsetof(DrawUniforms, straightOutput)},
 		};
 		for (const auto& [member, offset] : offsets) {
 			GLuint index = GL_INVALID_INDEX;
@@ -599,4 +601,161 @@ namespace Renderer::backend::gl {
 		gpu->destroyPipeline(pipeline);
 	}
 
+	TEST_F(GLBackendTest, ATargetHasAlphaAndDepthWithAnAlphaColourAndAStencilBuffer) {
+		const TextureHandle		 rgba = createTexture({.width = 2, .height = 2});
+		const TextureHandle		 rgb = createTexture({.width = 2, .height = 2, .format = TextureFormat::Rgb8});
+		const RenderTargetHandle withBoth = gpu->createRenderTarget(rgba, true);
+		const RenderTargetHandle noDepth = gpu->createRenderTarget(rgba, false);
+		const RenderTargetHandle noAlpha = gpu->createRenderTarget(rgb, true);
+		gpu->setRenderTarget(withBoth);
+		EXPECT_TRUE(gpu->hasAlphaAndDepth());
+		gpu->setRenderTarget(noDepth);
+		EXPECT_FALSE(gpu->hasAlphaAndDepth());
+		gpu->setRenderTarget(noAlpha);
+		EXPECT_FALSE(gpu->hasAlphaAndDepth());
+		gpu->setRenderTarget({});
+		gpu->destroyRenderTarget(noAlpha);
+		gpu->destroyRenderTarget(noDepth);
+		gpu->destroyRenderTarget(withBoth);
+		destroyTexture(rgb);
+		destroyTexture(rgba);
+	}
+
+	// The states a partial-coverage mask is evaluated in (docs/masks.md), one full-target quad a
+	// call into a 4 x 4 target's alpha, then the fixed state back after the submission.
+	TEST_F(GLBackendTest, TheCoverageStatesBlendWriteAndTestAsAMaskNeeds) {
+		const PipelineHandle pipeline = gpu->createPipeline(base_shader::source());
+		ASSERT_TRUE(pipeline.isValid());
+		const auto quad = [](float red, float alpha) {
+			BatchInstance instance{}; // flat
+			instance.corners[0] = {0.0F, 0.0F};
+			instance.corners[1] = {4.0F, 0.0F};
+			instance.corners[2] = {4.0F, 4.0F};
+			instance.corners[3] = {0.0F, 4.0F};
+			std::fill(std::begin(instance.fills), std::end(instance.fills), glm::packUnorm4x8(Foundation::Vec4(red, 0.0F, 0.0F, alpha)));
+			return instance;
+		};
+		const std::array<BatchInstance, 6> quads = {
+			quad(0.0F, 0.75F), quad(0.0F, 0.25F), quad(0.0F, 0.6F), quad(0.0F, 0.5F), quad(0.0F, 0.4F), quad(0.5F, 0.5F)
+		};
+		const BufferHandle	 instances = gpu->createBuffer(BufferUsage::Stream, 0, nullptr);
+		const GeometryHandle geometry = gpu->createGeometry({.layout = VertexLayout::Batched, .vertices = instances});
+		gpu->updateBuffer(instances, 0, sizeof(quads), quads.data());
+		const TextureHandle		 colour = createTexture({.width = 4, .height = 4});
+		const RenderTargetHandle target = gpu->createRenderTarget(colour, true);
+		ASSERT_TRUE(target.isValid());
+		gpu->setRenderTarget(target);
+		gpu->clear({0.0F, 0.2F, 0.0F, 0.5F});
+		const DrawUniforms flat{.projection = glm::ortho(0.0F, 4.0F, 4.0F, 0.0F, -1.0F, 1.0F), .viewportHeight = 4.0F, .pixelRatio = 1.0F};
+		std::vector<uint8_t> pixels(4 * 4 * 4, 0);
+		const auto			 drawn = [&](const DrawCall& call) {
+			  gpu->draw({&call, 1});
+			  gpu->readPixels(target, pixels);
+			  return std::array<int, 4>{pixels[20], pixels[21], pixels[22], pixels[23]}; // pixel (1, 1)
+		};
+		const auto call = [&](uint32_t instance, BlendState blend, ChannelWrites writes, DepthState depth = DepthState::Off) {
+			return DrawCall{
+				.pipeline = pipeline,
+				.geometry = geometry,
+				.blend = blend,
+				.writes = writes,
+				.depth = depth,
+				.firstInstance = instance,
+				.instanceCount = 1
+			};
+		};
+		// Within one of 8-bit rounding, which drivers differ in (0.75 is 191.25, 0.25 63.75).
+		const auto expectNear = [](const std::array<int, 4>& actual, const std::array<int, 4>& expected) {
+			for (size_t channel = 0; channel < 4; ++channel) {
+				EXPECT_NEAR(actual[channel], expected[channel], 1) << "channel " << channel;
+			}
+		};
+		gpu->setUniforms(flat);
+
+		// The greater, then the lesser, of the alphas, and the alpha replaced, the colour kept each time.
+		expectNear(drawn(call(0, BlendState::Max, ChannelWrites::Alpha)), {0, 51, 0, 191});
+		expectNear(drawn(call(1, BlendState::Min, ChannelWrites::Alpha)), {0, 51, 0, 64});
+		expectNear(drawn(call(2, BlendState::Replace, ChannelWrites::Alpha)), {0, 51, 0, 153});
+
+		// Depth from the value: 0.5 written at the greater-or-equal test, 0.4 then refused by it, and
+		// only the value whose depth is stored passes the equal test.
+		gpu->clearDepth();
+		DrawUniforms valued = flat;
+		valued.coverageDepth = {0.25F, 0.5F}; // depth 0.25 plus half the value
+		gpu->setUniforms(valued);
+		drawn(call(3, BlendState::Alpha, ChannelWrites::None, DepthState::GreaterOrEqual));
+		drawn(call(4, BlendState::Alpha, ChannelWrites::None, DepthState::GreaterOrEqual));
+		EXPECT_NEAR(drawn(call(4, BlendState::Replace, ChannelWrites::Alpha, DepthState::Equal))[3], 153, 1);
+		EXPECT_NEAR(drawn(call(3, BlendState::Replace, ChannelWrites::Alpha, DepthState::Equal))[3], 128, 1);
+
+		// The weighted fill: destination alpha times the source's, then the straight colour over by it.
+		gpu->setUniforms(flat);
+		EXPECT_NEAR(drawn(call(3, BlendState::MultiplyDestinationAlpha, ChannelWrites::Alpha))[3], 64, 1);
+		DrawUniforms straight = flat;
+		straight.straightOutput = 1;
+		gpu->setUniforms(straight);
+		const std::array<int, 4> over = drawn(call(5, BlendState::OverByDestinationAlpha, ChannelWrites::Colour));
+		EXPECT_NEAR(over[0], 64, 1); // straight red 1.0 at a quarter
+		EXPECT_NEAR(over[1], 38, 1); // green 0.2 at three quarters
+		EXPECT_NEAR(over[3], 64, 1);
+
+		// One submission through every state a masked draw uses, the stencil's included, and a depth
+		// clear; then the fixed state, as a game's GL finds it.
+		DrawCall stencilled = call(3, BlendState::MultiplyDestinationAlpha, ChannelWrites::None, DepthState::Equal);
+		stencilled.stencil = {.test = true, .reference = 0x10, .writeMask = 0x10, .pass = StencilOperation::Replace};
+		const std::array<DrawCall, 3> masked = {
+			call(0, BlendState::Max, ChannelWrites::None, DepthState::GreaterOrEqual),
+			stencilled,
+			call(5, BlendState::OverByDestinationAlpha, ChannelWrites::None),
+		};
+		gpu->draw(masked);
+		gpu->clearDepth();
+
+		EXPECT_FALSE(glIsEnabled(GL_DEPTH_TEST));
+		EXPECT_FALSE(glIsEnabled(GL_BLEND));
+		EXPECT_FALSE(glIsEnabled(GL_STENCIL_TEST));
+		EXPECT_FALSE(glIsEnabled(GL_SCISSOR_TEST));
+		std::array<GLint, 2> equations{};
+		glGetIntegerv(GL_BLEND_EQUATION_RGB, &equations[0]);
+		glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &equations[1]);
+		EXPECT_EQ(equations, (std::array<GLint, 2>{GL_FUNC_ADD, GL_FUNC_ADD}));
+		std::array<GLint, 6> stencilState{};
+		glGetIntegerv(GL_STENCIL_FUNC, &stencilState[0]);
+		glGetIntegerv(GL_STENCIL_REF, &stencilState[1]);
+		glGetIntegerv(GL_STENCIL_VALUE_MASK, &stencilState[2]);
+		glGetIntegerv(GL_STENCIL_FAIL, &stencilState[3]);
+		glGetIntegerv(GL_STENCIL_PASS_DEPTH_FAIL, &stencilState[4]);
+		glGetIntegerv(GL_STENCIL_PASS_DEPTH_PASS, &stencilState[5]);
+		stencilState[2] &= 0xFF;
+		EXPECT_EQ(stencilState, (std::array<GLint, 6>{GL_ALWAYS, 0, 0xFF, GL_KEEP, GL_KEEP, GL_KEEP}));
+		std::array<GLint, 4> factors{};
+		glGetIntegerv(GL_BLEND_SRC_RGB, &factors[0]);
+		glGetIntegerv(GL_BLEND_DST_RGB, &factors[1]);
+		glGetIntegerv(GL_BLEND_SRC_ALPHA, &factors[2]);
+		glGetIntegerv(GL_BLEND_DST_ALPHA, &factors[3]);
+		EXPECT_EQ(factors, (std::array<GLint, 4>{GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA}));
+		std::array<GLboolean, 4> channels{};
+		glGetBooleanv(GL_COLOR_WRITEMASK, channels.data());
+		EXPECT_EQ(channels, (std::array<GLboolean, 4>{GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE}));
+		GLint stencilWrites = 0;
+		glGetIntegerv(GL_STENCIL_WRITEMASK, &stencilWrites);
+		EXPECT_EQ(stencilWrites & 0xFF, 0xFF);
+		GLboolean depthWrites = GL_FALSE;
+		glGetBooleanv(GL_DEPTH_WRITEMASK, &depthWrites);
+		EXPECT_EQ(depthWrites, GL_TRUE);
+		GLint depthFunction = 0;
+		glGetIntegerv(GL_DEPTH_FUNC, &depthFunction);
+		EXPECT_EQ(depthFunction, GL_LESS);
+		GLfloat depthClear = 0.0F;
+		glGetFloatv(GL_DEPTH_CLEAR_VALUE, &depthClear);
+		EXPECT_EQ(depthClear, 1.0F);
+		EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+		gpu->setRenderTarget({});
+		gpu->destroyRenderTarget(target);
+		destroyTexture(colour);
+		gpu->destroyGeometry(geometry);
+		gpu->destroyBuffer(instances);
+		gpu->destroyPipeline(pipeline);
+	}
 } // namespace Renderer::backend::gl

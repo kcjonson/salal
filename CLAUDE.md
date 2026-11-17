@@ -53,8 +53,10 @@ repo's `specboard.md`.
   pixel, to the one program at build time (`salal_base_shader()`), the hook
   points, uniform blocks, and what fails the build.
 - **[docs/masks.md](docs/masks.md)** is CSS `mask` and `mask-composite` on a
-  rect: the mapping to css-masking-1, what isn't built, the lifetime and
-  coordinate rules, and the stencil build underneath.
+  rect, with content layers (an SVG `<mask>` read by luminance) of shapes
+  blended by `mix-blend-mode` for partial coverage: the mapping to
+  css-masking-1, what isn't built, the lifetime and coordinate rules, and the
+  stencil, alpha and depth builds underneath.
 - **[docs/app-api.md](docs/app-api.md)** is the phase 2 design of `app`: the
   frame, input and the per-tick snapshot, scenes, settings and saves, the dev
   server, and the seven PRs that land it.
@@ -237,7 +239,7 @@ There is no game in this repo, so the verification loop is the **sandbox app**
 plus the HTTP dev server. The sandbox (`apps/sandbox`) runs worldsim's
 renderer-level test scenes (`sdf_minimal`, `polygon`, `arc`, `polyline`,
 `blend` and `input_test`), `fill_hook` (the renderer tests' fill hook, which the
-sandbox's base shader is assembled with), `border` (rect borders on some sides, and dashed), `mask` (CSS masks: the player visibility cover over two moving sights), ui's (`ui_order`, `ui_text`, `ui_theme`,
+sandbox's base shader is assembled with), `border` (rect borders on some sides, and dashed), `mask` (CSS masks: the player visibility cover with soft edges, every case of its value test), ui's (`ui_order`, `ui_text`, `ui_theme`,
 `ui_layout`, `ui_grid`, `ui_clip`, `ui_scroll`, `ui_input`, `ui_focus`, `ui_icons`, `ui_motion`, `ui_display`,
 `ui_controls`, `ui_overlays`, `ui_overlay_components` and `ui_drag`) and the perf suite's (`perf_quads`, `perf_text`,
 `perf_world`, `perf_ui` and `perf_mask`) on the GLFW platform, under a scene picker built from ui's ListRows (F1, or the tab in the bottom-right corner; `/api/state?what=picker`

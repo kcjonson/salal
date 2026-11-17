@@ -62,10 +62,25 @@ namespace Renderer::backend {
 	// buffer over (what it held is discarded, never waited on) at the size of the write.
 	enum class BufferUsage : uint8_t { Static, Dynamic, Stream };
 
-	// The GPU blend state a draw runs in. One: premultiplied "over", (ONE,
-	// ONE_MINUS_SRC_ALPHA), which additive draws share by writing alpha 0 (see
-	// BatchRenderer.h), so mixing the two never splits a draw.
-	enum class BlendState : uint8_t { Alpha };
+	// The GPU blend state a draw runs in. Every draw but a mask's partial coverage runs in
+	// Alpha: premultiplied "over", (ONE, ONE_MINUS_SRC_ALPHA), which additive draws share by
+	// writing alpha 0 (see BatchRenderer.h), so mixing the two never splits a draw. The rest
+	// evaluate a partial-coverage mask in the target's alpha (docs/masks.md):
+	//   Replace                     no blending: the source as is
+	//   Max, Min                    the greater, or the lesser, of source and destination
+	//   MultiplyDestinationAlpha    destination alpha times source alpha; colour kept
+	//   OverByDestinationAlpha      colour: source times destination alpha plus destination
+	//                               times one less it, the source straight, not premultiplied
+	enum class BlendState : uint8_t { Alpha, Replace, Max, Min, MultiplyDestinationAlpha, OverByDestinationAlpha };
+
+	// Which channels of the bound target's colour a draw writes.
+	enum class ChannelWrites : uint8_t { All, None, Alpha, Colour };
+
+	// A draw's use of the bound target's depth buffer, which a mask's partial coverage keeps a
+	// group's greatest in (docs/masks.md). Off, the fixed state, neither tests nor writes;
+	// GreaterOrEqual passes a fragment at or above the stored depth and writes it; Equal passes
+	// one equal to it and writes nothing.
+	enum class DepthState : uint8_t { Off, GreaterOrEqual, Equal };
 
 	// The stencil test's function: a fragment passes when (reference & readMask) OP
 	// (stored & readMask).
@@ -75,8 +90,8 @@ namespace Renderer::backend {
 	enum class StencilOperation : uint8_t { Keep, Zero, Replace, Invert };
 
 	// A draw's use of the bound target's 8-bit stencil buffer, which the batch builds a
-	// CSS mask in (docs/masks.md). Off (`test` false) is the fixed state. With depth
-	// testing off, `pass` applies to every fragment that passes the stencil test.
+	// CSS mask in (docs/masks.md). Off (`test` false) is the fixed state. A fragment that
+	// fails the depth test keeps the stored value; `pass` applies to the rest.
 	struct StencilState {
 		bool			 test = false;
 		StencilFunction	 function = StencilFunction::Always;
@@ -153,7 +168,8 @@ namespace Renderer::backend {
 		GeometryHandle							 geometry;
 		BlendState								 blend = BlendState::Alpha;
 		StencilState							 stencil{};
-		bool									 writeColour = true; // false writes the stencil alone
+		ChannelWrites							 writes = ChannelWrites::All; // None writes the stencil and depth alone
+		DepthState								 depth = DepthState::Off;
 		std::array<TextureHandle, kTextureSlots> textures{};
 		uint32_t								 indexOffset = 0;
 		uint32_t								 indexCount = 0;
@@ -165,10 +181,10 @@ namespace Renderer::backend {
 	constexpr const char* kDrawUniformsBlock = "DrawUniforms";
 
 	// The per-draw uniforms: the std140 block DrawUniforms in
-	// shaders/includes/uniforms.glsl, member for member, padded to the block's 176
-	// bytes. In this order std140 puts no padding between members (mat4 on 16 bytes,
-	// vec2 on 8, scalars on 4); the offsets are asserted below and against the linked
-	// program in GLBackend.test.cpp. Change the two together.
+	// shaders/includes/uniforms.glsl, member for member, padded to 192 bytes. In this
+	// order std140 puts no padding between members (mat4 on 16 bytes, vec2 on 8, scalars
+	// on 4); the offsets are asserted below and against the linked program in
+	// GLBackend.test.cpp. Change the two together.
 	struct DrawUniforms {
 		Foundation::Mat4 projection{1.0F};
 		Foundation::Mat4 transform{1.0F};
@@ -180,7 +196,11 @@ namespace Renderer::backend {
 		float			 viewportHeight = 0.0F; // framebuffer pixels, for the clip test's y flip
 		float			 pixelRatio = 0.0F;		// framebuffer pixels per logical pixel
 		int32_t			 instanced = 0;			// 0 batched, 1 instanced, 2 baked world space
-		float			 padding[2] = {};		// NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+		// A partial-coverage mask's value as depth: with a span, a vertex's depth is base plus
+		// its colour's alpha times span; with none, every vertex is at depth 0 in clip space.
+		Foundation::Vec2 coverageDepth{0.0F, 0.0F}; // (base, span), window depth
+		int32_t			 straightOutput = 0;		// 1: the fragment's colour leaves straight, not premultiplied
+		float			 padding[3] = {};			// NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 	};
 	static_assert(offsetof(DrawUniforms, projection) == 0);
 	static_assert(offsetof(DrawUniforms, transform) == 64);
@@ -192,16 +212,22 @@ namespace Renderer::backend {
 	static_assert(offsetof(DrawUniforms, viewportHeight) == 156);
 	static_assert(offsetof(DrawUniforms, pixelRatio) == 160);
 	static_assert(offsetof(DrawUniforms, instanced) == 164);
-	static_assert(sizeof(DrawUniforms) == 176);
+	static_assert(offsetof(DrawUniforms, coverageDepth) == 168);
+	static_assert(offsetof(DrawUniforms, straightOutput) == 176);
+	static_assert(sizeof(DrawUniforms) == 192);
 
 	// One per GPU context. Every handle it returns is invalid when the object could
 	// not be made (logged), and every call taking a stale or invalid handle does
 	// nothing.
 	//
 	// State: depth test, culling, scissor and stencil test are off and every colour
-	// channel and stencil bit is written, fixed state set at creation, beginFrame() and
-	// invalidateState(). A draw's stencil state and colour writes are set by draw(), which
-	// puts the fixed state back before it returns, so neither outlives its submission.
+	// channel, stencil bit and the depth buffer are written, with the stencil function and
+	// operations, depth function and depth clear value at GL's defaults (always, keep, less,
+	// 1), fixed state set at creation,
+	// beginFrame() and invalidateState(). A draw's stencil state, depth state and channel
+	// writes are set by draw(), which puts the fixed state back, and the blend equation to
+	// add with Alpha's factors, before it returns, so none outlives its submission;
+	// clearDepth() puts the clear value back too.
 	// Bindings (pipeline, geometry, texture, blend) are made by each draw() and assumed
 	// to survive nothing outside it, because a game's own GPU code runs between the renderer's submissions. The
 	// one exception is the uniforms: setUniforms() binds them to uniform binding point
@@ -237,6 +263,14 @@ namespace Renderer::backend {
 		// Whether the bound target has an 8-bit stencil buffer: the window when it was made
 		// with one, a render target when it was made with ColourAndStencil.
 		[[nodiscard]] virtual bool hasStencil() const = 0;
+
+		// Set the depth buffer to 0 across the bound target; nothing on a target with none.
+		virtual void clearDepth() = 0;
+
+		// Whether the bound target has 8 bits of alpha and 24 of depth, which a mask's partial
+		// coverage is evaluated in: the window when it was made with them, a render target when
+		// its colour carries alpha and it was made with ColourAndStencil.
+		[[nodiscard]] virtual bool hasAlphaAndDepth() const = 0;
 
 		// GPU code outside the renderer changed the fixed state or a uniform binding point
 		// the renderer's blocks read; set both again.

@@ -42,6 +42,10 @@ flat out vec4	 v_clip;
 flat out uvec3	 v_mode;	   // (mode, flags, texture slot or a rect's fill hook)
 flat out uvec3	 v_fillParams; // a hooked rect's params, its fill's corners 1 to 3
 
+// A partial-coverage mask draws a group's shapes twice, keeping the greatest by depth and then
+// matching it exactly (docs/masks.md), so both passes must place every vertex alike.
+invariant gl_Position;
+
 // Modes, as BatchRenderer.h has them; instanced is the instanced and baked paths'
 const uint kModeFlat = 0u;
 const uint kModeRect = 1u;
@@ -72,6 +76,12 @@ vec4 rgba8(uint word) {
 	return vec4(float(word & 255u), float((word >> 8u) & 255u), float((word >> 16u) & 255u), float(word >> 24u)) / 255.0;
 }
 
+// Clip-space depth: a partial-coverage mask's value as window depth when u_coverageDepth has a span
+// (its value is the vertex colour's alpha), 0 otherwise. The projection is orthographic, w is 1.
+float coverageDepth(float value) {
+	return u_coverageDepth.y > 0.0 ? (2.0 * (u_coverageDepth.x + value * u_coverageDepth.y)) - 1.0 : 0.0;
+}
+
 void main() {
 	v_local = vec2(0.0);
 	v_texCoord = vec2(0.0);
@@ -86,6 +96,7 @@ void main() {
 		// Local mesh space through the instance's world position, rotation and scale
 		gl_Position = u_projection * u_transform * vec4(instanceToScreen(a_position), 0.0, 1.0);
 		v_fill = a_color * getInstanceColorTint();
+		gl_Position.z = coverageDepth(v_fill.a);
 		v_mode = uvec3(kModeInstanced, 0u, 0u);
 		return;
 	}
@@ -106,6 +117,7 @@ void main() {
 	v_mode = uvec3(mode, a_mode.z, a_mode.y);
 	v_fill = rgba8(a_fills[corner]);
 	v_clip = a_clip;
+	gl_Position.z = coverageDepth(v_fill.a);
 
 	if (mode == kModeStroke) {
 		// A convex piece shaded by its box: local is the piece's frame (geometry, its rows)

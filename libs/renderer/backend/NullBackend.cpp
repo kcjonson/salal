@@ -46,6 +46,21 @@ namespace Renderer::backend {
 		return target != nullptr ? target->stencil : windowStencil;
 	}
 
+	void NullBackend::clearDepth() {
+		if (hasAlphaAndDepth()) {
+			depthClearRecord.push_back(recordedDraws.size());
+		}
+	}
+
+	bool NullBackend::hasAlphaAndDepth() const {
+		const TargetRecord* target = targetTable.find(boundTarget);
+		if (target == nullptr) {
+			return windowAlphaAndDepth;
+		}
+		const TextureDesc* colour = textureTable.find(target->colour);
+		return target->stencil && colour != nullptr && colour->format != TextureFormat::Rgb8;
+	}
+
 	void NullBackend::readPixels(RenderTargetHandle target, std::span<uint8_t> rgba) {
 		++pixelReadCount;
 		// What GL reads, zeroed: the target's texture (the window at its set size), and
@@ -203,6 +218,7 @@ namespace Renderer::backend {
 		updates.clear();
 		clearColors.clear();
 		stencilClearRecord.clear();
+		depthClearRecord.clear();
 		frameCount = 0;
 		invalidationCount = 0;
 		timestampCount = 0;

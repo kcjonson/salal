@@ -590,7 +590,11 @@ namespace app {
 			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, config.glVersion.minor);
 			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 			glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
-			glfwWindowHint(GLFW_STENCIL_BITS, 8); // what a CSS mask is built in (docs/masks.md); GLFW's default, stated
+			// What a CSS mask is built in (docs/masks.md), its partial coverage in alpha and depth;
+			// GLFW's defaults, stated, which the GL backend checks at creation.
+			glfwWindowHint(GLFW_STENCIL_BITS, 8);
+			glfwWindowHint(GLFW_ALPHA_BITS, 8);
+			glfwWindowHint(GLFW_DEPTH_BITS, 24);
 			const int shownAtCreate = config.background ? GLFW_FALSE : GLFW_TRUE;
 			glfwWindowHint(GLFW_VISIBLE, shownAtCreate);
 			glfwWindowHint(GLFW_FOCUSED, shownAtCreate);

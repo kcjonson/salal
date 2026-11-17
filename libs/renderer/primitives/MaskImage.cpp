@@ -2,6 +2,29 @@
 
 namespace Renderer::Primitives {
 
+	MaskPaint MaskPaint::solid(float value) {
+		MaskPaint paint;
+		paint.fromValue = value;
+		paint.toValue = value;
+		return paint;
+	}
+
+	MaskPaint MaskPaint::linearGradient(Foundation::Vec2 from, Foundation::Vec2 to, float fromValue, float toValue) {
+		MaskPaint paint;
+		paint.from = from;
+		paint.to = to;
+		paint.fromValue = fromValue;
+		paint.toValue = toValue;
+		paint.gradient = true;
+		return paint;
+	}
+
+	MaskMesh::MaskMesh(const InstancedMeshHandle& mesh, const WorldCamera& camera)
+		: geometry(mesh.geometry),
+		  instances(mesh.instances),
+		  indexCount(mesh.indexCount),
+		  camera(camera) {}
+
 	MaskImage MaskImage::rect(const Foundation::Rect& bounds) {
 		MaskImage image;
 		image.kind = Kind::Rect;
@@ -23,6 +46,14 @@ namespace Renderer::Primitives {
 		image.meshInstances = mesh.instances;
 		image.meshIndexCount = mesh.indexCount;
 		image.camera = camera;
+		return image;
+	}
+
+	MaskImage MaskImage::svgMask(std::span<const MaskElement> elements) {
+		MaskImage image;
+		image.kind = Kind::Content;
+		image.elements = elements.data();
+		image.elementCount = elements.size();
 		return image;
 	}
 
