@@ -1,5 +1,5 @@
 // Masks with partial coverage (docs/masks.md): a content layer's shapes, their values combined by
-// mix-blend-mode and isolation, over a mask's rect, polygon and mesh layers. What reaches the
+// mix-blend-mode, groups isolated by it, over a mask's rect, polygon and mesh layers. What reaches the
 // backend, headless on the null backend; and the value test of the player visibility cover's cases
 // (worldsim's sight-softening design, 7.7), drawn through Primitives into a RenderTarget on a hidden
 // GL 3.3 core context and read back against the values its rules give (skipped where no context can
@@ -39,10 +39,8 @@ namespace Renderer {
 	using Primitives::MaskBlend;
 	using Primitives::MaskComposite;
 	using Primitives::MaskImage;
-	using Primitives::MaskIsolation;
 	using Primitives::MaskLayer;
 	using Primitives::MaskMesh;
-	using Primitives::MaskMode;
 	using Primitives::MaskPaint;
 	using Primitives::MaskShape;
 
@@ -272,30 +270,50 @@ namespace Renderer {
 		const std::array<Vec2, 3>	   shape = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
 		const std::array<Vec2, 3>	   piece = {{{4.0F, 4.0F}, {20.0F, 4.0F}, {4.0F, 20.0F}}};
 		const std::array<MaskLayer, 1> insideShape = {{{.image = MaskImage::polygon(shape)}}};
-		MaskShape					   group{.blend = MaskBlend::Darken, .isolation = MaskIsolation::Isolate};
+		MaskShape					   group{.blend = MaskBlend::Darken};
 		group.children.push_back({.points = shape, .paint = MaskPaint::flat(0.0F)});
 		group.children.push_back({.points = piece, .paint = MaskPaint::flat(0.5F), .mask = insideShape, .blend = MaskBlend::Lighten});
-		const std::vector<MaskShape>   content = {{.points = view, .paint = MaskPaint::flat(1.0F)}, group, group};
-		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::content(content), .mode = MaskMode::Luminance}}};
+		const std::vector<MaskShape> content = {
+			{.points = view, .paint = MaskPaint::flat(1.0F)},
+			group,
+			group,
+			{.points = piece, .paint = MaskPaint::flat(0.25F), .blend = MaskBlend::Lighten},
+		};
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::content(content)}}};
 		fill(mask);
 		Primitives::endFrame();
 
 		EXPECT_EQ(gpu->depthClears().size(), 1U); // once for both groups
 		size_t greaterOrEqual = 0;
 		size_t equal = 0;
+		size_t lighten = 0;
 		for (const auto& draw : gpu->draws()) {
 			greaterOrEqual += draw.call.depth == backend::DepthState::GreaterOrEqual ? 1 : 0;
 			equal += draw.call.depth == backend::DepthState::Equal ? 1 : 0;
 			if (draw.call.depth == backend::DepthState::Equal) {
-				EXPECT_EQ(draw.call.blend, backend::BlendState::Min);
-				EXPECT_FALSE(draw.call.stencil.test);
+				EXPECT_EQ(draw.call.blend, backend::BlendState::Min); // the group's darken
+			}
+			if (draw.call.depth == backend::DepthState::Off && draw.call.blend == backend::BlendState::Max) {
+				++lighten; // the shape outside a group, by its lighten
+				EXPECT_EQ(draw.call.writes, backend::ChannelWrites::Alpha);
 			}
 			if (draw.call.depth != backend::DepthState::Off) {
 				EXPECT_GT(draw.uniforms.coverageDepth.y, 0.0F);
 			}
+			// Every shape draws only over the cover box.
+			const bool shape = draw.call.depth != backend::DepthState::Off || draw.call.blend == backend::BlendState::Max ||
+							   (draw.call.blend == backend::BlendState::Replace && draw.call.stencil.writeMask == 0 &&
+								draw.call.writes == backend::ChannelWrites::Alpha && draw.call.stencil.readMask != kMaskAccumulatorBit);
+			if (shape) {
+				EXPECT_TRUE(draw.call.stencil.test);
+				EXPECT_EQ(draw.call.stencil.function, backend::StencilFunction::Equal);
+				EXPECT_EQ(draw.call.stencil.readMask & kCoverBoxBit, kCoverBoxBit);
+				EXPECT_EQ(draw.call.stencil.reference & kCoverBoxBit, kCoverBoxBit);
+			}
 		}
 		EXPECT_EQ(greaterOrEqual, 4U); // each group's two shapes, keeping the greatest
 		EXPECT_EQ(equal, 4U);		   // and again, writing it
+		EXPECT_EQ(lighten, 1U);
 		// The fill: alpha weighted, then the colour over by it, then the alpha set back.
 		EXPECT_EQ(drawsWith(backend::BlendState::MultiplyDestinationAlpha, backend::ChannelWrites::Alpha), 1U);
 		EXPECT_EQ(drawsWith(backend::BlendState::OverByDestinationAlpha, backend::ChannelWrites::Colour), 1U);
@@ -314,14 +332,38 @@ namespace Renderer {
 		};
 		fill(underneath);
 		// A group's shapes after its first combined by darken.
-		MaskShape group{.isolation = MaskIsolation::Isolate};
+		MaskShape group{.blend = MaskBlend::Lighten};
 		group.children.push_back({.points = triangle});
 		group.children.push_back({.points = triangle, .blend = MaskBlend::Darken});
 		const std::vector<MaskShape>   darkened = {group};
-		const std::array<MaskLayer, 1> darkenedMask = {{{.image = MaskImage::content(darkened), .mode = MaskMode::Luminance}}};
+		const std::array<MaskLayer, 1> darkenedMask = {{{.image = MaskImage::content(darkened)}}};
 		fill(darkenedMask);
+		// A shape with both points and a mesh.
+		renderer::TessellatedMesh triangleMesh;
+		triangleMesh.vertices = {triangle.begin(), triangle.end()};
+		triangleMesh.indices = {0, 1, 2};
+		triangleMesh.colors.assign(3, Foundation::Color::white());
+		InstancedMeshHandle			   uploaded = Primitives::uploadInstancedMesh(triangleMesh, 1);
+		const std::vector<MaskShape>   both = {{.points = triangle, .mesh = {uploaded, Primitives::WorldCamera{}}}};
+		const std::array<MaskLayer, 1> bothMask = {{{.image = MaskImage::content(both)}}};
+		fill(bothMask);
+		// A group carrying a paint.
+		MaskShape painted{.paint = MaskPaint::flat(0.5F)};
+		painted.children.push_back({.points = triangle, .paint = MaskPaint::flat(1.0F)});
+		const std::vector<MaskShape>   paintedGroup = {painted};
+		const std::array<MaskLayer, 1> paintedMask = {{{.image = MaskImage::content(paintedGroup)}}};
+		fill(paintedMask);
+		// An additive rect under a content layer.
+		const std::array<MaskLayer, 1> contentMask = {{{.image = MaskImage::content(content)}}};
+		Primitives::drawRect(
+			{.bounds = {0.0F, 0.0F, 64.0F, 64.0F},
+			 .style = {.fill = Foundation::Color::white()},
+			 .mask = contentMask,
+			 .blend = Primitives::BlendMode::Additive}
+		);
 		Primitives::endFrame();
 		EXPECT_TRUE(gpu->draws().empty());
+		Primitives::releaseInstancedMesh(uploaded);
 	}
 
 	TEST_F(CoverageBatchTest, ATargetWithNoAlphaOrDepthDrawsAContentMaskAsNothing) {
@@ -411,6 +453,36 @@ namespace Renderer {
 			return {pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3]};
 		}
 
+		// The alpha is opaque at every pixel: the rect covers the whole target, so its cover box does.
+		void expectOpaque(const char* what) const {
+			int failures = 0;
+			for (int y = 0; y < kSize; ++y) {
+				for (int x = 0; x < kSize; ++x) {
+					const int alpha = rgba(x, y)[3];
+					if (alpha != 255 && ++failures <= 8) {
+						ADD_FAILURE() << what << ": alpha " << alpha << " at (" << x << ", " << y << ")";
+					}
+				}
+			}
+			EXPECT_EQ(failures, 0) << what;
+		}
+
+		// Pixel centres one pixel apart from `from` along `step`, `count` of them, each against `expected`,
+		// and each step between neighbours against the step the rules give: a seam is a step they don't.
+		template <typename Expected>
+		void expectProbe(Expected expected, Vec2 from, Vec2 step, int count, const char* what) const {
+			for (int index = 0; index < count; ++index) {
+				const Vec2 point = from + (step * static_cast<float>(index));
+				EXPECT_NEAR(value(point), expected(point), kTolerance) << what << " at (" << point.x << ", " << point.y << ")";
+				if (index > 0) {
+					const Vec2 previous = point - step;
+					EXPECT_NEAR(value(point) - value(previous), expected(point) - expected(previous), kTolerance)
+						<< what << ": a step between (" << previous.x << ", " << previous.y << ") and (" << point.x << ", " << point.y
+						<< ")";
+				}
+			}
+		}
+
 		// Segments in cells of 16 px, so a pixel tests only the few near it for being within 0.6 px
 		// of one, where the drawn and the computed sides of an edge may differ by a pixel.
 		class EdgeGrid {
@@ -449,13 +521,13 @@ namespace Renderer {
 			std::vector<std::vector<size_t>>	   cells;
 		};
 
-		// Every `stride`th pixel centre against `expected`, but those near an edge of `grid`.
+		// Every pixel centre against `expected`, but those near an edge of `grid`.
 		template <typename Expected>
-		void expectEveryPixel(Expected expected, const EdgeGrid& grid, int stride, const char* what) {
+		void expectEveryPixel(Expected expected, const EdgeGrid& grid, const char* what) {
 			int checked = 0;
 			int failures = 0;
-			for (int y = 0; y < kSize; y += stride) {
-				for (int x = 0; x < kSize; x += stride) {
+			for (int y = 0; y < kSize; ++y) {
+				for (int x = 0; x < kSize; ++x) {
 					const Vec2 point(static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F);
 					if (grid.nearEdge(point)) {
 						continue;
@@ -481,6 +553,44 @@ namespace Renderer {
 		RenderTarget		 target;
 		std::vector<uint8_t> pixels;
 	};
+
+	// A content shape reaching far past the masked rect writes nothing outside the rect's cover box:
+	// on a target cleared transparent, the pixels between the rect and the shape's edge keep alpha 0,
+	// and under the rect the alpha is opaque.
+	TEST_F(CoverageDrawTest, AContentShapeWritesNothingOutsideTheCoverBox) {
+		const std::array<Vec2, 4>	   shape = {{{100.0F, 100.0F}, {400.0F, 100.0F}, {400.0F, 400.0F}, {100.0F, 400.0F}}};
+		const std::vector<MaskShape>   content = {{.points = shape, .paint = MaskPaint::flat(0.75F)}};
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::content(content)}}};
+		const Foundation::Rect		   bounds{200.0F, 200.0F, 100.0F, 100.0F};
+		target.begin();
+		Primitives::setViewport(kSize, kSize);
+		Primitives::clear(Foundation::Color(0.0F, 0.0F, 0.0F, 0.0F));
+		Primitives::beginFrame();
+		Primitives::drawRect({.bounds = bounds, .style = {.fill = Foundation::Color::white()}, .mask = mask});
+		Primitives::endFrame();
+		target.end();
+		pixels.assign(static_cast<size_t>(kSize) * kSize * 4, 0);
+		target.readPixels(pixels);
+
+		int outside = 0;
+		int inside = 0;
+		for (int y = 0; y < kSize; ++y) {
+			for (int x = 0; x < kSize; ++x) {
+				const bool				 farOutside = x < 198 || x >= 302 || y < 198 || y >= 302;
+				const bool				 wellInside = x >= 202 && x < 298 && y >= 202 && y < 298;
+				const std::array<int, 4> pixel = rgba(x, y);
+				if (farOutside && pixel[3] != 0 && ++outside <= 8) {
+					ADD_FAILURE() << "alpha " << pixel[3] << " outside the cover box at (" << x << ", " << y << ")";
+				}
+				if (wellInside && pixel[3] != 255 && ++inside <= 8) {
+					ADD_FAILURE() << "alpha " << pixel[3] << " under the rect at (" << x << ", " << y << ")";
+				}
+			}
+		}
+		EXPECT_EQ(outside, 0);
+		EXPECT_EQ(inside, 0);
+		EXPECT_NEAR(rgba(250, 250)[0], 191, 2); // white at three quarters over transparent black
+	}
 
 	// The unseen fill's mask of 7.5: the view less the record's meshes and the pending shapes, and over
 	// them the feather of the seen area's edge, the record's pieces kept in two cells (two meshes
@@ -593,7 +703,7 @@ namespace Renderer {
 			 {overlapping.left, overlapping.bottom}}
 		};
 		const std::array<MaskLayer, 6> unseenMask = {{
-			{.image = MaskImage::content(unseenFeather), .mode = MaskMode::Luminance},
+			{.image = MaskImage::content(unseenFeather)},
 			{.image = MaskImage::rect(kView), .composite = MaskComposite::Subtract},
 			{.image = MaskImage::mesh(firstSeen, camera)},
 			{.image = MaskImage::mesh(secondSeen, camera)},
@@ -601,7 +711,7 @@ namespace Renderer {
 			{.image = MaskImage::polygon(overlappingOutline)},
 		}};
 		render(unseenMask);
-		EXPECT_EQ(rgba(250, 100)[3], 255); // the alpha set back to opaque after the fill
+		expectOpaque("unseen fill"); // the alpha set back to opaque after the fill
 
 		// The seen area's edge exactly: each box's sides, cut where another box holds them.
 		std::vector<std::pair<Vec2, Vec2>> boundary;
@@ -650,7 +760,7 @@ namespace Renderer {
 			}
 			return fade(depth);
 		};
-		expectEveryPixel(expected, EdgeGrid({}), 2, "unseen fill");
+		expectEveryPixel(expected, EdgeGrid({}), "unseen fill");
 
 		// No seam where the two cells share an edge, or where the pending shape abuts the record.
 		for (float y = 75.5F; y < 145.0F; y += 1.0F) {
@@ -658,6 +768,15 @@ namespace Renderer {
 			EXPECT_LE(value({179.5F, y}), kTolerance) << "the cells' shared edge at y " << y;
 			EXPECT_LE(value({300.5F, y}), kTolerance) << "the abutting edge at y " << y;
 			EXPECT_LE(value({299.5F, y}), kTolerance) << "the abutting edge at y " << y;
+		}
+		// No seam across the pending leg's overlap with the record: down through the record's bottom
+		// edge inside the leg, beside the leg's sides and down its middle, a pixel at a time.
+		for (const float x : {101.5F, 105.5F, 125.5F, 144.5F, 148.5F}) {
+			expectProbe(expected, {x, 170.5F}, {0.0F, 1.0F}, 80, "the pending leg's overlap");
+		}
+		// And across it, along the record's old bottom edge and just inside the leg's.
+		for (const float y : {199.5F, 200.5F, 238.5F, 248.5F}) {
+			expectProbe(expected, {90.5F, y}, {1.0F, 0.0F}, 70, "across the pending leg");
 		}
 		// Nothing darkened twice: inside a convex corner, the nearer edge's fade alone.
 		EXPECT_NEAR(value({374.5F, 66.5F}), fade(5.5F), kTolerance);
@@ -787,12 +906,12 @@ namespace Renderer {
 		std::vector<MaskShape> tint = {{.points = viewPoints, .paint = MaskPaint::flat(1.0F)}};
 		for (const Colonist& colonist : colonists) {
 			insideBrightShapes.push_back({{{.image = MaskImage::polygon(colonist.bright)}}});
-			MaskShape group{.blend = MaskBlend::Darken, .isolation = MaskIsolation::Isolate};
+			MaskShape group{.blend = MaskBlend::Darken};
 			group.children.push_back({.points = colonist.bright, .paint = MaskPaint::flat(0.0F)});
 			appendShapes(colonist.pieces, insideBrightShapes.back(), outlines, group.children);
 			tint.push_back(std::move(group));
 		}
-		const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::content(tint), .mode = MaskMode::Luminance}}};
+		const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::content(tint)}}};
 		render(tintMask);
 
 		std::vector<std::pair<Vec2, Vec2>> edges;
@@ -814,7 +933,23 @@ namespace Renderer {
 			return least;
 		};
 		const EdgeGrid grid(edges);
-		expectEveryPixel(expected, grid, 2, "tint");
+		expectEveryPixel(expected, grid, "tint");
+		expectOpaque("tint");
+
+		// The sweep leaves out pixels by an edge; these cross the edges where a seam would show, a
+		// pixel at a time. Across the abutting bright shapes' shared edge, each side the rule's value
+		// and no step between.
+		for (float y = 190.5F; y < 230.0F; y += 1.0F) {
+			EXPECT_NEAR(value({439.5F, y}), expected({439.5F, y}), kTolerance) << "left of the abutting edge at y " << y;
+			EXPECT_NEAR(value({440.5F, y}), expected({440.5F, y}), kTolerance) << "right of the abutting edge at y " << y;
+			EXPECT_NEAR(value({439.5F, y}), value({440.5F, y}), kTolerance) << "a step across the abutting edge at y " << y;
+		}
+		// Along a feather strip's shared diagonal, the right one's top edge from (440, 180) to (500, 192):
+		// the pixels on it and either side.
+		for (float x = 446.5F; x < 494.0F; x += 1.0F) {
+			const float diagonal = 180.0F + ((x - 440.0F) * 0.2F);
+			expectProbe(expected, {x, std::floor(diagonal) - 1.5F}, {0.0F, 1.0F}, 4, "the feather strip's diagonal");
+		}
 
 		// The beam, 10 px across against a feather of 12: never fully bright, and at its middle the
 		// nearer side's fade alone, not both sides' darkened together.

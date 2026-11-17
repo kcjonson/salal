@@ -41,9 +41,7 @@ namespace {
 	using Primitives::MaskBlend;
 	using Primitives::MaskComposite;
 	using Primitives::MaskImage;
-	using Primitives::MaskIsolation;
 	using Primitives::MaskLayer;
-	using Primitives::MaskMode;
 	using Primitives::MaskPaint;
 	using Primitives::MaskShape;
 
@@ -416,7 +414,7 @@ namespace {
 			std::vector<MaskShape> tint = {{.points = viewPoints, .paint = MaskPaint::flat(1.0F)}};
 			for (const Colonist& colonist : colonists) {
 				insideBrightShapes.push_back({{{.image = MaskImage::polygon(colonist.bright)}}});
-				MaskShape group{.blend = MaskBlend::Darken, .isolation = MaskIsolation::Isolate};
+				MaskShape group{.blend = MaskBlend::Darken};
 				group.children.push_back({.points = colonist.bright, .paint = MaskPaint::flat(0.0F)});
 				for (const Piece& piece : colonist.pieces) {
 					outlines.push_back(piece.corners);
@@ -429,7 +427,7 @@ namespace {
 				}
 				tint.push_back(std::move(group));
 			}
-			const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::content(tint), .mode = MaskMode::Luminance}}};
+			const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::content(tint)}}};
 			Primitives::drawRect(
 				{.bounds = view, .style = {.fill = {0.0F, 0.0F, 0.0F, kSeenDimAlpha}}, .mask = tintMask, .key = kCoverKey}
 			);
@@ -451,7 +449,7 @@ namespace {
 			const std::array<Vec2, 4>	   abuttingOutline = kAbutting.outline();
 			const std::array<Vec2, 4>	   overlappingOutline = kOverlapping.outline();
 			const std::array<MaskLayer, 6> unseenMask = {{
-				{.image = MaskImage::content(unseenFeather), .mode = MaskMode::Luminance},
+				{.image = MaskImage::content(unseenFeather)},
 				{.image = MaskImage::rect(view), .composite = MaskComposite::Subtract},
 				{.image = MaskImage::mesh(firstSeen, camera)},
 				{.image = MaskImage::mesh(secondSeen, camera)},

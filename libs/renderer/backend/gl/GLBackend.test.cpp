@@ -664,12 +664,18 @@ namespace Renderer::backend::gl {
 				.instanceCount = 1
 			};
 		};
+		// Within one of 8-bit rounding, which drivers differ in (0.75 is 191.25, 0.25 63.75).
+		const auto expectNear = [](const std::array<int, 4>& actual, const std::array<int, 4>& expected) {
+			for (size_t channel = 0; channel < 4; ++channel) {
+				EXPECT_NEAR(actual[channel], expected[channel], 1) << "channel " << channel;
+			}
+		};
 		gpu->setUniforms(flat);
 
 		// The greater, then the lesser, of the alphas, and the alpha replaced, the colour kept each time.
-		EXPECT_EQ(drawn(call(0, BlendState::Max, ChannelWrites::Alpha)), (std::array<int, 4>{0, 51, 0, 191}));
-		EXPECT_EQ(drawn(call(1, BlendState::Min, ChannelWrites::Alpha)), (std::array<int, 4>{0, 51, 0, 64}));
-		EXPECT_EQ(drawn(call(2, BlendState::Replace, ChannelWrites::Alpha)), (std::array<int, 4>{0, 51, 0, 153}));
+		expectNear(drawn(call(0, BlendState::Max, ChannelWrites::Alpha)), {0, 51, 0, 191});
+		expectNear(drawn(call(1, BlendState::Min, ChannelWrites::Alpha)), {0, 51, 0, 64});
+		expectNear(drawn(call(2, BlendState::Replace, ChannelWrites::Alpha)), {0, 51, 0, 153});
 
 		// Depth from the value: 0.5 written at the greater-or-equal test, 0.4 then refused by it, and
 		// only the value whose depth is stored passes the equal test.
@@ -679,30 +685,59 @@ namespace Renderer::backend::gl {
 		gpu->setUniforms(valued);
 		drawn(call(3, BlendState::Alpha, ChannelWrites::None, DepthState::GreaterOrEqual));
 		drawn(call(4, BlendState::Alpha, ChannelWrites::None, DepthState::GreaterOrEqual));
-		EXPECT_EQ(drawn(call(4, BlendState::Replace, ChannelWrites::Alpha, DepthState::Equal))[3], 153);
-		EXPECT_EQ(drawn(call(3, BlendState::Replace, ChannelWrites::Alpha, DepthState::Equal))[3], 128);
+		EXPECT_NEAR(drawn(call(4, BlendState::Replace, ChannelWrites::Alpha, DepthState::Equal))[3], 153, 1);
+		EXPECT_NEAR(drawn(call(3, BlendState::Replace, ChannelWrites::Alpha, DepthState::Equal))[3], 128, 1);
 
 		// The weighted fill: destination alpha times the source's, then the straight colour over by it.
 		gpu->setUniforms(flat);
-		EXPECT_EQ(drawn(call(3, BlendState::MultiplyDestinationAlpha, ChannelWrites::Alpha))[3], 64);
+		EXPECT_NEAR(drawn(call(3, BlendState::MultiplyDestinationAlpha, ChannelWrites::Alpha))[3], 64, 1);
 		DrawUniforms straight = flat;
 		straight.straightOutput = 1;
 		gpu->setUniforms(straight);
 		const std::array<int, 4> over = drawn(call(5, BlendState::OverByDestinationAlpha, ChannelWrites::Colour));
 		EXPECT_NEAR(over[0], 64, 1); // straight red 1.0 at a quarter
 		EXPECT_NEAR(over[1], 38, 1); // green 0.2 at three quarters
-		EXPECT_EQ(over[3], 64);
+		EXPECT_NEAR(over[3], 64, 1);
+
+		// One submission through every state a masked draw uses, the stencil's included, and a depth
+		// clear; then the fixed state, as a game's GL finds it.
+		DrawCall stencilled = call(3, BlendState::MultiplyDestinationAlpha, ChannelWrites::None, DepthState::Equal);
+		stencilled.stencil = {.test = true, .reference = 0x10, .writeMask = 0x10, .pass = StencilOperation::Replace};
+		const std::array<DrawCall, 3> masked = {
+			call(0, BlendState::Max, ChannelWrites::None, DepthState::GreaterOrEqual),
+			stencilled,
+			call(5, BlendState::OverByDestinationAlpha, ChannelWrites::None),
+		};
+		gpu->draw(masked);
+		gpu->clearDepth();
 
 		EXPECT_FALSE(glIsEnabled(GL_DEPTH_TEST));
+		EXPECT_FALSE(glIsEnabled(GL_BLEND));
+		EXPECT_FALSE(glIsEnabled(GL_STENCIL_TEST));
 		GLint equation = 0;
 		glGetIntegerv(GL_BLEND_EQUATION_RGB, &equation);
 		EXPECT_EQ(equation, GL_FUNC_ADD);
+		std::array<GLint, 4> factors{};
+		glGetIntegerv(GL_BLEND_SRC_RGB, &factors[0]);
+		glGetIntegerv(GL_BLEND_DST_RGB, &factors[1]);
+		glGetIntegerv(GL_BLEND_SRC_ALPHA, &factors[2]);
+		glGetIntegerv(GL_BLEND_DST_ALPHA, &factors[3]);
+		EXPECT_EQ(factors, (std::array<GLint, 4>{GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA}));
 		std::array<GLboolean, 4> channels{};
 		glGetBooleanv(GL_COLOR_WRITEMASK, channels.data());
 		EXPECT_EQ(channels, (std::array<GLboolean, 4>{GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE}));
+		GLint stencilWrites = 0;
+		glGetIntegerv(GL_STENCIL_WRITEMASK, &stencilWrites);
+		EXPECT_EQ(stencilWrites & 0xFF, 0xFF);
 		GLboolean depthWrites = GL_FALSE;
 		glGetBooleanv(GL_DEPTH_WRITEMASK, &depthWrites);
 		EXPECT_EQ(depthWrites, GL_TRUE);
+		GLint depthFunction = 0;
+		glGetIntegerv(GL_DEPTH_FUNC, &depthFunction);
+		EXPECT_EQ(depthFunction, GL_LESS);
+		GLfloat depthClear = 0.0F;
+		glGetFloatv(GL_DEPTH_CLEAR_VALUE, &depthClear);
+		EXPECT_EQ(depthClear, 1.0F);
 		EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
 
 		gpu->setRenderTarget({});

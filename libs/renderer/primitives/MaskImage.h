@@ -2,7 +2,8 @@
 
 // A CSS mask on a draw (docs/masks.md): mask-image layers, each composited with the layers under it
 // by mask-composite. A rect, polygon or mesh layer covers a pixel or doesn't; a content layer, an
-// SVG <mask> of shapes painted with values and combined by mix-blend-mode, covers it partly.
+// SVG <mask> of shapes painted with values and combined by mix-blend-mode, covers it partly, read
+// by its luminance as `mask: url(#m)` reads an SVG <mask>.
 
 #include "Handle.h"
 #include "graphics/Rect.h"
@@ -23,22 +24,13 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 	//   Subtract  source out: the layer where it falls outside what is under it
 	enum class MaskComposite : uint8_t { Add, Subtract };
 
-	// CSS mask-mode: how a layer's image becomes coverage. Alpha reads the image's alpha, Luminance
-	// its luminance times its alpha. A rect, polygon or mesh layer is white where it covers, so the
-	// two agree on it; a content layer's shapes are opaque greys, so Alpha reads where any shape
-	// paints and Luminance reads the values they paint.
-	enum class MaskMode : uint8_t { Alpha, Luminance };
-
 	// CSS mix-blend-mode on a content layer's shape: how its value meets what is painted under it.
 	//   Normal   its value
 	//   Lighten  the greater of the two
 	//   Darken   the lesser of the two
+	// A group whose blend isn't Normal is isolated, as CSS makes it: its shapes composite together
+	// first, on nothing, and the result blends with what is under it by the group's blend.
 	enum class MaskBlend : uint8_t { Normal, Lighten, Darken };
-
-	// CSS isolation on a group of shapes. Isolate composites the group's shapes together first, on
-	// nothing, and blends the result with what is under it by the group's MaskBlend. A group whose
-	// blend isn't Normal is isolated either way, as CSS makes it.
-	enum class MaskIsolation : uint8_t { Auto, Isolate };
 
 	// How a shape in a content layer is filled: one grey, or an SVG linearGradient in user space
 	// with two stops, padded past its ends. A value is a grey from 0, black, to 1, white.
@@ -76,7 +68,7 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 		GeometryHandle geometry;
 		BufferHandle   instances;
 		uint32_t	   indexCount = 0;
-		WorldCamera	   view;
+		WorldCamera	   camera;
 	};
 
 	// A layer's mask-image. Made only through its factories.
@@ -118,18 +110,18 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 		size_t							  shapeCount = 0;
 	};
 
-	// One layer of a CSS mask: its mask-image, mask-composite and mask-mode.
+	// One layer of a CSS mask: its mask-image and mask-composite.
 	struct MaskLayer {
 		MaskImage	  image;
 		MaskComposite composite = MaskComposite::Add;
-		MaskMode	  mode = MaskMode::Alpha;
 	};
 
 	// A shape in a content layer, as an element inside an SVG <mask>: a <polygon> (`points`, filled
 	// by the nonzero rule in the current transform's space), an uploaded mesh (`mesh`), or a <g> of
-	// `children`. A polygon is filled by `paint`, black unless set, as SVG fills; a mesh by its
-	// vertices' values. `mask` is the shape's own mask, rect, polygon and mesh layers only: it
-	// paints only where they cover. Everything is read by the draw, as the layers are.
+	// `children`, exactly one of the three. A polygon is filled by `paint`, black unless set, as SVG
+	// fills; a mesh by its vertices' values; a group by its children alone. `mask` is the shape's own
+	// mask, rect, polygon and mesh layers only: it paints only where they cover. Everything is read
+	// by the draw, as the layers are.
 	struct MaskShape {
 		std::span<const Foundation::Vec2> points;
 		MaskMesh						  mesh;
@@ -137,7 +129,6 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 		MaskPaint						  paint = MaskPaint::flat(0.0F);
 		std::span<const MaskLayer>		  mask;
 		MaskBlend						  blend = MaskBlend::Normal;
-		MaskIsolation					  isolation = MaskIsolation::Auto;
 	};
 
 } // namespace Renderer::Primitives

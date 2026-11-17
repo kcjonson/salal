@@ -23,7 +23,7 @@ namespace Renderer::Primitives {
 		: geometry(mesh.geometry),
 		  instances(mesh.instances),
 		  indexCount(mesh.indexCount),
-		  view(camera) {}
+		  camera(camera) {}
 
 	MaskImage MaskImage::rect(const Foundation::Rect& bounds) {
 		MaskImage image;

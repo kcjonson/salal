@@ -17,7 +17,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <limits>
 #include <memory>
-#include <set>
 #include <stack>
 #include <string>
 #include <unordered_map>
@@ -371,11 +370,13 @@ namespace Renderer::Primitives {
 
 		static bool isContent(const MaskImage& image);
 
+		// Log `why`, a string literal, once, and answer kRefusedMask.
+		static uint32_t refuse(const char* why);
+
 	  private:
 		class ContentFlattener;
 
-		static bool		internOwnMasks(BatchRenderer& batch, std::span<const MaskShape> content, std::vector<uint32_t>& ownMasks);
-		static uint32_t refuse(const char* why);
+		static bool internOwnMasks(BatchRenderer& batch, std::span<const MaskShape> content, std::vector<uint32_t>& ownMasks);
 	};
 
 	void drawRect(const RectArgs& args) {
@@ -386,7 +387,12 @@ namespace Renderer::Primitives {
 		// The corners round by the border's radius, square beside a side it leaves bare.
 		const std::optional<Foundation::BorderStyle>& border = args.style.border;
 		const CornerRadii radii = rectCornerRadii(border.has_value() ? std::max(border->cornerRadius, 0.0F) : 0.0F, border);
-		const uint32_t	  mask = MaskImageAccess::intern(*g_batchRenderer, args.mask);
+		if (args.blend == BlendMode::Additive &&
+			std::ranges::any_of(args.mask, [](const MaskLayer& layer) { return MaskImageAccess::isContent(layer.image); })) {
+			MaskImageAccess::refuse("an additive rect under a content layer");
+			return;
+		}
+		const uint32_t mask = MaskImageAccess::intern(*g_batchRenderer, args.mask);
 		if (mask == MaskImageAccess::kRefusedMask) {
 			return;
 		}
@@ -580,15 +586,13 @@ namespace Renderer::Primitives {
 			std::vector<float>&				values,
 			std::vector<MaskShapeGeometry>& shapes,
 			std::vector<size_t>&			triangleStarts,
-			std::span<const uint32_t>		ownMasks,
-			bool							alphaMode
+			std::span<const uint32_t>		ownMasks
 		)
 			: triangles(triangles),
 			  values(values),
 			  shapes(shapes),
 			  triangleStarts(triangleStarts),
-			  ownMasks(ownMasks),
-			  alphaMode(alphaMode) {}
+			  ownMasks(ownMasks) {}
 
 		// False, with why in `refusal`, for content salal does not evaluate.
 		bool flatten(std::span<const MaskShape> content) { return walk(content, 0, Primitives::MaskBlend::Normal); }
@@ -612,9 +616,12 @@ namespace Renderer::Primitives {
 						refusal = "a group carries a mask of its own; give its shapes the mask instead";
 						return false;
 					}
-					const bool isolated = !alphaMode && (shape.blend != Primitives::MaskBlend::Normal ||
-														 shape.isolation == Primitives::MaskIsolation::Isolate);
-					if (!isolated) {
+					const MaskPaint& paint = shape.paint;
+					if (paint.gradient || paint.fromValue != 0.0F || paint.toValue != 0.0F) {
+						refusal = "a group carries a paint; give its shapes the paint instead";
+						return false;
+					}
+					if (shape.blend == Primitives::MaskBlend::Normal) {
 						if (!walk(shape.children, group, groupBlend)) {
 							return false;
 						}
@@ -631,6 +638,10 @@ namespace Renderer::Primitives {
 					}
 					continue;
 				}
+				if (!shape.points.empty() && shape.mesh.geometry.isValid()) {
+					refusal = "a shape has both points and a mesh";
+					return false;
+				}
 				if (group != 0 && groupShapes > 0 && shape.blend != Primitives::MaskBlend::Lighten) {
 					refusal = "an isolated group's shapes after its first are combined by other than lighten";
 					return false;
@@ -646,9 +657,9 @@ namespace Renderer::Primitives {
 		void add(const MaskShape& shape, uint32_t group, Primitives::MaskBlend groupBlend) {
 			const uint32_t	  ownMask = ownMasks[shapeOrdinal++];
 			MaskShapeGeometry geometry{
-				.camera = shape.mesh.view,
+				.camera = shape.mesh.camera,
 				.mask = ownMask,
-				.blend = alphaMode ? Primitives::MaskBlend::Lighten : shape.blend,
+				.blend = shape.blend,
 				.group = group,
 				.groupBlend = groupBlend,
 			};
@@ -675,11 +686,10 @@ namespace Renderer::Primitives {
 		// is padded past an end, so a triangle crossing an end is cut there into convex pieces,
 		// each linear, fanned into triangles.
 		void addTriangle(const std::array<Foundation::Vec2, 3>& corners, const MaskPaint& paint) {
-			if (alphaMode || !paint.gradient) {
-				const float value = alphaMode ? 1.0F : paint.toValue;
+			if (!paint.gradient) {
 				for (const Foundation::Vec2& corner : corners) {
 					triangles.push_back(corner);
-					values.push_back(value);
+					values.push_back(paint.toValue);
 				}
 				return;
 			}
@@ -732,7 +742,6 @@ namespace Renderer::Primitives {
 		std::vector<MaskShapeGeometry>& shapes;
 		std::vector<size_t>&			triangleStarts;
 		std::span<const uint32_t>		ownMasks;
-		bool							alphaMode = false;
 		size_t							shapeOrdinal = 0;
 		uint32_t						groupCount = 0;
 		uint32_t						groupShapes = 0;
@@ -819,9 +828,7 @@ namespace Renderer::Primitives {
 		shapes.clear();
 		shapeTriangleStarts.clear();
 		if (contentLayers == 1) {
-			ContentFlattener flattener(
-				shapeTriangles, shapeValues, shapes, shapeTriangleStarts, ownMasks, layers.front().mode == MaskMode::Alpha
-			);
+			ContentFlattener flattener(shapeTriangles, shapeValues, shapes, shapeTriangleStarts, ownMasks);
 			if (!flattener.flatten(content)) {
 				return refuse(flattener.refusal);
 			}
@@ -867,9 +874,12 @@ namespace Renderer::Primitives {
 		return batch.internMask(geometries);
 	}
 
+	// Every reason is a string literal, so the reasons said are kept by address: a refused draw
+	// each frame allocates nothing.
 	uint32_t MaskImageAccess::refuse(const char* why) {
-		static std::set<std::string> said;
-		if (said.insert(why).second) {
+		static std::vector<const char*> said;
+		if (std::find(said.begin(), said.end(), why) == said.end()) {
+			said.push_back(why);
 			LOG_ERROR(Renderer, "drawRect: a mask salal does not evaluate (%s); the rect draws nothing (logged once)", why);
 		}
 		return kRefusedMask;
