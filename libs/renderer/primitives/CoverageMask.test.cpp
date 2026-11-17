@@ -13,6 +13,7 @@
 #include "primitives/BatchRenderer.h"
 #include "random/Rng.h"
 #include "resources/RenderTarget.h"
+#include "utils/Log.h"
 #include "vector/Types.h"
 
 #include <GL/glew.h>
@@ -24,6 +25,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -94,7 +96,9 @@ namespace Renderer {
 				const float first = cross(corners[1] - point, corners[2] - point) / area;
 				const float second = cross(corners[2] - point, corners[0] - point) / area;
 				const float third = 1.0F - first - second;
-				if (first < 0.0F || second < 0.0F || third < 0.0F) {
+				// A point on an edge counts as inside, though rounding puts it a hair out.
+				constexpr float kOnEdge = -1e-5F;
+				if (first < kOnEdge || second < kOnEdge || third < kOnEdge) {
 					return std::nullopt;
 				}
 				return (first * values[0]) + (second * values[1]) + (third * values[2]);
@@ -256,6 +260,32 @@ namespace Renderer {
 			Primitives::drawRect({.bounds = {0.0F, 0.0F, 64.0F, 64.0F}, .style = {.fill = Foundation::Color::white()}, .mask = mask});
 		}
 
+		// The errors naming `reason` since the sink was set.
+		struct RefusalLog {
+			const char* reason = nullptr;
+			int			count = 0;
+		};
+
+		static void countRefusals(void* context, const foundation::LogRecord& record) {
+			auto* log = static_cast<RefusalLog*>(context);
+			if (record.level == foundation::LogLevel::Error && std::strstr(record.message, log->reason) != nullptr) {
+				++log->count;
+			}
+		}
+
+		// `draw` twice, refused both times: nothing drawn, and one error naming `reason`.
+		template <typename Draw>
+		void expectRefusedOnce(Draw draw, const char* reason) {
+			RefusalLog log{.reason = reason};
+			foundation::Logger::setSink(countRefusals, &log);
+			draw();
+			draw();
+			Primitives::endFrame();
+			foundation::Logger::setSink(nullptr, nullptr);
+			EXPECT_TRUE(gpu->draws().empty());
+			EXPECT_EQ(log.count, 1) << reason;
+		}
+
 		size_t drawsWith(backend::BlendState blend, backend::ChannelWrites writes) const {
 			return static_cast<size_t>(std::count_if(gpu->draws().begin(), gpu->draws().end(), [&](const auto& draw) {
 				return draw.call.blend == blend && draw.call.writes == writes;
@@ -338,32 +368,47 @@ namespace Renderer {
 		const std::vector<MaskShape>   darkened = {group};
 		const std::array<MaskLayer, 1> darkenedMask = {{{.image = MaskImage::content(darkened)}}};
 		fill(darkenedMask);
-		// A shape with both points and a mesh.
+		Primitives::endFrame();
+		EXPECT_TRUE(gpu->draws().empty());
+	}
+
+	TEST_F(CoverageBatchTest, AShapeWithBothPointsAndAMeshIsRefusedAndLoggedOnce) {
+		const std::array<Vec2, 3> triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
 		renderer::TessellatedMesh triangleMesh;
 		triangleMesh.vertices = {triangle.begin(), triangle.end()};
 		triangleMesh.indices = {0, 1, 2};
 		triangleMesh.colors.assign(3, Foundation::Color::white());
 		InstancedMeshHandle			   uploaded = Primitives::uploadInstancedMesh(triangleMesh, 1);
 		const std::vector<MaskShape>   both = {{.points = triangle, .mesh = {uploaded, Primitives::WorldCamera{}}}};
-		const std::array<MaskLayer, 1> bothMask = {{{.image = MaskImage::content(both)}}};
-		fill(bothMask);
-		// A group carrying a paint.
-		MaskShape painted{.paint = MaskPaint::flat(0.5F)};
-		painted.children.push_back({.points = triangle, .paint = MaskPaint::flat(1.0F)});
-		const std::vector<MaskShape>   paintedGroup = {painted};
-		const std::array<MaskLayer, 1> paintedMask = {{{.image = MaskImage::content(paintedGroup)}}};
-		fill(paintedMask);
-		// An additive rect under a content layer.
-		const std::array<MaskLayer, 1> contentMask = {{{.image = MaskImage::content(content)}}};
-		Primitives::drawRect(
-			{.bounds = {0.0F, 0.0F, 64.0F, 64.0F},
-			 .style = {.fill = Foundation::Color::white()},
-			 .mask = contentMask,
-			 .blend = Primitives::BlendMode::Additive}
-		);
-		Primitives::endFrame();
-		EXPECT_TRUE(gpu->draws().empty());
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::content(both)}}};
+		expectRefusedOnce([&] { fill(mask); }, "a shape has both points and a mesh");
 		Primitives::releaseInstancedMesh(uploaded);
+	}
+
+	TEST_F(CoverageBatchTest, AGroupCarryingAPaintIsRefusedAndLoggedOnce) {
+		const std::array<Vec2, 3> triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
+		MaskShape				  painted{.paint = MaskPaint::flat(0.5F)};
+		painted.children.push_back({.points = triangle, .paint = MaskPaint::flat(1.0F)});
+		const std::vector<MaskShape>   content = {painted};
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::content(content)}}};
+		expectRefusedOnce([&] { fill(mask); }, "a group carries a paint");
+	}
+
+	TEST_F(CoverageBatchTest, AnAdditiveRectUnderAContentLayerIsRefusedAndLoggedOnce) {
+		const std::array<Vec2, 3>	   triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
+		const std::vector<MaskShape>   content = {{.points = triangle, .paint = MaskPaint::flat(1.0F)}};
+		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::content(content)}}};
+		expectRefusedOnce(
+			[&] {
+				Primitives::drawRect(
+					{.bounds = {0.0F, 0.0F, 64.0F, 64.0F},
+					 .style = {.fill = Foundation::Color::white()},
+					 .mask = mask,
+					 .blend = Primitives::BlendMode::Additive}
+				);
+			},
+			"an additive rect under a content layer"
+		);
 	}
 
 	TEST_F(CoverageBatchTest, ATargetWithNoAlphaOrDepthDrawsAContentMaskAsNothing) {
@@ -476,7 +521,7 @@ namespace Renderer {
 				EXPECT_NEAR(value(point), expected(point), kTolerance) << what << " at (" << point.x << ", " << point.y << ")";
 				if (index > 0) {
 					const Vec2 previous = point - step;
-					EXPECT_NEAR(value(point) - value(previous), expected(point) - expected(previous), kTolerance)
+					EXPECT_NEAR(value(point) - value(previous), expected(point) - expected(previous), kStepTolerance)
 						<< what << ": a step between (" << previous.x << ", " << previous.y << ") and (" << point.x << ", " << point.y
 						<< ")";
 				}
@@ -505,9 +550,16 @@ namespace Renderer {
 			}
 
 			bool nearEdge(Vec2 point) const {
+				return nearEdgeWhere(point, [](Vec2, Vec2) { return true; });
+			}
+
+			// Whether `point` is within 0.6 px of an edge from start to end for which `accept(start, end)` holds.
+			template <typename Accept>
+			bool nearEdgeWhere(Vec2 point, Accept accept) const {
 				const std::vector<size_t>& near = cells[(static_cast<size_t>(cell(point.y)) * kCells) + cell(point.x)];
 				return std::any_of(near.begin(), near.end(), [&](size_t edge) {
-					return distanceToSegment(point, edges[edge].first, edges[edge].second) < 0.6F;
+					const auto& [start, end] = edges[edge];
+					return distanceToSegment(point, start, end) < 0.6F && accept(start, end);
 				});
 			}
 
@@ -546,6 +598,76 @@ namespace Renderer {
 
 		// 8-bit values at the pieces' corners and in the target, and interpolation between.
 		static constexpr float kTolerance = 3.0F / 255.0F;
+
+		// A step between neighbouring pixels against the rules' step: a seam a pixel wide is more.
+		static constexpr float kStepTolerance = 1.5F / 255.0F;
+
+		// Whether the rules' value jumps across the line through `point` along `normal`, a unit vector,
+		// as at a hard shadow side, a wall, or a piece's edge where nothing beside it carries its value.
+		template <typename Expected>
+		static bool stepsByTheRules(Expected expected, Vec2 point, Vec2 normal) {
+			return std::abs(expected(point + (normal * 0.01F)) - expected(point - (normal * 0.01F))) > kStepTolerance;
+		}
+
+		// Across the edge from `start` to `end` at `samples` points along it, the pixels two either side of
+		// each along the axis nearest the edge's normal: each at the rules' value, but one within 0.6 px of
+		// an edge the rules step across, which may land either side; and each step between neighbours at
+		// the rules' step, unless `stepsHere`, the rules stepping across this edge. Counts what fails in
+		// `failures`, reporting the first few.
+		template <typename Expected>
+		void probeAcross(Expected expected, const EdgeGrid& grid, Vec2 start, Vec2 end, int samples, int& failures) const {
+			const Vec2 along = end - start;
+			if (glm::dot(along, along) < 1e-6F) {
+				return;
+			}
+			const Vec2 normal = glm::normalize(Vec2(-along.y, along.x));
+			const Vec2 axis = std::abs(normal.x) >= std::abs(normal.y) ? Vec2(1.0F, 0.0F) : Vec2(0.0F, 1.0F);
+			const auto undecided = [&](Vec2 centre) {
+				return grid.nearEdgeWhere(centre, [&](Vec2 edgeStart, Vec2 edgeEnd) {
+					const Vec2	edge = edgeEnd - edgeStart;
+					const float share = std::clamp(glm::dot(centre - edgeStart, edge) / glm::dot(edge, edge), 0.0F, 1.0F);
+					return stepsByTheRules(expected, edgeStart + (edge * share), glm::normalize(Vec2(-edge.y, edge.x)));
+				});
+			};
+			const auto fail = [&](const std::string& what) {
+				if (++failures <= 8) {
+					ADD_FAILURE() << what;
+				}
+			};
+			for (int sample = 0; sample < samples; ++sample) {
+				const Vec2 onEdge = start + (along * ((static_cast<float>(sample) + 0.5F) / static_cast<float>(samples)));
+				const bool stepsHere = stepsByTheRules(expected, onEdge, normal);
+				const Vec2 middle(std::floor(onEdge.x) + 0.5F, std::floor(onEdge.y) + 0.5F);
+				std::optional<std::pair<Vec2, bool>> previous;
+				for (int offset = -2; offset <= 2; ++offset) {
+					const Vec2 centre = middle + (axis * static_cast<float>(offset));
+					if (centre.x < 0.0F || centre.y < 0.0F || centre.x > kSize || centre.y > kSize) {
+						previous.reset();
+						continue;
+					}
+					const bool decided = !undecided(centre);
+					if (decided && std::abs(value(centre) - expected(centre)) > kTolerance) {
+						fail(
+							"(" + std::to_string(centre.x) + ", " + std::to_string(centre.y) + ") holds " + std::to_string(value(centre)) +
+							", the rules give " + std::to_string(expected(centre))
+						);
+					}
+					if (previous.has_value() && previous->second && decided && !stepsHere) {
+						const Vec2	before = previous->first;
+						const float step = value(centre) - value(before);
+						const float want = expected(centre) - expected(before);
+						if (std::abs(step - want) > kStepTolerance) {
+							fail(
+								"a step of " + std::to_string(step) + " from (" + std::to_string(before.x) + ", " +
+								std::to_string(before.y) + ") to (" + std::to_string(centre.x) + ", " + std::to_string(centre.y) +
+								"), the rules give " + std::to_string(want)
+							);
+						}
+					}
+					previous = std::pair{centre, decided};
+				}
+			}
+		}
 
 		static constexpr Foundation::Rect kView{-4.0F, -4.0F, kSize + 8.0F, kSize + 8.0F};
 
@@ -769,14 +891,36 @@ namespace Renderer {
 			EXPECT_LE(value({300.5F, y}), kTolerance) << "the abutting edge at y " << y;
 			EXPECT_LE(value({299.5F, y}), kTolerance) << "the abutting edge at y " << y;
 		}
+		// The field the pieces draw, which the probes below hold a step to: the fans are 15-degree
+		// chords of 7.2's round fade, off it by up to 0.1 px of distance, so a pixel's step against the
+		// round fade can miss by more than a seam's tolerance where nothing is wrong. 1 outside the seen
+		// area; inside, the greatest of the pending pieces and of the record's outside the pending
+		// shapes' feather.
+		const auto drawnField = [&](Vec2 point) {
+			if (std::none_of(seen.begin(), seen.end(), [&](const Box& box) { return box.holds(point); })) {
+				return 1.0F;
+			}
+			float greatest = 0.0F;
+			for (const Piece& piece : pendingPieces) {
+				greatest = std::max(greatest, piece.at(point).value_or(0.0F));
+			}
+			if (!insidePolygon(abuttingGrown, point) && !insidePolygon(overlappingGrown, point)) {
+				for (const std::vector<Piece>* cell : {&firstCellPieces, &secondCellPieces}) {
+					for (const Piece& piece : *cell) {
+						greatest = std::max(greatest, piece.at(point).value_or(0.0F));
+					}
+				}
+			}
+			return greatest;
+		};
 		// No seam across the pending leg's overlap with the record: down through the record's bottom
 		// edge inside the leg, beside the leg's sides and down its middle, a pixel at a time.
 		for (const float x : {101.5F, 105.5F, 125.5F, 144.5F, 148.5F}) {
-			expectProbe(expected, {x, 170.5F}, {0.0F, 1.0F}, 80, "the pending leg's overlap");
+			expectProbe(drawnField, {x, 170.5F}, {0.0F, 1.0F}, 80, "the pending leg's overlap");
 		}
 		// And across it, along the record's old bottom edge and just inside the leg's.
 		for (const float y : {199.5F, 200.5F, 238.5F, 248.5F}) {
-			expectProbe(expected, {90.5F, y}, {1.0F, 0.0F}, 70, "across the pending leg");
+			expectProbe(drawnField, {90.5F, y}, {1.0F, 0.0F}, 70, "across the pending leg");
 		}
 		// Nothing darkened twice: inside a convex corner, the nearer edge's fade alone.
 		EXPECT_NEAR(value({374.5F, 66.5F}), fade(5.5F), kTolerance);
@@ -925,10 +1069,22 @@ namespace Renderer {
 				}
 			}
 		}
+		// Each bright shape's box: outside it his darkness is 1, which leaves the least alone.
+		std::vector<std::array<float, 4>> boxes;
+		for (const Colonist& colonist : colonists) {
+			std::array<float, 4> box = {colonist.bright[0].x, colonist.bright[0].y, colonist.bright[0].x, colonist.bright[0].y};
+			for (const Vec2 point : colonist.bright) {
+				box = {std::min(box[0], point.x), std::min(box[1], point.y), std::max(box[2], point.x), std::max(box[3], point.y)};
+			}
+			boxes.push_back(box);
+		}
 		const auto expected = [&](Vec2 point) {
 			float least = 1.0F;
-			for (const Colonist& colonist : colonists) {
-				least = std::min(least, colonist.darkness(point));
+			for (size_t index = 0; index < colonists.size(); ++index) {
+				const std::array<float, 4>& box = boxes[index];
+				if (point.x >= box[0] && point.x <= box[2] && point.y >= box[1] && point.y <= box[3]) {
+					least = std::min(least, colonists[index].darkness(point));
+				}
 			}
 			return least;
 		};
@@ -942,7 +1098,7 @@ namespace Renderer {
 		for (float y = 190.5F; y < 230.0F; y += 1.0F) {
 			EXPECT_NEAR(value({439.5F, y}), expected({439.5F, y}), kTolerance) << "left of the abutting edge at y " << y;
 			EXPECT_NEAR(value({440.5F, y}), expected({440.5F, y}), kTolerance) << "right of the abutting edge at y " << y;
-			EXPECT_NEAR(value({439.5F, y}), value({440.5F, y}), kTolerance) << "a step across the abutting edge at y " << y;
+			EXPECT_NEAR(value({439.5F, y}), value({440.5F, y}), kStepTolerance) << "a step across the abutting edge at y " << y;
 		}
 		// Along a feather strip's shared diagonal, the right one's top edge from (440, 180) to (500, 192):
 		// the pixels on it and either side.
@@ -950,6 +1106,35 @@ namespace Renderer {
 			const float diagonal = 180.0F + ((x - 440.0F) * 0.2F);
 			expectProbe(expected, {x, std::floor(diagonal) - 1.5F}, {0.0F, 1.0F}, 4, "the feather strip's diagonal");
 		}
+		// Across every other edge the sweep leaves out: each of the named cases' bright shapes and
+		// pieces a pixel at a time along it, and a seeded sample of the crowd's.
+		const auto edgesOf = [](const Colonist& colonist, std::vector<std::pair<Vec2, Vec2>>& into) {
+			for (size_t index = 0; index < colonist.bright.size(); ++index) {
+				into.emplace_back(colonist.bright[index], colonist.bright[(index + 1) % colonist.bright.size()]);
+			}
+			for (const Piece& piece : colonist.pieces) {
+				for (size_t corner = 0; corner < 3; ++corner) {
+					into.emplace_back(piece.corners[corner], piece.corners[(corner + 1) % 3]);
+				}
+			}
+		};
+		constexpr size_t				   kCrowdSize = 50; // the last colonists, the crowd
+		std::vector<std::pair<Vec2, Vec2>> namedEdges;
+		std::vector<std::pair<Vec2, Vec2>> crowdEdges;
+		for (size_t index = 0; index < colonists.size(); ++index) {
+			edgesOf(colonists[index], index + kCrowdSize < colonists.size() ? namedEdges : crowdEdges);
+		}
+		int edgeFailures = 0;
+		for (const auto& [start, end] : namedEdges) {
+			const int samples = std::max(1, static_cast<int>(std::ceil(glm::length(end - start))));
+			probeAcross(expected, grid, start, end, samples, edgeFailures);
+		}
+		foundation::Rng pick(77);
+		for (int count = 0; count < 300; ++count) {
+			const auto& [start, end] = crowdEdges[pick.nextUInt32() % crowdEdges.size()];
+			probeAcross(expected, grid, start, end, 3, edgeFailures);
+		}
+		EXPECT_EQ(edgeFailures, 0) << "pixels or steps off across the edges the sweep leaves out";
 
 		// The beam, 10 px across against a feather of 12: never fully bright, and at its middle the
 		// nearer side's fade alone, not both sides' darkened together.

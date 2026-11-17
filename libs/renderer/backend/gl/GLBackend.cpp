@@ -159,10 +159,13 @@ namespace Renderer::backend::gl {
 			}
 		}
 
-		// `stencil`'s test, function and operations; off is the fixed state's (test off, every bit written).
+		// `stencil`'s test, function and operations; off is the fixed state's (test off, every bit
+		// written, and GL's default function and operations, which a game's stencil code may rely on).
 		void applyStencil(const StencilState& stencil) {
 			if (!stencil.test) {
 				glDisable(GL_STENCIL_TEST);
+				glStencilFunc(GL_ALWAYS, 0, 0xFF);
+				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 				glStencilMask(0xFF);
 				return;
 			}

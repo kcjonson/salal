@@ -93,6 +93,9 @@ namespace Renderer::Primitives {
 	};
 	static std::vector<HookBlockEntry> g_hookBlocks;
 
+	// The reasons a refused mask was logged for since init(), each a string literal kept by address.
+	static std::vector<const char*> g_maskRefusalsSaid;
+
 	// --- Initialization ---
 
 	void init(std::unique_ptr<backend::Backend> backend, const backend::ShaderSource& baseShader) {
@@ -105,6 +108,7 @@ namespace Renderer::Primitives {
 		g_backend->setWindowSize(g_backbufferWidth, g_backbufferHeight);
 		g_batchRenderer = std::make_unique<BatchRenderer>(*g_backend, baseShader);
 		g_hookBlocks.clear();
+		g_maskRefusalsSaid.clear();
 		for (const backend::HookUniformBlock& block : baseShader.hookBlocks) {
 			g_hookBlocks.push_back({.hook = block.hook != nullptr ? block.hook : "", .binding = block.binding, .size = block.size});
 		}
@@ -370,7 +374,7 @@ namespace Renderer::Primitives {
 
 		static bool isContent(const MaskImage& image);
 
-		// Log `why`, a string literal, once, and answer kRefusedMask.
+		// Log `why`, a string literal, once between init() calls, and answer kRefusedMask.
 		static uint32_t refuse(const char* why);
 
 	  private:
@@ -874,12 +878,10 @@ namespace Renderer::Primitives {
 		return batch.internMask(geometries);
 	}
 
-	// Every reason is a string literal, so the reasons said are kept by address: a refused draw
-	// each frame allocates nothing.
+	// Kept by address, so a refused draw each frame allocates nothing.
 	uint32_t MaskImageAccess::refuse(const char* why) {
-		static std::vector<const char*> said;
-		if (std::find(said.begin(), said.end(), why) == said.end()) {
-			said.push_back(why);
+		if (std::find(g_maskRefusalsSaid.begin(), g_maskRefusalsSaid.end(), why) == g_maskRefusalsSaid.end()) {
+			g_maskRefusalsSaid.push_back(why);
 			LOG_ERROR(Renderer, "drawRect: a mask salal does not evaluate (%s); the rect draws nothing (logged once)", why);
 		}
 		return kRefusedMask;
