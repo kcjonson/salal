@@ -17,7 +17,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <limits>
 #include <memory>
+#include <set>
 #include <stack>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <utils/Log.h>
@@ -357,11 +359,23 @@ namespace Renderer::Primitives {
 
 	// --- Drawing Functions ---
 
-	// MaskImage's content for the batch (MaskImage.h names this its friend).
+	// MaskImage's content for the batch (MaskImage.h, MaskPaint and MaskMesh name this their friend).
 	struct MaskImageAccess {
+		// What intern() answers for a mask salal does not evaluate, logged once: the rect draws nothing.
+		static constexpr uint32_t kRefusedMask = std::numeric_limits<uint32_t>::max();
+
 		// The batch's index for `layers`: rects and polygons as triangles in local units, a
-		// polygon tessellated by the nonzero rule as drawPolygon's fill is, a mesh as its handles.
+		// polygon tessellated by the nonzero rule as drawPolygon's fill is, a mesh as its handles,
+		// and a content layer's shapes flattened, each with its own mask interned first.
 		static uint32_t intern(BatchRenderer& batch, std::span<const MaskLayer> layers);
+
+		static bool isContent(const MaskImage& image);
+
+	  private:
+		class ContentFlattener;
+
+		static bool		internOwnMasks(BatchRenderer& batch, std::span<const MaskShape> content, std::vector<uint32_t>& ownMasks);
+		static uint32_t refuse(const char* why);
 	};
 
 	void drawRect(const RectArgs& args) {
@@ -373,6 +387,9 @@ namespace Renderer::Primitives {
 		const std::optional<Foundation::BorderStyle>& border = args.style.border;
 		const CornerRadii radii = rectCornerRadii(border.has_value() ? std::max(border->cornerRadius, 0.0F) : 0.0F, border);
 		const uint32_t	  mask = MaskImageAccess::intern(*g_batchRenderer, args.mask);
+		if (mask == MaskImageAccess::kRefusedMask) {
+			return;
+		}
 
 		// Outer box-shadow / glow sits behind the fill (emit first).
 		if (args.style.boxShadow.has_value()) {
@@ -554,10 +571,229 @@ namespace Renderer::Primitives {
 
 	} // namespace
 
+	// A content layer's shapes flattened in paint order (docs/masks.md): triangles with a value
+	// at each point, into the vectors given. Holds what it reads only during intern().
+	class MaskImageAccess::ContentFlattener {
+	  public:
+		ContentFlattener(
+			std::vector<Foundation::Vec2>&	triangles,
+			std::vector<float>&				values,
+			std::vector<MaskShapeGeometry>& shapes,
+			std::vector<size_t>&			triangleStarts,
+			std::span<const uint32_t>		ownMasks,
+			bool							alphaMode
+		)
+			: triangles(triangles),
+			  values(values),
+			  shapes(shapes),
+			  triangleStarts(triangleStarts),
+			  ownMasks(ownMasks),
+			  alphaMode(alphaMode) {}
+
+		// False, with why in `refusal`, for content salal does not evaluate.
+		bool flatten(std::span<const MaskShape> content) { return walk(content, 0, Primitives::MaskBlend::Normal); }
+
+		const char* refusal = nullptr;
+
+	  private:
+		struct Point {
+			Foundation::Vec2 position;
+			float			 at;
+		};
+
+		bool walk(std::span<const MaskShape> content, uint32_t group, Primitives::MaskBlend groupBlend) {
+			for (const MaskShape& shape : content) {
+				if (!shape.children.empty()) {
+					if (!shape.points.empty() || shape.mesh.geometry.isValid()) {
+						refusal = "a shape has both children and its own points or mesh";
+						return false;
+					}
+					if (!shape.mask.empty()) {
+						refusal = "a group carries a mask of its own; give its shapes the mask instead";
+						return false;
+					}
+					const bool isolated = !alphaMode && (shape.blend != Primitives::MaskBlend::Normal ||
+														 shape.isolation == Primitives::MaskIsolation::Isolate);
+					if (!isolated) {
+						if (!walk(shape.children, group, groupBlend)) {
+							return false;
+						}
+						continue;
+					}
+					if (group != 0) {
+						refusal = "an isolated group inside another";
+						return false;
+					}
+					++groupCount;
+					groupShapes = 0;
+					if (!walk(shape.children, groupCount, shape.blend)) {
+						return false;
+					}
+					continue;
+				}
+				if (group != 0 && groupShapes > 0 && shape.blend != Primitives::MaskBlend::Lighten) {
+					refusal = "an isolated group's shapes after its first are combined by other than lighten";
+					return false;
+				}
+				if (group != 0) {
+					++groupShapes;
+				}
+				add(shape, group, groupBlend);
+			}
+			return true;
+		}
+
+		void add(const MaskShape& shape, uint32_t group, Primitives::MaskBlend groupBlend) {
+			const uint32_t	  ownMask = ownMasks[shapeOrdinal++];
+			MaskShapeGeometry geometry{
+				.camera = shape.mesh.view,
+				.mask = ownMask,
+				.blend = alphaMode ? Primitives::MaskBlend::Lighten : shape.blend,
+				.group = group,
+				.groupBlend = groupBlend,
+			};
+			triangleStarts.push_back(triangles.size());
+			if (shape.mesh.geometry.isValid()) {
+				geometry.meshGeometry = shape.mesh.geometry;
+				geometry.meshInstances = shape.mesh.instances;
+				geometry.meshIndexCount = shape.mesh.indexCount;
+			} else if (shape.points.size() >= 3) {
+				const renderer::TessellatedMesh& fill = polygonFill(shape.points).mesh;
+				for (size_t index = 0; index + 2 < fill.indices.size(); index += 3) {
+					addTriangle(
+						{fill.vertices[fill.indices[index]],
+						 fill.vertices[fill.indices[index + 1]],
+						 fill.vertices[fill.indices[index + 2]]},
+						shape.paint
+					);
+				}
+			}
+			shapes.push_back(geometry);
+		}
+
+		// A triangle filled by `paint`. A gradient's value is linear in position except where it
+		// is padded past an end, so a triangle crossing an end is cut there into convex pieces,
+		// each linear, fanned into triangles.
+		void addTriangle(const std::array<Foundation::Vec2, 3>& corners, const MaskPaint& paint) {
+			if (alphaMode || !paint.gradient) {
+				const float value = alphaMode ? 1.0F : paint.toValue;
+				for (const Foundation::Vec2& corner : corners) {
+					triangles.push_back(corner);
+					values.push_back(value);
+				}
+				return;
+			}
+			const Foundation::Vec2 along = paint.to - paint.from;
+			const float			   lengthSquared = glm::dot(along, along);
+			const auto			   position = [&](Foundation::Vec2 point) {
+				// SVG paints a gradient whose ends meet in its last stop's colour.
+				return lengthSquared > 0.0F ? glm::dot(point - paint.from, along) / lengthSquared : 1.0F;
+			};
+			const auto value = [&](float at) {
+				return paint.fromValue + ((paint.toValue - paint.fromValue) * std::clamp(at, 0.0F, 1.0F));
+			};
+			const std::array<std::pair<float, float>, 3> bands = {
+				{{std::numeric_limits<float>::lowest(), 0.0F}, {0.0F, 1.0F}, {1.0F, std::numeric_limits<float>::max()}}
+			};
+			for (const auto& [low, high] : bands) {
+				std::vector<Point>& piece = clipped;
+				piece = {{corners[0], position(corners[0])}, {corners[1], position(corners[1])}, {corners[2], position(corners[2])}};
+				for (const auto& [bound, keepAbove] : {std::pair{low, true}, std::pair{high, false}}) {
+					if (bound == std::numeric_limits<float>::lowest() || bound == std::numeric_limits<float>::max()) {
+						continue;
+					}
+					scratch.clear();
+					for (size_t index = 0; index < piece.size(); ++index) {
+						const Point& current = piece[index];
+						const Point& next = piece[(index + 1) % piece.size()];
+						const bool	 currentIn = keepAbove ? current.at >= bound : current.at <= bound;
+						const bool	 nextIn = keepAbove ? next.at >= bound : next.at <= bound;
+						if (currentIn) {
+							scratch.push_back(current);
+						}
+						if (currentIn != nextIn) {
+							const float share = (bound - current.at) / (next.at - current.at);
+							scratch.push_back({current.position + ((next.position - current.position) * share), bound});
+						}
+					}
+					piece.swap(scratch);
+				}
+				for (size_t index = 1; index + 1 < piece.size(); ++index) {
+					for (const Point& point : {piece[0], piece[index], piece[index + 1]}) {
+						triangles.push_back(point.position);
+						values.push_back(value(point.at));
+					}
+				}
+			}
+		}
+
+		std::vector<Foundation::Vec2>&	triangles;
+		std::vector<float>&				values;
+		std::vector<MaskShapeGeometry>& shapes;
+		std::vector<size_t>&			triangleStarts;
+		std::span<const uint32_t>		ownMasks;
+		bool							alphaMode = false;
+		size_t							shapeOrdinal = 0;
+		uint32_t						groupCount = 0;
+		uint32_t						groupShapes = 0;
+		std::vector<Point>				clipped;
+		std::vector<Point>				scratch;
+	};
+
+	// Every leaf shape's own mask, in paint order, interned before the content so the batch's
+	// table holds them; false for content salal does not evaluate there.
+	bool MaskImageAccess::internOwnMasks(BatchRenderer& batch, std::span<const MaskShape> content, std::vector<uint32_t>& ownMasks) {
+		for (const MaskShape& shape : content) {
+			if (!shape.children.empty()) {
+				if (!internOwnMasks(batch, shape.children, ownMasks)) {
+					return false;
+				}
+				continue;
+			}
+			for (const MaskLayer& layer : shape.mask) {
+				if (isContent(layer.image)) {
+					return false;
+				}
+			}
+			ownMasks.push_back(intern(batch, shape.mask));
+		}
+		return true;
+	}
+
+	bool MaskImageAccess::isContent(const MaskImage& image) {
+		return image.kind == MaskImage::Kind::Content;
+	}
+
 	uint32_t MaskImageAccess::intern(BatchRenderer& batch, std::span<const MaskLayer> layers) {
 		if (layers.empty()) {
 			return 0;
 		}
+		// One content layer, on top; its shapes' own masks are interned first, as masks of their own.
+		size_t contentLayers = 0;
+		for (size_t index = 0; index < layers.size(); ++index) {
+			if (isContent(layers[index].image)) {
+				++contentLayers;
+				if (index != 0) {
+					return refuse("a content layer under another layer");
+				}
+			}
+		}
+		if (contentLayers > 1) {
+			return refuse("more than one content layer");
+		}
+		const MaskImage&				 top = layers.front().image;
+		const std::span<const MaskShape> content =
+			contentLayers == 1 ? std::span<const MaskShape>(top.shapes, top.shapeCount) : std::span<const MaskShape>{};
+		// Filled only for a content layer: interning a shape's own mask, which holds none, comes back
+		// through here and leaves it alone.
+		static thread_local std::vector<uint32_t> ownMasks;
+		if (contentLayers == 1) {
+			ownMasks.clear();
+			if (!internOwnMasks(batch, content, ownMasks)) {
+				return refuse("a shape's own mask holds a content layer");
+			}
+		}
+
 		// Every layer's triangles are copied out first, since a later polygon may empty the
 		// polygon cache, then handed over as spans into the copies.
 		struct Range {
@@ -570,10 +806,32 @@ namespace Renderer::Primitives {
 		static thread_local std::vector<uint16_t>		   indices;
 		static thread_local std::vector<Range>			   ranges;
 		static thread_local std::vector<MaskLayerGeometry> geometries;
+		static thread_local std::vector<Foundation::Vec2>  shapeTriangles;
+		static thread_local std::vector<float>			   shapeValues;
+		static thread_local std::vector<MaskShapeGeometry> shapes;
+		static thread_local std::vector<size_t>			   shapeTriangleStarts;
 		vertices.clear();
 		indices.clear();
 		ranges.clear();
 		geometries.clear();
+		shapeTriangles.clear();
+		shapeValues.clear();
+		shapes.clear();
+		shapeTriangleStarts.clear();
+		if (contentLayers == 1) {
+			ContentFlattener flattener(
+				shapeTriangles, shapeValues, shapes, shapeTriangleStarts, ownMasks, layers.front().mode == MaskMode::Alpha
+			);
+			if (!flattener.flatten(content)) {
+				return refuse(flattener.refusal);
+			}
+			for (size_t index = 0; index < shapes.size(); ++index) {
+				const size_t start = shapeTriangleStarts[index];
+				const size_t end = index + 1 < shapes.size() ? shapeTriangleStarts[index + 1] : shapeTriangles.size();
+				shapes[index].triangles = std::span(shapeTriangles).subspan(start, end - start);
+				shapes[index].values = std::span(shapeValues).subspan(start, end - start);
+			}
+		}
 		for (const MaskLayer& layer : layers) {
 			const MaskImage& image = layer.image;
 			Range			 range{.vertexStart = vertices.size(), .indexStart = indices.size()};
@@ -600,10 +858,21 @@ namespace Renderer::Primitives {
 				 .meshGeometry = image.kind == MaskImage::Kind::Mesh ? image.meshGeometry : GeometryHandle{},
 				 .meshInstances = image.meshInstances,
 				 .meshIndexCount = image.meshIndexCount,
-				 .camera = image.camera}
+				 .camera = image.camera,
+				 .content = image.kind == MaskImage::Kind::Content,
+				 .shapes = image.kind == MaskImage::Kind::Content ? std::span<const MaskShapeGeometry>(shapes)
+																  : std::span<const MaskShapeGeometry>{}}
 			);
 		}
 		return batch.internMask(geometries);
+	}
+
+	uint32_t MaskImageAccess::refuse(const char* why) {
+		static std::set<std::string> said;
+		if (said.insert(why).second) {
+			LOG_ERROR(Renderer, "drawRect: a mask salal does not evaluate (%s); the rect draws nothing (logged once)", why);
+		}
+		return kRefusedMask;
 	}
 
 	void drawPolygon(const PolygonArgs& args) {
