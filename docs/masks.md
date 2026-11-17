@@ -148,7 +148,7 @@ being added.
 - **Targets.** A masked rect draws into the window, or into a `RenderTarget` made with
   `RenderTarget::Attachments::ColourAndStencil`; under a content layer, into the window or such a
   `RenderTarget` whose format has alpha (any but `Rgb8`). Anywhere else it draws nothing, logged once:
-  drawn unmasked it would cover the whole view ("Where the stencil, alpha and depth live", below).
+  drawn unmasked it would cover the whole view ("Targets a mask draws into", below).
 
 ## Content layers: partial coverage
 
@@ -294,10 +294,10 @@ the bound target's alpha (8 bits) over the mask's cover box, with its depth buff
    of a run keeps value v at `(k + v / 2) / 4096`, so a later group's depths lie above every earlier
    one's and never match them, and depth is cleared once a run, and again every 4095 groups. Its shapes
    draw with no colour and a greater-or-equal depth test that writes, each under its own mask; then
-   the same shapes draw again with an equal test that writes nothing, no stencil, writing their values
-   to alpha by the group's blend. At each pixel only a shape holding the group's greatest passes, or one
-   holding the same value, so alpha takes the group's blend of its greatest. Positions are `invariant`,
-   so the two passes' depths are equal to the bit.
+   the same shapes draw again with an equal test that writes nothing, not under their own masks,
+   writing their values to alpha by the group's blend. At each pixel only a shape holding the group's
+   greatest passes, or one holding the same value, so alpha takes the group's blend of its greatest.
+   Positions are `invariant`, so the two passes' depths are equal to the bit.
 5. `Add` sets alpha to 1 where the layers under it cover, `Subtract` to 0, alpha alone written under
    the stencil test.
 6. The quad draws twice: its alpha multiplies the target's (alpha alone written), then its colour,
@@ -316,7 +316,7 @@ The backend's states for it (`backend/Backend.h`): blend states `Replace`, `Max`
 (less), every channel and the depth buffer written, the blend equation add with the `Alpha` state's
 factors, before `draw` returns; `clearDepth()` puts the clear value back to GL's default, 1.
 
-## Where the stencil, alpha and depth live
+## Targets a mask draws into
 
 The window has all three: the GLFW platform asks for 8 stencil, 8 alpha and 24 depth bits (GLFW's
 defaults, stated), and the GL backend checks the default framebuffer at creation and warns when it has
