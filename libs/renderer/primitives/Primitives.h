@@ -259,9 +259,10 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// per id and the hook drawn over style.fill; a hook the base shader doesn't have is
 		// logged once per id and the rect drawn as if it named none.
 		//
-		// With a `mask`, the rect and its shadow show only where the composited mask covers
-		// (docs/masks.md). The layers are read during the call. A masked rect drawn into a target
-		// with no stencil buffer draws nothing, logged once.
+		// With a `mask`, the rect and its shadow show where the composited mask covers, as much as
+		// it covers (docs/masks.md). The layers are read during the call. A masked rect drawn into a
+		// target with no stencil buffer, or under a content layer into one with no alpha or depth,
+		// draws nothing, logged once; so does one whose mask salal does not evaluate.
 		void drawRect(const RectArgs& args);
 
 		// Draw a line: a rotated quad as two flat triangles, aliased, or with style.dash
