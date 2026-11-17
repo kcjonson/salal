@@ -146,12 +146,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		uint32_t										  mask = 0;
 	};
 
-	// A shape of a content layer as the batch takes it (docs/masks.md), in paint order: triangles in
+	// An element of a content layer as the batch takes it (docs/masks.md), in paint order: triangles in
 	// the current transform's space with a value at each point, or an uploaded mesh, one copy at the
 	// world origin under a camera, whose vertices' alpha is the value. `mask` is the index of its own
-	// mask in the flush's mask table, 0 for none. A shape of an isolated group carries the group's
-	// number, shared by its consecutive shapes (0 for none), and the group's blend; such a group's
-	// value is the greatest of its shapes'.
+	// mask in the flush's mask table, 0 for none. An element of an isolated group carries the group's
+	// number, shared by its consecutive elements (0 for none), and the group's blend; such a group's
+	// value is the greatest of its elements'.
 	struct MaskElementGeometry {
 		std::span<const Foundation::Vec2> triangles; // three points a triangle
 		std::span<const float>			  values;	 // one a point
@@ -160,34 +160,34 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		uint32_t						  meshIndexCount = 0;
 		Primitives::WorldCamera			  camera;
 		uint32_t						  mask = 0;
-		Primitives::MixBlendMode			  blend = Primitives::MixBlendMode::Normal;
+		Primitives::MixBlendMode		  blend = Primitives::MixBlendMode::Normal;
 		uint32_t						  group = 0;
-		Primitives::MixBlendMode			  groupBlend = Primitives::MixBlendMode::Normal;
+		Primitives::MixBlendMode		  groupBlend = Primitives::MixBlendMode::Normal;
 	};
 
 	// A CSS mask layer as the batch takes it (docs/masks.md): a mask-composite, and its coverage as
 	// triangles in the current transform's space, an uploaded mesh, one copy at the world origin
-	// under a camera, or a content layer's shapes, whose values are the layer's partial coverage.
+	// under a camera, or a content layer's elements, whose values are the layer's partial coverage.
 	struct MaskLayerGeometry {
-		Primitives::MaskComposite		   composite = Primitives::MaskComposite::Add;
-		std::span<const Foundation::Vec2>  vertices;
-		std::span<const uint16_t>		   indices;
-		GeometryHandle					   meshGeometry; // valid for a mesh layer
-		BufferHandle					   meshInstances;
-		uint32_t						   meshIndexCount = 0;
-		Primitives::WorldCamera			   camera;
-		bool							   content = false;
-		std::span<const MaskElementGeometry> shapes; // a content layer's
+		Primitives::MaskComposite			 composite = Primitives::MaskComposite::Add;
+		std::span<const Foundation::Vec2>	 vertices;
+		std::span<const uint16_t>			 indices;
+		GeometryHandle						 meshGeometry; // valid for a mesh layer
+		BufferHandle						 meshInstances;
+		uint32_t							 meshIndexCount = 0;
+		Primitives::WorldCamera				 camera;
+		bool								 content = false;
+		std::span<const MaskElementGeometry> elements; // a content layer's
 	};
 
 	// The stencil bits a mask's rect, polygon and mesh layers are built in: the composited mask,
-	// and a layer's coverage while a Subtract composites it. A content layer's shapes build their
+	// and a layer's coverage while a Subtract composites it. A content layer's elements build their
 	// own masks in the next two, and are drawn only where the last one is set: over the cover box,
 	// set while a content layer is evaluated and clear everywhere otherwise.
 	constexpr uint8_t kMaskAccumulatorBit = 0x01U;
 	constexpr uint8_t kMaskScratchBit = 0x02U;
-	constexpr uint8_t kShapeMaskAccumulatorBit = 0x04U;
-	constexpr uint8_t kShapeMaskScratchBit = 0x08U;
+	constexpr uint8_t kElementMaskAccumulatorBit = 0x04U;
+	constexpr uint8_t kElementMaskScratchBit = 0x08U;
 	constexpr uint8_t kCoverBoxBit = 0x10U;
 
 	// How many isolated groups a content layer evaluates in depth between depth clears: group k
@@ -544,12 +544,12 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		// The flush's mask table (docs/masks.md). Entry i is mask index i + 1: its layers, top
 		// first, a run of maskLayers, and the box on screen round every quad drawn under it,
-		// which a Subtract's cover passes fill and a layer must hold to be built inverted; a shape's
-		// own mask's box takes in the shapes it masks. A layer's triangles are a run of
+		// which a Subtract's cover passes fill and a layer must hold to be built inverted; an element's
+		// own mask's box takes in the elements it masks. A layer's triangles are a run of
 		// maskTriangles, three points each, on screen; `screenBox` is set when they are exactly an
 		// axis-aligned box on screen, (minX, minY, maxX, maxY), split along a diagonal. A content
-		// layer's shapes are a run of maskShapes, their triangles runs of shapePoints with
-		// shapeValues beside them. Emptied with the batch.
+		// layer's elements are a run of maskElements, their triangles runs of elementPoints with
+		// elementValues beside them. Emptied with the batch.
 		struct MaskLayerEntry {
 			Primitives::MaskComposite		composite = Primitives::MaskComposite::Add;
 			uint32_t						triangleStart = 0;
@@ -560,20 +560,20 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 			Primitives::WorldCamera			camera;
 			std::optional<Foundation::Vec4> screenBox;
 			bool							content = false;
-			uint32_t						shapeStart = 0;
-			uint32_t						shapeCount = 0;
+			uint32_t						elementStart = 0;
+			uint32_t						elementCount = 0;
 		};
 		struct MaskElementEntry {
-			uint32_t				triangleStart = 0; // in shapePoints, three points a triangle
-			uint32_t				triangleCount = 0;
-			GeometryHandle			meshGeometry;
-			BufferHandle			meshInstances;
-			uint32_t				meshIndexCount = 0;
-			Primitives::WorldCamera camera;
-			uint32_t				mask = 0;
-			Primitives::MixBlendMode	blend = Primitives::MixBlendMode::Normal;
-			uint32_t				group = 0;
-			Primitives::MixBlendMode	groupBlend = Primitives::MixBlendMode::Normal;
+			uint32_t				 triangleStart = 0; // in elementPoints, three points a triangle
+			uint32_t				 triangleCount = 0;
+			GeometryHandle			 meshGeometry;
+			BufferHandle			 meshInstances;
+			uint32_t				 meshIndexCount = 0;
+			Primitives::WorldCamera	 camera;
+			uint32_t				 mask = 0;
+			Primitives::MixBlendMode blend = Primitives::MixBlendMode::Normal;
+			uint32_t				 group = 0;
+			Primitives::MixBlendMode groupBlend = Primitives::MixBlendMode::Normal;
 		};
 		struct MaskEntry {
 			uint32_t		 layerStart = 0;
@@ -585,15 +585,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		std::vector<MaskEntry>		  maskEntries;
 		std::vector<MaskLayerEntry>	  maskLayers;
 		std::vector<Foundation::Vec2> maskTriangles;
-		std::vector<MaskElementEntry>	  maskShapes;
-		std::vector<Foundation::Vec2> shapePoints;
-		std::vector<float>			  shapeValues;
+		std::vector<MaskElementEntry> maskElements;
+		std::vector<Foundation::Vec2> elementPoints;
+		std::vector<float>			  elementValues;
 
-		// Add a content layer's shape to maskShapes, mixing it into a mask's `hash`.
-		void internShape(const MaskElementGeometry& shape, bool isIdentity, uint64_t& hash);
+		// Add a content layer's elements to maskElements, mixing it into a mask's `hash`.
+		void internElement(const MaskElementGeometry& element, bool isIdentity, uint64_t& hash);
 
-		// Whether two interned shapes are the same, their triangles and values compared too.
-		bool sameShape(const MaskElementEntry& first, const MaskElementEntry& second) const;
+		// Whether two interned elements are the same, their triangles and values compared too.
+		bool sameElement(const MaskElementEntry& first, const MaskElementEntry& second) const;
 
 		// Whether two interned layers are the same mask-image under the same composite.
 		bool sameLayer(const MaskLayerEntry& first, const MaskLayerEntry& second) const;
@@ -610,7 +610,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void clearMasks();
 
 		// The stencil bits a mask is built in, and whether they are cleared across the target or,
-		// for a shape's own mask, over its cover box.
+		// for an element's own mask, over its cover box.
 		struct MaskBits {
 			uint8_t accumulator = kMaskAccumulatorBit;
 			uint8_t scratch = kMaskScratchBit;
@@ -623,17 +623,17 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		bool buildMask(uint32_t index, uint32_t firstLayer = 0, const MaskBits& bits = {});
 
 		// Evaluate mask `index`, whose top layer is a content layer, into the bound target's alpha
-		// over its cover box: the layers under it in the stencil, the content's shapes in alpha, and
+		// over its cover box: the layers under it in the stencil, the content's elements in alpha, and
 		// the two composited by the content layer's mask-composite.
 		void buildCoverageMask(uint32_t index);
 
 		// A run under a content layer, a quad at a time, each over its own evaluation of the mask.
 		void drawUnderCoverage(const DrawRun& run);
 
-		// Draw maskShapes[shapeIndex] in the given states with `coverageDepth` in the uniforms, under
+		// Draw maskElements[elementIndex] in the given states with `coverageDepth` in the uniforms, under
 		// its own mask (built first unless it was the last built) when `underOwnMask`.
-		void drawShape(
-			uint32_t			   shapeIndex,
+		void drawElement(
+			uint32_t			   elementIndex,
 			backend::BlendState	   blend,
 			backend::ChannelWrites writes,
 			backend::DepthState	   depth,
@@ -644,15 +644,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// Where flush()'s upload holds the masks' cover quads, two a mask: alpha 0, then alpha 1.
 		uint32_t coverQuadStart = 0;
 
-		// The shape mask built last in the shape bits, 0 for none, and whether it is inverted.
-		uint32_t builtShapeMask = 0;
-		bool	 builtShapeMaskInverted = false;
+		// The element mask built last in the element-mask bits, 0 for none, and whether it is inverted.
+		uint32_t builtElementMask = 0;
+		bool	 builtElementMaskInverted = false;
 
 		// Submit what is pending and set `next` when it differs from the uniforms last set.
 		void				  useUniforms(const backend::DrawUniforms& next);
 		backend::DrawUniforms lastUniforms;
 
-		// The view on screen in logical pixels, the box of a mesh shape, which no CPU geometry bounds.
+		// The view on screen in logical pixels, the box of a mesh element, which no CPU geometry bounds.
 		Foundation::Vec4 viewBox() const;
 
 		// flush()'s draw calls gathered under the batched uniforms, submitted before anything
@@ -667,7 +667,7 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// index; and the uniforms the batched draws read.
 		std::vector<BatchInstance> maskedUpload;
 		std::vector<uint32_t>	   layerFirstInstance;
-		std::vector<uint32_t>	   shapeFirstInstance; // by maskShapes index
+		std::vector<uint32_t>	   elementFirstInstance; // by maskElements index
 		backend::DrawUniforms	   batchedUniforms;
 
 		// A masked run met a target with no stencil buffer, and said so; one under a content layer

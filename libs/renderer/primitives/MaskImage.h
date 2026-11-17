@@ -2,7 +2,7 @@
 
 // A CSS mask on a draw (docs/masks.md): mask-image layers, each composited with the layers under it
 // by mask-composite. A rect, polygon or mesh layer covers a pixel or doesn't; a content layer, an
-// SVG <mask> of shapes painted with values and combined by mix-blend-mode, covers it partly, read
+// SVG <mask> of elements painted with values and combined by mix-blend-mode, covers it partly, read
 // by its luminance as `mask: url(#m)` reads an SVG <mask>.
 
 #include "Handle.h"
@@ -24,21 +24,21 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 	//   Subtract  source out: the layer where it falls outside what is under it
 	enum class MaskComposite : uint8_t { Add, Subtract };
 
-	// CSS mix-blend-mode on a content layer's shape: how its value meets what is painted under it.
+	// CSS mix-blend-mode on a content layer's element: how its value meets what is painted under it.
 	//   Normal   its value
 	//   Lighten  the greater of the two
 	//   Darken   the lesser of the two
-	// A group whose blend isn't Normal is isolated, as CSS makes it: its shapes composite together
+	// A group whose blend isn't Normal is isolated, as CSS makes it: its elements composite together
 	// first, on nothing, and the result blends with what is under it by the group's blend.
 	enum class MixBlendMode : uint8_t { Normal, Lighten, Darken };
 
-	// How a shape in a content layer is filled: one grey, or an SVG linearGradient in user space
+	// How an element in a content layer is filled: one grey, or an SVG linearGradient in user space
 	// with two stops, padded past its ends. A value is a grey from 0, black, to 1, white.
 	class MaskPaint {
 	  public:
 		static MaskPaint solid(float value);
 
-		// The value runs from `fromValue` at `from` to `toValue` at `to`, in the shape's own space,
+		// The value runs from `fromValue` at `from` to `toValue` at `to`, in the element's own space,
 		// and holds each end's value past it.
 		static MaskPaint linearGradient(Foundation::Vec2 from, Foundation::Vec2 to, float fromValue, float toValue);
 
@@ -54,7 +54,7 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 		bool			 gradient = false;
 	};
 
-	// An uploaded mesh as a shape in a content layer, one copy at the world origin in world space
+	// An uploaded mesh as an element in a content layer, one copy at the world origin in world space
 	// under `camera`. Each vertex's value is its colour's alpha, the colour itself read as white.
 	// The mesh must not be released before the draw it masks is flushed.
 	class MaskMesh {
@@ -116,19 +116,19 @@ namespace Renderer::Primitives { // NOLINT(readability-identifier-naming)
 		MaskComposite composite = MaskComposite::Add;
 	};
 
-	// A shape in a content layer, as an element inside an SVG <mask>: a <polygon> (`points`, filled
+	// An element of a content layer, inside an SVG <mask>: a <polygon> (`points`, filled
 	// by the nonzero rule in the current transform's space), an uploaded mesh (`mesh`), or a <g> of
 	// `children`, exactly one of the three. A polygon is filled by `paint`, black unless set, as SVG
-	// fills; a mesh by its vertices' values; a group by its children alone. `mask` is the shape's own
+	// fills; a mesh by its vertices' values; a group by its children alone. `mask` is the element's own
 	// mask, rect, polygon and mesh layers only: it paints only where they cover. Everything is read
 	// by the draw, as the layers are.
 	struct MaskElement {
 		std::span<const Foundation::Vec2> points;
 		MaskMesh						  mesh;
-		std::vector<MaskElement>			  children;
+		std::vector<MaskElement>		  children;
 		MaskPaint						  paint = MaskPaint::solid(0.0F);
 		std::span<const MaskLayer>		  mask;
-		MixBlendMode						  blend = MixBlendMode::Normal;
+		MixBlendMode					  blend = MixBlendMode::Normal;
 	};
 
 } // namespace Renderer::Primitives

@@ -16,15 +16,15 @@ expected to be the next.
 ```cpp
 namespace Renderer::Primitives {
 	enum class MaskComposite : uint8_t { Add, Subtract };          // mask-composite
-	enum class MixBlendMode : uint8_t { Normal, Lighten, Darken };    // mix-blend-mode, on a content shape or group
+	enum class MixBlendMode : uint8_t { Normal, Lighten, Darken }; // mix-blend-mode, on a content element or group
 
-	class MaskPaint { // a content shape's fill
+	class MaskPaint { // a content element's fill
 	  public:
-		static MaskPaint flat(float value);
-		static MaskPaint linear(Foundation::Vec2 from, Foundation::Vec2 to, float fromValue, float toValue);
+		static MaskPaint solid(float value);
+		static MaskPaint linearGradient(Foundation::Vec2 from, Foundation::Vec2 to, float fromValue, float toValue);
 	};
 
-	class MaskMesh { // an uploaded mesh as a content shape; .mesh = {mesh, camera}
+	class MaskMesh { // an uploaded mesh as a content element; .mesh = {mesh, camera}
 	  public:
 		MaskMesh(const InstancedMeshHandle& mesh, const WorldCamera& camera);
 	};
@@ -44,11 +44,11 @@ namespace Renderer::Primitives {
 
 	struct MaskElement { // an element inside the <mask>: a <polygon>, a mesh, or a <g>, exactly one
 		std::span<const Foundation::Vec2> points;
-		MaskMesh						  mesh;
-		std::vector<MaskElement>			  children;
-		MaskPaint						  paint = MaskPaint::solid(0.0F); // black, as SVG fills
-		std::span<const MaskLayer>		  mask;                          // its own mask, hard layers only
-		MixBlendMode						  blend = MixBlendMode::Normal;
+		MaskMesh                          mesh;
+		std::vector<MaskElement>          children;
+		MaskPaint                         paint = MaskPaint::solid(0.0F); // black, as SVG fills
+		std::span<const MaskLayer>        mask;                           // its own mask, hard layers only
+		MixBlendMode                      blend = MixBlendMode::Normal;
 	};
 }
 // RectArgs, after `fill`:
@@ -110,7 +110,7 @@ record's meshes and the pending shapes; worldsim's sight-softening design, 7.5, 
 | `mask-mode`, SVG `mask-type` | a content layer reads its luminance, as `mask: url(#m)` reads an SVG `<mask>` (`match-source`, `mask-type: luminance`); a rect, polygon or mesh layer reads the same either way | `mask-mode: alpha` or `mask-type: alpha` on a content layer |
 | SVG `<polygon>`, `<g>` in a `<mask>` | `MaskElement::points`, `children`; `mesh` for an uploaded mesh | every other element |
 | SVG `fill` with a grey, or a `linearGradient` in user space | `MaskPaint::solid`, `MaskPaint::linearGradient` (two stops, `spreadMethod="pad"`) | more stops, other spreads, `objectBoundingBox`, `radialGradient` |
-| `mix-blend-mode: normal`, `lighten`, `darken` | `MixBlendMode::Normal`, `Lighten`, `Darken`, per shape or group | every other mode |
+| `mix-blend-mode: normal`, `lighten`, `darken` | `MixBlendMode::Normal`, `Lighten`, `Darken`, per element or group | every other mode |
 | isolation | a group whose blend isn't `Normal` is isolated, as CSS makes it | `isolation: isolate` on a `Normal` group |
 | `mask` on an element inside a `<mask>` | `MaskElement::mask`, rect, polygon and mesh layers | a content layer there |
 | `mask-position`, `mask-size`, `mask-repeat`, `mask-origin` | a layer is where its points are | all four |
@@ -152,20 +152,20 @@ being added.
 
 ## Content layers: partial coverage
 
-- **The canvas.** A content layer's shapes are painted in order on nothing, value 0. A shape lands where
+- **The canvas.** A content layer's elements are painted in order on nothing, value 0. An element lands where
   it covers (its own mask's coverage included) by its blend: `Normal` its value, `Lighten` the greater
   of its value and the canvas's, `Darken` the lesser. Values are greys from 0 to 1, clamped.
 - **Luminance.** A content layer covers a pixel by the value painted there, its luminance, as
   `mask: url(#m)` reads an SVG `<mask>`.
-- **Groups.** A group whose blend isn't `Normal` is isolated, as CSS makes it: it composites its shapes
-  on nothing first and lands as the result, where any of its shapes does, by its own blend. A `Normal`
-  group is no group: its shapes land straight on the canvas.
-- **Two places a CSS reader would expect otherwise.** Inside an isolated group every shape after the
-  first must be `Lighten`, where CSS would let a `Normal` one paint over; and a `Darken` shape over
+- **Groups.** A group whose blend isn't `Normal` is isolated, as CSS makes it: it composites its elements
+  on nothing first and lands as the result, where any of its elements does, by its own blend. A `Normal`
+  group is no group: its elements land straight on the canvas.
+- **Two places a CSS reader would expect otherwise.** Inside an isolated group every element after the
+  first must be `Lighten`, where CSS would let a `Normal` one paint over; and a `Darken` element over
   canvas nothing has painted gives 0.
 - **Paint.** A polygon is filled by its paint, black unless set. A linear gradient runs from `fromValue`
-  at `from` to `toValue` at `to`, in the shape's own space, padded past each end; with `from` equal to
-  `to` it is `toValue` everywhere, as SVG paints it. A mesh shape's value at a vertex is the vertex
+  at `from` to `toValue` at `to`, in the element's own space, padded past each end; with `from` equal to
+  `to` it is `toValue` everywhere, as SVG paints it. A mesh element's value at a vertex is the vertex
   colour's alpha, its colour read as white, linear over each triangle; its `paint` is ignored.
 - **Where it sits.** One content layer, the top layer. Under it any rect, polygon and mesh layers
   composite as before, to 0 or 1, and the content layer's `composite` puts it on them: `Add`, source
@@ -173,25 +173,25 @@ being added.
   source out, is the content where they are 0.
 - **The draw.** The rect's colour lands at its own alpha times the mask, as CSS composites a masked
   element, so a mask of 0.5 under an opaque fill blends it half over what is beneath.
-- **Coordinates and lifetime** are a polygon layer's for polygon shapes and a mesh layer's for mesh
-  shapes. Everything a content layer names is read during the `drawRect` call: shapes, their points
+- **Coordinates and lifetime** are a polygon layer's for polygon elements and a mesh layer's for mesh
+  elements. Everything a content layer names is read during the `drawRect` call: elements, their points
   and their masks are copied then; meshes must outlive the flush.
 
-**What salal evaluates, and what it refuses.** Inside an isolated group, a shape after the first must
-blend by `Lighten`: the group's value is then the greatest of its shapes', which is what salal
-evaluates. The first shape may blend any way, since it lands on nothing. A drawRect whose mask breaks
+**What salal evaluates, and what it refuses.** Inside an isolated group, an element after the first must
+blend by `Lighten`: the group's value is then the greatest of its elements', which is what salal
+evaluates. The first element may blend any way, since it lands on nothing. A drawRect whose mask breaks
 one of these draws nothing, logged once for each reason:
 
 - a content layer anywhere but on top, or more than one;
-- an isolated group inside another, or a group shape after the first not blending by `Lighten`;
-- a group carrying its own `mask` or `paint` (give its shapes them), or a shape with both children and
+- an isolated group inside another, or a group element after the first not blending by `Lighten`;
+- a group carrying its own `mask` or `paint` (give its elements them), or an element with both children and
   its own points or mesh, or with both points and a mesh;
-- a content layer inside a shape's own mask;
+- a content layer inside an element's own mask;
 - an additive rect (`BlendMode::Additive`) under a content layer.
 
 **Where salal departs from CSS.**
 
-- A `Darken` shape over canvas nothing has painted yet lands as 0, where SVG would show its value (a
+- A `Darken` element over canvas nothing has painted yet lands as 0, where SVG would show its value (a
   blend over a transparent backdrop shows the source). Paint a base first, as the tint's view at 1 does.
 - A rect's own quads (its shadow, then its fill and border) each land at their alpha times the mask, one
   after the other, not composited together first, so where a masked rect's shadow lies under it the two
@@ -199,7 +199,7 @@ one of these draws nothing, logged once for each reason:
 - After the rect, a render target's alpha under the mask's cover box, the box round the rect's quads,
   becomes opaque; outside it nothing changes. The window is opaque, so nothing changes there; a render
   target whose alpha mattered under the rect loses it.
-- A value is within about 2/255 of the rule's. Where two shapes of one group hold values within a 255th
+- A value is within about 2/255 of the rule's. Where two elements of one group hold values within a 255th
   of each other, the group's greatest may be the lesser of the two.
 
 ## How it is built
@@ -272,30 +272,30 @@ game's GL that leaves stencil, depth or channel-write state changed calls
 
 ## How partial coverage is built
 
-No caller sees any of this; the API names no GPU state. At add time a content layer's shapes are
+No caller sees any of this; the API names no GPU state. At add time a content layer's elements are
 flattened in paint order, each polygon tessellated by the nonzero rule (from the polygon cache) and
 each triangle given a value at its corners; a gradient's triangle crossing either padded end is cut
-there into pieces that are each linear, so the values between corners are exact. Each shape's own mask
-is interned first as a mask of its own, its cover box the box round the shapes it masks (the view, for
-a mesh). Isolated groups are numbered. The shapes' triangles upload as flat quads, their values as
+there into pieces that are each linear, so the values between corners are exact. Each element's own mask
+is interned first as a mask of its own, its cover box the box round the elements it masks (the view, for
+a mesh). Isolated groups are numbered. The elements' triangles upload as flat quads, their values as
 their colour.
 
 At flush, a run under a content layer is drawn a quad at a time, the mask evaluated before each into
 the bound target's alpha (8 bits) over the mask's cover box, with its depth buffer (24 bits) as scratch:
 
 1. The layers under the content layer are built in stencil bits 1 and 2, as above.
-2. Alpha is set to 0 over the cover box, alpha alone written, and stencil bit 5 set there. Every shape
-   below draws only where bit 5 is set, so a shape reaching past the cover box writes no alpha or depth
+2. Alpha is set to 0 over the cover box, alpha alone written, and stencil bit 5 set there. Every element
+   below draws only where bit 5 is set, so an element reaching past the cover box writes no alpha or depth
    outside it. Bit 5 is cleared across the target once a run, before its first quad.
-3. A shape outside a group draws its values into alpha alone, by replace, max or min for `Normal`,
+3. An element outside a group draws its values into alpha alone, by replace, max or min for `Normal`,
    `Lighten` and `Darken`, under its own mask: that mask built in stencil bits 3 and 4 the same way,
-   cleared over its own cover box, and kept while the next shapes share it.
+   cleared over its own cover box, and kept while the next elements share it.
 4. An isolated group's greatest is found in depth. The vertex shader takes a value as depth: group k
    of a run keeps value v at `(k + v / 2) / 4096`, so a later group's depths lie above every earlier
-   one's and never match them, and depth is cleared once a run, and again every 4095 groups. Its shapes
+   one's and never match them, and depth is cleared once a run, and again every 4095 groups. Its elements
    draw with no colour and a greater-or-equal depth test that writes, each under its own mask; then
-   the same shapes draw again with an equal test that writes nothing, not under their own masks,
-   writing their values to alpha by the group's blend. At each pixel only a shape holding the group's
+   the same elements draw again with an equal test that writes nothing, not under their own masks,
+   writing their values to alpha by the group's blend. At each pixel only an element holding the group's
    greatest passes, or one holding the same value, so alpha takes the group's blend of its greatest.
    Positions are `invariant`, so the two passes' depths are equal to the bit.
 5. `Add` sets alpha to 1 where the layers under it cover, `Subtract` to 0, alpha alone written under
@@ -305,8 +305,8 @@ the bound target's alpha (8 bits) over the mask's cover box, with its depth buff
    the quad lands at its alpha times the mask.
 7. Alpha is set back to 1 over the cover box, and stencil bit 5 cleared there.
 
-A group costs its shapes twice and its own masks once each; with the tint's, a colonist costs his
-bright shape three times (as a shape twice, as his pieces' mask once) and his pieces twice, linear in the
+A group costs its elements twice and its own masks once each; with the tint's, a colonist costs his
+bright shape three times (as an element twice, as his pieces' mask once) and his pieces twice, linear in the
 colonists, with no pass per pair. Masks of 0 or 1 alone take none of this: they draw exactly as above.
 
 The backend's states for it (`backend/Backend.h`): blend states `Replace`, `Max`, `Min`,

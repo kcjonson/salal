@@ -38,12 +38,12 @@ namespace {
 
 	namespace Primitives = Renderer::Primitives;
 	using Foundation::Vec2;
-	using Primitives::MixBlendMode;
 	using Primitives::MaskComposite;
+	using Primitives::MaskElement;
 	using Primitives::MaskImage;
 	using Primitives::MaskLayer;
 	using Primitives::MaskPaint;
-	using Primitives::MaskElement;
+	using Primitives::MixBlendMode;
 
 	constexpr const char* kSceneName = "mask";
 	constexpr float		  kPi = std::numbers::pi_v<float>;
@@ -438,10 +438,10 @@ namespace {
 				{.image = MaskImage::polygon(abuttingGrown)},
 				{.image = MaskImage::polygon(overlappingGrown)},
 			}};
-			std::vector<MaskElement>		   unseenFeather = {
-				{.mesh = {firstFeather, camera}, .mask = outsidePendingFeather, .blend = MixBlendMode::Lighten},
-				{.mesh = {secondFeather, camera}, .mask = outsidePendingFeather, .blend = MixBlendMode::Lighten},
-			};
+			std::vector<MaskElement>	   unseenFeather = {
+				  {.mesh = {firstFeather, camera}, .mask = outsidePendingFeather, .blend = MixBlendMode::Lighten},
+				  {.mesh = {secondFeather, camera}, .mask = outsidePendingFeather, .blend = MixBlendMode::Lighten},
+			  };
 			for (const Piece& piece : pendingPieces) {
 				outlines.push_back(piece.corners);
 				unseenFeather.push_back({.points = outlines.back(), .paint = pieceGradient(piece), .blend = MixBlendMode::Lighten});

@@ -38,13 +38,13 @@
 namespace Renderer {
 
 	using Foundation::Vec2;
-	using Primitives::MixBlendMode;
 	using Primitives::MaskComposite;
+	using Primitives::MaskElement;
 	using Primitives::MaskImage;
 	using Primitives::MaskLayer;
 	using Primitives::MaskMesh;
 	using Primitives::MaskPaint;
-	using Primitives::MaskElement;
+	using Primitives::MixBlendMode;
 
 	namespace {
 		constexpr float kFeather = 12.0F; // sightFeatherMm, in pixels
@@ -227,15 +227,17 @@ namespace Renderer {
 
 		// The pieces of `pieces` as content shapes under `ownMask`, combined by lighten, their outlines
 		// kept in `outlines`, which must hold room for them all (the shapes point into it).
-		void appendShapes(
+		void appendElements(
 			std::span<const Piece>			  pieces,
 			std::span<const MaskLayer>		  ownMask,
 			std::vector<std::array<Vec2, 3>>& outlines,
-			std::vector<MaskElement>&			  shapes
+			std::vector<MaskElement>&		  shapes
 		) {
 			for (const Piece& piece : pieces) {
 				outlines.push_back(piece.corners);
-				shapes.push_back({.points = outlines.back(), .paint = pieceGradient(piece), .mask = ownMask, .blend = MixBlendMode::Lighten});
+				shapes.push_back(
+					{.points = outlines.back(), .paint = pieceGradient(piece), .mask = ownMask, .blend = MixBlendMode::Lighten}
+				);
 			}
 		}
 	} // namespace
@@ -349,12 +351,12 @@ namespace Renderer {
 		EXPECT_EQ(drawsWith(backend::BlendState::OverByDestinationAlpha, backend::ChannelWrites::Colour), 1U);
 		// A shape's own mask is built in its own bits, cleared over its box, not across the target.
 		for (const auto& clear : gpu->stencilClears()) {
-			EXPECT_EQ(clear.bits & (kShapeMaskAccumulatorBit | kShapeMaskScratchBit), 0);
+			EXPECT_EQ(clear.bits & (kElementMaskAccumulatorBit | kElementMaskScratchBit), 0);
 		}
 	}
 
 	TEST_F(CoverageBatchTest, MasksSalalDoesNotEvaluateDrawNothing) {
-		const std::array<Vec2, 3>	 triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
+		const std::array<Vec2, 3>	   triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
 		const std::vector<MaskElement> content = {{.points = triangle, .paint = MaskPaint::solid(1.0F)}};
 		// A content layer under another layer.
 		const std::array<MaskLayer, 2> underneath = {
@@ -365,23 +367,23 @@ namespace Renderer {
 		MaskElement group{.blend = MixBlendMode::Lighten};
 		group.children.push_back({.points = triangle});
 		group.children.push_back({.points = triangle, .blend = MixBlendMode::Darken});
-		const std::vector<MaskElement>   darkened = {group};
+		const std::vector<MaskElement> darkened = {group};
 		const std::array<MaskLayer, 1> darkenedMask = {{{.image = MaskImage::svgMask(darkened)}}};
 		fill(darkenedMask);
 		Primitives::endFrame();
 		EXPECT_TRUE(gpu->draws().empty());
 	}
 
-	TEST_F(CoverageBatchTest, AShapeWithBothPointsAndAMeshIsRefusedAndLoggedOnce) {
+	TEST_F(CoverageBatchTest, AnElementWithBothPointsAndAMeshIsRefusedAndLoggedOnce) {
 		const std::array<Vec2, 3> triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
 		renderer::TessellatedMesh triangleMesh;
 		triangleMesh.vertices = {triangle.begin(), triangle.end()};
 		triangleMesh.indices = {0, 1, 2};
 		triangleMesh.colors.assign(3, Foundation::Color::white());
 		InstancedMeshHandle			   uploaded = Primitives::uploadInstancedMesh(triangleMesh, 1);
-		const std::vector<MaskElement>   both = {{.points = triangle, .mesh = {uploaded, Primitives::WorldCamera{}}}};
+		const std::vector<MaskElement> both = {{.points = triangle, .mesh = {uploaded, Primitives::WorldCamera{}}}};
 		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::svgMask(both)}}};
-		expectRefusedOnce([&] { fill(mask); }, "a shape has both points and a mesh");
+		expectRefusedOnce([&] { fill(mask); }, "an element has both points and a mesh");
 		Primitives::releaseInstancedMesh(uploaded);
 	}
 
@@ -389,14 +391,14 @@ namespace Renderer {
 		const std::array<Vec2, 3> triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
 		MaskElement				  painted{.paint = MaskPaint::solid(0.5F)};
 		painted.children.push_back({.points = triangle, .paint = MaskPaint::solid(1.0F)});
-		const std::vector<MaskElement>   content = {painted};
+		const std::vector<MaskElement> content = {painted};
 		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::svgMask(content)}}};
 		expectRefusedOnce([&] { fill(mask); }, "a group carries a paint");
 	}
 
 	TEST_F(CoverageBatchTest, AnAdditiveRectUnderAContentLayerIsRefusedAndLoggedOnce) {
 		const std::array<Vec2, 3>	   triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
-		const std::vector<MaskElement>   content = {{.points = triangle, .paint = MaskPaint::solid(1.0F)}};
+		const std::vector<MaskElement> content = {{.points = triangle, .paint = MaskPaint::solid(1.0F)}};
 		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::svgMask(content)}}};
 		expectRefusedOnce(
 			[&] {
@@ -413,7 +415,7 @@ namespace Renderer {
 
 	TEST_F(CoverageBatchTest, ATargetWithNoAlphaOrDepthDrawsAContentMaskAsNothing) {
 		const std::array<Vec2, 3>	   triangle = {{{4.0F, 4.0F}, {40.0F, 4.0F}, {4.0F, 40.0F}}};
-		const std::vector<MaskElement>   content = {{.points = triangle, .paint = MaskPaint::solid(1.0F)}};
+		const std::vector<MaskElement> content = {{.points = triangle, .paint = MaskPaint::solid(1.0F)}};
 		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::svgMask(content)}}};
 		gpu->setWindowAlphaAndDepth(false);
 		fill(mask);
@@ -679,9 +681,9 @@ namespace Renderer {
 	// A content shape reaching far past the masked rect writes nothing outside the rect's cover box:
 	// on a target cleared transparent, the pixels between the rect and the shape's edge keep alpha 0,
 	// and under the rect the alpha is opaque.
-	TEST_F(CoverageDrawTest, AContentShapeWritesNothingOutsideTheCoverBox) {
+	TEST_F(CoverageDrawTest, AContentElementWritesNothingOutsideTheCoverBox) {
 		const std::array<Vec2, 4>	   shape = {{{100.0F, 100.0F}, {400.0F, 100.0F}, {400.0F, 400.0F}, {100.0F, 400.0F}}};
-		const std::vector<MaskElement>   content = {{.points = shape, .paint = MaskPaint::solid(0.75F)}};
+		const std::vector<MaskElement> content = {{.points = shape, .paint = MaskPaint::solid(0.75F)}};
 		const std::array<MaskLayer, 1> mask = {{{.image = MaskImage::svgMask(content)}}};
 		const Foundation::Rect		   bounds{200.0F, 200.0F, 100.0F, 100.0F};
 		target.begin();
@@ -811,7 +813,7 @@ namespace Renderer {
 		};
 		std::vector<std::array<Vec2, 3>> outlines;
 		outlines.reserve(pendingPieces.size());
-		appendShapes(pendingPieces, {}, outlines, unseenFeather);
+		appendElements(pendingPieces, {}, outlines, unseenFeather);
 		const std::array<Vec2, 4> abuttingOutline = {
 			{{abutting.left, abutting.top},
 			 {abutting.right, abutting.top},
@@ -1052,7 +1054,7 @@ namespace Renderer {
 			insideBrightShapes.push_back({{{.image = MaskImage::polygon(colonist.bright)}}});
 			MaskElement group{.blend = MixBlendMode::Darken};
 			group.children.push_back({.points = colonist.bright, .paint = MaskPaint::solid(0.0F)});
-			appendShapes(colonist.pieces, insideBrightShapes.back(), outlines, group.children);
+			appendElements(colonist.pieces, insideBrightShapes.back(), outlines, group.children);
 			tint.push_back(std::move(group));
 		}
 		const std::array<MaskLayer, 1> tintMask = {{{.image = MaskImage::svgMask(tint)}}};

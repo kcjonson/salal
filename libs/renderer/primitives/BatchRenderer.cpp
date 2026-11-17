@@ -420,8 +420,8 @@ namespace Renderer {
 		}
 		const auto	 layerStart = static_cast<uint32_t>(maskLayers.size());
 		const size_t triangleMark = maskTriangles.size();
-		const size_t shapeMark = maskShapes.size();
-		const size_t shapePointMark = shapePoints.size();
+		const size_t elementMark = maskElements.size();
+		const size_t elementPointMark = elementPoints.size();
 		const bool	 isIdentity = transformClass == TransformClass::kIdentity;
 		uint64_t	 hash = 14695981039346656037ULL; // FNV-1a
 		const auto	 mix = [&hash](uint64_t value) {
@@ -436,13 +436,13 @@ namespace Renderer {
 				.meshIndexCount = layer.meshIndexCount,
 				.camera = layer.camera,
 				.content = layer.content,
-				.shapeStart = static_cast<uint32_t>(maskShapes.size()),
+				.elementStart = static_cast<uint32_t>(maskElements.size()),
 			};
 			if (layer.content) {
-				for (const MaskElementGeometry& shape : layer.shapes) {
-					internShape(shape, isIdentity, hash);
+				for (const MaskElementGeometry& element : layer.elements) {
+					internElement(element, isIdentity, hash);
 				}
-				entry.shapeCount = static_cast<uint32_t>(maskShapes.size()) - entry.shapeStart;
+				entry.elementCount = static_cast<uint32_t>(maskElements.size()) - entry.elementStart;
 			} else if (!layer.meshGeometry.isValid()) {
 				for (size_t index = 0; index + 2 < layer.indices.size(); index += 3) {
 					if (layer.indices[index] >= layer.vertices.size() || layer.indices[index + 1] >= layer.vertices.size() ||
@@ -461,7 +461,7 @@ namespace Renderer {
 			mix(static_cast<uint64_t>(entry.composite));
 			mix(entry.triangleCount);
 			mix(entry.meshGeometry.value);
-			mix(entry.shapeCount);
+			mix(entry.elementCount);
 			maskLayers.push_back(entry);
 		}
 		for (size_t index = triangleMark; index < maskTriangles.size(); ++index) {
@@ -483,9 +483,9 @@ namespace Renderer {
 			if (same) {
 				maskLayers.resize(layerStart);
 				maskTriangles.resize(triangleMark);
-				maskShapes.resize(shapeMark);
-				shapePoints.resize(shapePointMark);
-				shapeValues.resize(shapePointMark);
+				maskElements.resize(elementMark);
+				elementPoints.resize(elementPointMark);
+				elementValues.resize(elementPointMark);
 				return static_cast<uint32_t>(index + 1);
 			}
 		}
@@ -493,25 +493,25 @@ namespace Renderer {
 		return static_cast<uint32_t>(maskEntries.size());
 	}
 
-	void BatchRenderer::internShape(const MaskElementGeometry& shape, bool isIdentity, uint64_t& hash) {
+	void BatchRenderer::internElement(const MaskElementGeometry& element, bool isIdentity, uint64_t& hash) {
 		const auto mix = [&hash](uint64_t value) {
 			hash = (hash ^ value) * 1099511628211ULL;
 		};
 		MaskElementEntry entry{
-			.triangleStart = static_cast<uint32_t>(shapePoints.size() / 3),
-			.meshGeometry = shape.meshGeometry,
-			.meshInstances = shape.meshInstances,
-			.meshIndexCount = shape.meshIndexCount,
-			.camera = shape.camera,
-			.mask = shape.mask,
-			.blend = shape.blend,
-			.group = shape.group,
-			.groupBlend = shape.groupBlend,
+			.triangleStart = static_cast<uint32_t>(elementPoints.size() / 3),
+			.meshGeometry = element.meshGeometry,
+			.meshInstances = element.meshInstances,
+			.meshIndexCount = element.meshIndexCount,
+			.camera = element.camera,
+			.mask = element.mask,
+			.blend = element.blend,
+			.group = element.group,
+			.groupBlend = element.groupBlend,
 		};
 		// A mesh's box is the view's: nothing on the CPU bounds it.
 		Foundation::Vec4 box = viewBox();
-		if (!shape.meshGeometry.isValid()) {
-			const size_t pointCount = std::min(shape.triangles.size() / 3 * 3, shape.values.size() / 3 * 3);
+		if (!element.meshGeometry.isValid()) {
+			const size_t pointCount = std::min(element.triangles.size() / 3 * 3, element.values.size() / 3 * 3);
 			box = Foundation::Vec4(
 				std::numeric_limits<float>::max(),
 				std::numeric_limits<float>::max(),
@@ -519,10 +519,10 @@ namespace Renderer {
 				std::numeric_limits<float>::lowest()
 			);
 			for (size_t index = 0; index < pointCount; ++index) {
-				const Foundation::Vec2 point = TransformPosition(shape.triangles[index], currentTransform, isIdentity);
-				const float			   value = std::clamp(shape.values[index], 0.0F, 1.0F);
-				shapePoints.push_back(point);
-				shapeValues.push_back(value);
+				const Foundation::Vec2 point = TransformPosition(element.triangles[index], currentTransform, isIdentity);
+				const float			   value = std::clamp(element.values[index], 0.0F, 1.0F);
+				elementPoints.push_back(point);
+				elementValues.push_back(value);
 				box = Foundation::Vec4(
 					std::min(box.x, point.x), std::min(box.y, point.y), std::max(box.z, point.x), std::max(box.w, point.y)
 				);
@@ -532,7 +532,7 @@ namespace Renderer {
 			}
 			entry.triangleCount = static_cast<uint32_t>(pointCount / 3);
 		}
-		// A shape's own mask is read only where the shape lands, so its cover takes in the shape's box.
+		// An element's own mask is read only where the element lands, so its cover takes in the element's box.
 		if (entry.mask != 0 && (entry.triangleCount > 0 || entry.meshGeometry.isValid())) {
 			MaskEntry& masked = maskEntries[entry.mask - 1];
 			masked.cover = masked.covered ? Foundation::Vec4(
@@ -549,18 +549,18 @@ namespace Renderer {
 		mix(entry.mask);
 		mix((static_cast<uint64_t>(entry.group) << 16U) | (static_cast<uint64_t>(entry.blend) << 8U) |
 			static_cast<uint64_t>(entry.groupBlend));
-		maskShapes.push_back(entry);
+		maskElements.push_back(entry);
 	}
 
 	bool BatchRenderer::sameLayer(const MaskLayerEntry& first, const MaskLayerEntry& second) const {
 		if (first.composite != second.composite || first.triangleCount != second.triangleCount ||
 			first.meshGeometry != second.meshGeometry || first.meshInstances != second.meshInstances ||
 			first.meshIndexCount != second.meshIndexCount || !(first.camera == second.camera) || first.content != second.content ||
-			first.shapeCount != second.shapeCount) {
+			first.elementCount != second.elementCount) {
 			return false;
 		}
-		for (uint32_t offset = 0; offset < first.shapeCount; ++offset) {
-			if (!sameShape(maskShapes[first.shapeStart + offset], maskShapes[second.shapeStart + offset])) {
+		for (uint32_t offset = 0; offset < first.elementCount; ++offset) {
+			if (!sameElement(maskElements[first.elementStart + offset], maskElements[second.elementStart + offset])) {
 				return false;
 			}
 		}
@@ -569,7 +569,7 @@ namespace Renderer {
 		return std::equal(firstTriangles, firstTriangles + (static_cast<ptrdiff_t>(first.triangleCount) * 3), secondTriangles);
 	}
 
-	bool BatchRenderer::sameShape(const MaskElementEntry& first, const MaskElementEntry& second) const {
+	bool BatchRenderer::sameElement(const MaskElementEntry& first, const MaskElementEntry& second) const {
 		if (first.triangleCount != second.triangleCount || first.meshGeometry != second.meshGeometry ||
 			first.meshInstances != second.meshInstances || first.meshIndexCount != second.meshIndexCount ||
 			!(first.camera == second.camera) || first.mask != second.mask || first.blend != second.blend || first.group != second.group ||
@@ -579,8 +579,12 @@ namespace Renderer {
 		const auto firstStart = static_cast<ptrdiff_t>(first.triangleStart) * 3;
 		const auto secondStart = static_cast<ptrdiff_t>(second.triangleStart) * 3;
 		const auto count = static_cast<ptrdiff_t>(first.triangleCount) * 3;
-		return std::equal(shapePoints.begin() + firstStart, shapePoints.begin() + firstStart + count, shapePoints.begin() + secondStart) &&
-			   std::equal(shapeValues.begin() + firstStart, shapeValues.begin() + firstStart + count, shapeValues.begin() + secondStart);
+		return std::equal(
+				   elementPoints.begin() + firstStart, elementPoints.begin() + firstStart + count, elementPoints.begin() + secondStart
+			   ) &&
+			   std::equal(
+				   elementValues.begin() + firstStart, elementValues.begin() + firstStart + count, elementValues.begin() + secondStart
+			   );
 	}
 
 	Foundation::Vec4 BatchRenderer::viewBox() const {
@@ -627,9 +631,9 @@ namespace Renderer {
 		maskEntries.clear();
 		maskLayers.clear();
 		maskTriangles.clear();
-		maskShapes.clear();
-		shapePoints.clear();
-		shapeValues.clear();
+		maskElements.clear();
+		elementPoints.clear();
+		elementValues.clear();
 	}
 
 	void BatchRenderer::addTriangles(const TriangleMeshArgs& mesh) {
@@ -1023,7 +1027,7 @@ namespace Renderer {
 		const DrawPlan drawPlan = plan();
 
 		// The whole batch, every flush: the stream buffer starts over. With masks, each layer's
-		// triangles, each content shape's triangles with its values as their colour, and each
+		// triangles, each content element's triangles with its values as their colour, and each
 		// mask's two cover quads, alpha 0 then alpha 1, follow the plan's quads, as flat quads with
 		// no clip.
 		std::span<const BatchInstance> upload = drawPlan.instances;
@@ -1046,14 +1050,14 @@ namespace Renderer {
 					flatQuad(corners, kNoFill);
 				}
 			}
-			shapeFirstInstance.resize(maskShapes.size());
-			for (size_t shapeIndex = 0; shapeIndex < maskShapes.size(); ++shapeIndex) {
-				const MaskElementEntry& shape = maskShapes[shapeIndex];
-				shapeFirstInstance[shapeIndex] = static_cast<uint32_t>(maskedUpload.size());
-				for (uint32_t triangle = 0; triangle < shape.triangleCount; ++triangle) {
-					const size_t			first = (static_cast<size_t>(shape.triangleStart) + triangle) * 3;
-					const Foundation::Vec2* points = &shapePoints[first];
-					const float*			values = &shapeValues[first];
+			elementFirstInstance.resize(maskElements.size());
+			for (size_t elementIndex = 0; elementIndex < maskElements.size(); ++elementIndex) {
+				const MaskElementEntry& element = maskElements[elementIndex];
+				elementFirstInstance[elementIndex] = static_cast<uint32_t>(maskedUpload.size());
+				for (uint32_t triangle = 0; triangle < element.triangleCount; ++triangle) {
+					const size_t			first = (static_cast<size_t>(element.triangleStart) + triangle) * 3;
+					const Foundation::Vec2* points = &elementPoints[first];
+					const float*			values = &elementValues[first];
 					const Foundation::Vec2	corners[4] = {points[0], points[1], points[2], points[2]};
 					const uint32_t			fills[4] = {
 						 glm::packUnorm4x8(Foundation::Vec4(values[0])),
@@ -1275,14 +1279,14 @@ namespace Renderer {
 	//
 	// - The layers under it are built in the stencil as any mask is.
 	// - The canvas starts at 0 over the cover box, which sets the cover box's stencil bit there; every
-	//   shape draws only where that bit is set, so none writes alpha or depth outside the box.
-	// - A shape outside a group lands on the canvas by its blend, replace, max or min on alpha, under
+	//   element draws only where that bit is set, so none writes alpha or depth outside the box.
+	// - An element outside a group lands on the canvas by its blend, replace, max or min on alpha, under
 	//   its own mask's stencil bit.
-	// - An isolated group's value, the greatest of its shapes, is found in depth: its shapes are drawn
+	// - An isolated group's value, the greatest of its elements, is found in depth: its elements are drawn
 	//   with their values as depth, above every earlier group's, keeping the greater, colour off and
 	//   each under its own mask; then drawn again where their depth equals what is stored, writing
-	//   their values to alpha by the group's blend. Only the shape that holds the greatest at a pixel,
-	//   or one equal to it, passes, so the group lands as its greatest, where any of its shapes does.
+	//   their values to alpha by the group's blend. Only the element that holds the greatest at a pixel,
+	//   or one equal to it, passes, so the group lands as its greatest, where any of its elements does.
 	// - Source over sets the alpha to 1 where the layers under it cover, source out to 0.
 	void BatchRenderer::buildCoverageMask(uint32_t index) {
 		const MaskEntry&	  entry = maskEntries[index - 1];
@@ -1301,15 +1305,15 @@ namespace Renderer {
 			 .instanceCount = 1}
 		);
 
-		builtShapeMask = 0;
+		builtElementMask = 0;
 		uint32_t	groupsSinceClear = kCoverageGroupsPerClear;
 		const float groupSpan = 1.0F / static_cast<float>(kCoverageGroupsPerClear);
-		for (uint32_t offset = 0; offset < content.shapeCount;) {
-			const MaskElementEntry& shape = maskShapes[content.shapeStart + offset];
-			if (shape.group == 0) {
-				drawShape(
-					content.shapeStart + offset,
-					coverageBlend(shape.blend),
+		for (uint32_t offset = 0; offset < content.elementCount;) {
+			const MaskElementEntry& element = maskElements[content.elementStart + offset];
+			if (element.group == 0) {
+				drawElement(
+					content.elementStart + offset,
+					coverageBlend(element.blend),
 					backend::ChannelWrites::Alpha,
 					backend::DepthState::Off,
 					true,
@@ -1319,7 +1323,7 @@ namespace Renderer {
 				continue;
 			}
 			uint32_t end = offset + 1;
-			while (end < content.shapeCount && maskShapes[content.shapeStart + end].group == shape.group) {
+			while (end < content.elementCount && maskElements[content.elementStart + end].group == element.group) {
 				++end;
 			}
 			if (groupsSinceClear + 1 >= kCoverageGroupsPerClear) {
@@ -1330,8 +1334,8 @@ namespace Renderer {
 			++groupsSinceClear;
 			const Foundation::Vec2 depth{static_cast<float>(groupsSinceClear) * groupSpan, 0.5F * groupSpan};
 			for (uint32_t member = offset; member < end; ++member) {
-				drawShape(
-					content.shapeStart + member,
+				drawElement(
+					content.elementStart + member,
 					backend::BlendState::Alpha,
 					backend::ChannelWrites::None,
 					backend::DepthState::GreaterOrEqual,
@@ -1340,9 +1344,9 @@ namespace Renderer {
 				);
 			}
 			for (uint32_t member = offset; member < end; ++member) {
-				drawShape(
-					content.shapeStart + member,
-					coverageBlend(shape.groupBlend),
+				drawElement(
+					content.elementStart + member,
+					coverageBlend(element.groupBlend),
 					backend::ChannelWrites::Alpha,
 					backend::DepthState::Equal,
 					false,
@@ -1373,54 +1377,54 @@ namespace Renderer {
 		submitPending();
 	}
 
-	void BatchRenderer::drawShape(
-		uint32_t			   shapeIndex,
+	void BatchRenderer::drawElement(
+		uint32_t			   elementIndex,
 		backend::BlendState	   blend,
 		backend::ChannelWrites writes,
 		backend::DepthState	   depth,
 		bool				   underOwnMask,
 		Foundation::Vec2	   coverageDepth
 	) {
-		const MaskElementEntry& shape = maskShapes[shapeIndex];
-		backend::StencilState stencil{
-			.test = true,
-			.function = backend::StencilFunction::Equal,
-			.reference = kCoverBoxBit,
-			.readMask = kCoverBoxBit,
-			.writeMask = 0,
-		};
-		if (underOwnMask && shape.mask != 0) {
-			if (builtShapeMask != shape.mask) {
-				builtShapeMaskInverted = buildMask(
-					shape.mask, 0, {.accumulator = kShapeMaskAccumulatorBit, .scratch = kShapeMaskScratchBit, .clearOverCover = true}
+		const MaskElementEntry& element = maskElements[elementIndex];
+		backend::StencilState	stencil{
+			  .test = true,
+			  .function = backend::StencilFunction::Equal,
+			  .reference = kCoverBoxBit,
+			  .readMask = kCoverBoxBit,
+			  .writeMask = 0,
+		  };
+		if (underOwnMask && element.mask != 0) {
+			if (builtElementMask != element.mask) {
+				builtElementMaskInverted = buildMask(
+					element.mask, 0, {.accumulator = kElementMaskAccumulatorBit, .scratch = kElementMaskScratchBit, .clearOverCover = true}
 				);
-				builtShapeMask = shape.mask;
+				builtElementMask = element.mask;
 			}
-			stencil.reference = builtShapeMaskInverted ? kCoverBoxBit : static_cast<uint8_t>(kCoverBoxBit | kShapeMaskAccumulatorBit);
-			stencil.readMask = static_cast<uint8_t>(kCoverBoxBit | kShapeMaskAccumulatorBit);
+			stencil.reference = builtElementMaskInverted ? kCoverBoxBit : static_cast<uint8_t>(kCoverBoxBit | kElementMaskAccumulatorBit);
+			stencil.readMask = static_cast<uint8_t>(kCoverBoxBit | kElementMaskAccumulatorBit);
 		}
-		if (shape.meshGeometry.isValid()) {
-			backend::DrawUniforms world = worldUniforms(shape.camera.position, shape.camera.zoom, shape.camera.pixelsPerMeter);
+		if (element.meshGeometry.isValid()) {
+			backend::DrawUniforms world = worldUniforms(element.camera.position, element.camera.zoom, element.camera.pixelsPerMeter);
 			world.bakedAlpha = 1.0F;
 			world.coverageDepth = coverageDepth;
 			useUniforms(world);
 			submitPending();
 			const InstanceData origin;
-			gpu.updateBuffer(shape.meshInstances, 0, sizeof(InstanceData), &origin);
+			gpu.updateBuffer(element.meshInstances, 0, sizeof(InstanceData), &origin);
 			drawCalls.push_back(
 				{.pipeline = pipeline,
-				 .geometry = shape.meshGeometry,
+				 .geometry = element.meshGeometry,
 				 .blend = blend,
 				 .stencil = stencil,
 				 .writes = writes,
 				 .depth = depth,
-				 .indexCount = shape.meshIndexCount,
+				 .indexCount = element.meshIndexCount,
 				 .instanceCount = 1}
 			);
 			submitPending();
 			return;
 		}
-		if (shape.triangleCount == 0) {
+		if (element.triangleCount == 0) {
 			return;
 		}
 		backend::DrawUniforms flat = batchedUniforms;
@@ -1433,8 +1437,8 @@ namespace Renderer {
 			 .stencil = stencil,
 			 .writes = writes,
 			 .depth = depth,
-			 .firstInstance = shapeFirstInstance[shapeIndex],
-			 .instanceCount = shape.triangleCount}
+			 .firstInstance = elementFirstInstance[elementIndex],
+			 .instanceCount = element.triangleCount}
 		);
 	}
 
@@ -1453,7 +1457,7 @@ namespace Renderer {
 	//   layer outside what it held) or leave it (inverted: what it holds is already the
 	//   complement), and clear the scratch bit. The result is not inverted.
 	//
-	// The bits are cleared first, across the target, or over the cover box for a shape's own mask,
+	// The bits are cleared first, across the target, or over the cover box for an element's own mask,
 	// whose bits are read only there. Every layer draws aliased, with no clip and no colour.
 	// Returns `inverted`, which the draws under it read: they draw where the accumulator bit is
 	// clear when it is set.
