@@ -205,8 +205,8 @@ namespace {
 	float distanceToSegment(Vec2 point, Vec2 start, Vec2 end) {
 		const Vec2	along = end - start;
 		const float lengthSquared = glm::dot(along, along);
-		const float t = lengthSquared > 0.0F ? std::clamp(glm::dot(point - start, along) / lengthSquared, 0.0F, 1.0F) : 0.0F;
-		return glm::length(point - (start + (along * t)));
+		const float fraction = lengthSquared > 0.0F ? std::clamp(glm::dot(point - start, along) / lengthSquared, 0.0F, 1.0F) : 0.0F;
+		return glm::length(point - (start + (along * fraction)));
 	}
 
 	// The largest distance from any of `vertices` to the polyline `centreline`.
