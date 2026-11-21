@@ -491,7 +491,8 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		void				releaseInstancedMesh(InstancedMeshHandle& handle);
 
 		// Part of an uploaded mesh's index buffer: `count` indices from `first`, both
-		// counted in indices. The default is every index.
+		// counted in indices (not triangles, and not drawInstanced's instance count),
+		// each a multiple of 3. The default is every index.
 		struct IndexRange {
 			static constexpr uint32_t kToEnd = UINT32_MAX; // every index from `first` on
 
@@ -503,7 +504,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		// the per-instance transforms applied on the GPU under `camera` and the base
 		// shader's hooks run on every vertex (setHookUniforms below). Each instance
 		// draws the `indices` range of the mesh's index buffer, all of it by default.
-		// A range reaching past the mesh's indices draws nothing and is logged.
+		// An empty range draws nothing and counts no draw. A range reaching past the
+		// mesh's indices, or not of whole triangles, draws nothing, logged the first
+		// time.
 		void drawInstanced(
 			const InstancedMeshHandle& handle,
 			const InstanceData*		   instances,

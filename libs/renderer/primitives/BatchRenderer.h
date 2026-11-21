@@ -685,6 +685,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 
 		bool warnedStale = false;
 
+		// drawInstanced() was given an index range past its mesh or not of whole triangles.
+		bool warnedBadIndexRange = false;
+
 		// The base shader's fill hooks by index, fillHooks[i] index i + 1's name, which a rect's
 		// Fill is checked against; the indexes the quads added since the last flush name; and
 		// the ids addQuad warned for, once each.

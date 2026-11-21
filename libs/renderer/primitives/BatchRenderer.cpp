@@ -1801,17 +1801,26 @@ namespace Renderer {
 			return;
 		}
 		const bool toEnd = indices.count == Primitives::IndexRange::kToEnd;
-		if (indices.first > handle.indexCount || (!toEnd && indices.count > handle.indexCount - indices.first)) {
-			LOG_ERROR(
-				Renderer,
-				"drawInstanced: %u indices from %u reach past the mesh's %u; not drawn",
-				indices.count,
-				indices.first,
-				handle.indexCount
-			);
+		const bool pastEnd = indices.first > handle.indexCount || (!toEnd && indices.count > handle.indexCount - indices.first);
+		// A range that isn't whole triangles would draw triangles stitched from its neighbours.
+		const bool wholeTriangles = indices.first % 3 == 0 && (toEnd || indices.count % 3 == 0);
+		if (pastEnd || !wholeTriangles) {
+			if (!warnedBadIndexRange) {
+				warnedBadIndexRange = true;
+				LOG_ERROR(
+					Renderer,
+					"drawInstanced: %u indices from %u are not whole triangles within the mesh's %u; not drawn (logged once)",
+					indices.count,
+					indices.first,
+					handle.indexCount
+				);
+			}
 			return;
 		}
 		const Primitives::IndexRange range{.first = indices.first, .count = toEnd ? handle.indexCount - indices.first : indices.count};
+		if (range.count == 0) {
+			return;
+		}
 
 		uniforms = worldUniforms(cameraPosition, cameraZoom, pixelsPerMeter);
 		gpu.setUniforms(uniforms);
