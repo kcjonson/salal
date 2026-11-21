@@ -205,8 +205,10 @@ a call takes several parameters.
 **Names are whole readable words.** No one- or two-letter variables,
 parameters or namespace aliases (`namespace P = Renderer::Primitives` is out:
 write `Primitives::drawRect`, or a `using` of whole-word names). Loop indices
-and `x`, `y`, `z` are the exceptions. Older code that breaks this is legacy,
-not a pattern to copy.
+and `x`, `y`, `z` are the exceptions. Where CSS or SVG names a thing, its name
+is used even when it is a single letter (the `a` to `f` of a transform matrix),
+since following CSS's names outranks this rule. Older code that breaks this is
+legacy, not a pattern to copy.
 
 > **A discrepancy worth knowing.** Worldsim's `CLAUDE.md` said
 > "Classes/Functions: PascalCase" with `LoadTexture` as the example, while its
