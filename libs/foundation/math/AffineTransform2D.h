@@ -45,9 +45,10 @@ namespace Foundation { // NOLINT(readability-identifier-naming)
 
 		[[nodiscard]] constexpr float determinant() const { return (a * d) - (b * c); }
 
-		// Empty when the map has no inverse: a determinant of zero, or one so small that the
-		// inverse overflows. A near-singular map (a face seen almost edge-on) inverts to huge
-		// values; a caller that cares tests the determinant first.
+		// Empty when the map has no inverse in floats: a determinant of zero, a determinant that
+		// itself overflows (a = d = 1e20), or one so small that the inverse overflows. A
+		// near-singular map (a face seen almost edge-on) inverts to huge values; a caller that
+		// cares tests the determinant first.
 		[[nodiscard]] std::optional<AffineTransform2D> inverse() const {
 			const float divisor = determinant();
 			if (divisor == 0.0F || !std::isfinite(divisor)) {

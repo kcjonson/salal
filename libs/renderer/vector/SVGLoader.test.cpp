@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <ranges>
 #include <span>
 #include <string>
 #include <vector>
@@ -245,9 +246,54 @@ namespace {
 } // namespace
 
 // The two-argument call is the defaults (identity, None, brightness 1), and those leave a shape as
-// it always was: the fill exactly the tessellator's triangles coloured by the gradient at each
-// vertex, then the stroke exactly as a stroke-only shape builds it.
+// it was before the options existed: the fill exactly the tessellator's triangles coloured by the
+// gradient at each vertex, the stroke bands and the parts exactly the values the two-argument
+// appendShapeMesh produced at v0.43.0, written out here.
 TEST(SVGLoaderTest, DefaultArgsDrawTheShapeAsDrawn) {
+	const auto expectStroke =
+		[](const renderer::LoadedSVGShape& shape, const std::vector<Vec2>& vertices, const std::vector<uint16_t>& indices) {
+			renderer::TessellatedMesh mesh;
+			renderer::appendShapeMesh(shape, mesh);
+			EXPECT_EQ(mesh.vertices, vertices);
+			EXPECT_EQ(mesh.indices, indices);
+			ASSERT_EQ(mesh.parts.size(), 1U);
+			EXPECT_EQ(mesh.parts[0].vertexStart, 0U);
+			EXPECT_EQ(mesh.parts[0].vertexCount, vertices.size());
+		};
+	// M0,0 L10,0 at stroke width 2: one quad.
+	expectStroke(
+		strokeShape({{0.0F, 0.0F}, {10.0F, 0.0F}}, /*closed=*/false, 2.0F),
+		{{0.0F, 1.0F}, {0.0F, -1.0F}, {10.0F, 1.0F}, {10.0F, -1.0F}},
+		{0, 2, 3, 0, 3, 1}
+	);
+	// The closed unit square at width 0.1: four quads, then four bevel wedges.
+	expectStroke(
+		strokeShape({{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}}, /*closed=*/true, 0.1F),
+		{{0.0F, 0.0500000007F},	 {0.0F, -0.0500000007F}, {1.0F, 0.0500000007F},	 {1.0F, -0.0500000007F}, {0.949999988F, 0.0F},
+		 {1.04999995F, 0.0F},	 {0.949999988F, 1.0F},	 {1.04999995F, 1.0F},	 {1.0F, 0.949999988F},	 {1.0F, 1.04999995F},
+		 {0.0F, 0.949999988F},	 {0.0F, 1.04999995F},	 {0.0500000007F, 1.0F},	 {-0.0500000007F, 1.0F}, {0.0500000007F, 0.0F},
+		 {-0.0500000007F, 0.0F}, {0.0F, 0.0F},			 {-0.0500000007F, 0.0F}, {0.0F, -0.0500000007F}, {1.0F, 0.0F},
+		 {1.0F, -0.0500000007F}, {1.04999995F, 0.0F},	 {1.0F, 1.0F},			 {1.04999995F, 1.0F},	 {1.0F, 1.04999995F},
+		 {0.0F, 1.0F},			 {0.0F, 1.04999995F},	 {-0.0500000007F, 1.0F}},
+		{0, 2, 3, 0, 3, 1, 4, 6, 7, 4, 7, 5, 8, 10, 11, 8, 11, 9, 12, 14, 15, 12, 15, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27}
+	);
+	// Each shape is one part named by its id, fill and stroke together.
+	renderer::LoadedSVGShape board = squareWithHole(linearGradient());
+	board.id = "board";
+	renderer::LoadedSVGShape seam = strokeShape({{0.0F, 0.0F}, {10.0F, 0.0F}}, /*closed=*/false, 2.0F);
+	seam.id = "seam";
+	renderer::TessellatedMesh boardAndSeam;
+	renderer::appendShapeMesh(board, boardAndSeam);
+	renderer::appendShapeMesh(seam, boardAndSeam);
+	ASSERT_EQ(boardAndSeam.parts.size(), 2U);
+	EXPECT_EQ(boardAndSeam.parts[0].name, "board");
+	EXPECT_EQ(boardAndSeam.parts[0].vertexStart, 0U);
+	EXPECT_EQ(boardAndSeam.parts[0].vertexCount, 64U);
+	EXPECT_EQ(boardAndSeam.parts[1].name, "seam");
+	EXPECT_EQ(boardAndSeam.parts[1].vertexStart, 64U);
+	EXPECT_EQ(boardAndSeam.parts[1].vertexCount, 4U);
+	EXPECT_EQ(boardAndSeam.vertices.size(), 68U);
+
 	for (const renderer::LoadedSVGShape& shape : {squareWithHole(linearGradient()), squareWithHole(radialGradient()), radialPentagon()}) {
 		renderer::TessellatedMesh twoArgument;
 		renderer::appendShapeMesh(shape, twoArgument);
@@ -270,19 +316,63 @@ TEST(SVGLoaderTest, DefaultArgsDrawTheShapeAsDrawn) {
 		for (const Vec2& vertex : expected.vertices) {
 			expected.colors.push_back(shape.gradient.colorAt(vertex));
 		}
-		if (shape.hasStroke) {
-			renderer::LoadedSVGShape strokeOnly = shape;
-			strokeOnly.hasFill = false;
-			renderer::TessellatedMesh stroke;
-			renderer::appendShapeMesh(strokeOnly, stroke);
-			const auto base = static_cast<uint16_t>(expected.vertices.size());
-			expected.vertices.insert(expected.vertices.end(), stroke.vertices.begin(), stroke.vertices.end());
-			expected.colors.insert(expected.colors.end(), stroke.colors.begin(), stroke.colors.end());
-			for (const uint16_t index : stroke.indices) {
-				expected.indices.push_back(static_cast<uint16_t>(base + index));
-			}
-		}
-		expectSameMesh(twoArgument, expected);
+		// The fill comes first; the stroke bands after it are pinned above.
+		ASSERT_GE(twoArgument.vertices.size(), expected.vertices.size());
+		ASSERT_GE(twoArgument.indices.size(), expected.indices.size());
+		renderer::TessellatedMesh fill;
+		fill.vertices.assign(
+			twoArgument.vertices.begin(), twoArgument.vertices.begin() + static_cast<std::ptrdiff_t>(expected.vertices.size())
+		);
+		fill.colors.assign(twoArgument.colors.begin(), twoArgument.colors.begin() + static_cast<std::ptrdiff_t>(expected.colors.size()));
+		fill.indices.assign(
+			twoArgument.indices.begin(), twoArgument.indices.begin() + static_cast<std::ptrdiff_t>(expected.indices.size())
+		);
+		expectSameMesh(fill, expected);
+	}
+}
+
+// A mirror keeps the fill's triangles and both stroke modes keep the band's width: it scales
+// nothing.
+TEST(SVGLoaderTest, AMirrorKeepsTheFillAndTheStrokeWidth) {
+	const AffineTransform2D	  mirror{.a = -1.0F, .b = 0.0F, .c = 0.0F, .d = 1.0F, .e = 0.0F, .f = 0.0F};
+	renderer::LoadedSVGShape  shape = radialPentagon();
+	renderer::TessellatedMesh plain;
+	renderer::appendShapeMesh(shape, plain);
+	renderer::TessellatedMesh mirrored;
+	renderer::appendShapeMesh(shape, mirrored, {.transform = mirror});
+	EXPECT_EQ(mirrored.getTriangleCount(), plain.getTriangleCount());
+
+	for (const renderer::VectorEffect effect : {renderer::VectorEffect::None, renderer::VectorEffect::NonScalingStroke}) {
+		// Down the line, x spans the band's width; along it, y does.
+		renderer::TessellatedMesh vertical;
+		renderer::appendShapeMesh(
+			strokeShape({{3.0F, 0.0F}, {3.0F, 10.0F}}, false, 2.0F), vertical, {.transform = mirror, .vectorEffect = effect}
+		);
+		renderer::TessellatedMesh horizontal;
+		renderer::appendShapeMesh(
+			strokeShape({{0.0F, 3.0F}, {10.0F, 3.0F}}, false, 2.0F), horizontal, {.transform = mirror, .vectorEffect = effect}
+		);
+		const auto [left, right] = std::ranges::minmax(vertical.vertices | std::views::transform([](Vec2 vertex) { return vertex.x; }));
+		const auto [top, bottom] = std::ranges::minmax(horizontal.vertices | std::views::transform([](Vec2 vertex) { return vertex.y; }));
+		EXPECT_FLOAT_EQ(left, -4.0F);
+		EXPECT_FLOAT_EQ(right, -2.0F);
+		EXPECT_FLOAT_EQ(top, 2.0F);
+		EXPECT_FLOAT_EQ(bottom, 4.0F);
+	}
+}
+
+// With VectorEffect::None a skewed stroke is the band drawn in the shape's space and then mapped,
+// vertex for vertex, joins included, as SVG transforms a stroke's outline.
+TEST(SVGLoaderTest, ASkewWithoutTheVectorEffectMapsTheFinishedBand) {
+	const auto				  outline = strokeShape({{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}}, /*closed=*/true, 0.1F);
+	renderer::TessellatedMesh drawn;
+	renderer::appendShapeMesh(outline, drawn);
+	renderer::TessellatedMesh skewed;
+	renderer::appendShapeMesh(outline, skewed, {.transform = kFaceMatrix});
+	ASSERT_EQ(skewed.vertices.size(), drawn.vertices.size());
+	EXPECT_EQ(skewed.indices, drawn.indices);
+	for (size_t i = 0; i < drawn.vertices.size(); ++i) {
+		EXPECT_EQ(skewed.vertices[i], kFaceMatrix.applyToPoint(drawn.vertices[i]));
 	}
 }
 
@@ -353,8 +443,8 @@ TEST(SVGLoaderTest, AGradientUnderATransformKeepsItsSourceVertexColours) {
 	}
 }
 
-// brightness multiplies the fill, every gradient stop and the stroke in RGB, clamps to 1, and
-// leaves alpha alone.
+// brightness multiplies the fill, the gradient and the stroke in RGB, clamps to 1, and leaves
+// alpha alone.
 TEST(SVGLoaderTest, BrightnessScalesEveryColourAndKeepsAlpha) {
 	renderer::LoadedSVGShape solid;
 	solid.fillColor = Foundation::Color(0.5F, 0.25F, 0.8F, 0.5F);
@@ -379,21 +469,47 @@ TEST(SVGLoaderTest, BrightnessScalesEveryColourAndKeepsAlpha) {
 		EXPECT_EQ(dimmed.vertices[i], plain.vertices[i]);
 	}
 
-	// The stops are brightened before the gradient is evaluated: at brightness 2 the middle stop
-	// (0.2, 0.8, 0.1) is (0.4, 1, 0.2) where the gradient lands on it, not 1.6 clamped later.
-	renderer::LoadedSVGShape gradientShape = squareWithHole(linearGradient());
-	gradientShape.hasStroke = false;
+	// The gradient is evaluated, then brightened, as CSS filters the painted colour: green from 0.2
+	// to 0.8 at brightness 2 is 1.0 halfway, where brightening the stops first would give 0.7.
+	renderer::LoadedSVGShape gradientShape;
+	gradientShape.gradient = linearGradient();
+	gradientShape.gradient.stops = {
+		{.offset = 0.0F, .color = Foundation::Color(0.0F, 0.2F, 0.0F, 1.0F)},
+		{.offset = 1.0F, .color = Foundation::Color(0.0F, 0.8F, 0.0F, 1.0F)},
+	};
+	gradientShape.fillColor = gradientShape.gradient.stops.front().color;
+	// The apex and the fan's centroid both sit at x = 5, halfway along the gradient.
+	gradientShape.paths.emplace_back(std::vector<Vec2>{{0.0F, 0.0F}, {10.0F, 0.0F}, {5.0F, 10.0F}}, true);
 	renderer::TessellatedMesh doubled;
 	renderer::appendShapeMesh(gradientShape, doubled, {.brightness = 2.0F});
-	renderer::GradientFill expected = linearGradient();
-	for (renderer::GradientStop& stop : expected.stops) {
-		stop.color = Foundation::Color(
-			std::min(stop.color.r * 2.0F, 1.0F), std::min(stop.color.g * 2.0F, 1.0F), std::min(stop.color.b * 2.0F, 1.0F), stop.color.a
-		);
-	}
+	bool sawHalfway = false;
 	for (size_t i = 0; i < doubled.vertices.size(); ++i) {
-		EXPECT_EQ(doubled.colors[i].toVec4(), expected.colorAt(doubled.vertices[i]).toVec4());
+		const Foundation::Color evaluated = gradientShape.gradient.colorAt(doubled.vertices[i]);
+		EXPECT_FLOAT_EQ(doubled.colors[i].g, std::min(evaluated.g * 2.0F, 1.0F));
+		if (doubled.vertices[i].x == 5.0F) {
+			sawHalfway = true;
+			EXPECT_FLOAT_EQ(doubled.colors[i].g, 1.0F);
+		}
 	}
+	EXPECT_TRUE(sawHalfway);
+}
+
+class SVGLoaderDeathTest : public testing::Test {
+  protected:
+	void SetUp() override {
+#ifdef NDEBUG
+		GTEST_SKIP() << "asserts are compiled out";
+#endif
+	}
+};
+
+// brightness is a finite number of at least 0; a debug build stops on anything else.
+TEST_F(SVGLoaderDeathTest, BrightnessMustBeFiniteAndNotNegative) {
+	const auto				  shape = strokeShape({{0.0F, 0.0F}, {10.0F, 0.0F}}, /*closed=*/false, 2.0F);
+	renderer::TessellatedMesh mesh;
+	EXPECT_DEATH(renderer::appendShapeMesh(shape, mesh, {.brightness = -1.0F}), "brightness must be a finite number");
+	EXPECT_DEATH(renderer::appendShapeMesh(shape, mesh, {.brightness = std::numeric_limits<float>::quiet_NaN()}), "brightness must be");
+	EXPECT_DEATH(renderer::appendShapeMesh(shape, mesh, {.brightness = std::numeric_limits<float>::infinity()}), "brightness must be");
 }
 
 // Seen almost edge-on (determinant about 1e-6), a filled, stroked outline and an open zigzag with

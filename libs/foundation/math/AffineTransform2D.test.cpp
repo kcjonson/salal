@@ -56,6 +56,7 @@ TEST(AffineTransform2D, ASingularMapHasNoInverse) {
 	EXPECT_FALSE((AffineTransform2D{.a = 0.0F, .b = 1.0F, .c = 0.0F, .d = 0.35F}).inverse().has_value());
 	EXPECT_FALSE((AffineTransform2D{.a = 2.0F, .b = 4.0F, .c = 1.0F, .d = 2.0F}).inverse().has_value());
 	EXPECT_FALSE((AffineTransform2D{.a = 1e-30F, .b = 0.0F, .c = 0.0F, .d = 1e-30F}).inverse().has_value());
+	EXPECT_FALSE((AffineTransform2D{.a = 1e20F, .b = 0.0F, .c = 0.0F, .d = 1e20F}).inverse().has_value());
 	const AffineTransform2D edgeOn{.a = 3e-6F, .b = 1.0F, .c = 0.0F, .d = 0.35F};
 	const auto				inverse = edgeOn.inverse();
 	ASSERT_TRUE(inverse.has_value());

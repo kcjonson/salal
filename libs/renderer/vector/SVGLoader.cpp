@@ -8,6 +8,7 @@
 #include "utils/Log.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <fstream>
 #include <memory>
@@ -326,6 +327,7 @@ namespace renderer {
 	}
 
 	void appendShapeMesh(const LoadedSVGShape& shape, TessellatedMesh& outMesh, const ShapeMeshArgs& args) {
+		assert(std::isfinite(args.brightness) && args.brightness >= 0.0F && "appendShapeMesh: brightness must be a finite number >= 0");
 		const Foundation::AffineTransform2D& transform = args.transform;
 
 		// Record where this shape's geometry begins so we can tag the contributed range as a named
@@ -334,15 +336,8 @@ namespace renderer {
 
 		// --- Fill ---
 		if (shape.hasFill) {
-			Tessellator	 tessellator;
-			const bool	 hasGradient = (shape.gradient.type != GradientFill::Type::None);
-			GradientFill gradient;
-			if (hasGradient) {
-				gradient = shape.gradient;
-				for (GradientStop& stop : gradient.stops) {
-					stop.color = brightened(stop.color, args.brightness);
-				}
-			}
+			Tessellator				tessellator;
+			const bool				hasGradient = (shape.gradient.type != GradientFill::Type::None);
 			const Foundation::Color fillColor = brightened(shape.fillColor, args.brightness);
 
 			TessellatorOptions options;
@@ -380,7 +375,7 @@ namespace renderer {
 				// Coloured at the source vertex, then mapped: the gradient is painted on the shape.
 				for (const auto& vertex : shapeMesh.vertices) {
 					outMesh.vertices.push_back(transform.applyToPoint(vertex));
-					outMesh.colors.push_back(hasGradient ? gradient.colorAt(vertex) : fillColor);
+					outMesh.colors.push_back(hasGradient ? brightened(shape.gradient.colorAt(vertex), args.brightness) : fillColor);
 				}
 				for (const auto idx : shapeMesh.indices) {
 					outMesh.indices.push_back(static_cast<uint16_t>(baseIndex + idx));

@@ -58,7 +58,7 @@ namespace renderer {
 	struct ShapeMeshArgs {
 		Foundation::AffineTransform2D transform{};						 ///< CSS/SVG `transform: matrix(a, b, c, d, e, f)`
 		VectorEffect				  vectorEffect = VectorEffect::None; ///< SVG `vector-effect`
-		float						  brightness = 1.0F;				 ///< CSS `filter: brightness()`: RGB times this, clamped to 1
+		float						  brightness = 1.0F;				 ///< CSS `filter: brightness()`: finite, >= 0
 	};
 
 	/// Tessellate a loaded SVG shape into colored triangles, appended to outMesh.
@@ -73,9 +73,12 @@ namespace renderer {
 	/// barycentric weights, so a gradient looks painted on the shape and then transformed, with no
 	/// inverse taken. With VectorEffect::None the stroke band is built in the shape's space and then
 	/// mapped; with NonScalingStroke the centreline is mapped and the band built at strokeWidth in the
-	/// output space, so a line keeps its width on a skewed face. `args.brightness` multiplies the fill
-	/// colour, every gradient stop and the stroke colour in RGB, clamped to [0, 1], alpha untouched.
-	/// The defaults (identity, None, 1) leave the shape in its SVG space as it was drawn.
+	/// output space, so a line keeps its width on a skewed face. `args.brightness` multiplies each
+	/// vertex's colour (the solid fill, the gradient as evaluated there, the stroke) in RGB, clamped
+	/// to [0, 1], alpha untouched, as CSS applies the filter to the painted colour. It must be finite
+	/// and at least 0: a debug build asserts it, a release build doesn't check (a negative value
+	/// clamps to black, a non-finite one gives non-finite colours). The defaults (identity, None, 1) leave the shape in its SVG space as it
+	/// was drawn.
 	///
 	/// A near-singular transform (a face seen almost edge-on) gives degenerate fill triangles and,
 	/// with NonScalingStroke, a band of full width round a collapsed centreline, never further than
