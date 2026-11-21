@@ -1794,11 +1794,24 @@ namespace Renderer {
 		uint32_t				   count,
 		Foundation::Vec2		   cameraPosition,
 		float					   cameraZoom,
-		float					   pixelsPerMeter
+		float					   pixelsPerMeter,
+		Primitives::IndexRange	   indices
 	) {
 		if (!handle.isValid() || count == 0 || instances == nullptr) {
 			return;
 		}
+		const bool toEnd = indices.count == Primitives::IndexRange::kToEnd;
+		if (indices.first > handle.indexCount || (!toEnd && indices.count > handle.indexCount - indices.first)) {
+			LOG_ERROR(
+				Renderer,
+				"drawInstanced: %u indices from %u reach past the mesh's %u; not drawn",
+				indices.count,
+				indices.first,
+				handle.indexCount
+			);
+			return;
+		}
+		const Primitives::IndexRange range{.first = indices.first, .count = toEnd ? handle.indexCount - indices.first : indices.count};
 
 		uniforms = worldUniforms(cameraPosition, cameraZoom, pixelsPerMeter);
 		gpu.setUniforms(uniforms);
@@ -1817,7 +1830,8 @@ namespace Renderer {
 				.pipeline = pipeline,
 				.geometry = handle.geometry,
 				.blend = backend::BlendState::Alpha,
-				.indexCount = handle.indexCount,
+				.indexOffset = range.first,
+				.indexCount = range.count,
 				.instanceCount = batchSize
 			};
 			beginGpuSpan();
@@ -1825,9 +1839,10 @@ namespace Renderer {
 			endGpuSpan();
 
 			drawCallCount++;
-			// Each instance renders all mesh vertices; triangle count = indices / 3
+			// The whole mesh's vertices are counted for a range too: which of them a range reads
+			// isn't known here.
 			frameVertexCount += static_cast<size_t>(handle.vertexCount) * batchSize;
-			frameTriangleCount += static_cast<size_t>(handle.indexCount / 3) * batchSize;
+			frameTriangleCount += static_cast<size_t>(range.count / 3) * batchSize;
 			frameInstanceCount += batchSize;
 			frameUploadBytes += batchSize * sizeof(InstanceData);
 

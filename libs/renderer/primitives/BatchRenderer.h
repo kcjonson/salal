@@ -459,13 +459,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		/// @param cameraPosition Camera world position (center of view)
 		/// @param cameraZoom Camera zoom level (1.0 = normal)
 		/// @param pixelsPerMeter World scale factor
+		/// @param indices The part of the mesh's index buffer each instance draws
 		void drawInstanced(
 			const InstancedMeshHandle& handle,
 			const InstanceData*		   instances,
 			uint32_t				   count,
 			Foundation::Vec2		   cameraPosition,
 			float					   cameraZoom,
-			float					   pixelsPerMeter
+			float					   pixelsPerMeter,
+			Primitives::IndexRange	   indices
 		);
 
 		/// u_bakedAlpha, the alpha the instanced and baked paths multiply in.
