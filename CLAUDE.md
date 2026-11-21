@@ -205,8 +205,10 @@ a call takes several parameters.
 **Names are whole readable words.** No one- or two-letter variables,
 parameters or namespace aliases (`namespace P = Renderer::Primitives` is out:
 write `Primitives::drawRect`, or a `using` of whole-word names). Loop indices
-and `x`, `y`, `z` are the exceptions. Older code that breaks this is legacy,
-not a pattern to copy.
+and `x`, `y`, `z` are the exceptions. Where CSS or SVG names a thing, its name
+is used even when it is a single letter (the `a` to `f` of a transform matrix),
+since following CSS's names outranks this rule. Older code that breaks this is
+legacy, not a pattern to copy.
 
 > **A discrepancy worth knowing.** Worldsim's `CLAUDE.md` said
 > "Classes/Functions: PascalCase" with `LoadTexture` as the example, while its
@@ -390,8 +392,17 @@ images, patterns, markers, `<use>` or `<style>`, failing the build naming the
 file, line and element) and embeds it, so `<ns>::art(name)` hands loadSVG's
 byte-span overload a file's bytes and nothing is staged beside the exe. A game
 that loads SVG from disk instead resolves the path itself
-(`Foundation::findResource`); `SVGLoader` takes no asset root. The art check
-and ui's icon check share one scanner of SVG markup (`renderer/vector/SvgMarkup.h`).
+(`Foundation::findResource`) and can check what it reads with the same
+`renderer::svg::checkArt` by linking `salal::svg_build`; `SVGLoader` takes no
+asset root.
+The art check and ui's icon check share one scanner of SVG markup
+(`renderer/vector/SvgMarkup.h`). `renderer::appendShapeMesh` tessellates a
+loaded shape, optionally under a CSS `transform: matrix()`
+(`Foundation::AffineTransform2D`) with SVG's `vector-effect:
+non-scaling-stroke` and a CSS `filter: brightness()` (`ShapeMeshArgs`), which is
+how a game maps flat art onto a skewed face with its lines kept at their width.
+`Primitives::drawInstanced` takes an optional `IndexRange` to draw part of an
+uploaded mesh.
 `salal_windows_manifest(<target>)` (`cmake/SalalWindows.cmake`) declares a
 game's executable per-monitor DPI aware (V2) on Windows, which the ui's scale
 from the window's resolution rests on ([docs/app-api.md](docs/app-api.md), "UI

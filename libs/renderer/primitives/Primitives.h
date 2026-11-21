@@ -490,10 +490,30 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 		void				releaseInstancedMesh(InstancedMeshHandle& handle);
 
+		// Part of an uploaded mesh's index buffer: `count` indices from `first`, both
+		// counted in indices (not triangles, and not drawInstanced's instance count),
+		// each a multiple of 3. The default is every index.
+		struct IndexRange {
+			static constexpr uint32_t kToEnd = UINT32_MAX; // every index from `first` on
+
+			uint32_t first = 0;
+			uint32_t count = kToEnd;
+		};
+
 		// Draw `count` instances of an uploaded mesh immediately (not batched), with
 		// the per-instance transforms applied on the GPU under `camera` and the base
-		// shader's hooks run on every vertex (setHookUniforms below).
-		void drawInstanced(const InstancedMeshHandle& handle, const InstanceData* instances, uint32_t count, const WorldCamera& camera);
+		// shader's hooks run on every vertex (setHookUniforms below). Each instance
+		// draws the `indices` range of the mesh's index buffer, all of it by default.
+		// An empty range draws nothing and counts no draw. A range reaching past the
+		// mesh's indices, or not of whole triangles, draws nothing, logged the first
+		// time.
+		void drawInstanced(
+			const InstancedMeshHandle& handle,
+			const InstanceData*		   instances,
+			uint32_t				   count,
+			const WorldCamera&		   camera,
+			IndexRange				   indices = {}
+		);
 
 		// Alpha multiplied into instanced and baked draws (u_bakedAlpha); 1 is opaque.
 		void setBakedAlpha(float alpha);

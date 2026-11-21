@@ -7,6 +7,8 @@
 #include "Tessellator.h"
 #include "utils/Log.h"
 
+#include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <fstream>
 #include <memory>
@@ -110,6 +112,16 @@ namespace renderer {
 					outPath.vertices.pop_back();
 				}
 			}
+		}
+
+		/// CSS filter: brightness(): RGB scaled and clamped, alpha kept.
+		Foundation::Color brightened(const Foundation::Color& color, float brightness) {
+			return Foundation::Color(
+				std::clamp(color.r * brightness, 0.0F, 1.0F),
+				std::clamp(color.g * brightness, 0.0F, 1.0F),
+				std::clamp(color.b * brightness, 0.0F, 1.0F),
+				color.a
+			);
 		}
 
 		constexpr size_t kMaxMeshVertices = 65535;	// indices are 16-bit
@@ -314,15 +326,19 @@ namespace renderer {
 		return !outShapes.empty();
 	}
 
-	void appendShapeMesh(const LoadedSVGShape& shape, TessellatedMesh& outMesh) {
+	void appendShapeMesh(const LoadedSVGShape& shape, TessellatedMesh& outMesh, const ShapeMeshArgs& args) {
+		assert(std::isfinite(args.brightness) && args.brightness >= 0.0F && "appendShapeMesh: brightness must be a finite number >= 0");
+		const Foundation::AffineTransform2D& transform = args.transform;
+
 		// Record where this shape's geometry begins so we can tag the contributed range as a named
 		// MeshPart (fill + stroke) once both are emitted. This is what the animation layer transforms.
 		const auto partVertexStart = static_cast<uint32_t>(outMesh.vertices.size());
 
 		// --- Fill ---
 		if (shape.hasFill) {
-			Tessellator tessellator;
-			const bool	hasGradient = (shape.gradient.type != GradientFill::Type::None);
+			Tessellator				tessellator;
+			const bool				hasGradient = (shape.gradient.type != GradientFill::Type::None);
+			const Foundation::Color fillColor = brightened(shape.fillColor, args.brightness);
 
 			TessellatorOptions options;
 			// Only honored for a single subpath (where a convex fan may apply); multi-subpath shapes go
@@ -356,9 +372,10 @@ namespace renderer {
 				LOG_WARNING(Renderer, "appendShapeMesh: mesh would exceed %zu vertices; dropping fill", kMaxMeshVertices);
 			} else {
 				const auto baseIndex = static_cast<uint16_t>(outMesh.vertices.size());
-				for (const auto& v : shapeMesh.vertices) {
-					outMesh.vertices.push_back(v);
-					outMesh.colors.push_back(hasGradient ? shape.gradient.colorAt(v) : shape.fillColor);
+				// Coloured at the source vertex, then mapped: the gradient is painted on the shape.
+				for (const auto& vertex : shapeMesh.vertices) {
+					outMesh.vertices.push_back(transform.applyToPoint(vertex));
+					outMesh.colors.push_back(hasGradient ? brightened(shape.gradient.colorAt(vertex), args.brightness) : fillColor);
 				}
 				for (const auto idx : shapeMesh.indices) {
 					outMesh.indices.push_back(static_cast<uint16_t>(baseIndex + idx));
@@ -368,8 +385,25 @@ namespace renderer {
 
 		// --- Stroke (on top of the fill, matching SVG paint order) ---
 		if (shape.hasStroke && shape.strokeWidth > 0.0F) {
-			for (const auto& sub : shape.paths) {
-				appendStrokeBand(sub.vertices, sub.isClosed, shape.strokeWidth, shape.strokeColor, outMesh);
+			const Foundation::Color strokeColor = brightened(shape.strokeColor, args.brightness);
+			if (args.vectorEffect == VectorEffect::NonScalingStroke) {
+				std::vector<Foundation::Vec2> centreline;
+				for (const auto& sub : shape.paths) {
+					centreline.clear();
+					centreline.reserve(sub.vertices.size());
+					for (const auto& vertex : sub.vertices) {
+						centreline.push_back(transform.applyToPoint(vertex));
+					}
+					appendStrokeBand(centreline, sub.isClosed, shape.strokeWidth, strokeColor, outMesh);
+				}
+			} else {
+				const size_t bandStart = outMesh.vertices.size();
+				for (const auto& sub : shape.paths) {
+					appendStrokeBand(sub.vertices, sub.isClosed, shape.strokeWidth, strokeColor, outMesh);
+				}
+				for (size_t i = bandStart; i < outMesh.vertices.size(); ++i) {
+					outMesh.vertices[i] = transform.applyToPoint(outMesh.vertices[i]);
+				}
 			}
 		}
 

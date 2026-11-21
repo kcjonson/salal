@@ -772,6 +772,64 @@ namespace Renderer {
 		EXPECT_EQ(gpu->live().geometries, before.geometries);
 	}
 
+	TEST_F(FlushTest, AnInstancedIndexRangeDrawsItsSliceAndRejectsWhatIsNotWholeTriangles) {
+		// Three quads, 18 indices.
+		renderer::TessellatedMesh quads;
+		for (uint16_t quad = 0; quad < 3; ++quad) {
+			const float left = static_cast<float>(quad);
+			quads.vertices.insert(quads.vertices.end(), {{left, 0.0F}, {left + 1.0F, 0.0F}, {left + 1.0F, 1.0F}, {left, 1.0F}});
+			const auto base = static_cast<uint16_t>(quad * 4);
+			quads.indices.insert(
+				quads.indices.end(),
+				{base,
+				 static_cast<uint16_t>(base + 1),
+				 static_cast<uint16_t>(base + 2),
+				 base,
+				 static_cast<uint16_t>(base + 2),
+				 static_cast<uint16_t>(base + 3)}
+			);
+		}
+		InstancedMeshHandle mesh = Primitives::uploadInstancedMesh(quads, 4);
+		ASSERT_TRUE(mesh.isValid());
+		const InstanceData instance;
+		Primitives::beginFrameStats();
+
+		Primitives::drawInstanced(mesh, &instance, 1, {}, {.first = 6, .count = 6});
+		ASSERT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(gpu->draws()[0].call.indexOffset, 6U);
+		EXPECT_EQ(gpu->draws()[0].call.indexCount, 6U);
+		EXPECT_EQ(Primitives::getStats().drawCalls, 1U);
+		EXPECT_EQ(Primitives::getStats().triangleCount, 2U);
+
+		// Past the end, empty, and not whole triangles: no draw, no instance upload, no count.
+		const uint64_t uploaded = Primitives::getStats().uploadBytes;
+		for (const Primitives::IndexRange range : {
+				 Primitives::IndexRange{.first = 21},
+				 Primitives::IndexRange{.first = 12, .count = 9},
+				 Primitives::IndexRange{.first = 6, .count = 0},
+				 Primitives::IndexRange{.first = 18},
+				 Primitives::IndexRange{.first = 1, .count = 6},
+				 Primitives::IndexRange{.first = 6, .count = 4},
+				 Primitives::IndexRange{.first = 4},
+			 }) {
+			Primitives::drawInstanced(mesh, &instance, 1, {}, range);
+		}
+		EXPECT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(Primitives::getStats().drawCalls, 1U);
+		EXPECT_EQ(Primitives::getStats().uploadBytes, uploaded);
+
+		// "To the end" is checked as resolved: a mesh of 7 indices leaves a stray index after its
+		// whole triangles, drawn from the start or from index 3.
+		renderer::TessellatedMesh ragged = quads;
+		ragged.indices.resize(7);
+		InstancedMeshHandle raggedMesh = Primitives::uploadInstancedMesh(ragged, 4);
+		ASSERT_TRUE(raggedMesh.isValid());
+		Primitives::drawInstanced(raggedMesh, &instance, 1, {});
+		Primitives::drawInstanced(raggedMesh, &instance, 1, {}, {.first = 3});
+		EXPECT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(Primitives::getStats().drawCalls, 1U);
+	}
+
 	TEST_F(FlushTest, TheBakedPassBracketsTheCallersDrawsAndRestoresAlpha) {
 		Primitives::setBakedAlpha(0.25F); // outside a pass: kept for the next draw, nothing submitted
 		EXPECT_TRUE(gpu->uniformWrites().empty());

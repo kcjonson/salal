@@ -1088,9 +1088,15 @@ namespace Renderer::Primitives {
 		BatchRenderer::releaseInstancedMesh(g_batchRenderer.get(), handle);
 	}
 
-	void drawInstanced(const InstancedMeshHandle& handle, const InstanceData* instances, uint32_t count, const WorldCamera& camera) {
+	void drawInstanced(
+		const InstancedMeshHandle& handle,
+		const InstanceData*		   instances,
+		uint32_t				   count,
+		const WorldCamera&		   camera,
+		IndexRange				   indices
+	) {
 		if (g_batchRenderer != nullptr) {
-			g_batchRenderer->drawInstanced(handle, instances, count, camera.position, camera.zoom, camera.pixelsPerMeter);
+			g_batchRenderer->drawInstanced(handle, instances, count, camera.position, camera.zoom, camera.pixelsPerMeter, indices);
 		}
 	}
 

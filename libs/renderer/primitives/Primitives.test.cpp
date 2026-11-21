@@ -1007,4 +1007,39 @@ namespace Renderer {
 		}
 	}
 
+	TEST_F(PrimitivesDrawTest, AnIndexRangeDrawsOnlyItsTriangles) {
+		// Two squares in one mesh: the left half of the screen at indices 0 to 5, the right at 6 to 11.
+		const float				  size = static_cast<float>(kSize);
+		const float				  half = size * 0.5F;
+		renderer::TessellatedMesh halves;
+		halves.vertices = {{0.0F, 0.0F}, {half, 0.0F}, {half, size}, {0.0F, size}, {half, 0.0F}, {size, 0.0F}, {size, size}, {half, size}};
+		halves.indices = {0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7};
+		InstancedMeshHandle mesh = Primitives::uploadInstancedMesh(halves, 2);
+		ASSERT_TRUE(mesh.isValid());
+		// Two instances, so each draws the range: the second's tint shows over the first's.
+		const std::array<InstanceData, 2> instances = {
+			InstanceData({0.0F, 0.0F}, 0.0F, 1.0F, Foundation::Vec4(1.0F, 0.0F, 0.0F, 1.0F)),
+			InstanceData({0.0F, 0.0F}, 0.0F, 1.0F, Foundation::Vec4(0.0F, 0.0F, 1.0F, 1.0F))
+		};
+		const Primitives::WorldCamera camera{.position = {half, half}};
+		const Foundation::Color		  clear(0.0F, 0.0F, 0.0F, 0.0F);
+
+		render(clear, [&] { Primitives::drawInstanced(mesh, instances.data(), 2, camera, {.first = 6, .count = 6}); });
+		expectNear(pixel(8, 16), {0, 0, 0, 0});
+		expectNear(pixel(24, 16), {0, 0, 255, 255});
+
+		render(clear, [&] { Primitives::drawInstanced(mesh, instances.data(), 2, camera, {.first = 0, .count = 6}); });
+		expectNear(pixel(8, 16), {0, 0, 255, 255});
+		expectNear(pixel(24, 16), {0, 0, 0, 0});
+
+		render(clear, [&] { Primitives::drawInstanced(mesh, instances.data(), 2, camera); });
+		expectNear(pixel(8, 16), {0, 0, 255, 255});
+		expectNear(pixel(24, 16), {0, 0, 255, 255});
+
+		// A range past the mesh's twelve indices draws nothing.
+		render(clear, [&] { Primitives::drawInstanced(mesh, instances.data(), 2, camera, {.first = 6, .count = 9}); });
+		expectNear(pixel(8, 16), {0, 0, 0, 0});
+		expectNear(pixel(24, 16), {0, 0, 0, 0});
+	}
+
 } // namespace Renderer

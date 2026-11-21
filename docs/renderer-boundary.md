@@ -100,7 +100,7 @@ namespace Primitives {
 	void drawGlyphs(const FontRenderer::GlyphQuad* quads, size_t count, float zIndex = 0.0F, BlendMode blend = BlendMode::Alpha); // colour, atlas and the atlas's distance range from each quad; this sketch took a family too, until a caller drew one family's quads with another's atlas (v0.9.0), and PR 3 added the blend
 	InstancedMeshHandle uploadInstancedMesh(const renderer::TessellatedMesh& mesh, uint32_t maxInstances = 10000);
 	void releaseInstancedMesh(InstancedMeshHandle&);
-	void drawInstanced(const InstancedMeshHandle&, const InstanceData* instances, uint32_t count, const WorldCamera&);
+	void drawInstanced(const InstancedMeshHandle&, const InstanceData* instances, uint32_t count, const WorldCamera&, IndexRange indices = {}); // the range came later, for a game drawing part of a mesh's index buffer; the default is every index
 	void setHookUniforms(const backend::HookUniformBlock&, std::span<const std::byte>); // a hook's uniform block; this sketch had a setter for worldsim's grass deform until it became a hook (decision 4)
 	void setBakedAlpha(float alpha); // u_bakedAlpha, also between baked draws
 	void beginBakedPass(const WorldCamera&); // the base shader in mode 2, camera uniforms, projection from the setViewport size as today

@@ -85,6 +85,8 @@ set_target_properties(salal_shader_assembly salal_shader_assembler PROPERTIES FO
 # the check and the generator, on a scanner of SVG markup that ui's icon check shares, and needs
 # nothing else. Built whenever the renderer is.
 add_library(salal_svg_build STATIC vector/SvgMarkup.cpp vector/ArtBuild.cpp)
+# For a game library that calls renderer::svg::checkArt on art it loads itself.
+add_library(salal::svg_build ALIAS salal_svg_build)
 target_compile_features(salal_svg_build PUBLIC cxx_std_20)
 target_include_directories(salal_svg_build PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 add_executable(salal_art_tool tools/ArtMain.cpp)

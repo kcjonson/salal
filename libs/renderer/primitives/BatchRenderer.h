@@ -459,13 +459,15 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		/// @param cameraPosition Camera world position (center of view)
 		/// @param cameraZoom Camera zoom level (1.0 = normal)
 		/// @param pixelsPerMeter World scale factor
+		/// @param indices The part of the mesh's index buffer each instance draws
 		void drawInstanced(
 			const InstancedMeshHandle& handle,
 			const InstanceData*		   instances,
 			uint32_t				   count,
 			Foundation::Vec2		   cameraPosition,
 			float					   cameraZoom,
-			float					   pixelsPerMeter
+			float					   pixelsPerMeter,
+			Primitives::IndexRange	   indices
 		);
 
 		/// u_bakedAlpha, the alpha the instanced and baked paths multiply in.
@@ -682,6 +684,9 @@ namespace Renderer { // NOLINT(readability-identifier-naming)
 		TextureHandle liveTexture;
 
 		bool warnedStale = false;
+
+		// drawInstanced() was given an index range past its mesh or not of whole triangles.
+		bool warnedBadIndexRange = false;
 
 		// The base shader's fill hooks by index, fillHooks[i] index i + 1's name, which a rect's
 		// Fill is checked against; the indexes the quads added since the last flush name; and
