@@ -817,6 +817,17 @@ namespace Renderer {
 		EXPECT_EQ(gpu->draws().size(), 1U);
 		EXPECT_EQ(Primitives::getStats().drawCalls, 1U);
 		EXPECT_EQ(Primitives::getStats().uploadBytes, uploaded);
+
+		// "To the end" is checked as resolved: a mesh of 7 indices leaves a stray index after its
+		// whole triangles, drawn from the start or from index 3.
+		renderer::TessellatedMesh ragged = quads;
+		ragged.indices.resize(7);
+		InstancedMeshHandle raggedMesh = Primitives::uploadInstancedMesh(ragged, 4);
+		ASSERT_TRUE(raggedMesh.isValid());
+		Primitives::drawInstanced(raggedMesh, &instance, 1, {});
+		Primitives::drawInstanced(raggedMesh, &instance, 1, {}, {.first = 3});
+		EXPECT_EQ(gpu->draws().size(), 1U);
+		EXPECT_EQ(Primitives::getStats().drawCalls, 1U);
 	}
 
 	TEST_F(FlushTest, TheBakedPassBracketsTheCallersDrawsAndRestoresAlpha) {

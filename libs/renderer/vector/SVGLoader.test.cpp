@@ -282,6 +282,7 @@ TEST(SVGLoaderTest, DefaultArgsDrawTheShapeAsDrawn) {
 	board.id = "board";
 	renderer::LoadedSVGShape seam = strokeShape({{0.0F, 0.0F}, {10.0F, 0.0F}}, /*closed=*/false, 2.0F);
 	seam.id = "seam";
+	seam.strokeColor = Foundation::Color(0.9F, 0.3F, 0.2F, 0.75F);
 	renderer::TessellatedMesh boardAndSeam;
 	renderer::appendShapeMesh(board, boardAndSeam);
 	renderer::appendShapeMesh(seam, boardAndSeam);
@@ -293,6 +294,14 @@ TEST(SVGLoaderTest, DefaultArgsDrawTheShapeAsDrawn) {
 	EXPECT_EQ(boardAndSeam.parts[1].vertexStart, 64U);
 	EXPECT_EQ(boardAndSeam.parts[1].vertexCount, 4U);
 	EXPECT_EQ(boardAndSeam.vertices.size(), 68U);
+	// The seam's quad follows the board's fill and stroke, offset past them, in its own colour.
+	ASSERT_GE(boardAndSeam.indices.size(), 6U);
+	EXPECT_EQ(
+		std::vector<uint16_t>(boardAndSeam.indices.end() - 6, boardAndSeam.indices.end()), (std::vector<uint16_t>{64, 66, 67, 64, 67, 65})
+	);
+	for (size_t i = 64; i < boardAndSeam.colors.size(); ++i) {
+		EXPECT_EQ(boardAndSeam.colors[i].toVec4(), Foundation::Vec4(0.9F, 0.3F, 0.2F, 0.75F));
+	}
 
 	for (const renderer::LoadedSVGShape& shape : {squareWithHole(linearGradient()), squareWithHole(radialGradient()), radialPentagon()}) {
 		renderer::TessellatedMesh twoArgument;

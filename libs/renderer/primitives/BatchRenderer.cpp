@@ -1802,8 +1802,11 @@ namespace Renderer {
 		}
 		const bool toEnd = indices.count == Primitives::IndexRange::kToEnd;
 		const bool pastEnd = indices.first > handle.indexCount || (!toEnd && indices.count > handle.indexCount - indices.first);
+		const Primitives::IndexRange range{
+			.first = indices.first, .count = toEnd && !pastEnd ? handle.indexCount - indices.first : indices.count
+		};
 		// A range that isn't whole triangles would draw triangles stitched from its neighbours.
-		const bool wholeTriangles = indices.first % 3 == 0 && (toEnd || indices.count % 3 == 0);
+		const bool wholeTriangles = range.first % 3 == 0 && range.count % 3 == 0;
 		if (pastEnd || !wholeTriangles) {
 			if (!warnedBadIndexRange) {
 				warnedBadIndexRange = true;
@@ -1817,7 +1820,6 @@ namespace Renderer {
 			}
 			return;
 		}
-		const Primitives::IndexRange range{.first = indices.first, .count = toEnd ? handle.indexCount - indices.first : indices.count};
 		if (range.count == 0) {
 			return;
 		}

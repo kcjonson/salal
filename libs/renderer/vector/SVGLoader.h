@@ -77,8 +77,8 @@ namespace renderer {
 	/// vertex's colour (the solid fill, the gradient as evaluated there, the stroke) in RGB, clamped
 	/// to [0, 1], alpha untouched, as CSS applies the filter to the painted colour. It must be finite
 	/// and at least 0: a debug build asserts it, a release build doesn't check (a negative value
-	/// clamps to black, a non-finite one gives non-finite colours). The defaults (identity, None, 1) leave the shape in its SVG space as it
-	/// was drawn.
+	/// clamps to black, a non-finite one gives non-finite colours). The defaults (identity, None,
+	/// 1) leave the shape in its SVG space as it was drawn.
 	///
 	/// A near-singular transform (a face seen almost edge-on) gives degenerate fill triangles and,
 	/// with NonScalingStroke, a band of full width round a collapsed centreline, never further than
